@@ -115,11 +115,23 @@ pub enum LineCap {
     Square,
 }
 
+impl Default for LineCap {
+    fn default() -> Self {
+        Self::Butt
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum LineJoin {
     Miter,
     Round,
     Bevel
+}
+
+impl Default for LineJoin {
+    fn default() -> Self {
+        Self::Miter
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -267,13 +279,7 @@ impl PathCache {
 #[derive(Copy, Clone)]
 struct State {
 	transform: Transform2D,
-	//fill: Paint,
-	shape_anti_alias: bool,
     scissor: Scissor,
-    //stroke: Paint,
-	stroke_width: f32,
-	line_cap: LineCap,
-	line_join: LineJoin,
 	miter_limit: f32,
 	alpha: f32,
 	font_id: usize,// TODO: Option
@@ -288,13 +294,7 @@ impl Default for State {
 	fn default() -> Self {
 		Self {
 			transform: Transform2D::identity(),
-			//fill: Paint::color(Color::white()),
-			shape_anti_alias: true,
             scissor: Default::default(),
-            //stroke: Paint::color(Color::black()),
-			stroke_width: 10.0,
-			line_cap: LineCap::Butt,
-			line_join: LineJoin::Miter,
 			miter_limit: 10.0,
 			alpha: 1.0,
 			font_id: 0,
@@ -393,38 +393,11 @@ impl Canvas {
 	
 	// Render styles
 	
-	/// Sets whether to draw antialias for stroke() and fill(). It's enabled by default.
-	///
-	/// TODO: Maybe it would be best if we have a shape struct that takes the role of the path cache and tesselates paths and hadles such properties as
-	/// anti alias, fill and stroke styles.. etc
-    pub fn set_shape_anti_alias(&mut self, value: bool) {
-        self.state_mut().shape_anti_alias = value;
-    }
-    
     /// Sets the miter limit of the stroke style.
     ///
     /// Miter limit controls when a sharp corner is beveled.
     pub fn set_miter_limit(&mut self, limit: f32) {
         self.state_mut().miter_limit = limit;
-    }
-    
-    /// Sets the stroke width of the stroke style.
-    pub fn set_stroke_width(&mut self, width: f32) {
-        self.state_mut().stroke_width = width;
-    }
-    
-    /// Sets how the end of the line (cap) is drawn
-    ///
-    /// By default it's set to LineCap::Butt
-    pub fn set_line_cap(&mut self, cap: LineCap) {
-        self.state_mut().line_cap = cap;
-    }
-    
-    /// Sets how sharp path corners are drawn.
-    ///
-    /// By default it's set to LineJoin::Miter
-    pub fn set_line_join(&mut self, join: LineJoin) {
-        self.state_mut().line_join = join;
     }
     
     /// Sets the transparency applied to all rendered shapes.
@@ -826,7 +799,7 @@ impl Canvas {
 	pub fn fill(&mut self, mut paint: Paint) {		
 		self.flatten_paths();
 		
-		if self.renderer.edge_antialiasing() && self.state().shape_anti_alias {
+		if self.renderer.edge_antialiasing() && paint.shape_anti_alias {
 			self.expand_fill(self.fringe_width, LineJoin::Miter, 2.4);
 		} else {
 			self.expand_fill(0.0, LineJoin::Miter, 2.4);
@@ -835,8 +808,8 @@ impl Canvas {
 		paint.transform.multiply(&self.state().transform);
 		
 		// Apply global alpha
-		//paint.inner_color.a *= self.state().alpha;
-		//paint.outer_color.a *= self.state().alpha;
+		paint.inner_color.a *= self.state().alpha;
+		paint.outer_color.a *= self.state().alpha;
 		
         let scissor = &self.state_stack.last().unwrap().scissor;
         
@@ -846,7 +819,7 @@ impl Canvas {
 	/// Fills the current path with current stroke style.
 	pub fn stroke(&mut self, mut paint: Paint) {
 		let scale = self.state().transform.average_scale();
-		let mut stroke_width = (self.state().stroke_width * scale).max(0.0).min(200.0);
+		let mut stroke_width = (paint.stroke_width * scale).max(0.0).min(200.0);
 		
 		if stroke_width < self.fringe_width {
 			// If the stroke width is less than pixel size, use alpha to emulate coverage.
@@ -867,10 +840,10 @@ impl Canvas {
 		
 		self.flatten_paths();
 		
-		if self.renderer.edge_antialiasing() && self.state().shape_anti_alias {
-			self.expand_stroke(stroke_width * 0.5, self.fringe_width, self.state().line_cap, self.state().line_join, self.state().miter_limit);
+		if self.renderer.edge_antialiasing() && paint.shape_anti_alias {
+			self.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap, paint.line_join, self.state().miter_limit);
 		} else {
-			self.expand_stroke(stroke_width * 0.5, 0.0, self.state().line_cap, self.state().line_join, self.state().miter_limit);
+			self.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap, paint.line_join, self.state().miter_limit);
 		}
 		
 		let scissor = &self.state_stack.last().unwrap().scissor;

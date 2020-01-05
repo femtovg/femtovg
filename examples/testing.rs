@@ -100,9 +100,8 @@ fn main() {
 					
 					//dbg!(bounds);
 					//canvas.rotate(math::Deg(rot));
-					canvas.begin_path();
-					canvas.set_stroke_width(1.0);
-					canvas.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
+					//canvas.begin_path();
+					//canvas.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
 					//canvas.stroke();
 					
 					canvas.set_font_size(16);
@@ -257,7 +256,6 @@ fn draw_shadows(canvas: &mut Canvas) {
 	canvas.fill(shadow);
 	
 	canvas.begin_path();
-	canvas.set_stroke_width(1.0);
 	canvas.rounded_rect(x, y, rect_w, rect_h, 12.0);
 	canvas.fill(paint);
 	canvas.stroke(paint);
@@ -277,10 +275,9 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.scissor(0.0, 0.0, 80.0, 80.0);
     
-    canvas.set_stroke_width(10.0);
-    canvas.set_line_cap(LineCap::Butt);
-    
-    let paint = Paint::color(Color::hex("#70c1b3"));
+    let mut paint = Paint::color(Color::hex("#70c1b3"));
+    paint.set_stroke_width(10.0);
+    paint.set_line_cap(LineCap::Butt);
     
     /* TODO: this panics with "attempt to subtract with overflow"
     canvas.set_line_join(LineJoin::Miter);
@@ -293,7 +290,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.translate(15.0, 0.0);
     
-    canvas.set_line_join(LineJoin::Miter);
+    paint.set_line_join(LineJoin::Miter);
     canvas.begin_path();
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
@@ -302,7 +299,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.translate(0.0, 25.0);
     
-    canvas.set_line_join(LineJoin::Bevel);
+    paint.set_line_join(LineJoin::Bevel);
     canvas.begin_path();
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
@@ -311,7 +308,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.translate(0.0, 25.0);
     
-    canvas.set_line_join(LineJoin::Round);
+    paint.set_line_join(LineJoin::Round);
     canvas.begin_path();
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
@@ -331,23 +328,23 @@ fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.rect(0.0, 0.0, 80.0, 80.0);
     canvas.stroke(Paint::color(Color::hex("#247ba0")));
     
-    let paint = Paint::color(Color::hex("#70c1b3"));
+    let mut paint = Paint::color(Color::hex("#70c1b3"));
     
-    canvas.set_stroke_width(12.0);
+    paint.set_stroke_width(12.0);
     
-    canvas.set_line_cap(LineCap::Butt);
+    paint.set_line_cap(LineCap::Butt);
     canvas.begin_path();
     canvas.move_to(20.0, 15.0);
     canvas.line_to(60.0, 15.0);
     canvas.stroke(paint);
     
-    canvas.set_line_cap(LineCap::Square);
+    paint.set_line_cap(LineCap::Square);
     canvas.begin_path();
     canvas.move_to(20.0, 40.0);
     canvas.line_to(60.0, 40.0);
     canvas.stroke(paint);
     
-    canvas.set_line_cap(LineCap::Round);
+    paint.set_line_cap(LineCap::Round);
     canvas.begin_path();
     canvas.move_to(20.0, 65.0);
     canvas.line_to(60.0, 65.0);
@@ -360,12 +357,12 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.save();
     canvas.translate(x, y);
     
-    let paint = Paint::color(Color::hex("#247ba0"));
+    let mut paint = Paint::color(Color::hex("#247ba0"));
     
     let w = 80.0;
     
     for i in 0..8 {
-        canvas.set_stroke_width(i as f32);
+        paint.set_stroke_width(i as f32);
         
         canvas.begin_path();
         canvas.move_to(0.0, i as f32 * 10.0);
@@ -373,12 +370,12 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
         canvas.stroke(paint);
     }
     
-    canvas.set_shape_anti_alias(false);
+    paint.set_shape_anti_alias(false);
     
     canvas.translate(95.0, 0.0);
     
     for i in 0..8 {
-        canvas.set_stroke_width(i as f32);
+        paint.set_stroke_width(i as f32);
         
         canvas.begin_path();
         canvas.move_to(0.0, i as f32 * 10.0);
@@ -390,10 +387,10 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
 }
 
 fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
-    canvas.set_stroke_width(2.0);
     
     let fill_paint = Paint::color(Color::hex("#70c1b3"));
-    let stroke_paint = Paint::color(Color::hex("#247ba0"));
+    let mut stroke_paint = Paint::color(Color::hex("#247ba0"));
+    stroke_paint.set_stroke_width(2.0);
     
     canvas.save();
     canvas.translate(x, y);

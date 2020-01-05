@@ -1,9 +1,11 @@
 // TODO: Consider changing Paint/Brush to be an enum (Color, Gradient, Image)
 // TODO: Move State.shape_anti_alias to Paint/Brush.anti_alias
 // TODO: Maybe we should get rid of Color and just use this paint struct
+// TODO: Make thease properties private and create getters for them
+// TODO: Make a paint builder
 
 use crate::math::{Rad, Transform2D};
-use super::{Color, ImageId};
+use super::{Color, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Paint {
@@ -13,7 +15,11 @@ pub struct Paint {
     pub(crate) feather: f32,
     pub(crate) inner_color: Color,
     pub(crate) outer_color: Color,
-    pub(crate) image: Option<ImageId>
+    pub(crate) image: Option<ImageId>,
+    pub(crate) shape_anti_alias: bool,
+    pub(crate) stroke_width: f32,
+    pub(crate) line_cap: LineCap,
+    pub(crate) line_join: LineJoin,
 }
 
 impl Default for Paint {
@@ -26,6 +32,10 @@ impl Default for Paint {
 			inner_color: Color::white(),
 			outer_color: Default::default(),
 			image: Default::default(),
+            shape_anti_alias: true,
+            stroke_width: 1.0,
+            line_cap: Default::default(),
+            line_join: Default::default(),
 		}
 	}
 }
@@ -155,5 +165,29 @@ impl Paint {
         self.feather = 1.0;
         self.inner_color = color;
         self.outer_color = color;
+    }
+    
+    /// Sets whether to draw antialias for stroke() and fill(). It's enabled by default.
+    pub fn set_shape_anti_alias(&mut self, value: bool) {
+        self.shape_anti_alias = value;
+    }
+    
+    /// Sets the stroke width of the stroke style.
+    pub fn set_stroke_width(&mut self, width: f32) {
+        self.stroke_width = width;
+    }
+    
+    /// Sets how the end of the line (cap) is drawn
+    ///
+    /// By default it's set to LineCap::Butt
+    pub fn set_line_cap(&mut self, cap: LineCap) {
+        self.line_cap = cap;
+    }
+    
+    /// Sets how sharp path corners are drawn.
+    ///
+    /// By default it's set to LineJoin::Miter
+    pub fn set_line_join(&mut self, join: LineJoin) {
+        self.line_join = join;
     }
 }
