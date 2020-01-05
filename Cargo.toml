@@ -1,9 +1,22 @@
 [package]
 name = "rscanvas"
+description = "Antialiased 2d vector drawing library written in rust"
 version = "0.1.0"
+license = "MIT"
 authors = ["Peter Todorov <ptodorov@cytec.bg>"]
+keywords = ["graphics", "canvas", "vector", "drawing"]
+categories = ["graphics"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+fnv = "1.0.6"
+bitflags = "1.2.1"
+image = "0.23.0-preview.0"
+freetype = "0.4.1"
+harfbuzz_rs = "1.0.0"
+
+[build-dependencies]
+gl_generator = "0.13"
+
+[dev-dependencies]
+glutin = "0.22.0-alpha4"
