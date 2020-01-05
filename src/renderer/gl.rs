@@ -673,7 +673,7 @@ impl GlRenderer {
         let paths = &self.paths[call.path_offset..(call.path_offset+call.path_count)];
         
         self.set_uniforms(call.uniform_offset, call.image);
-        
+
 		for path in paths {
 			unsafe {
                 gl::DrawArrays(gl::TRIANGLE_FAN, path.fill_offset as i32, path.fill_count as i32);

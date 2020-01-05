@@ -21,6 +21,9 @@ pub use font_manager::{FontManager, FontStyle, FontManagerError};
 pub mod math;
 use crate::math::*;
 
+mod paint;
+pub use paint::Paint;
+
 // TODO: Use Convexity enum to describe path concave/convex
 // TODO: Replace pt_equals with method on point
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
@@ -162,150 +165,6 @@ struct Point {
 	flags: u8// TODO: Use bitflags crate for this
 }
 
-// TODO: Rename Paint to Brush
-// TODO: Consider changing Paint/Brush to be an enum (Color, Gradient, Image)
-// TODO: Move State.shape_anti_alias to Paint/Brush.anti_alias
-
-#[derive(Copy, Clone, Debug, Default)]
-pub struct Paint {
-    transform: Transform2D,
-    extent: [f32; 2],
-    radius: f32,
-    feather: f32,
-    inner_color: Color,
-    outer_color: Color,
-    image: Option<ImageId>
-}
-
-impl Paint {
-	pub fn color(color: Color) -> Self {
-		Self {
-			inner_color: color,
-			..Default::default()
-		}
-	}
-	
-	/// Creates and returns an image pattern. 
-	/// 
-	/// Parameters (cx,cy) specify the left-top location of the image pattern, (w,h) the size of one image,
-	/// angle rotation around the top-left corner, id is handle to the image to render.
-	pub fn image<A: Into<Rad>>(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: A, alpha: f32) -> Paint {
-		let mut paint = Self::default();
-		
-		paint.transform.rotate(angle);
-		paint.transform[4] = cx;
-		paint.transform[5] = cy;
-		
-		paint.extent[0] = w;
-        paint.extent[1] = h;
-        
-        paint.image = Some(id);
-        
-        paint.inner_color = Color::rgbaf(1.0, 1.0, 1.0, alpha);
-        paint.outer_color = Color::rgbaf(1.0, 1.0, 1.0, alpha);
-        
-        paint
-	}
-	
-	/// Creates and returns a linear gradient paint. 
-    ///
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-	pub fn linear_gradient(start_x: f32, start_y: f32, end_x: f32, end_y: f32, start_color: Color, end_color: Color) -> Self {
-        let mut paint = Self::default();
-        
-        let large = 1e5f32;
-        let mut dx = end_x - start_x;
-        let mut dy = end_y - start_y;
-        let d = (dx*dx + dy*dy).sqrt();
-        
-        if d > 0.0001 {
-            dx /= d;
-            dy /= d;
-        } else {
-            dx = 0.0;
-            dy = 1.0;
-        }
-        
-        paint.transform = Transform2D([
-            dy, -dx,
-            dx, dy,
-            start_x - dx*large, start_y - dy*large
-        ]);
-        
-        paint.extent[0] = large;
-        paint.extent[1] = large + d*0.5;
-        paint.radius = 0.0;
-        paint.feather = 1.0f32.max(d);
-        
-        paint.inner_color = start_color;
-        paint.outer_color = end_color;
-        
-        paint
-    }
-    
-    /// Creates and returns a box gradient. 
-    ///
-    /// Box gradient is a feathered rounded rectangle, it is useful for rendering
-    /// drop shadows or highlights for boxes. Parameters (x,y) define the top-left corner of the rectangle,
-    /// (w,h) define the size of the rectangle, r defines the corner radius, and f feather. Feather defines how blurry
-    /// the border of the rectangle is. Parameter inner_color specifies the inner color and outer_color the outer color of the gradient.
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-    pub fn box_gradient(x: f32, y: f32, w: f32, h: f32, r: f32, f: f32, inner_color: Color, outer_color: Color) -> Self {
-        let mut paint = Self::default();
-        
-        paint.transform = Transform2D::default();
-        
-        paint.transform[4] = x+w*0.5;
-        paint.transform[5] = y+h*0.5;
-        
-        paint.extent[0] = w*0.5;
-        paint.extent[1] = h*0.5;
-        
-        paint.radius = r;
-        paint.feather = 1.0f32.max(f);
-        
-        paint.inner_color = inner_color;
-        paint.outer_color = outer_color;
-        
-        paint
-    }
-    
-    /// Creates and returns a radial gradient. 
-    ///
-    /// Parameters (cx,cy) specify the center, inr and outr specify
-    /// the inner and outer radius of the gradient, icol specifies the start color and ocol the end color.
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-    pub fn radial_gradient(cx: f32, cy: f32, inr: f32, outr: f32, inner_color: Color, outer_color: Color) -> Self {
-        let mut paint = Self::default();
-        
-        let r = (inr + outr) * 0.5;
-        let f = outr - inr;
-        
-        paint.transform[4] = cx;
-        paint.transform[5] = cy;
-
-        paint.extent[0] = r;
-        paint.extent[1] = r;
-
-        paint.radius = r;
-
-        paint.feather = 1.0f32.max(f);
-
-        paint.inner_color = inner_color;
-        paint.outer_color = outer_color;
-
-        paint
-    }
-	
-    fn set_color(&mut self, color: Color) {
-        self.transform = Transform2D::identity();
-        self.radius = 0.0;
-        self.feather = 1.0;
-        self.inner_color = color;
-        self.outer_color = color;
-    }
-}
-
 // TODO: We need an iterator for the path points that loops by chunks of 2
 
 #[derive(Default, Debug)]
@@ -408,10 +267,10 @@ impl PathCache {
 #[derive(Copy, Clone)]
 struct State {
 	transform: Transform2D,
-	fill: Paint,
+	//fill: Paint,
 	shape_anti_alias: bool,
     scissor: Scissor,
-    stroke: Paint,
+    //stroke: Paint,
 	stroke_width: f32,
 	line_cap: LineCap,
 	line_join: LineJoin,
@@ -429,10 +288,10 @@ impl Default for State {
 	fn default() -> Self {
 		Self {
 			transform: Transform2D::identity(),
-			fill: Paint::color(Color::white()),
+			//fill: Paint::color(Color::white()),
 			shape_anti_alias: true,
             scissor: Default::default(),
-            stroke: Paint::color(Color::black()),
+            //stroke: Paint::color(Color::black()),
 			stroke_width: 10.0,
 			line_cap: LineCap::Butt,
 			line_join: LineJoin::Miter,
@@ -547,28 +406,6 @@ impl Canvas {
     /// Miter limit controls when a sharp corner is beveled.
     pub fn set_miter_limit(&mut self, limit: f32) {
         self.state_mut().miter_limit = limit;
-    }
-	
-	/// Sets current fill style to a solid color.
-    pub fn set_fill_color(&mut self, color: Color) {
-        self.state_mut().fill.set_color(color);
-    }
-    
-    /// Sets current fill style to a paint, which can be a one of the gradients or a pattern.
-    pub fn set_fill_paint(&mut self, mut paint: Paint) {
-		paint.transform.multiply(&self.state().transform);
-        self.state_mut().fill = paint;
-    }
-    
-    /// Sets current stroke style to a solid color.
-    pub fn set_stroke_color(&mut self, color: Color) {
-        self.state_mut().stroke.set_color(color);
-    }
-    
-    /// Sets current stroke style to a paint, which can be a one of the gradients or a pattern.
-    pub fn set_stroke_paint(&mut self, mut paint: Paint) {
-		paint.transform.multiply(&self.state().transform);
-        self.state_mut().stroke = paint;
     }
     
     /// Sets the stroke width of the stroke style.
@@ -986,9 +823,7 @@ impl Canvas {
 	}
 	
 	/// Fills the current path with current fill style.
-	pub fn fill(&mut self) {
-		let mut paint = self.state().fill;
-		
+	pub fn fill(&mut self, mut paint: Paint) {		
 		self.flatten_paths();
 		
 		if self.renderer.edge_antialiasing() && self.state().shape_anti_alias {
@@ -997,9 +832,11 @@ impl Canvas {
 			self.expand_fill(0.0, LineJoin::Miter, 2.4);
 		}
 		
+		paint.transform.multiply(&self.state().transform);
+		
 		// Apply global alpha
-		paint.inner_color.a *= self.state().alpha;
-		paint.outer_color.a *= self.state().alpha;
+		//paint.inner_color.a *= self.state().alpha;
+		//paint.outer_color.a *= self.state().alpha;
 		
         let scissor = &self.state_stack.last().unwrap().scissor;
         
@@ -1007,9 +844,7 @@ impl Canvas {
 	}
 	
 	/// Fills the current path with current stroke style.
-	pub fn stroke(&mut self) {
-		let mut paint = self.state().stroke;
-		
+	pub fn stroke(&mut self, mut paint: Paint) {
 		let scale = self.state().transform.average_scale();
 		let mut stroke_width = (self.state().stroke_width * scale).max(0.0).min(200.0);
 		
@@ -1023,6 +858,8 @@ impl Canvas {
 			
 			stroke_width = self.fringe_width;
 		}
+		
+		paint.transform.multiply(&self.state().transform);
 		
 		// Apply global alpha
 		paint.inner_color.a *= self.state().alpha;
@@ -1081,7 +918,7 @@ impl Canvas {
 		bounds
 	}
 	
-	pub fn text(&mut self, x: f32, y: f32, text: &str) {
+	pub fn text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint) {
 		let transform = self.state().transform;
 		let scale = self.font_scale() * self.device_px_ratio;
 		let invscale = 1.0 / scale;
@@ -1117,7 +954,6 @@ impl Canvas {
 				verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
 			}
 			
-			let mut paint = self.state().fill;
 			paint.image = Some(cmd.image_id);
 			
 			// Apply global alpha
