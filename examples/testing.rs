@@ -82,6 +82,9 @@ fn main() {
 				
 				canvas.begin_frame(size.width as f32, size.height as f32, dpi_factor as f32);
 				
+				neumorphism(&mut canvas, size.width as f32, size.height as f32);
+				
+				/*
 				draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
 				
 				canvas.set_fill_color(Color::hex("#70c1b3"));
@@ -94,9 +97,9 @@ fn main() {
 				draw_joins(&mut canvas, 110.0, 110.0);
 				
 				draw_lines(&mut canvas, 205.0, 110.0);
+				*/
 				
-				
-				if true {
+				if false {
 					let text = "Thanks for using our products and services (“Services”). If you’re based in the European Economic Area or Switzerland";
 					let bounds = canvas.text_bounds(15.0, 300.0, text);
 					
@@ -239,6 +242,42 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn neumorphism(canvas: &mut Canvas, w: f32, h: f32) {
+	canvas.save();
+	
+	canvas.begin_path();
+	canvas.set_fill_color(Color::hex("#efeeee"));
+	canvas.rect(0.0, 0.0, w, h);
+	canvas.fill();
+	
+	let rect_w = 350.0;
+	let rect_h = 220.0;
+	let x = (w - rect_w) / 2.0;
+	let y = (h - rect_h) / 2.0;
+	
+	let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 16.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
+	canvas.begin_path();
+	canvas.rounded_rect(x + 6.0, y + 6.0, rect_w, rect_h, 12.0);
+	canvas.set_fill_paint(shadow);
+	canvas.fill();
+	
+	let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 26.0, Color::rgba(255, 255, 255, 211), Color::rgba(0, 0, 0, 0));
+	canvas.begin_path();
+	canvas.rounded_rect(x - 6.0, y - 6.0, rect_w, rect_h, 12.0);
+	canvas.set_fill_paint(shadow);
+	canvas.fill();
+	
+	canvas.begin_path();
+	canvas.set_fill_color(Color::hex("#efeeee"));
+	canvas.set_stroke_width(1.0);
+	canvas.set_stroke_color(Color::rgbaf(1.0, 1.0, 1.0, 0.2));
+	canvas.rounded_rect(x, y, rect_w, rect_h, 12.0);
+	canvas.fill();
+	canvas.stroke();
+	
+	canvas.restore();
 }
 
 fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
