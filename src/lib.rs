@@ -267,7 +267,6 @@ impl PathCache {
 struct State {
 	transform: Transform2D,
     scissor: Scissor,
-	miter_limit: f32,
 	alpha: f32,
 }
 
@@ -276,7 +275,6 @@ impl Default for State {
 		Self {
 			transform: Transform2D::identity(),
             scissor: Default::default(),
-			miter_limit: 10.0,
 			alpha: 1.0,
 		}
 	}
@@ -366,13 +364,6 @@ impl Canvas {
 	
 	// Render styles
 	
-    /// Sets the miter limit of the stroke style.
-    ///
-    /// Miter limit controls when a sharp corner is beveled.
-    pub fn set_miter_limit(&mut self, limit: f32) {
-        self.state_mut().miter_limit = limit;
-    }
-    
     /// Sets the transparency applied to all rendered shapes.
     ///
     /// Already transparent paths will get proportionally more transparent as well.
@@ -837,9 +828,9 @@ impl Canvas {
 		self.flatten_paths();
 		
 		if self.renderer.edge_antialiasing() && paint.shape_anti_alias() {
-			self.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), self.state().miter_limit);
+			self.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit());
 		} else {
-			self.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap(), paint.line_join(), self.state().miter_limit);
+			self.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit());
 		}
 		
 		let scissor = &self.state_stack.last().unwrap().scissor;
@@ -921,8 +912,13 @@ impl Canvas {
 			paint.set_image(Some(cmd.image_id));
 			
 			// Apply global alpha
-			//paint.inner_color.a *= self.state().alpha;
-			//paint.outer_color.a *= self.state().alpha;
+            let mut inner_color = paint.inner_color();
+            inner_color.a *= self.state().alpha;
+            paint.set_inner_color(inner_color);
+            
+            let mut outer_color = paint.outer_color();
+            outer_color.a *= self.state().alpha;
+            paint.set_outer_color(outer_color);
 			
 			let scissor = &self.state_stack.last().unwrap().scissor;
 			
@@ -1178,6 +1174,7 @@ impl Canvas {
 		}
 	}
 	
+    // TODO: instead of passing 3 paint values here we can just pass the paint struct as a parameter
 	fn expand_stroke(&mut self, w: f32, fringe: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32) {
 		let aa = fringe;
 		let mut u0 = 0.0;

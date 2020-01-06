@@ -18,6 +18,7 @@ pub struct Paint {
     image: Option<ImageId>,
     shape_anti_alias: bool,
     stroke_width: f32,
+    miter_limit: f32,
     line_cap: LineCap,
     line_join: LineJoin,
     font_name: String,
@@ -39,6 +40,7 @@ impl Default for Paint {
 			image: Default::default(),
             shape_anti_alias: true,
             stroke_width: 1.0,
+            miter_limit: 10.0,
             line_cap: Default::default(),
             line_join: Default::default(),
             font_name: String::from("NotoSans-Regular"),
@@ -251,6 +253,18 @@ impl Paint {
     /// Sets the stroke width for shapes stroked with this paint.
     pub fn set_stroke_width(&mut self, width: f32) {
         self.stroke_width = width;
+    }
+    
+    /// Getter for the miter limit
+    pub fn miter_limit(&self) -> f32 {
+        self.miter_limit
+    }
+    
+    /// Sets the limit at which a sharp corner is drawn beveled.
+    ///
+    /// If the miter at a corner exceeds this limit, LineJoin is replaced with LineJoin::Bevel.
+    pub fn set_miter_limit(&mut self, limit: f32) {
+        self.miter_limit = limit;
     }
     
     /// Returns the current line cap for this paint.
