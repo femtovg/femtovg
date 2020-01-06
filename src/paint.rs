@@ -233,24 +233,27 @@ impl Paint {
         self.outer_color = color;
     }
     
+    /// Returns boolean if the shapes drawn with this paint will be antialiased.
     pub fn shape_anti_alias(&self) -> bool {
         self.shape_anti_alias
     }
     
-    /// Sets whether to draw antialias for stroke() and fill(). It's enabled by default.
+    /// Sets whether shapes drawn with this paint will be anti aliased. Enabled by default.
     pub fn set_shape_anti_alias(&mut self, value: bool) {
         self.shape_anti_alias = value;
     }
     
+    /// Returns the current stroke line width.
     pub fn stroke_width(&self) -> f32 {
         self.stroke_width
     }
     
-    /// Sets the stroke width of the stroke style.
+    /// Sets the stroke width for shapes stroked with this paint.
     pub fn set_stroke_width(&mut self, width: f32) {
         self.stroke_width = width;
     }
     
+    /// Returns the current line cap for this paint.
     pub fn line_cap(&self) -> LineCap {
         self.line_cap
     }
@@ -262,6 +265,7 @@ impl Paint {
         self.line_cap = cap;
     }
     
+    /// Returns the current line join for this paint.
     pub fn line_join(&self) -> LineJoin {
         self.line_join
     }
@@ -273,10 +277,14 @@ impl Paint {
         self.line_join = join;
     }
     
+    /// Returns the font name that is used when drawing text with this paint
     pub fn font_name(&self) -> &str {
         &self.font_name
     }
 
+    /// Sets the font name for text drawn with this paint
+    ///
+    /// This needs to be the Fonts postscript name. Eg. "NotoSans-Regular"
     pub fn set_font_name(&mut self, name: String) {
         self.font_name = name;
     }
