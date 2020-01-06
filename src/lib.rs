@@ -37,19 +37,6 @@ pub use paint::Paint;
 const KAPPA90: f32 = 0.5522847493; // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum HAlign {
-	Left,
-	Center,
-	Right
-}
-
-impl Default for HAlign {
-	fn default() -> Self {
-		Self::Left
-	}
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VAlign {
 	Top,
 	Middle,
@@ -282,12 +269,6 @@ struct State {
     scissor: Scissor,
 	miter_limit: f32,
 	alpha: f32,
-	font_id: usize,// TODO: Option
-	font_size: u32,
-	letter_spacing: f32,
-	font_blur: f32,
-	text_halign: HAlign,
-	text_valign: VAlign,
 }
 
 impl Default for State {
@@ -297,12 +278,6 @@ impl Default for State {
             scissor: Default::default(),
 			miter_limit: 10.0,
 			alpha: 1.0,
-			font_id: 0,
-			font_size: 14,
-			letter_spacing: 0.0,
-			font_blur: 0.0,
-			text_halign: Default::default(),
-			text_valign: Default::default(),
 		}
 	}
 }
@@ -323,9 +298,7 @@ pub struct Canvas {
 
 impl Canvas {
     
-    pub fn new<R: Renderer + 'static>(mut renderer: R) -> Self {
-		
-		let font_image_size = 512;
+    pub fn new<R: Renderer + 'static>(renderer: R) -> Self {
 		
 		// TODO: Return result from this method instead of unwrapping
 		let font_manager = FontManager::new().unwrap();
@@ -796,20 +769,29 @@ impl Canvas {
 	}
 	
 	/// Fills the current path with current fill style.
-	pub fn fill(&mut self, mut paint: Paint) {		
-		self.flatten_paths();
-		
-		if self.renderer.edge_antialiasing() && paint.shape_anti_alias {
+	pub fn fill(&mut self, paint: &Paint) {
+        self.flatten_paths();
+        
+        let mut paint = paint.clone();
+        
+		if self.renderer.edge_antialiasing() && paint.shape_anti_alias() {
 			self.expand_fill(self.fringe_width, LineJoin::Miter, 2.4);
 		} else {
 			self.expand_fill(0.0, LineJoin::Miter, 2.4);
 		}
 		
-		paint.transform.multiply(&self.state().transform);
-		
+        let mut transform = paint.transform();
+        transform.multiply(&self.state().transform);
+		paint.set_transform(transform);
+        
 		// Apply global alpha
-		paint.inner_color.a *= self.state().alpha;
-		paint.outer_color.a *= self.state().alpha;
+        let mut inner_color = paint.inner_color();
+        inner_color.a *= self.state().alpha;
+        paint.set_inner_color(inner_color);
+        
+        let mut outer_color = paint.outer_color();
+        outer_color.a *= self.state().alpha;
+        paint.set_outer_color(outer_color);
 		
         let scissor = &self.state_stack.last().unwrap().scissor;
         
@@ -817,33 +799,47 @@ impl Canvas {
 	}
 	
 	/// Fills the current path with current stroke style.
-	pub fn stroke(&mut self, mut paint: Paint) {
+	pub fn stroke(&mut self, paint: &Paint) {
 		let scale = self.state().transform.average_scale();
-		let mut stroke_width = (paint.stroke_width * scale).max(0.0).min(200.0);
+		let mut stroke_width = (paint.stroke_width() * scale).max(0.0).min(200.0);
+        
+        let mut paint = paint.clone();
 		
 		if stroke_width < self.fringe_width {
 			// If the stroke width is less than pixel size, use alpha to emulate coverage.
 			// Since coverage is area, scale by alpha*alpha.
 			let alpha = (stroke_width / self.fringe_width).max(0.0).min(1.0);
 			
-			paint.inner_color.a *= alpha*alpha;
-			paint.outer_color.a *= alpha*alpha;
+            let mut inner_color = paint.inner_color();
+            inner_color.a *= alpha*alpha;
+            paint.set_inner_color(inner_color);
+            
+            let mut outer_color = paint.outer_color();
+            outer_color.a *= alpha*alpha;
+            paint.set_outer_color(outer_color);
 			
 			stroke_width = self.fringe_width;
 		}
 		
-		paint.transform.multiply(&self.state().transform);
+        let mut transform = paint.transform();
+        transform.multiply(&self.state().transform);
+		paint.set_transform(transform);
 		
 		// Apply global alpha
-		paint.inner_color.a *= self.state().alpha;
-		paint.outer_color.a *= self.state().alpha;
+        let mut inner_color = paint.inner_color();
+        inner_color.a *= self.state().alpha;
+        paint.set_inner_color(inner_color);
+        
+        let mut outer_color = paint.outer_color();
+        outer_color.a *= self.state().alpha;
+        paint.set_outer_color(outer_color);
 		
 		self.flatten_paths();
 		
-		if self.renderer.edge_antialiasing() && paint.shape_anti_alias {
-			self.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap, paint.line_join, self.state().miter_limit);
+		if self.renderer.edge_antialiasing() && paint.shape_anti_alias() {
+			self.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), self.state().miter_limit);
 		} else {
-			self.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap, paint.line_join, self.state().miter_limit);
+			self.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap(), paint.line_join(), self.state().miter_limit);
 		}
 		
 		let scissor = &self.state_stack.last().unwrap().scissor;
@@ -857,14 +853,7 @@ impl Canvas {
 		self.font_manager.add_font_file(file_path).expect("cannot add font");
 	}
 	
-	pub fn set_font_blur(&mut self, blur: f32) {
-		self.state_mut().font_blur = blur;
-	}
-	
-	pub fn set_font_size(&mut self, size: u32) {
-		self.state_mut().font_size = size;
-	}
-	
+    /*
 	pub fn text_bounds(&mut self, x: f32, y: f32, text: &str) -> [f32; 4] {
 		let scale = self.font_scale() * self.device_px_ratio;
 		let invscale = 1.0 / scale;
@@ -889,22 +878,24 @@ impl Canvas {
 		bounds[3] *= invscale;
 		
 		bounds
-	}
+	}*/
 	
-	pub fn text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint) {
+	pub fn text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
 		let transform = self.state().transform;
 		let scale = self.font_scale() * self.device_px_ratio;
 		let invscale = 1.0 / scale;
+        
+        let mut paint = paint.clone();
 		
 		//let mut style = FontStyle::new("DroidSerif");
 		//let mut style = FontStyle::new("Roboto-Regular");
 		//let mut style = FontStyle::new("Amiri-Regular");
 		//let mut style = FontStyle::new("NotoSansDevanagari-Regular");
-		let mut style = FontStyle::new("NotoSans-Regular");
+		let mut style = FontStyle::new(paint.font_name());
 		
-		style.set_size((self.state().font_size as f32 * scale) as u32);
-		style.set_letter_spacing(self.state().letter_spacing * scale);
-		style.set_blur(self.state().font_blur * scale);
+		style.set_size((paint.font_size() as f32 * scale) as u32);
+		style.set_letter_spacing(paint.letter_spacing() * scale);
+		style.set_blur(paint.font_blur() * scale);
 		
 		let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text).unwrap();
 		
@@ -927,11 +918,11 @@ impl Canvas {
 				verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
 			}
 			
-			paint.image = Some(cmd.image_id);
+			paint.set_image(Some(cmd.image_id));
 			
 			// Apply global alpha
-			paint.inner_color.a *= self.state().alpha;
-			paint.outer_color.a *= self.state().alpha;
+			//paint.inner_color.a *= self.state().alpha;
+			//paint.outer_color.a *= self.state().alpha;
 			
 			let scissor = &self.state_stack.last().unwrap().scissor;
 			
@@ -1028,13 +1019,13 @@ impl Canvas {
 		for path in &mut self.cache.paths {
 			let mut points = &mut self.cache.points[path.first..(path.first + path.count)];
 			
-			let mut p0 = points.last().copied().unwrap();
+			let p0 = points.last().copied().unwrap();
 			let p1 = points.first().copied().unwrap();
 			
 			// If the first and last points are the same, remove the last, mark as closed path.
 			if pt_equals(p0.x, p0.y, p1.x, p1.y, self.dist_tol) {
 				path.count -= 1;
-				p0 = points[path.count-1];
+				//p0 = points[path.count-1];
 				path.closed = true;
 				points = &mut self.cache.points[path.first..(path.first + path.count)];
 			}
@@ -1082,6 +1073,7 @@ impl Canvas {
 		self.calculate_joins(w, line_join, miter_limit);
 		
 		// Calculate max vertex usage.
+        /*
 		let mut vertex_count = 0;
 		
 		for path in &self.cache.paths {
@@ -1090,7 +1082,7 @@ impl Canvas {
 			if fringe {
 				vertex_count += (path.count + path.bevel*5 + 1) * 2;// plus one for loop
 			}
-		}
+		}*/
 		
 		//self.cache.verts.clear();
 		//self.cache.verts.reserve(vertex_count);

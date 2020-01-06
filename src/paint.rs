@@ -1,25 +1,30 @@
-// TODO: Consider changing Paint/Brush to be an enum (Color, Gradient, Image)
-// TODO: Move State.shape_anti_alias to Paint/Brush.anti_alias
+
 // TODO: Maybe we should get rid of Color and just use this paint struct
-// TODO: Make thease properties private and create getters for them
 // TODO: Make a paint builder
+// TODO: move create_image, linear_gradient, box_gradient, radial_gradient to the builder
+// TODO: Document all functions
 
 use crate::math::{Rad, Transform2D};
-use super::{Color, ImageId, LineCap, LineJoin};
+use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Paint {
-    pub(crate) transform: Transform2D,
-    pub(crate) extent: [f32; 2],
-    pub(crate) radius: f32,
-    pub(crate) feather: f32,
-    pub(crate) inner_color: Color,
-    pub(crate) outer_color: Color,
-    pub(crate) image: Option<ImageId>,
-    pub(crate) shape_anti_alias: bool,
-    pub(crate) stroke_width: f32,
-    pub(crate) line_cap: LineCap,
-    pub(crate) line_join: LineJoin,
+    transform: Transform2D,
+    extent: [f32; 2],
+    radius: f32,
+    feather: f32,
+    inner_color: Color,
+    outer_color: Color,
+    image: Option<ImageId>,
+    shape_anti_alias: bool,
+    stroke_width: f32,
+    line_cap: LineCap,
+    line_join: LineJoin,
+    font_name: String,
+	font_size: u32,
+	letter_spacing: f32,
+	font_blur: f32,
+	text_valign: VAlign,
 }
 
 impl Default for Paint {
@@ -36,6 +41,11 @@ impl Default for Paint {
             stroke_width: 1.0,
             line_cap: Default::default(),
             line_join: Default::default(),
+            font_name: String::from("NotoSans-Regular"),
+            font_size: 16,
+            letter_spacing: 0.0,
+            font_blur: 0.0,
+            text_valign: VAlign::default(),
 		}
 	}
 }
@@ -51,7 +61,7 @@ impl Paint {
 	/// 
 	/// Parameters (cx,cy) specify the left-top location of the image pattern, (w,h) the size of one image,
 	/// angle rotation around the top-left corner, id is handle to the image to render.
-	pub fn image<A: Into<Rad>>(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: A, alpha: f32) -> Paint {
+	pub fn create_image<A: Into<Rad>>(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: A, alpha: f32) -> Paint {
 		let mut paint = Self::default();
 		
 		paint.transform.rotate(angle);
@@ -158,6 +168,62 @@ impl Paint {
 
         paint
     }
+    
+    pub fn transform(&self) -> Transform2D {
+        self.transform
+    }
+
+    pub fn set_transform(&mut self, transform: Transform2D) {
+        self.transform = transform;
+    }
+
+    pub fn extent(&self) -> [f32; 2] {
+        self.extent
+    }
+
+    pub fn set_extent(&mut self, extent: [f32; 2]) {
+        self.extent = extent;
+    }
+
+    pub fn radius(&self) -> f32 {
+        self.radius
+    }
+
+    pub fn set_radius(&mut self, radius: f32) {
+        self.radius = radius;
+    }
+
+    pub fn feather(&self) -> f32 {
+        self.feather
+    }
+
+    pub fn set_feather(&mut self, feather: f32) {
+        self.feather = feather;
+    }
+
+    pub fn inner_color(&self) -> Color {
+        self.inner_color
+    }
+
+    pub fn set_inner_color(&mut self, color: Color) {
+        self.inner_color = color;
+    }
+
+    pub fn outer_color(&self) -> Color {
+        self.outer_color
+    }
+
+    pub fn set_outer_color(&mut self, color: Color) {
+        self.outer_color = color;
+    }
+    
+    pub fn image(&self) -> Option<ImageId> {
+        self.image
+    }
+
+    pub fn set_image(&mut self, image: Option<ImageId>) {
+        self.image = image;
+    }
 	
     pub fn set_color(&mut self, color: Color) {
         self.transform = Transform2D::identity();
@@ -167,14 +233,26 @@ impl Paint {
         self.outer_color = color;
     }
     
+    pub fn shape_anti_alias(&self) -> bool {
+        self.shape_anti_alias
+    }
+    
     /// Sets whether to draw antialias for stroke() and fill(). It's enabled by default.
     pub fn set_shape_anti_alias(&mut self, value: bool) {
         self.shape_anti_alias = value;
     }
     
+    pub fn stroke_width(&self) -> f32 {
+        self.stroke_width
+    }
+    
     /// Sets the stroke width of the stroke style.
     pub fn set_stroke_width(&mut self, width: f32) {
         self.stroke_width = width;
+    }
+    
+    pub fn line_cap(&self) -> LineCap {
+        self.line_cap
     }
     
     /// Sets how the end of the line (cap) is drawn
@@ -184,10 +262,54 @@ impl Paint {
         self.line_cap = cap;
     }
     
+    pub fn line_join(&self) -> LineJoin {
+        self.line_join
+    }
+    
     /// Sets how sharp path corners are drawn.
     ///
     /// By default it's set to LineJoin::Miter
     pub fn set_line_join(&mut self, join: LineJoin) {
         self.line_join = join;
+    }
+    
+    pub fn font_name(&self) -> &str {
+        &self.font_name
+    }
+
+    pub fn set_font_name(&mut self, name: String) {
+        self.font_name = name;
+    }
+
+    pub fn font_size(&self) -> u32 {
+        self.font_size
+    }
+
+    pub fn set_font_size(&mut self, size: u32) {
+        self.font_size = size;
+    }
+
+    pub fn letter_spacing(&self) -> f32 {
+        self.letter_spacing
+    }
+
+    pub fn set_letter_spacing(&mut self, spacing: f32) {
+        self.letter_spacing = spacing;
+    }
+
+    pub fn font_blur(&self) -> f32 {
+        self.font_blur
+    }
+
+    pub fn set_font_blur(&mut self, blur: f32) {
+        self.font_blur = blur;
+    }
+
+    pub fn text_valign(&self) -> VAlign {
+        self.text_valign
+    }
+
+    pub fn set_text_valign(&mut self, valign: VAlign) {
+        self.text_valign = valign;
     }
 }

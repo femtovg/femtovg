@@ -299,14 +299,14 @@ impl Renderer for GlRenderer {
         call.triangle_count = 4; // I think this is 4 since this renders bounding box only, rest must come from path itself idk
         call.path_offset = self.paths.len();
         call.path_count = paths.len();
-        call.image = paint.image;
+        call.image = paint.image();
         
         if paths.len() == 1 && paths[0].convex {
             call.call_type = CallType::ConvexFill;
             call.triangle_count = 0; // Bounding box fill quad not needed for convex fill
         }
         
-        let max_vertex_count = paths.iter().fold(0, |acc, path| acc + path.fill.len() + path.stroke.len()) + call.triangle_count;
+        //let max_vertex_count = paths.iter().fold(0, |acc, path| acc + path.fill.len() + path.stroke.len()) + call.triangle_count;
         
         let mut offset = self.verts.len();
         
@@ -370,7 +370,7 @@ impl Renderer for GlRenderer {
 		call.call_type = CallType::Stroke;
 		call.path_offset = self.paths.len();
 		call.path_count = paths.len();
-		call.image = paint.image;
+		call.image = paint.image();
 		
 		// TODO: blend func
 		
@@ -411,7 +411,7 @@ impl Renderer for GlRenderer {
 		
 		call.call_type = CallType::Triangles;
 		// TODO: blendFunc
-		call.image = paint.image;
+		call.image = paint.image();
 		call.triangle_offset = self.verts.len();
 		call.triangle_count = verts.len();
 		
@@ -486,12 +486,12 @@ impl Renderer for GlRenderer {
 			unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
 		}
 		
-		unsafe { 
+		//unsafe { 
 			//gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
 			//gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
 			//gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
 			//gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-		}
+		//}
 		
 		if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
 			unsafe { gl::GenerateMipmap(gl::TEXTURE_2D); }
@@ -512,6 +512,14 @@ impl Renderer for GlRenderer {
             Some(texture) => texture,
             None => return
         };
+        
+        if x + w > texture.width {
+            panic!();// TODO: error handling
+        }
+        
+        if y + h > texture.height {
+            panic!();// TODO: error handling
+        }
         
         // TODO: the comments bellow had to me made for font support (partial texture update)
         // So now this function expects that the image provided is the entire update data,
@@ -558,10 +566,8 @@ impl GlRenderer {
     
     fn convert_paint(&self, uniforms: &mut FragUniforms, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) {
         
-        let mut inv_transform = Transform2D::identity();
-        
-        uniforms.inner_col = paint.inner_color.premultiplied().to_array();
-        uniforms.outer_col = paint.outer_color.premultiplied().to_array();
+        uniforms.inner_col = paint.inner_color().premultiplied().to_array();
+        uniforms.outer_col = paint.outer_color().premultiplied().to_array();
         
         if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
             uniforms.scissor_ext[0] = 1.0;
@@ -576,11 +582,13 @@ impl GlRenderer {
 			uniforms.scissor_scale[1] = (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe;
         }
     
-        uniforms.extent = paint.extent;
+        uniforms.extent = paint.extent();
         uniforms.stroke_mult = (width*0.5 + fringe*0.5) / fringe;
         uniforms.stroke_thr = stroke_thr;
         
-        if let Some(image_id) = paint.image {
+        let inv_transform;
+        
+        if let Some(image_id) = paint.image() {
             let texture = self.textures.get(&image_id);
             
             if texture.is_none() {
@@ -592,7 +600,7 @@ impl GlRenderer {
             if texture.flags.contains(ImageFlags::FLIP_Y) {
                 let mut m1 = Transform2D::identity();
                 m1.translate(0.0, uniforms.extent[1] * 0.5);
-                m1.multiply(&paint.transform);
+                m1.multiply(&paint.transform());
                 
                 let mut m2 = Transform2D::identity();
                 m2.scale(1.0, -1.0);
@@ -603,7 +611,7 @@ impl GlRenderer {
                 
                 inv_transform = m1.inversed();
 			} else {
-				inv_transform = paint.transform.inversed();
+				inv_transform = paint.transform().inversed();
 			}
 			
 			uniforms.shader_type = ShaderType::FillImage.to_i32();
@@ -614,10 +622,10 @@ impl GlRenderer {
 			};
         } else {
             uniforms.shader_type = ShaderType::FillGradient.to_i32();
-            uniforms.radius = paint.radius;
-            uniforms.feather = paint.feather;
+            uniforms.radius = paint.radius();
+            uniforms.feather = paint.feather();
             
-            inv_transform = paint.transform.inversed();
+            inv_transform = paint.transform().inversed();
         }
         
         uniforms.paint_mat = inv_transform.to_mat3x4();
@@ -765,7 +773,7 @@ impl GlRenderer {
 
 impl Drop for GlRenderer {
 	fn drop(&mut self) {
-		for (id, texture) in self.textures.drain() {
+		for (_, texture) in self.textures.drain() {
             unsafe { gl::DeleteTextures(1, &texture.tex); }
         }
         

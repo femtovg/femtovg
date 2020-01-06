@@ -96,17 +96,20 @@ fn main() {
 				
 				if true {
 					let text = "Thanks for using our products and services (“Services”). If you’re based in the European Economic Area or Switzerland";
-					let bounds = canvas.text_bounds(15.0, 300.0, text);
+					//let bounds = canvas.text_bounds(15.0, 300.0, text);
 					
 					//dbg!(bounds);
 					//canvas.rotate(math::Deg(rot));
 					//canvas.begin_path();
 					//canvas.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
 					//canvas.stroke();
+                    
+                    let mut paint = Paint::color(Color::hex("454545"));
 					
-					canvas.set_font_size(16);
-					canvas.text(15.0 + x, 230.0 + y, text, Paint::color(Color::hex("454545")));
-					canvas.set_font_blur(1.0);
+					paint.set_font_size(16);
+					canvas.text(15.0 + x, 230.0 + y, text, &paint);
+					
+                    //paint.set_font_blur(1.0);
 					//canvas.set_fill_color(Color::rgbaf(0.0, 0.0, 0.0, 0.3));
 					//canvas.text(15.0 + x, 80.0 + y, text);
 					
@@ -171,21 +174,21 @@ fn main() {
 					
 					canvas.begin_path();
 					canvas.rounded_rect(50.0, 50.0, 100.0, 100.0, 10.0);
-					canvas.fill(Paint::linear_gradient(50.0, 50.0, 150.0, 150.0, Color::rgb(0, 0, 0), Color::rgb(255, 0, 0)));
-					canvas.stroke(stroke_paint);
+					canvas.fill(&Paint::linear_gradient(50.0, 50.0, 150.0, 150.0, Color::rgb(0, 0, 0), Color::rgb(255, 0, 0)));
+					canvas.stroke(&stroke_paint);
 					
 					canvas.save();
 					canvas.translate(170.0, 50.0);
 					canvas.begin_path();
 					canvas.rect(0.0, 0.0, 100.0, 100.0);
-					canvas.fill(Paint::box_gradient(0.0, 0.0, 100.0, 100.0, 0.0, 20.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0)));
+					canvas.fill(&Paint::box_gradient(0.0, 0.0, 100.0, 100.0, 0.0, 20.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0)));
 					canvas.restore();
 					
 					canvas.save();
 					canvas.translate(290.0, 50.0);
 					canvas.begin_path();
 					canvas.rect(0.0, 0.0, 100.0, 100.0);
-					canvas.fill(Paint::radial_gradient(50.0, 50.0, 0.0, 50.0, Color::rgb(0, 0, 0), Color::rgb(255, 255, 255)));
+					canvas.fill(&Paint::radial_gradient(50.0, 50.0, 0.0, 50.0, Color::rgb(0, 0, 0), Color::rgb(255, 255, 255)));
 					canvas.restore();
 				}
 				
@@ -198,7 +201,7 @@ fn main() {
 					canvas.line_to(100.0, 20.0);
 					canvas.arc_to(150.0, 20.0, 150.0, 70.0, 50.0);
 					canvas.line_to(150.0, 120.0);
-					canvas.stroke(Paint::color(Color::rgb(100, 100, 100)));
+					canvas.stroke(&Paint::color(Color::rgb(100, 100, 100)));
 					canvas.restore();
 				}
 				
@@ -248,17 +251,17 @@ fn draw_shadows(canvas: &mut Canvas) {
 	let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 16.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
 	canvas.begin_path();
 	canvas.rounded_rect(x + 6.0, y + 6.0, rect_w, rect_h, 12.0);
-	canvas.fill(shadow);
+	canvas.fill(&shadow);
 	
 	let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 26.0, Color::rgba(255, 255, 255, 211), Color::rgba(0, 0, 0, 0));
 	canvas.begin_path();
 	canvas.rounded_rect(x - 6.0, y - 6.0, rect_w, rect_h, 12.0);
-	canvas.fill(shadow);
+	canvas.fill(&shadow);
 	
 	canvas.begin_path();
 	canvas.rounded_rect(x, y, rect_w, rect_h, 12.0);
-	canvas.fill(paint);
-	canvas.stroke(paint);
+	canvas.fill(&paint);
+	canvas.stroke(&paint);
 	
 	canvas.restore();
 }
@@ -271,7 +274,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke(Paint::color(Color::hex("#247ba0")));
+    canvas.stroke(&Paint::color(Color::hex("#247ba0")));
     
     canvas.scissor(0.0, 0.0, 80.0, 80.0);
     
@@ -295,7 +298,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
     canvas.line_to(w, 40.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     canvas.translate(0.0, 25.0);
     
@@ -304,7 +307,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
     canvas.line_to(w, 40.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     canvas.translate(0.0, 25.0);
     
@@ -313,7 +316,7 @@ fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.move_to(0.0, 40.0);
     canvas.line_to(w/2.0, 10.0);
     canvas.line_to(w, 40.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     canvas.restore();
 }
@@ -326,7 +329,7 @@ fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke(Paint::color(Color::hex("#247ba0")));
+    canvas.stroke(&Paint::color(Color::hex("#247ba0")));
     
     let mut paint = Paint::color(Color::hex("#70c1b3"));
     
@@ -336,19 +339,19 @@ fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.begin_path();
     canvas.move_to(20.0, 15.0);
     canvas.line_to(60.0, 15.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     paint.set_line_cap(LineCap::Square);
     canvas.begin_path();
     canvas.move_to(20.0, 40.0);
     canvas.line_to(60.0, 40.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     paint.set_line_cap(LineCap::Round);
     canvas.begin_path();
     canvas.move_to(20.0, 65.0);
     canvas.line_to(60.0, 65.0);
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     canvas.restore();
 }
@@ -367,7 +370,7 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
         canvas.begin_path();
         canvas.move_to(0.0, i as f32 * 10.0);
         canvas.line_to(w, 10.0 + i as f32 * 10.0);
-        canvas.stroke(paint);
+        canvas.stroke(&paint);
     }
     
     paint.set_shape_anti_alias(false);
@@ -380,7 +383,7 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
         canvas.begin_path();
         canvas.move_to(0.0, i as f32 * 10.0);
         canvas.line_to(w, 10.0 + i as f32 * 10.0);
-        canvas.stroke(paint);
+        canvas.stroke(&paint);
     }
     
     canvas.restore();
@@ -397,28 +400,28 @@ fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
     
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.fill(fill_paint);
+    canvas.fill(&fill_paint);
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke(stroke_paint);
+    canvas.stroke(&stroke_paint);
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.rounded_rect(0.0, 0.0, 80.0, 80.0, 10.0);
-    canvas.fill(fill_paint);
+    canvas.fill(&fill_paint);
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.rounded_rect(0.0, 0.0, 80.0, 80.0, 10.0);
-    canvas.stroke(stroke_paint);
+    canvas.stroke(&stroke_paint);
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.rounded_rect_varying(0.0, 0.0, 80.0, 80.0, 20.0, 20.0, 5.0, 5.0);
-    canvas.fill(fill_paint);
-    canvas.stroke(stroke_paint);
+    canvas.fill(&fill_paint);
+    canvas.stroke(&stroke_paint);
     
     // TODO: Instead of save/restore pairs try doing something with scopes or closures
     // Or use temp var and use drop to restore state
@@ -429,7 +432,7 @@ fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.rotate(math::Deg(45.0));
     canvas.begin_path();
     canvas.rounded_rect(0.0, 0.0, 55.0, 55.0, 5.0);
-    canvas.stroke(stroke_paint);
+    canvas.stroke(&stroke_paint);
     canvas.restore();
     
     canvas.translate(95.0, 0.0);
@@ -437,20 +440,20 @@ fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.skew_x(math::Deg(-10.0));
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke(stroke_paint);
+    canvas.stroke(&stroke_paint);
     canvas.restore();
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.circle(40.0, 40.0, 40.0);
-    canvas.fill(fill_paint);
-    canvas.stroke(stroke_paint);
+    canvas.fill(&fill_paint);
+    canvas.stroke(&stroke_paint);
     
     canvas.translate(95.0, 0.0);
     canvas.begin_path();
     canvas.ellipse(40.0, 40.0, 30.0, 40.0);
-    canvas.fill(fill_paint);
-    canvas.stroke(stroke_paint);
+    canvas.fill(&fill_paint);
+    canvas.stroke(&stroke_paint);
     
     canvas.translate(95.0, 0.0);
     draw_star(canvas, 0.0, 0.0, 80.0);
@@ -478,7 +481,7 @@ fn draw_star(canvas: &mut Canvas, cx: f32, cy: f32, scale: f32) {
     canvas.translate(scale * 0.5, scale * 0.5);
     canvas.close_path();
     // canvas.fill(); TODO: Why is this not filling ok
-    canvas.stroke(paint);
+    canvas.stroke(&paint);
     
     canvas.restore();
 }
@@ -502,7 +505,7 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
 	let by = cy + a1.sin() * (r0+r1)*0.5;
 	
 	let paint = Paint::linear_gradient(ax, ay, bx, by, Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 128));
-	canvas.fill(paint);
+	canvas.fill(&paint);
 
 	canvas.restore();
 }

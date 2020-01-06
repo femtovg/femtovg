@@ -138,7 +138,7 @@ struct FontFace {
 }
 
 impl FontFace {
-	pub fn new(mut face: ft::Face) -> Self {
+	pub fn new(face: ft::Face) -> Self {
 		Self {
 			ft_face: face,
 			glyphs: Default::default()
@@ -161,13 +161,11 @@ pub struct FontManager {
 impl FontManager {
 	
 	pub fn new() -> Result<Self> {
-		let mut manager = Self {
+		Ok(Self {
 			library: ft::Library::init()?,
 			faces: Default::default(),
 			textures: Default::default(),
-		};
-		
-		Ok(manager)
+		})
 	}
 	
 	pub fn add_font_file<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
@@ -225,7 +223,7 @@ impl FontManager {
 		
 		for (position, info) in positions.iter().zip(infos) {
 			let gid = info.codepoint;
-			let cluster = info.cluster;
+			//let cluster = info.cluster;
 			let x_advance = position.x_advance >> 6;
 			let y_advance = position.y_advance >> 6;
 			let x_offset = position.x_offset >> 6;
@@ -265,7 +263,7 @@ impl FontManager {
 		
 		layout.bbox[2] = cursor_x as f32;
 		
-		layout.cmds = cmd_map.drain().map(|(k, v)| v).collect();
+		layout.cmds = cmd_map.drain().map(|(_, v)| v).collect();
 		
 		Ok(layout)
 	}
@@ -284,7 +282,7 @@ impl FontManager {
 		
 		let padding = GLYPH_PADDING + style.blur.ceil() as u32;
 		
-		face.ft_face.load_glyph(glyph_index, ft::LoadFlag::RENDER | ft::LoadFlag::NO_HINTING);
+		face.ft_face.load_glyph(glyph_index, ft::LoadFlag::RENDER | ft::LoadFlag::NO_HINTING)?;
 		
 		let ft_glyph = face.ft_face.glyph();
 		let ft_bitmap = ft_glyph.bitmap();
@@ -331,7 +329,7 @@ impl FontManager {
 			glyph_image = image::imageops::blur(&glyph_image, style.blur);
 		}
 		
-		glyph_image.save("/home/ptodorov/glyph_test.png");
+		//glyph_image.save("/home/ptodorov/glyph_test.png");
 		
 		// Upload image
 		renderer.update_texture(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32, width, height);

@@ -1,4 +1,4 @@
-
+#![allow(dead_code)]
 // This is a hot mess copied from https://github.com/PistonDevelopers/freetype-rs
 // It's a nice abstraction over freetype, but PistonDevelopers/freetype-rs links 
 // against different freetype-sys then harfbuzz_rs so they can't be used toghether
