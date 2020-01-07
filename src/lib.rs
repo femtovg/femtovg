@@ -50,12 +50,6 @@ impl Default for VAlign {
 	}
 }
 
-// Point flags
-const POINT_CORNER: u8 = 0x01;
-const POINT_LEFT: u8 = 0x02;
-const POINT_BEVEL: u8 = 0x04;
-const POINT_INNERBEVEL: u8 = 0x08;
-
 // Image flags
 bitflags! {
     pub struct ImageFlags: u32 {

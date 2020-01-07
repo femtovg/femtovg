@@ -2,9 +2,15 @@
 use std::f32::consts::PI;
 
 use crate::math::Transform2D;
-use super::{Point, Vertex, Contour, Command, Winding, LineCap, LineJoin, pt_equals, cross, normalize, dist_pt_segment, poly_area, POINT_CORNER, POINT_LEFT, POINT_BEVEL, POINT_INNERBEVEL};
+use super::{Point, Vertex, Contour, Command, Winding, LineCap, LineJoin, pt_equals, cross, normalize, dist_pt_segment, poly_area};
 
 const KAPPA90: f32 = 0.5522847493; // Length proportional to radius of a cubic bezier handle for 90deg arcs.
+
+// Point flags
+const POINT_CORNER: u8 = 0x01;
+const POINT_LEFT: u8 = 0x02;
+const POINT_BEVEL: u8 = 0x04;
+const POINT_INNERBEVEL: u8 = 0x08;
 
 #[derive(Clone, Default)]
 pub struct Path {
