@@ -6,7 +6,7 @@ use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::GlRenderer, math};
+use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::GlRenderer, Path, math};
 
 fn main() {
     let el = EventLoop::new();
@@ -82,6 +82,19 @@ fn main() {
 				
 				canvas.begin_frame(size.width as f32, size.height as f32, dpi_factor as f32);
 				
+                let mut path = Path::new();
+                path.move_to(10.0, 10.0);
+                path.line_to(100.0, 10.0);
+                path.line_to(100.0, 100.0);
+                path.line_to(10.0, 100.0);
+                path.close();
+                
+                let paint = Paint::color(Color::hex("bababa"));
+                
+                //canvas.translate(100.0, 100.0);
+                //canvas.fill(&path, &paint);
+                
+                /*
 				draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
 				
 				draw_rects(&mut canvas, 15.0, 15.0);
@@ -93,7 +106,8 @@ fn main() {
 				draw_lines(&mut canvas, 205.0, 110.0);
 				
 				draw_shadows(&mut canvas);
-				
+				*/
+                
 				if true {
 					let text = "Thanks for using our products and services (“Services”). If you’re based in the European Economic Area or Switzerland";
 					//let bounds = canvas.text_bounds(15.0, 300.0, text);
@@ -169,6 +183,7 @@ fn main() {
 				//canvas.skew_x(math::Deg(10.0));
 				
 				// Gradients
+                /*
 				if false {
 					let stroke_paint = Paint::linear_gradient(50.0, 50.0, 150.0, 150.0, Color::rgb(255, 0, 0), Color::rgb(0, 0, 0));
 					
@@ -190,18 +205,21 @@ fn main() {
 					canvas.rect(0.0, 0.0, 100.0, 100.0);
 					canvas.fill(&Paint::radial_gradient(50.0, 50.0, 0.0, 50.0, Color::rgb(0, 0, 0), Color::rgb(255, 255, 255)));
 					canvas.restore();
-				}
+				}*/
 				
 				// arc_to test
-				if false {
+                
+				if true {
+                    let mut path = Path::new();
+                    path.move_to(20.0, 20.0);
+					path.line_to(100.0, 20.0);
+					path.arc_to(150.0, 20.0, 150.0, 70.0, 50.0);
+					path.line_to(150.0, 120.0);
+                    
 					canvas.save();
-					canvas.translate(0.0, 140.0);
-					canvas.begin_path();
-					canvas.move_to(20.0, 20.0);
-					canvas.line_to(100.0, 20.0);
-					canvas.arc_to(150.0, 20.0, 150.0, 70.0, 50.0);
-					canvas.line_to(150.0, 120.0);
-					canvas.stroke(&Paint::color(Color::rgb(100, 100, 100)));
+					canvas.translate(10.0, 10.0);
+					
+					canvas.stroke(&path, &Paint::color(Color::rgb(100, 100, 100)));
 					canvas.restore();
 				}
 				
@@ -237,7 +255,7 @@ fn main() {
         }
     });
 }
-
+/*
 fn draw_shadows(canvas: &mut Canvas) {
 	canvas.save();
 	
@@ -508,4 +526,4 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
 	canvas.fill(&paint);
 
 	canvas.restore();
-}
+}*/

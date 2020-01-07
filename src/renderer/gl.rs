@@ -16,7 +16,7 @@ use image::DynamicImage;
 // Rendering dashed lines -> https://hal.inria.fr/hal-00907326/file/paper.pdf
 
 use super::{Renderer, TextureType};
-use super::super::{Vertex, Paint, Path, Scissor, ImageId, ImageFlags};
+use super::super::{Vertex, Paint, Contour, Scissor, ImageId, ImageFlags};
 
 use crate::math::Transform2D;
 
@@ -72,8 +72,8 @@ impl Default for CallType {
 #[derive(Default, Debug)]
 struct GlRenderCall {
 	call_type: CallType,
-    path_offset: usize,
-    path_count: usize,
+    contour_offset: usize,
+    contour_count: usize,
 	triangle_offset: usize,
 	triangle_count: usize,
 	uniform_offset: usize,
@@ -89,7 +89,7 @@ struct GlTexture {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-struct GlPath {
+struct GlContour {
     fill_offset: usize,
 	fill_count: usize,
 	stroke_offset: usize,
@@ -107,7 +107,7 @@ pub struct GlRenderer {
 	frag_size: usize,
 	view: [f32; 2],
 	calls: Vec<GlRenderCall>,
-    paths: Vec<GlPath>,
+    paths: Vec<GlContour>,
 	uniforms: Vec<FragUniforms>,
 	verts: Vec<Vertex>,
 	last_texture_id: u32,
@@ -291,17 +291,17 @@ impl Renderer for GlRenderer {
 		// paths
 	}
 	
-	fn render_fill(&mut self, paint: &Paint, scissor: &Scissor, fringe_width: f32, bounds: [f32; 4], paths: &[Path]) {
+	fn render_fill(&mut self, paint: &Paint, scissor: &Scissor, fringe_width: f32, bounds: [f32; 4], contours: &[Contour]) {
 		
         let mut call = GlRenderCall::default();
         
         call.call_type = CallType::Fill;
         call.triangle_count = 4; // I think this is 4 since this renders bounding box only, rest must come from path itself idk
-        call.path_offset = self.paths.len();
-        call.path_count = paths.len();
+        call.contour_offset = self.paths.len();
+        call.contour_count = contours.len();
         call.image = paint.image();
         
-        if paths.len() == 1 && paths[0].convex {
+        if contours.len() == 1 && contours[0].convex {
             call.call_type = CallType::ConvexFill;
             call.triangle_count = 0; // Bounding box fill quad not needed for convex fill
         }
@@ -310,28 +310,28 @@ impl Renderer for GlRenderer {
         
         let mut offset = self.verts.len();
         
-        for path in paths {
-            let mut glpath = GlPath::default();
+        for contour in contours {
+            let mut glcontour = GlContour::default();
             
-            if !path.fill.is_empty() {
-                glpath.fill_offset = offset;
-                glpath.fill_count = path.fill.len();
+            if !contour.fill.is_empty() {
+                glcontour.fill_offset = offset;
+                glcontour.fill_count = contour.fill.len();
                 
-                self.verts.extend_from_slice(&path.fill);
+                self.verts.extend_from_slice(&contour.fill);
                 
-                offset += path.fill.len();
+                offset += contour.fill.len();
             }
             
-            if !path.stroke.is_empty() {
-                glpath.stroke_offset = offset;
-                glpath.stroke_count = path.stroke.len();
+            if !contour.stroke.is_empty() {
+                glcontour.stroke_offset = offset;
+                glcontour.stroke_count = contour.stroke.len();
                 
-                self.verts.extend_from_slice(&path.stroke);
+                self.verts.extend_from_slice(&contour.stroke);
                 
-                offset += path.stroke.len();
+                offset += contour.stroke.len();
             }
             
-            self.paths.push(glpath);
+            self.paths.push(glcontour);
         }
         
         // Setup uniforms for draw calls
@@ -364,31 +364,31 @@ impl Renderer for GlRenderer {
         self.calls.push(call);
 	}
 	
-	fn render_stroke(&mut self, paint: &Paint, scissor: &Scissor, fringe_width: f32, stroke_width: f32, paths: &[Path]) {
+	fn render_stroke(&mut self, paint: &Paint, scissor: &Scissor, fringe_width: f32, stroke_width: f32, contours: &[Contour]) {
 		let mut call = GlRenderCall::default();
 		
 		call.call_type = CallType::Stroke;
-		call.path_offset = self.paths.len();
-		call.path_count = paths.len();
+		call.contour_offset = self.paths.len();
+		call.contour_count = contours.len();
 		call.image = paint.image();
 		
 		// TODO: blend func
 		
 		let mut offset = self.verts.len();
 		
-		for path in paths {
-            let mut glpath = GlPath::default();
+		for contour in contours {
+            let mut glcontour = GlContour::default();
             
-            if !path.stroke.is_empty() {
-				glpath.stroke_offset = offset;
-                glpath.stroke_count = path.stroke.len();
+            if !contour.stroke.is_empty() {
+				glcontour.stroke_offset = offset;
+                glcontour.stroke_count = contour.stroke.len();
                 
-                self.verts.extend_from_slice(&path.stroke);
+                self.verts.extend_from_slice(&contour.stroke);
                 
-                offset += path.stroke.len();
+                offset += contour.stroke.len();
 			}
 			
-			self.paths.push(glpath);
+			self.paths.push(glcontour);
 		}
 		
 		call.uniform_offset = self.uniforms.len() * self.frag_size;
@@ -632,7 +632,7 @@ impl GlRenderer {
     }
     
     fn fill(&self, call: &GlRenderCall) {
-        let paths = &self.paths[call.path_offset..(call.path_offset + call.path_count)];
+        let paths = &self.paths[call.contour_offset..(call.contour_offset + call.contour_count)];
         
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
@@ -678,7 +678,7 @@ impl GlRenderer {
     }
     
     fn convex_fill(&self, call: &GlRenderCall) {
-        let paths = &self.paths[call.path_offset..(call.path_offset+call.path_count)];
+        let paths = &self.paths[call.contour_offset..(call.contour_offset+call.contour_count)];
         
         self.set_uniforms(call.uniform_offset, call.image);
 
@@ -697,7 +697,7 @@ impl GlRenderer {
     }
     
     fn stroke(&self, call: &GlRenderCall) {
-		let paths = &self.paths[call.path_offset..(call.path_offset+call.path_count)];
+		let paths = &self.paths[call.contour_offset..(call.contour_offset+call.contour_count)];
 		
 		if self.stencil_strokes {
 			unsafe {
