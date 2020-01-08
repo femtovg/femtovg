@@ -1,2 +1,2 @@
 # rscanvas
-Antialiased 2d vector drawing library written in rust
+Antialiased 2D vector drawing library written in rust. Ported from https://github.com/memononen/nanovg
