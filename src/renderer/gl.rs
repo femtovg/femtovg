@@ -14,6 +14,7 @@ use image::DynamicImage;
 // TODO: Rename calls to commands
 // TODO: "frag" is not a good name for the fragment shader data. Rename it once finished
 // Rendering dashed lines -> https://hal.inria.fr/hal-00907326/file/paper.pdf
+// TODO: Remove let shader_header = "#version 100"; we only support gles2
 
 use super::{Renderer, TextureType};
 use super::super::{Vertex, Paint, Contour, Scissor, ImageId, ImageFlags};
@@ -25,6 +26,9 @@ mod gl {
 }
 
 use gl::types::*;
+
+mod uniform_array;
+use uniform_array::UniformArray;
 
 // TODO: Rename this to frag_data_loc or something
 const FRAG_BINDING: GLuint = 0;
@@ -101,14 +105,15 @@ pub struct GlRenderer {
     debug: bool,
     stencil_strokes: bool,
     shader: GlShader,
-    vert_arr: GLuint,
+    //vert_arr: GLuint,
     vert_buff: GLuint,
-    frag_buff: GLuint,
+    //frag_buff: GLuint,
     frag_size: usize,
+    uniforms: Vec<UniformArray>,
     view: [f32; 2],
     calls: Vec<GlRenderCall>,
     paths: Vec<GlContour>,
-    uniforms: Vec<FragUniforms>,
+    //uniforms: Vec<FragUniforms>,
     verts: Vec<Vertex>,
     last_texture_id: u32,
     textures: FnvHashMap<ImageId, GlTexture>
@@ -123,7 +128,7 @@ impl GlRenderer {
         let debug = true;
         let stencil_strokes = true;
 
-        let shader_header = "#version 300 es";
+        let shader_header = "#version 100";
 
         gl::load_with(load_fn);
 
@@ -138,14 +143,15 @@ impl GlRenderer {
             debug: debug,
             stencil_strokes: stencil_strokes,
             shader: shader,
-            vert_arr: 0,
+            //vert_arr: 0,
             vert_buff: 0,
-            frag_buff: 0,
+            //frag_buff: 0,
             frag_size: mem::size_of::<FragUniforms>(),
+            uniforms: Default::default(),
             view: [0.0, 0.0],
             calls: Default::default(),
             paths: Default::default(),
-            uniforms: Default::default(),
+            //uniforms: Default::default(),
             verts: Default::default(),
             last_texture_id: Default::default(),
             textures: Default::default()
@@ -156,12 +162,12 @@ impl GlRenderer {
         let mut align = 4;
 
         unsafe {
-            gl::GenVertexArrays(1, &mut renderer.vert_arr);
+            //gl::GenVertexArrays(1, &mut renderer.vert_arr);
             gl::GenBuffers(1, &mut renderer.vert_buff);
-            gl::GenBuffers(1, &mut renderer.frag_buff);
+            //gl::GenBuffers(1, &mut renderer.frag_buff);
 
-            gl::UniformBlockBinding(renderer.shader.prog, renderer.shader.loc_frag, FRAG_BINDING);
-            gl::GetIntegerv(gl::UNIFORM_BUFFER_OFFSET_ALIGNMENT, &mut align);
+            //gl::UniformBlockBinding(renderer.shader.prog, renderer.shader.loc_frag, FRAG_BINDING);
+            //gl::GetIntegerv(gl::UNIFORM_BUFFER_OFFSET_ALIGNMENT, &mut align);
         }
 
         renderer.check_error("vertex arrays and buffers");
@@ -231,12 +237,11 @@ impl Renderer for GlRenderer {
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
 
-            gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
-            let size = self.uniforms.len() * self.frag_size;
+            //gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
+            //let size = self.uniforms.len() * self.frag_size;
+            //gl::BufferData(gl::UNIFORM_BUFFER, size as isize, self.uniforms.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
 
-            gl::BufferData(gl::UNIFORM_BUFFER, size as isize, self.uniforms.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
-
-            gl::BindVertexArray(self.vert_arr);
+            //gl::BindVertexArray(self.vert_arr);
 
             let vertex_size = mem::size_of::<Vertex>();
 
@@ -254,10 +259,12 @@ impl Renderer for GlRenderer {
             gl::Uniform1i(self.shader.loc_tex, 0);
             gl::Uniform2fv(self.shader.loc_viewsize, 1, self.view.as_ptr());
 
-            gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
+            //gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
 
             //gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
         }
+
+        self.check_error("render_flush prepare");
 
         for call in &self.calls {
 
@@ -276,7 +283,7 @@ impl Renderer for GlRenderer {
         unsafe {
             gl::DisableVertexAttribArray(0);
             gl::DisableVertexAttribArray(1);
-            gl::BindVertexArray(0);
+            //gl::BindVertexArray(0);
 
             gl::Disable(gl::CULL_FACE);
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
@@ -284,6 +291,8 @@ impl Renderer for GlRenderer {
 
             //glnvg__bindTexture(gl, 0);
         }
+
+        self.check_error("render_flush done");
 
         self.calls.clear();
         self.verts.clear();
@@ -343,20 +352,20 @@ impl Renderer for GlRenderer {
             self.verts.push(Vertex::new(bounds[0], bounds[3], 0.5, 1.0));
             self.verts.push(Vertex::new(bounds[0], bounds[1], 0.5, 1.0));
 
-            call.uniform_offset = self.uniforms.len() * self.frag_size;
+            call.uniform_offset = self.uniforms.len();
 
-            let mut uniform = FragUniforms::default();
-            uniform.stroke_thr = -1.0;
-            uniform.shader_type = ShaderType::Simple.to_i32();
+            let mut uniform = UniformArray::default();
+            uniform.set_stroke_thr(-1.0);
+            uniform.set_shader_type(ShaderType::Simple.to_i32() as f32);//TODO: create ShaderType::to_f32()
             self.uniforms.push(uniform);
 
-            let mut uniform = FragUniforms::default();
+            let mut uniform = UniformArray::default();
             self.convert_paint(&mut uniform, paint, scissor, fringe_width, fringe_width, -1.0);
             self.uniforms.push(uniform);
         } else {
-            call.uniform_offset = self.uniforms.len() * self.frag_size;
+            call.uniform_offset = self.uniforms.len();
 
-            let mut uniform = FragUniforms::default();
+            let mut uniform = UniformArray::default();
             self.convert_paint(&mut uniform, paint, scissor, fringe_width, fringe_width, -1.0);
             self.uniforms.push(uniform);
         }
@@ -391,14 +400,14 @@ impl Renderer for GlRenderer {
             self.paths.push(glcontour);
         }
 
-        call.uniform_offset = self.uniforms.len() * self.frag_size;
+        call.uniform_offset = self.uniforms.len();
 
-        let mut uniform = FragUniforms::default();
+        let mut uniform = UniformArray::default();
         self.convert_paint(&mut uniform, paint, scissor, stroke_width, fringe_width, -1.0);
         self.uniforms.push(uniform);
 
         if self.stencil_strokes {
-            let mut uniform = FragUniforms::default();
+            let mut uniform = UniformArray::default();
             self.convert_paint(&mut uniform, paint, scissor, stroke_width, fringe_width, 1.0 - 0.5/255.0);
             self.uniforms.push(uniform);
         }
@@ -417,11 +426,11 @@ impl Renderer for GlRenderer {
 
         self.verts.extend_from_slice(verts);
 
-        call.uniform_offset = self.uniforms.len() * self.frag_size;
+        call.uniform_offset = self.uniforms.len();
 
-        let mut uniform = FragUniforms::default();
+        let mut uniform = UniformArray::default();
         self.convert_paint(&mut uniform, paint, scissor, 1.0, 1.0, -1.0);
-        uniform.shader_type = ShaderType::Img.to_i32();
+        uniform.set_shader_type(ShaderType::Img.to_i32() as f32);
         self.uniforms.push(uniform);
 
         self.calls.push(call);
@@ -450,7 +459,7 @@ impl Renderer for GlRenderer {
                 gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, ptr::null());
             },
             TextureType::Alpha => unsafe {
-                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::R8 as i32, width as i32, height as i32, 0, gl::RED, gl::UNSIGNED_BYTE, ptr::null());
+                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::LUMINANCE as i32, width as i32, height as i32, 0, gl::LUMINANCE, gl::UNSIGNED_BYTE, ptr::null());
             }
         }
 
@@ -494,7 +503,10 @@ impl Renderer for GlRenderer {
         //}
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
-            unsafe { gl::GenerateMipmap(gl::TEXTURE_2D); }
+            unsafe {
+                gl::GenerateMipmap(gl::TEXTURE_2D);
+                //gl::TexParameteri(gl::TEXTURE_2D, gl::GENERATE_MIPMAP, gl::TRUE);
+            }
         }
 
         unsafe { gl::BindTexture(gl::TEXTURE_2D, 0); }
@@ -528,7 +540,9 @@ impl Renderer for GlRenderer {
             gl::BindTexture(gl::TEXTURE_2D, texture.tex);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
             //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, w as i32);
+
+            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, w as i32);///////
+
             //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, x as i32);
             //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, y as i32);
         }
@@ -540,15 +554,15 @@ impl Renderer for GlRenderer {
             },
             TextureType::Alpha => unsafe {
                 let image = image.to_luma();
-                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, gl::RED, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
+                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, gl::LUMINANCE, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
             }
         }
 
         unsafe {
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
-            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
+            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+            //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
+            //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
     }
@@ -564,27 +578,40 @@ impl Renderer for GlRenderer {
 
 impl GlRenderer {
 
-    fn convert_paint(&self, uniforms: &mut FragUniforms, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) {
+    fn convert_paint(&self, uniforms: &mut UniformArray, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) {
 
-        uniforms.inner_col = paint.inner_color().premultiplied().to_array();
-        uniforms.outer_col = paint.outer_color().premultiplied().to_array();
+        uniforms.set_inner_col(paint.inner_color().premultiplied().to_array());
+        uniforms.set_outer_col(paint.outer_color().premultiplied().to_array());
 
-        if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
-            uniforms.scissor_ext[0] = 1.0;
-            uniforms.scissor_ext[1] = 1.0;
-            uniforms.scissor_scale[0] = 1.0;
-            uniforms.scissor_scale[1] = 1.0;
+        let (scissor_ext, scissor_scale) = if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
+            //uniforms.scissor_ext[0] = 1.0;
+            //uniforms.scissor_ext[1] = 1.0;
+            //uniforms.scissor_scale[0] = 1.0;
+            //uniforms.scissor_scale[1] = 1.0;
+            ([1.0, 1.0], [1.0, 1.0])
         } else {
-            uniforms.scissor_mat = scissor.transform.inversed().to_mat3x4();
-            uniforms.scissor_ext[0] = scissor.extent[0];
-            uniforms.scissor_ext[1] = scissor.extent[1];
-            uniforms.scissor_scale[0] = (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe;
-            uniforms.scissor_scale[1] = (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe;
-        }
+            uniforms.set_scissor_mat(scissor.transform.inversed().to_mat3x4());
 
-        uniforms.extent = paint.extent();
-        uniforms.stroke_mult = (width*0.5 + fringe*0.5) / fringe;
-        uniforms.stroke_thr = stroke_thr;
+            let scissor_scale = [
+                (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
+                (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
+            ];
+
+            // uniforms.scissor_ext[0] = scissor.extent[0];
+            // uniforms.scissor_ext[1] = scissor.extent[1];
+            // uniforms.scissor_scale[0] = (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe;
+            // uniforms.scissor_scale[1] = (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe;
+            (scissor.extent, scissor_scale)
+        };
+
+        uniforms.set_scissor_ext(scissor_ext);
+        uniforms.set_scissor_scale(scissor_scale);
+
+        let extent = paint.extent();
+
+        uniforms.set_extent(extent);
+        uniforms.set_stroke_mult((width*0.5 + fringe*0.5) / fringe);
+        uniforms.set_stroke_thr(stroke_thr);
 
         let inv_transform;
 
@@ -599,14 +626,14 @@ impl GlRenderer {
 
             if texture.flags.contains(ImageFlags::FLIP_Y) {
                 let mut m1 = Transform2D::identity();
-                m1.translate(0.0, uniforms.extent[1] * 0.5);
+                m1.translate(0.0, extent[1] * 0.5);
                 m1.multiply(&paint.transform());
 
                 let mut m2 = Transform2D::identity();
                 m2.scale(1.0, -1.0);
                 m2.multiply(&m1);
 
-                m1.translate(0.0, -uniforms.extent[1] * 0.5);
+                m1.translate(0.0, -extent[1] * 0.5);
                 m1.multiply(&m2);
 
                 inv_transform = m1.inversed();
@@ -614,21 +641,21 @@ impl GlRenderer {
                 inv_transform = paint.transform().inversed();
             }
 
-            uniforms.shader_type = ShaderType::FillImage.to_i32();
+            uniforms.set_shader_type(ShaderType::FillImage.to_i32() as f32);
 
-            uniforms.tex_type = match texture.tex_type {
-                TextureType::Rgba => if texture.flags.contains(ImageFlags::PREMULTIPLIED) { 0 } else { 1 }
-                TextureType::Alpha => 2
-            };
+            uniforms.set_tex_type(match texture.tex_type {
+                TextureType::Rgba => if texture.flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 }
+                TextureType::Alpha => 2.0
+            });
         } else {
-            uniforms.shader_type = ShaderType::FillGradient.to_i32();
-            uniforms.radius = paint.radius();
-            uniforms.feather = paint.feather();
+            uniforms.set_shader_type(ShaderType::FillGradient.to_i32() as f32);
+            uniforms.set_radius(paint.radius());
+            uniforms.set_feather(paint.feather());
 
             inv_transform = paint.transform().inversed();
         }
 
-        uniforms.paint_mat = inv_transform.to_mat3x4();
+        uniforms.set_paint_mat(inv_transform.to_mat3x4());
     }
 
     fn fill(&self, call: &GlRenderCall) {
@@ -656,7 +683,7 @@ impl GlRenderer {
             gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
 
             // Set uniforms
-            self.set_uniforms(call.uniform_offset + self.frag_size, call.image);
+            self.set_uniforms(call.uniform_offset + 1, call.image);
 
             if self.antialias {
                 gl::StencilFunc(gl::EQUAL, 0x00, 0xff);
@@ -708,7 +735,7 @@ impl GlRenderer {
                 gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
                 gl::StencilOp(gl::KEEP, gl::KEEP, gl::INCR);
 
-                self.set_uniforms(call.uniform_offset + self.frag_size, call.image);
+                self.set_uniforms(call.uniform_offset + 1, call.image);
 
                 for path in paths {
                     gl::DrawArrays(gl::TRIANGLE_STRIP, path.stroke_offset as i32, path.stroke_count as i32);
@@ -760,14 +787,19 @@ impl GlRenderer {
 
     fn set_uniforms(&self, offset: usize, image_id: Option<ImageId>) {
         unsafe {
-            gl::BindBufferRange(gl::UNIFORM_BUFFER, FRAG_BINDING, self.frag_buff, offset as isize, mem::size_of::<FragUniforms>() as isize);
+            //gl::BindBufferRange(gl::UNIFORM_BUFFER, FRAG_BINDING, self.frag_buff, offset as isize, mem::size_of::<FragUniforms>() as isize);
+            gl::Uniform4fv(self.shader.loc_frag, UniformArray::size() as i32, self.uniforms[offset].as_ptr());
         }
+
+        self.check_error("set_uniforms uniforms");
 
         let tex = image_id.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
 
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, tex);
         }
+
+        self.check_error("set_uniforms texture");
     }
 }
 
@@ -777,13 +809,13 @@ impl Drop for GlRenderer {
             unsafe { gl::DeleteTextures(1, &texture.tex); }
         }
 
-        if self.frag_buff != 0 {
-            unsafe { gl::DeleteBuffers(1, &self.frag_buff); }
-        }
+        //if self.frag_buff != 0 {
+        //    unsafe { gl::DeleteBuffers(1, &self.frag_buff); }
+        //}
 
-        if self.vert_arr != 0 {
-            unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
-        }
+        //if self.vert_arr != 0 {
+        //    unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
+        //}
 
         if self.vert_buff != 0 {
             unsafe { gl::DeleteBuffers(1, &self.vert_buff); }
@@ -817,7 +849,7 @@ struct GlShader {
     frag: GLuint,
     loc_viewsize: GLint,
     loc_tex: GLint,
-    loc_frag: GLuint,
+    loc_frag: GLint,
 }
 
 impl GlShader {
@@ -879,7 +911,7 @@ impl GlShader {
         unsafe {
             shader.loc_viewsize = gl::GetUniformLocation(shader.prog, CString::new("viewSize").unwrap().as_ptr());
             shader.loc_tex = gl::GetUniformLocation(shader.prog, CString::new("tex").unwrap().as_ptr());
-            shader.loc_frag = gl::GetUniformBlockIndex(shader.prog, CString::new("frag").unwrap().as_ptr());
+            shader.loc_frag = gl::GetUniformLocation(shader.prog, CString::new("frag").unwrap().as_ptr());
         }
 
         Ok(shader)
@@ -948,11 +980,11 @@ impl Error for GlRendererError {}
 const FILL_VERTEX_SRC: &str = r#"
 uniform vec2 viewSize;
 
-in vec2 vertex;
-in vec2 tcoord;
+attribute vec2 vertex;
+attribute vec2 tcoord;
 
-out vec2 ftcoord;
-out vec2 fpos;
+varying vec2 ftcoord;
+varying vec2 fpos;
 
 void main(void) {
     ftcoord = tcoord;
@@ -962,8 +994,27 @@ void main(void) {
 "#;
 
 const FILL_FRAGMENT_SRC: &str = r#"
-precision highp float;
+precision mediump float;
 
+#define UNIFORMARRAY_SIZE 11
+
+uniform vec4 frag[UNIFORMARRAY_SIZE];
+
+#define scissorMat mat3(frag[0].xyz, frag[1].xyz, frag[2].xyz)
+#define paintMat mat3(frag[3].xyz, frag[4].xyz, frag[5].xyz)
+#define innerCol frag[6]
+#define outerCol frag[7]
+#define scissorExt frag[8].xy
+#define scissorScale frag[8].zw
+#define extent frag[9].xy
+#define radius frag[9].z
+#define feather frag[9].w
+#define strokeMult frag[10].x
+#define strokeThr frag[10].y
+#define texType int(frag[10].z)
+#define shaderType int(frag[10].w)
+
+/*
 layout(std140) uniform frag {
     mat3 scissorMat;
     mat3 paintMat;
@@ -978,14 +1029,12 @@ layout(std140) uniform frag {
     float strokeThr;
     int texType;
     int shader_type;
-};
+};*/
 
 uniform sampler2D tex;
 
 in vec2 ftcoord;
 in vec2 fpos;
-
-out vec4 outColor;
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -1024,7 +1073,7 @@ void main(void) {
     float strokeAlpha = 1.0;
 #endif
 
-    if (shader_type == 0) {
+    if (shaderType == 0) {
         // Gradient
 
         // Calculate gradient color using box gradient
@@ -1036,13 +1085,13 @@ void main(void) {
         // Combine alpha
         color *= strokeAlpha * scissor;
         result = color;
-    } else if (shader_type == 1) {
+    } else if (shaderType == 1) {
         // Image
 
         // Calculate color from texture
         vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
 
-        vec4 color = texture(tex, pt);
+        vec4 color = texture2D(tex, pt);
 
         if (texType == 1) color = vec4(color.xyz * color.w, color.w);
         if (texType == 2) color = vec4(color.x);
@@ -1054,12 +1103,12 @@ void main(void) {
         color *= strokeAlpha * scissor;
 
         result = color;
-    } else if (shader_type == 2) {
+    } else if (shaderType == 2) {
         // Stencil fill
         result = vec4(1,1,1,1);
-    } else if (shader_type == 3) {
+    } else if (shaderType == 3) {
         // Textured tris
-        vec4 color = texture(tex, ftcoord);
+        vec4 color = texture2D(tex, ftcoord);
 
         if (texType == 1) color = vec4(color.xyz * color.w, color.w);
         if (texType == 2) color = vec4(color.x);
@@ -1068,6 +1117,6 @@ void main(void) {
         result = color * innerCol;
     }
 
-    outColor = result;
+    gl_FragColor = result;
 }
 "#;
