@@ -482,9 +482,9 @@ fn draw_star(canvas: &mut Canvas, cx: f32, cy: f32, scale: f32) {
         path.line_to(theta.cos() * r, theta.sin() * r);
     }
 
-    canvas.translate(scale * 0.5, scale * 0.5);
+    //canvas.translate(scale * 0.5, scale * 0.5);
     path.close();
-    // canvas.fill(); TODO: Why is this not filling ok
+    //canvas.fill(&path, &paint); // TODO: Why is this not filling ok
     canvas.stroke(&path, &paint);
 
     canvas.restore();

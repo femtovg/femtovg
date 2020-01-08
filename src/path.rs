@@ -1,16 +1,53 @@
 
 use std::f32::consts::PI;
 
-use crate::math::Transform2D;
-use super::{Point, Vertex, Contour, Command, Winding, LineCap, LineJoin, pt_equals, cross, normalize, dist_pt_segment, poly_area};
+use bitflags::bitflags;
+
+use crate::math::{self, Transform2D};
+use crate::{Vertex, Contour, Command, Winding, LineCap, LineJoin};
 
 const KAPPA90: f32 = 0.5522847493; // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 
 // Point flags
-const POINT_CORNER: u8 = 0x01;
-const POINT_LEFT: u8 = 0x02;
-const POINT_BEVEL: u8 = 0x04;
-const POINT_INNERBEVEL: u8 = 0x08;
+bitflags! {
+    #[derive(Default)]
+    struct PointFlags: u8 {
+        const CORNER        = 0x01;
+        const LEFT          = 0x02;
+        const BEVEL         = 0x04;
+        const INNERBEVEL    = 0x08;
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+struct Point {
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    len: f32,
+    dmx: f32,
+    dmy: f32,
+    flags: PointFlags
+}
+
+impl Point {
+
+    pub fn poly_area(points: &[Point]) -> f32 {
+        let mut area = 0.0;
+
+        for i in 2..points.len() {
+            let p0 = points[0];
+            let p1 = points[i-1];
+            let p2 = points[i];
+
+            area += math::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+        }
+
+        area * 0.5
+    }
+
+}
 
 #[derive(Clone, Default)]
 pub struct Path {
@@ -153,7 +190,10 @@ impl Path {
         let y0 = self.commandy;
 
         // Handle degenerate cases.
-        if pt_equals(x0, y0, x1, y1, self.dist_tol) || pt_equals(x1, y1, x2, y2, self.dist_tol) || dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol || radius < self.dist_tol {
+        if math::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
+            math::pt_equals(x1, y1, x2, y2, self.dist_tol) ||
+            math::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol ||
+            radius < self.dist_tol {
             return self.line_to(x1, y1);
         }
 
@@ -162,8 +202,8 @@ impl Path {
         let mut dx1 = x2 - x1;
         let mut dy1 = y2 - y1;
 
-        normalize(&mut dx0, &mut dy0);
-        normalize(&mut dx1, &mut dy1);
+        math::normalize(&mut dx0, &mut dy0);
+        math::normalize(&mut dx1, &mut dy1);
 
         let a = (dx0*dx1 + dy0*dy1).acos();
         let d = radius / (a/2.0).tan();
@@ -174,7 +214,7 @@ impl Path {
 
         let (cx, cy, a0, a1, dir);
 
-        if cross(dx0, dy0, dx1, dy1) > 0.0 {
+        if math::cross(dx0, dy0, dx1, dy1) > 0.0 {
             cx = x1 + dx0*d + dy0*radius;
             cy = y1 + dy0*d + -dx0*radius;
             a0 = dx0.atan2(-dy0);
@@ -296,7 +336,7 @@ impl Path {
 pub struct CachedPath {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: [f32; 4],
-    pub(crate) points: Vec<Point>,
+    points: Vec<Point>,
 }
 
 impl CachedPath {
@@ -315,7 +355,7 @@ impl CachedPath {
 
                     transform.transform_point(&mut tx, &mut ty, *x, *y);
 
-                    cache.add_point(tx, ty, POINT_CORNER, dist_tol);
+                    cache.add_point(tx, ty, PointFlags::CORNER, dist_tol);
                 }
                 Command::LineTo(x, y) => {
                     let mut tx = *x;
@@ -323,7 +363,7 @@ impl CachedPath {
 
                     transform.transform_point(&mut tx, &mut ty, *x, *y);
 
-                    cache.add_point(tx, ty, POINT_CORNER, dist_tol);
+                    cache.add_point(tx, ty, PointFlags::CORNER, dist_tol);
                 }
                 Command::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.last_point() {
@@ -333,7 +373,7 @@ impl CachedPath {
                         transform.transform_point(&mut tc2x, &mut tc2y, *c2x, *c2y);
                         transform.transform_point(&mut tx, &mut ty, *x, *y);
 
-                        cache.tesselate_bezier(last.x, last.y, tc1x, tc1y, tc2x, tc2y, tx, ty, 0, POINT_CORNER, tess_tol, dist_tol);
+                        cache.tesselate_bezier(last.x, last.y, tc1x, tc1y, tc2x, tc2y, tx, ty, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Command::Close => {
@@ -357,7 +397,7 @@ impl CachedPath {
             let p1 = points.first().copied().unwrap();
 
             // If the first and last points are the same, remove the last, mark as closed path.
-            if pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
+            if math::pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
                 contour.count -= 1;
                 //p0 = points[path.count-1];
                 contour.closed = true;
@@ -366,7 +406,7 @@ impl CachedPath {
 
             // Enforce winding.
             if contour.count > 2 {
-                let area = poly_area(points);
+                let area = Point::poly_area(points);
 
                 if contour.winding == Winding::CCW && area < 0.0 {
                     points.reverse();
@@ -389,7 +429,7 @@ impl CachedPath {
 
                 p0.dx = p1.x - p0.x;
                 p0.dy = p1.y - p0.y;
-                p0.len = normalize(&mut p0.dx, &mut p0.dy);
+                p0.len = math::normalize(&mut p0.dx, &mut p0.dy);
 
                 cache.bounds[0] = cache.bounds[0].min(p0.x);
                 cache.bounds[1] = cache.bounds[1].min(p0.y);
@@ -418,14 +458,14 @@ impl CachedPath {
         self.points.last_mut().copied()
     }
 
-    fn add_point(&mut self, x: f32, y: f32, flags: u8, dist_tol: f32) {
+    fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
         if self.contours.len() == 0 { return }
 
         let count = &mut self.contours.last_mut().unwrap().count;
 
         if *count > 0 {
             if let Some(point) = self.points.last_mut() {
-                if pt_equals(point.x, point.y, x, y, dist_tol) {
+                if math::pt_equals(point.x, point.y, x, y, dist_tol) {
                     point.flags |= flags;
                     return;
                 }
@@ -441,7 +481,7 @@ impl CachedPath {
         *count += 1;
     }
 
-    fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: u8, tess_tol: f32, dist_tol: f32) {
+    fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: PointFlags, tess_tol: f32, dist_tol: f32) {
         if level > 10 { return; }
 
         let x12 = (x1+x2)*0.5;
@@ -468,7 +508,7 @@ impl CachedPath {
         let x1234 = (x123+x234)*0.5;
         let y1234 = (y123+y234)*0.5;
 
-        self.tesselate_bezier(x1,y1, x12,y12, x123,y123, x1234,y1234, level+1, 0, tess_tol, dist_tol);
+        self.tesselate_bezier(x1,y1, x12,y12, x123,y123, x1234,y1234, level+1, PointFlags::empty(), tess_tol, dist_tol);
         self.tesselate_bezier(x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, atype, tess_tol, dist_tol);
     }
 
@@ -513,14 +553,14 @@ impl CachedPath {
                         points.get(i-1).unwrap()
                     };
 
-                    if p1.flags & POINT_BEVEL > 0 {
+                    if p1.flags.contains(PointFlags::BEVEL) {
                         // TODO: why do we need these variables.. just use p0.. and p1 directly down there
                         let dlx0 = p0.dy;
                         let dly0 = -p0.dx;
                         let dlx1 = p1.dy;
                         let dly1 = -p1.dx;
 
-                        if p1.flags & POINT_LEFT > 0 {
+                        if p1.flags.contains(PointFlags::LEFT) {
                             let lx = p1.x + p1.dmx * woff;
                             let ly = p1.y + p1.dmy * woff;
                             contour.fill.push(Vertex::new(lx, ly, 0.5, 1.0));
@@ -564,7 +604,7 @@ impl CachedPath {
                         points.get(i-1).unwrap()
                     };
 
-                    if p1.flags & (POINT_BEVEL | POINT_INNERBEVEL) != 0 {
+                    if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                         bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, rw, fringe_width);
                     } else {
                         contour.stroke.push(Vertex::new(p1.x + (p1.dmx * lw), p1.y + (p1.dmy * lw), lu, 1.0));
@@ -616,7 +656,7 @@ impl CachedPath {
                         points[i-1]
                     };
 
-                    if (p1.flags & (POINT_BEVEL | POINT_INNERBEVEL)) != 0 {
+                    if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
                             round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
                         } else {
@@ -639,7 +679,7 @@ impl CachedPath {
                 let mut dx = p1.x - p0.x;
                 let mut dy = p1.y - p0.y;
 
-                normalize(&mut dx, &mut dy);
+                math::normalize(&mut dx, &mut dy);
 
                 match line_cap {
                     LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, dx, dy, w, -aa*0.5, aa, u0, u1),
@@ -652,7 +692,7 @@ impl CachedPath {
                     p1 = points[i];
                     p0 = points[i-1];
 
-                    if (p1.flags & (POINT_BEVEL | POINT_INNERBEVEL)) != 0 {
+                    if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
                             round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
                         } else {
@@ -671,7 +711,7 @@ impl CachedPath {
                 let mut dx = p1.x - p0.x;
                 let mut dy = p1.y - p0.y;
 
-                normalize(&mut dx, &mut dy);
+                math::normalize(&mut dx, &mut dy);
 
                 match line_cap {
                     LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, dx, dy, w, -aa*0.5, aa, u0, u1),
@@ -719,31 +759,31 @@ impl CachedPath {
                 }
 
                 // Clear flags, but keep the corner.
-                p1.flags = if (p1.flags & POINT_CORNER) > 0 { POINT_CORNER } else { 0 };
+                p1.flags = if p1.flags.contains(PointFlags::CORNER) { PointFlags::CORNER } else { PointFlags::empty() };
 
                 // Keep track of left turns.
                 let cross = p1.dx * p0.dy - p0.dx * p1.dy;
 
                 if cross > 0.0 {
                     nleft += 1;
-                    p1.flags |= POINT_LEFT;
+                    p1.flags |= PointFlags::LEFT;
                 }
 
                 // Calculate if we should use bevel or miter for inner join.
                 let limit = (p0.len.min(p1.len) * iw).max(1.01);
 
                 if (dmr2 * limit * limit) < 1.0 {
-                    p1.flags |= POINT_INNERBEVEL;
+                    p1.flags |= PointFlags::INNERBEVEL;
                 }
 
                 // Check to see if the corner needs to be beveled.
-                if (p1.flags & POINT_CORNER) > 0 {
+                if p1.flags.contains(PointFlags::CORNER) {
                     if (dmr2 * miter_limit * miter_limit) < 1.0 || line_join == LineJoin::Bevel || line_join == LineJoin::Round {
-                        p1.flags |= POINT_BEVEL;
+                        p1.flags |= PointFlags::BEVEL;
                     }
                 }
 
-                if (p1.flags & (POINT_BEVEL | POINT_INNERBEVEL)) != 0 {
+                if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                     contour.bevel += 1;
                 }
             }
@@ -839,8 +879,8 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     let mut a1;
 
     // TODO: this if else arms are almost identical, maybe they can be combined
-    if p1.flags & POINT_LEFT > 0 {
-        let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags & POINT_INNERBEVEL > 0, p0, p1, lw);
+    if p1.flags.contains(PointFlags::LEFT) {
+        let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
         a0 = (-dly0).atan2(-dlx0);
         a1 = (-dly1).atan2(-dlx1);
 
@@ -866,7 +906,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         verts.push(Vertex::new(lx1, ly1, lu, 1.0));
         verts.push(Vertex::new(p1.x - dlx1*rw, p1.y - dly1*rw, ru, 1.0));
     } else {
-        let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags & POINT_INNERBEVEL > 0, p0, p1, -rw);
+        let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, -rw);
         a0 = dly0.atan2(dlx0);
         a1 = dly1.atan2(dlx1);
 
@@ -901,13 +941,13 @@ fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     let dly1 = -p1.dx;
 
     // TODO: this if else arms are almost identical, maybe they can be combined
-    if p1.flags & POINT_LEFT > 0 {
-        let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags & POINT_INNERBEVEL > 0, p0, p1, lw);
+    if p1.flags.contains(PointFlags::LEFT) {
+        let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
 
         verts.push(Vertex::new(lx0, ly0, lu, 1.0));
         verts.push(Vertex::new(p1.x - dlx0*rw, p1.y - dly0*rw, ru, 1.0));
 
-        if p1.flags & POINT_BEVEL > 0 {
+        if p1.flags.contains(PointFlags::BEVEL) {
             verts.push(Vertex::new(lx0, ly0, lu, 1.0));
             verts.push(Vertex::new(p1.x - dlx0*rw, p1.y - dly0*rw, ru, 1.0));
 
@@ -930,12 +970,12 @@ fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         verts.push(Vertex::new(lx1, ly1, lu, 1.0));
         verts.push(Vertex::new(p1.x - dlx1*rw, p1.y - dly1*rw, ru, 1.0));
     } else {
-        let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags & POINT_INNERBEVEL > 0, p0, p1, -rw);
+        let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, -rw);
 
         verts.push(Vertex::new(p1.x + dlx0*lw, p1.y + dly0*lw, lu, 1.0));
         verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
-        if p1.flags & POINT_BEVEL > 0 {
+        if p1.flags.contains(PointFlags::BEVEL) {
             verts.push(Vertex::new(p1.x + dlx0*lw, p1.y + dly0*lw, lu, 1.0));
             verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
