@@ -1,9 +1,4 @@
 
-// TODO: Maybe we should get rid of Color and just use this paint struct
-// TODO: Make a paint builder
-// TODO: move create_image, linear_gradient, box_gradient, radial_gradient to the builder
-// TODO: Document all functions
-
 use crate::math::{Rad, Transform2D};
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 

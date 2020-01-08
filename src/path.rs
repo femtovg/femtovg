@@ -4,11 +4,20 @@ use std::f32::consts::PI;
 use bitflags::bitflags;
 
 use crate::math::{self, Transform2D};
-use crate::{Vertex, Contour, Command, Winding, LineCap, LineJoin};
+use crate::{Vertex, Contour, Winding, LineCap, LineJoin};
 
-const KAPPA90: f32 = 0.5522847493; // Length proportional to radius of a cubic bezier handle for 90deg arcs.
+// Length proportional to radius of a cubic bezier handle for 90deg arcs.
+const KAPPA90: f32 = 0.5522847493;
 
-// Point flags
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+enum Command {
+    MoveTo(f32, f32),
+    LineTo(f32, f32),
+    BezierTo(f32, f32, f32, f32, f32, f32),
+    Close,
+    Winding(Winding)
+}
+
 bitflags! {
     #[derive(Default)]
     struct PointFlags: u8 {
@@ -32,7 +41,6 @@ struct Point {
 }
 
 impl Point {
-
     pub fn poly_area(points: &[Point]) -> f32 {
         let mut area = 0.0;
 
@@ -46,25 +54,21 @@ impl Point {
 
         area * 0.5
     }
-
 }
 
 #[derive(Clone, Default)]
 pub struct Path {
-    pub(crate) commands: Vec<Command>,
+    commands: Vec<Command>,
     commandx: f32,
     commandy: f32,
     dist_tol: f32
 }
 
 impl Path {
-
     pub fn new() -> Self {
         Self {
-            commands: Default::default(),
-            commandx: Default::default(),
-            commandy: Default::default(),
             dist_tol: 0.01,
+            ..Default::default()
         }
     }
 

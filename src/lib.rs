@@ -27,14 +27,11 @@ mod path;
 pub use path::{CachedPath, Path};
 
 // TODO: Use Convexity enum to describe path concave/convex
-// TODO: Replace pt_equals with method on point
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
 // TODO: Drawing works before the call to begin frame for some reason
 // TODO: rethink image creation and resource creation in general, it's currently blocking,
 //         it would be awesome if its non-blocking and maybe async. Or maybe resource creation
 //         should be a functionality provided by the current renderer implementation, not by the canvas itself.
-// TODO: A lot of the render styles can be moved to the Paint object - stroke width, line join and cap, basically a lot of the state object
-// TODO: Instead of path cache filles with paths, use path filled with contours -> https://skia.org/user/api/SkPath_Overview
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VAlign {
@@ -56,9 +53,9 @@ bitflags! {
         const GENERATE_MIPMAPS = 1 << 0;// Generate mipmaps during creation of the image.
         const REPEAT_X = 1 << 1;        // Repeat image in X direction.
         const REPEAT_Y = 1 << 2;        // Repeat image in Y direction.
-        const FLIP_Y = 1 << 3;            // Flips (inverses) image in Y direction when rendered.
-        const PREMULTIPLIED = 1 << 4;    // Image data has premultiplied alpha.
-        const NEAREST = 1 << 5;            // Image interpolation is Nearest instead Linear
+        const FLIP_Y = 1 << 3;          // Flips (inverses) image in Y direction when rendered.
+        const PREMULTIPLIED = 1 << 4;   // Image data has premultiplied alpha.
+        const NEAREST = 1 << 5;         // Image interpolation is Nearest instead Linear
     }
 }
 
@@ -117,15 +114,6 @@ impl Default for LineJoin {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub u32);
-
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-enum Command {
-    MoveTo(f32, f32),
-    LineTo(f32, f32),
-    BezierTo(f32, f32, f32, f32, f32, f32),
-    Close,
-    Winding(Winding)
-}
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
 #[repr(C)]

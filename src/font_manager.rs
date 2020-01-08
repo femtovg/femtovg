@@ -10,7 +10,7 @@ use self::freetype as ft;
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
-use self::hb::{UnicodeBuffer, HarfbuzzObject};
+use self::hb::UnicodeBuffer;
 
 use fnv::FnvHashMap;
 use image::{DynamicImage, GrayImage, Luma};
@@ -194,8 +194,9 @@ impl FontManager {
 
         let hb_font = unsafe {
             let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
-            hb_sys::hb_ot_font_set_funcs(raw_font);
-            hb::Font::from_raw(raw_font)
+            //hb_sys::hb_ot_font_set_funcs(raw_font);
+            hb::Owned::from_raw(raw_font)
+            //hb::Font::from_raw(raw_font)
         };
 
         let buffer = UnicodeBuffer::new().add_str(text);
