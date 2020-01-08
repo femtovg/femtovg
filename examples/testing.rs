@@ -5,6 +5,7 @@ use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyC
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
+use glutin::{GlRequest, Api};
 
 use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::GlRenderer, Path, math};
 
@@ -13,12 +14,18 @@ fn main() {
     //let wb = WindowBuilder::new().with_inner_size((800.0, 600.0).into()).with_title("A fantastic window!");
     let wb = WindowBuilder::new().with_title("A fantastic window!");
 
-    let windowed_context = ContextBuilder::new().with_vsync(true).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = GlRenderer::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer);
-
+    
+    canvas.begin_frame(800.0, 600.0, 1.0);
+    
+    draw_rects(&mut canvas, 15.0, 15.0);
+    
+    canvas.end_frame();
+return;
     //canvas.add_font("../rust-engine/game/assets/fonts/Roboto-Regular.ttf");
     //canvas.add_font("/home/ptodorov/Workspace/harfbuzz-example/fonts/amiri-regular.ttf");
     //canvas.add_font(String::from("/usr/share/fonts/droid/DroidSerif-Regular.ttf"));

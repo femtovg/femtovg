@@ -162,6 +162,9 @@ impl GlRenderer {
         let mut align = 4;
 
         unsafe {
+            let version = CString::from_raw(gl::GetString(gl::VERSION) as *mut i8);
+            dbg!(version);
+            
             //gl::GenVertexArrays(1, &mut renderer.vert_arr);
             gl::GenBuffers(1, &mut renderer.vert_buff);
             //gl::GenBuffers(1, &mut renderer.frag_buff);
@@ -222,9 +225,9 @@ impl Renderer for GlRenderer {
 
         unsafe {
             gl::UseProgram(self.shader.prog);
-
+            
             gl::Enable(gl::CULL_FACE);
-
+            
             gl::CullFace(gl::BACK);
             gl::FrontFace(gl::CCW);
             gl::Enable(gl::BLEND);
@@ -236,6 +239,8 @@ impl Renderer for GlRenderer {
             gl::StencilFunc(gl::ALWAYS, 0, 0xffffffff);
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
+            
+            
 
             //gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
             //let size = self.uniforms.len() * self.frag_size;
@@ -251,9 +256,13 @@ impl Renderer for GlRenderer {
 
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
+            
+            self.check_error("1");
 
             gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, 0 as *const c_void);
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
+
+            self.check_error("2");
 
             // Set view and texture just once per frame.
             gl::Uniform1i(self.shader.loc_tex, 0);
@@ -266,6 +275,7 @@ impl Renderer for GlRenderer {
 
         self.check_error("render_flush prepare");
 
+        /*
         for call in &self.calls {
 
             // Blend func
@@ -278,7 +288,7 @@ impl Renderer for GlRenderer {
                 CallType::Triangles => self.triangles(call),
                 _ => ()
             }
-        }
+        }*/
 
         unsafe {
             gl::DisableVertexAttribArray(0);
@@ -1033,8 +1043,8 @@ layout(std140) uniform frag {
 
 uniform sampler2D tex;
 
-in vec2 ftcoord;
-in vec2 fpos;
+varying vec2 ftcoord;
+varying vec2 fpos;
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
