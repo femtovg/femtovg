@@ -37,22 +37,25 @@ impl Path {
     }
 
     /// Starts new sub-path with specified point as first point.
-    pub fn move_to(&mut self, x: f32, y: f32) {
+    pub fn move_to(&mut self, x: f32, y: f32) -> &mut Self {
         self.append_commands(&[Command::MoveTo(x, y)]);
+        self
     }
 
     /// Adds line segment from the last point in the path to the specified point.
-    pub fn line_to(&mut self, x: f32, y: f32) {
+    pub fn line_to(&mut self, x: f32, y: f32) -> &mut Self {
         self.append_commands(&[Command::LineTo(x, y)]);
+        self
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
-    pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
+    pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) -> &mut Self {
         self.append_commands(&[Command::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+        self
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
-    pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+    pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) -> &mut Self {
         let x0 = self.commandx;
         let y0 = self.commandy;
 
@@ -63,22 +66,26 @@ impl Path {
                 x, y
             )
         ]);
+
+        self
     }
 
     /// Closes current sub-path with a line segment.
-    pub fn close(&mut self) {
+    pub fn close(&mut self) -> &mut Self {
         self.append_commands(&[Command::Close]);
+        self
     }
 
     /// Sets the current sub-path winding, see Winding and Solidity
-    pub fn set_winding(&mut self, winding: Winding) {
+    pub fn set_winding(&mut self, winding: Winding) -> &mut Self {
         self.append_commands(&[Command::Winding(winding)]);
+        self
     }
 
     /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
     /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
     /// Angles are specified in radians.
-    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Winding) {
+    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Winding) -> &mut Self {
         // TODO: Maybe use small stack vec here
         let mut commands = Vec::new();
 
@@ -132,12 +139,14 @@ impl Path {
         }
 
         self.append_commands(&mut commands);
+
+        self
     }
 
     /// Adds an arc segment at the corner defined by the last path point, and two specified points.
-    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
+    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) -> &mut Self {
         if self.commands.len() == 0 {
-            return;
+            return self;
         }
 
         let x0 = self.commandx;
@@ -145,8 +154,7 @@ impl Path {
 
         // Handle degenerate cases.
         if pt_equals(x0, y0, x1, y1, self.dist_tol) || pt_equals(x1, y1, x2, y2, self.dist_tol) || dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol || radius < self.dist_tol {
-            self.line_to(x1, y1);
-            return;
+            return self.line_to(x1, y1);
         }
 
         let mut dx0 = x0 - x1;
@@ -161,8 +169,7 @@ impl Path {
         let d = radius / (a/2.0).tan();
 
         if d > 10000.0 {
-            self.line_to(x1, y1);
-            return;
+            return self.line_to(x1, y1);
         }
 
         let (cx, cy, a0, a1, dir);
@@ -182,10 +189,12 @@ impl Path {
         }
 
         self.arc(cx, cy, radius, a0, a1, dir);
+
+        self
     }
 
     /// Creates new rectangle shaped sub-path.
-    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> &mut Self {
         self.append_commands(&mut [
             Command::MoveTo(x, y),
             Command::LineTo(x, y + h),
@@ -193,15 +202,18 @@ impl Path {
             Command::LineTo(x + w, y),
             Command::Close
         ]);
+
+        self
     }
 
     /// Creates new rounded rectangle shaped sub-path.
-    pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+    pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) -> &mut Self {
         self.rounded_rect_varying(x, y, w, h, r, r, r, r);
+        self
     }
 
     /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
-    pub fn rounded_rect_varying(&mut self, x: f32, y: f32, w: f32, h: f32, rad_top_left: f32, rad_top_right: f32, rad_bottom_right: f32, rad_bottom_left: f32) {
+    pub fn rounded_rect_varying(&mut self, x: f32, y: f32, w: f32, h: f32, rad_top_left: f32, rad_top_right: f32, rad_bottom_right: f32, rad_bottom_left: f32) -> &mut Self {
         if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {
             self.rect(x, y, w, h);
         } else {
@@ -233,10 +245,12 @@ impl Path {
                 Command::Close
             ]);
         }
+
+        self
     }
 
     /// Creates new ellipse shaped sub-path.
-    pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
+    pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) -> &mut Self {
         self.append_commands(&mut [
             Command::MoveTo(cx-rx, cy),
             Command::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
@@ -245,11 +259,14 @@ impl Path {
             Command::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
             Command::Close
         ]);
+
+        self
     }
 
     /// Creates new circle shaped sub-path.
-    pub fn circle(&mut self, cx: f32, cy: f32, r: f32) {
+    pub fn circle(&mut self, cx: f32, cy: f32, r: f32) -> &mut Self {
         self.ellipse(cx, cy, r, r);
+        self
     }
 
     fn append_commands(&mut self, commands: &[Command]) {
