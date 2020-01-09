@@ -2,7 +2,7 @@
 use std::str;
 use std::ptr;
 use std::mem;
-use std::ffi::{NulError, CString, c_void};
+use std::ffi::{NulError, CString, CStr, c_void};
 use std::{error::Error, fmt};
 
 use fnv::FnvHashMap;
@@ -29,9 +29,6 @@ use gl::types::*;
 
 mod uniform_array;
 use uniform_array::UniformArray;
-
-// TODO: Rename this to frag_data_loc or something
-const FRAG_BINDING: GLuint = 0;
 
 // TODO: Rename those to make more sense - why do we have FillImage and Img?
 #[derive(Copy, Clone)]
@@ -104,16 +101,14 @@ pub struct GlRenderer {
     antialias: bool,
     debug: bool,
     stencil_strokes: bool,
-    shader: GlShader,
-    //vert_arr: GLuint,
-    vert_buff: GLuint,
-    //frag_buff: GLuint,
-    frag_size: usize,
-    uniforms: Vec<UniformArray>,
+    is_opengles: bool,
     view: [f32; 2],
+    shader: GlShader,
+    vert_arr: GLuint,
+    vert_buff: GLuint,
+    uniforms: Vec<UniformArray>,
     calls: Vec<GlRenderCall>,
     paths: Vec<GlContour>,
-    //uniforms: Vec<FragUniforms>,
     verts: Vec<Vertex>,
     last_texture_id: u32,
     textures: FnvHashMap<ImageId, GlTexture>
@@ -138,20 +133,19 @@ impl GlRenderer {
             GlShader::new(shader_header, "", FILL_VERTEX_SRC, FILL_FRAGMENT_SRC)?
         };
 
+
         let mut renderer = Self {
             antialias: antialias,
             debug: debug,
             stencil_strokes: stencil_strokes,
-            shader: shader,
-            //vert_arr: 0,
-            vert_buff: 0,
-            //frag_buff: 0,
-            frag_size: mem::size_of::<FragUniforms>(),
-            uniforms: Default::default(),
+            is_opengles: false,
             view: [0.0, 0.0],
+            shader: shader,
+            vert_arr: 0,
+            vert_buff: 0,
+            uniforms: Default::default(),
             calls: Default::default(),
             paths: Default::default(),
-            //uniforms: Default::default(),
             verts: Default::default(),
             last_texture_id: Default::default(),
             textures: Default::default()
@@ -159,18 +153,12 @@ impl GlRenderer {
 
         renderer.check_error("init");
 
-        let mut align = 4;
-
         unsafe {
-            let version = CString::from_raw(gl::GetString(gl::VERSION) as *mut i8);
-            dbg!(version);
-            
-            //gl::GenVertexArrays(1, &mut renderer.vert_arr);
-            gl::GenBuffers(1, &mut renderer.vert_buff);
-            //gl::GenBuffers(1, &mut renderer.frag_buff);
+            let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *mut i8);
+            renderer.is_opengles = version.to_str().ok().map_or(false, |str| str.starts_with("OpenGL ES"));
 
-            //gl::UniformBlockBinding(renderer.shader.prog, renderer.shader.loc_frag, FRAG_BINDING);
-            //gl::GetIntegerv(gl::UNIFORM_BUFFER_OFFSET_ALIGNMENT, &mut align);
+            gl::GenVertexArrays(1, &mut renderer.vert_arr);
+            gl::GenBuffers(1, &mut renderer.vert_buff);
         }
 
         renderer.check_error("vertex arrays and buffers");
@@ -191,8 +179,6 @@ impl GlRenderer {
             gl::INVALID_ENUM => "Invalid enum",
             gl::INVALID_VALUE => "Invalid value",
             gl::INVALID_OPERATION => "Invalid operation",
-            //gl::STACK_OVERFLOW => "STACK_OVERFLOW",
-            //gl::STACK_UNDERFLOW => "STACK_UNDERFLOW",
             gl::OUT_OF_MEMORY => "Out of memory",
             gl::INVALID_FRAMEBUFFER_OPERATION => "Invalid framebuffer operation",
             _ => "Unknown error"
@@ -225,9 +211,9 @@ impl Renderer for GlRenderer {
 
         unsafe {
             gl::UseProgram(self.shader.prog);
-            
+
             gl::Enable(gl::CULL_FACE);
-            
+
             gl::CullFace(gl::BACK);
             gl::FrontFace(gl::CCW);
             gl::Enable(gl::BLEND);
@@ -239,14 +225,8 @@ impl Renderer for GlRenderer {
             gl::StencilFunc(gl::ALWAYS, 0, 0xffffffff);
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
-            
-            
 
-            //gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
-            //let size = self.uniforms.len() * self.frag_size;
-            //gl::BufferData(gl::UNIFORM_BUFFER, size as isize, self.uniforms.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
-
-            //gl::BindVertexArray(self.vert_arr);
+            gl::BindVertexArray(self.vert_arr);
 
             let vertex_size = mem::size_of::<Vertex>();
 
@@ -256,26 +236,17 @@ impl Renderer for GlRenderer {
 
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
-            
-            self.check_error("1");
 
             gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, 0 as *const c_void);
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
 
-            self.check_error("2");
-
             // Set view and texture just once per frame.
             gl::Uniform1i(self.shader.loc_tex, 0);
             gl::Uniform2fv(self.shader.loc_viewsize, 1, self.view.as_ptr());
-
-            //gl::BindBuffer(gl::UNIFORM_BUFFER, self.frag_buff);
-
-            //gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
         }
 
         self.check_error("render_flush prepare");
 
-        /*
         for call in &self.calls {
 
             // Blend func
@@ -288,18 +259,17 @@ impl Renderer for GlRenderer {
                 CallType::Triangles => self.triangles(call),
                 _ => ()
             }
-        }*/
+        }
 
         unsafe {
             gl::DisableVertexAttribArray(0);
             gl::DisableVertexAttribArray(1);
-            //gl::BindVertexArray(0);
+            gl::BindVertexArray(0);
 
             gl::Disable(gl::CULL_FACE);
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
             gl::UseProgram(0);
-
-            //glnvg__bindTexture(gl, 0);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
         }
 
         self.check_error("render_flush done");
@@ -458,10 +428,10 @@ impl Renderer for GlRenderer {
         unsafe {
             gl::GenTextures(1, &mut texture.tex);
             gl::BindTexture(gl::TEXTURE_2D, texture.tex);
-            //gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
-            //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
+            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
         }
 
         match texture.tex_type {
@@ -469,7 +439,9 @@ impl Renderer for GlRenderer {
                 gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, ptr::null());
             },
             TextureType::Alpha => unsafe {
-                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::LUMINANCE as i32, width as i32, height as i32, 0, gl::LUMINANCE, gl::UNSIGNED_BYTE, ptr::null());
+                let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
+
+                gl::TexImage2D(gl::TEXTURE_2D, 0, format as i32, width as i32, height as i32, 0, format, gl::UNSIGNED_BYTE, ptr::null());
             }
         }
 
@@ -505,12 +477,12 @@ impl Renderer for GlRenderer {
             unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
         }
 
-        //unsafe {
-            //gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
-            //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-        //}
+        unsafe {
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
+        }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
             unsafe {
@@ -551,7 +523,7 @@ impl Renderer for GlRenderer {
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
             //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
 
-            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, w as i32);///////
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, w as i32);///////
 
             //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, x as i32);
             //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, y as i32);
@@ -564,13 +536,15 @@ impl Renderer for GlRenderer {
             },
             TextureType::Alpha => unsafe {
                 let image = image.to_luma();
-                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, gl::LUMINANCE, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
+                let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
+
+                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, format, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
             }
         }
 
         unsafe {
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
             //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
             //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
@@ -823,9 +797,9 @@ impl Drop for GlRenderer {
         //    unsafe { gl::DeleteBuffers(1, &self.frag_buff); }
         //}
 
-        //if self.vert_arr != 0 {
-        //    unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
-        //}
+        if self.vert_arr != 0 {
+            unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
+        }
 
         if self.vert_buff != 0 {
             unsafe { gl::DeleteBuffers(1, &self.vert_buff); }
