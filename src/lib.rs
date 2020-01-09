@@ -539,7 +539,7 @@ impl Canvas {
         style.set_letter_spacing(paint.letter_spacing() * scale);
         style.set_blur(paint.font_blur() * scale);
 
-        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text).unwrap();
+        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text, paint.experimental_shaper()).unwrap();
 
         for cmd in &layout.cmds {
             let mut verts = Vec::new();

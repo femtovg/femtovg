@@ -29,8 +29,12 @@ fn main() {
     //canvas.add_font("../rust-engine/game/assets/fonts/Roboto-Regular.ttf");
     //canvas.add_font("/home/ptodorov/Workspace/harfbuzz-example/fonts/amiri-regular.ttf");
     //canvas.add_font(String::from("/usr/share/fonts/droid/DroidSerif-Regular.ttf"));
+
     canvas.add_font("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+
     //canvas.add_font("/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf");
+
+    canvas.add_font("/usr/share/fonts/TTF/Vera.ttf"); // <- Kerning
 
     //canvas.set_font(font_id);
 
@@ -89,21 +93,35 @@ fn main() {
 
                 canvas.begin_frame(size.width as f32, size.height as f32, dpi_factor as f32);
 
-                draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
+                //draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
 
-                draw_rects(&mut canvas, 15.0, 15.0);
+                //draw_rects(&mut canvas, 15.0, 15.0);
 
-                draw_caps(&mut canvas, 15.0, 110.0);
+                //draw_caps(&mut canvas, 15.0, 110.0);
 
-                draw_joins(&mut canvas, 110.0, 110.0);
+                //draw_joins(&mut canvas, 110.0, 110.0);
 
-                draw_lines(&mut canvas, 205.0, 110.0);
+                //draw_lines(&mut canvas, 205.0, 110.0);
 
-                draw_shadows(&mut canvas);
+                //draw_shadows(&mut canvas);
+
+
 
                 if true {
-                    let text = "Thanks for using our products and services (“Services”). If you’re based in the European Economic Area or Switzerland";
+                    let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
+
+                    let cursive_joining = format!("Cursive Joining: اللغة العربية");
+
+                    let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
+
+
+                    //let mut text = String::new();
+                    //text.push('ў');
+                    //text.push('à');
+                    //text.push('\u{006f}');
+                    //text.push('\u{030b}');
+
 
                     //dbg!(bounds);
                     //canvas.rotate(math::Deg(rot));
@@ -113,8 +131,15 @@ fn main() {
 
                     let mut paint = Paint::color(Color::hex("454545"));
 
-                    paint.set_font_size(16);
-                    canvas.text(15.0 + x, 230.0 + y, text, &paint);
+                    let font_size = 16;
+
+                    paint.set_font_size(font_size);
+                    paint.set_font_name("BitstreamVeraSans-Roman".to_string());
+
+                    canvas.text(15.0 + x, 10.0 + font_size as f32 + y, &text, &paint);
+
+                    paint.set_experimental_shaper(true);
+                    canvas.text(15.0 + x, 15.0 + font_size as f32 * 2.0 + y, &text, &paint);
 
                     //paint.set_font_blur(1.0);
                     //canvas.set_fill_color(Color::rgbaf(0.0, 0.0, 0.0, 0.3));

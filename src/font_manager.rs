@@ -5,9 +5,6 @@ use std::path::Path;
 use std::error::Error;
 use std::collections::HashMap;
 
-mod freetype;
-use self::freetype as ft;
-
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
 use self::hb::UnicodeBuffer;
@@ -16,6 +13,12 @@ use fnv::FnvHashMap;
 use image::{DynamicImage, GrayImage, Luma};
 
 use super::{ImageId, Atlas, Renderer, ImageFlags, renderer::TextureType};
+
+mod freetype;
+use self::freetype as ft;
+
+mod shaper;
+use shaper::{ShaperFace, GlyphInfo};
 
 // TODO: Font fallback for missing characters
 // TODO: Color fonts
@@ -134,13 +137,15 @@ struct Glyph {
 
 struct FontFace {
     ft_face: ft::Face,
+    data: Vec<u8>,
     glyphs: HashMap<GlyphId, Glyph>
 }
 
 impl FontFace {
-    pub fn new(face: ft::Face) -> Self {
+    pub fn new(face: ft::Face, data: Vec<u8>) -> Self {
         Self {
             ft_face: face,
+            data: data,
             glyphs: Default::default()
         }
     }
@@ -154,7 +159,7 @@ pub struct FontTexture {
 pub struct FontManager {
     library: ft::Library,
     faces: HashMap<PostscriptName, FontFace>,
-    textures: Vec<FontTexture>
+    textures: Vec<FontTexture>,
 }
 
 // Public
@@ -176,34 +181,21 @@ impl FontManager {
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<()> {
 
-        let face = self.library.new_memory_face(data, 0)?;
+        let face = self.library.new_memory_face(data.clone(), 0)?;
 
         let postscript_name = face.postscript_name().ok_or_else(|| {
             FontManagerError::GeneralError("Cannot read font postscript name".to_string())
         })?;
 
-        self.faces.insert(postscript_name, FontFace::new(face));
+        self.faces.insert(postscript_name, FontFace::new(face, data));
 
         Ok(())
     }
 
-    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str) -> Result<TextLayout> {
+    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str, experimental_shaper: bool) -> Result<TextLayout> {
         let face = self.faces.get_mut(style.font_name).ok_or(FontManagerError::FontNotFound)?;
 
         face.ft_face.set_pixel_sizes(0, style.size).unwrap();
-
-        let hb_font = unsafe {
-            let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
-            //hb_sys::hb_ot_font_set_funcs(raw_font);
-            hb::Owned::from_raw(raw_font)
-            //hb::Font::from_raw(raw_font)
-        };
-
-        let buffer = UnicodeBuffer::new().add_str(text);
-        let output = hb::shape(&hb_font, buffer, &[]);
-
-        let positions = output.get_glyph_positions();
-        let infos = output.get_glyph_infos();
 
         let line_height = (face.ft_face.size_metrics().unwrap().height >> 6) as f32;
 
@@ -219,16 +211,46 @@ impl FontManager {
         let mut cursor_y = y as i32;
 
         let mut cmd_map = FnvHashMap::default();
+        let mut glyph_positions = Vec::new();
+
+        if experimental_shaper {
+            let face = ShaperFace::new(&face.data)?;
+
+            glyph_positions = face.shape(text, style.size)?;
+        } else {
+            let hb_font = unsafe {
+                let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
+                //hb_sys::hb_ot_font_set_funcs(raw_font);
+                hb::Owned::from_raw(raw_font)
+                //hb::Font::from_raw(raw_font)
+            };
+
+            let buffer = UnicodeBuffer::new().add_str(text);
+            let output = hb::shape(&hb_font, buffer, &[]);
+
+            let positions = output.get_glyph_positions();
+            let infos = output.get_glyph_infos();
+
+            for (position, info) in positions.iter().zip(infos) {
+                glyph_positions.push(GlyphInfo {
+                    glyph_index: info.codepoint,
+                    x_advance: position.x_advance >> 6,
+                    y_advance: position.y_advance >> 6,
+                    x_offset: position.x_offset >> 6,
+                    y_offset: position.y_offset >> 6
+                });
+            }
+        }
 
         // No subpixel positioning / full hinting
 
-        for (position, info) in positions.iter().zip(infos) {
-            let gid = info.codepoint;
+        for position in glyph_positions {
+            let gid = position.glyph_index;
             //let cluster = info.cluster;
-            let x_advance = position.x_advance >> 6;
-            let y_advance = position.y_advance >> 6;
-            let x_offset = position.x_offset >> 6;
-            let y_offset = position.y_offset >> 6;
+            let x_advance = position.x_advance;
+            let y_advance = position.y_advance;
+            let x_offset = position.x_offset;
+            let y_offset = position.y_offset;
 
             //dbg!(format!("{:?} {:?}", position.x_advance >> 6, position.x_advance / 64.0));
 
@@ -358,7 +380,8 @@ pub enum FontManagerError {
     GeneralError(String),
     FontNotFound,
     IoError(io::Error),
-    FreetypeError(ft::Error)
+    FreetypeError(ft::Error),
+    ShaperError(shaper::ShaperError)
 }
 
 impl fmt::Display for FontManagerError {
@@ -376,6 +399,12 @@ impl From<io::Error> for FontManagerError {
 impl From<ft::Error> for FontManagerError {
     fn from(error: ft::Error) -> Self {
         Self::FreetypeError(error)
+    }
+}
+
+impl From<shaper::ShaperError> for FontManagerError {
+    fn from(error: shaper::ShaperError) -> Self {
+        Self::ShaperError(error)
     }
 }
 

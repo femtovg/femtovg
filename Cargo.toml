@@ -14,6 +14,8 @@ bitflags = "1.2.1"
 image = "0.23.0-preview.0"
 freetype = "0.4.1"
 harfbuzz_rs = "1.0.0"
+ttf-parser = "0.3.0"
+unicode-normalization = "0.1.11"
 
 [build-dependencies]
 gl_generator = "0.13"
