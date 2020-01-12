@@ -108,20 +108,20 @@ fn main() {
 
 
                 if true {
-                    let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
-
+					
+					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
-
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
+                    
+					let lines = vec![
+						"en: am. Englisch [ˈjuːnikoʊd], lié à la brit. Englisch [ˈjuːnikəʊd]; dt. [ˈjuːnikoːt]) ist ein in".to_string(),
+						"bileşenlerine ayrılış bilgileri, sıralama kuralı, büyük-küçük harf bilgisi, yazılış yönü bilgisi gibi".to_string(),
+						text,
+						"¼ i⁹ i₉ Юнико́д[1] (чаще всего) или Унико́д Йй".to_string(),
+					];
+					
+                    
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
-
-
-                    //let mut text = String::new();
-                    //text.push('ў');
-                    //text.push('à');
-                    //text.push('\u{006f}');
-                    //text.push('\u{030b}');
-
 
                     //dbg!(bounds);
                     //canvas.rotate(math::Deg(rot));
@@ -132,14 +132,24 @@ fn main() {
                     let mut paint = Paint::color(Color::hex("454545"));
 
                     let font_size = 16;
-
+					
                     paint.set_font_size(font_size);
-                    paint.set_font_name("BitstreamVeraSans-Roman".to_string());
+                    //paint.set_font_name("BitstreamVeraSans-Roman".to_string());
+                    paint.set_font_name("NotoSans-Regular".to_string());
 
-                    canvas.text(15.0 + x, 10.0 + font_size as f32 + y, &text, &paint);
+					let mut y = 10.0 + font_size as f32;
 
-                    paint.set_experimental_shaper(true);
-                    canvas.text(15.0 + x, 15.0 + font_size as f32 * 2.0 + y, &text, &paint);
+					for line in lines {
+						
+						paint.set_experimental_shaper(false);
+						canvas.text(15.0 + x, y, &line, &paint);
+						
+						paint.set_experimental_shaper(true);
+						canvas.text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
+						
+						y += font_size as f32 * 2.0 + 40.0;
+					}
+                    
 
                     //paint.set_font_blur(1.0);
                     //canvas.set_fill_color(Color::rgbaf(0.0, 0.0, 0.0, 0.3));

@@ -5,9 +5,6 @@ use std::error::Error;
 use ttf_parser::{GlyphId, Font};
 use unicode_normalization::{char, UnicodeNormalization};
 
-mod combining_class;
-use combining_class::CombiningClass;
-
 type Result<T> = std::result::Result<T, ShaperError>;
 
 pub struct GlyphInfo {
@@ -69,21 +66,6 @@ impl<'a> ShaperFace<'a> {
 
             info.x_advance = (x_advance as f32 * scale) as i32;
 
-            if char::is_combining_mark(c) {
-                if let Some(class) = CombiningClass::new(char::canonical_combining_class(c)) {
-
-                    if let Some((prev_c, prev_glyph_id)) = prev {
-                        let prev_info = positions.last_mut().unwrap();
-
-                        info.x_advance = prev_info.x_advance;
-                        prev_info.x_advance = 0;// TODO: place in middle
-
-                        info.y_offset = -(size as i32);
-                    }
-
-                }
-            }
-
             positions.push(info);
             prev = Some((c, glyph_id));
         }
@@ -94,34 +76,39 @@ impl<'a> ShaperFace<'a> {
     fn find_glyph_ids(&self, text: &str) -> Vec<(char, GlyphId)> {
         let mut ids = Vec::new();
 
-        for c in text.chars().nfc() {
+        // Iterate over the composed form of characters, the composed form
+        // will prpbably will better designed if it's present in the font
+        let mut chars = text.chars().nfc().peekable();
+
+        while let Some(c) = chars.next() {
+            // check for variation with the next char
+            if let Some(next_char) = chars.peek() {
+                if let Ok(variation_id) = self.face.glyph_variation_index(c, *next_char) {
+                    ids.push((c, variation_id));
+                    chars.next();
+                    continue;
+                }
+            }
 
             if let Ok(glyph_id) = self.face.glyph_index(c) {
-                ids.push((c, glyph_id)); // present in font
-            } else {
-                // try to find glyph id from the decomposed char
+                ids.push((c, glyph_id));
+            } else if !char::is_combining_mark(c) {
+                let mut decomposed = Vec::new(); // TODO: maybe use smallvec
+                
+                // try to find glyph ids from the decomposed char
                 char::decompose_canonical(c, |c| {
-                    if let Ok(glyph_id) = self.face.glyph_index(c) {
-                        ids.push((c, glyph_id)); // present in font
-                    } else {
-                        ids.push((c, GlyphId(0)));
-                    }
+                    decomposed.push((c, self.face.glyph_index(c).unwrap_or(GlyphId(0))));
                 });
+                
+                // if all scalars are not present in the font file show just a single glyph id 0
+                if decomposed.iter().all(|tuple| tuple.1 == GlyphId(0)) {
+                    ids.push((c, GlyphId(0)));
+                } else {
+                    ids.append(&mut decomposed);
+                }
             }
-
-            //ids.push(current_char_id);
         }
-
-        // check for variation with the next char
-        /*
-        if let Some(next_char) = chars.peek() {
-            if let Ok(variation_id) = self.face.glyph_variation_index(c, *next_char) {
-                ids.push(variation_id);
-                chars.next();
-                continue;
-            }
-        }*/
-
+        
         ids
     }
 
