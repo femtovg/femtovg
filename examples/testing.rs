@@ -134,8 +134,8 @@ fn main() {
                     let font_size = 16;
 					
                     paint.set_font_size(font_size);
-                    //paint.set_font_name("BitstreamVeraSans-Roman".to_string());
-                    paint.set_font_name("NotoSans-Regular".to_string());
+                    paint.set_font_name("BitstreamVeraSans-Roman".to_string());
+                    //paint.set_font_name("NotoSans-Regular".to_string());
 
 					let mut y = 10.0 + font_size as f32;
 

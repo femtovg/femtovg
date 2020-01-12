@@ -2,6 +2,7 @@
 use std::io;
 use std::fmt;
 use std::path::Path;
+use std::ops::Range;
 use std::error::Error;
 use std::collections::HashMap;
 
@@ -193,95 +194,103 @@ impl FontManager {
     }
 
     pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str, experimental_shaper: bool) -> Result<TextLayout> {
-        let face = self.faces.get_mut(style.font_name).ok_or(FontManagerError::FontNotFound)?;
-
-        face.ft_face.set_pixel_sizes(0, style.size).unwrap();
-
-        let line_height = (face.ft_face.size_metrics().unwrap().height >> 6) as f32;
-
+        let mut cursor_x = x as i32;
+        let mut cursor_y = y as i32;
+        let mut line_height = style.size as f32;
+        
+        let mut cmd_map = FnvHashMap::default();
+        
         let mut layout = TextLayout {
             bbox: [x, y - line_height, x, y],
             cmds: Vec::new()
         };
+            
+        let faces = Self::resolve_fonts(&mut self.faces, text, style.font_name)?;
+        
+        for (face_name, str_range) in faces {
+        
+            let face = self.faces.get_mut(&face_name).ok_or(FontManagerError::FontNotFound)?;
 
-        let itw = 1.0 / TEXTURE_SIZE as f32;
-        let ith = 1.0 / TEXTURE_SIZE as f32;
+            face.ft_face.set_pixel_sizes(0, style.size).unwrap();
 
-        let mut cursor_x = x as i32;
-        let mut cursor_y = y as i32;
+            line_height = line_height.max((face.ft_face.size_metrics().unwrap().height >> 6) as f32);
 
-        let mut cmd_map = FnvHashMap::default();
-        let mut glyph_positions = Vec::new();
+            let itw = 1.0 / TEXTURE_SIZE as f32;
+            let ith = 1.0 / TEXTURE_SIZE as f32;
 
-        if experimental_shaper {
-            let face = ShaperFace::new(&face.data)?;
+            let mut glyph_positions = Vec::new();
 
-            glyph_positions = face.shape(text, style.size)?;
-        } else {
-            let hb_font = unsafe {
-                let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
-                //hb_sys::hb_ot_font_set_funcs(raw_font);
-                hb::Owned::from_raw(raw_font)
-                //hb::Font::from_raw(raw_font)
-            };
+            if experimental_shaper {
+                let face = ShaperFace::new(&face.data)?;
 
-            let buffer = UnicodeBuffer::new().add_str(text);
-            let output = hb::shape(&hb_font, buffer, &[]);
+                glyph_positions = face.shape(text, style.size)?;
+            } else {
+                let hb_font = unsafe {
+                    let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
+                    //hb_sys::hb_ot_font_set_funcs(raw_font);
+                    hb::Owned::from_raw(raw_font)
+                    //hb::Font::from_raw(raw_font)
+                };
 
-            let positions = output.get_glyph_positions();
-            let infos = output.get_glyph_infos();
+                let buffer = UnicodeBuffer::new().add_str(text);
+                let output = hb::shape(&hb_font, buffer, &[]);
 
-            for (position, info) in positions.iter().zip(infos) {
-                glyph_positions.push(GlyphInfo {
-                    glyph_index: info.codepoint,
-                    x_advance: position.x_advance >> 6,
-                    y_advance: position.y_advance >> 6,
-                    x_offset: position.x_offset >> 6,
-                    y_offset: position.y_offset >> 6
-                });
+                let positions = output.get_glyph_positions();
+                let infos = output.get_glyph_infos();
+
+                for (position, info) in positions.iter().zip(infos) {
+                    glyph_positions.push(GlyphInfo {
+                        glyph_index: info.codepoint,
+                        x_advance: position.x_advance >> 6,
+                        y_advance: position.y_advance >> 6,
+                        x_offset: position.x_offset >> 6,
+                        y_offset: position.y_offset >> 6
+                    });
+                }
             }
-        }
 
-        // No subpixel positioning / full hinting
+            // No subpixel positioning / full hinting
 
-        for position in glyph_positions {
-            let gid = position.glyph_index;
-            //let cluster = info.cluster;
-            let x_advance = position.x_advance;
-            let y_advance = position.y_advance;
-            let x_offset = position.x_offset;
-            let y_offset = position.y_offset;
+            for position in glyph_positions {
+                let gid = position.glyph_index;
+                //let cluster = info.cluster;
+                let x_advance = position.x_advance;
+                let y_advance = position.y_advance;
+                let x_offset = position.x_offset;
+                let y_offset = position.y_offset;
 
-            //dbg!(format!("{:?} {:?}", position.x_advance >> 6, position.x_advance / 64.0));
+                //dbg!(format!("{:?} {:?}", position.x_advance >> 6, position.x_advance / 64.0));
 
-            let glyph = Self::glyph(&mut self.textures, face, renderer, style, gid)?;
+                let glyph = Self::glyph(&mut self.textures, face, renderer, style, gid)?;
 
-            let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
-            let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
+                let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
+                let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
 
-            let image_id = self.textures[glyph.texture_index].image_id;
+                let image_id = self.textures[glyph.texture_index].image_id;
 
-            let cmd = cmd_map.entry(glyph.texture_index).or_insert_with(|| DrawCmd {
-                image_id: image_id,
-                quads: Vec::new()
-            });
+                let cmd = cmd_map.entry(glyph.texture_index).or_insert_with(|| DrawCmd {
+                    image_id: image_id,
+                    quads: Vec::new()
+                });
 
-            let mut q = Quad::default();
+                let mut q = Quad::default();
 
-            q.x0 = xpos as f32;
-            q.y0 = ypos as f32;
-            q.x1 = (xpos + glyph.width as i32) as f32;
-            q.y1 = (ypos + glyph.height as i32) as f32;
+                q.x0 = xpos as f32;
+                q.y0 = ypos as f32;
+                q.x1 = (xpos + glyph.width as i32) as f32;
+                q.y1 = (ypos + glyph.height as i32) as f32;
 
-            q.s0 = glyph.atlas_x as f32 * itw;
-            q.t0 = glyph.atlas_y as f32 * ith;
-            q.s1 = (glyph.atlas_x + glyph.width) as f32 * itw;
-            q.t1 = (glyph.atlas_y + glyph.height) as f32 * ith;
+                q.s0 = glyph.atlas_x as f32 * itw;
+                q.t0 = glyph.atlas_y as f32 * ith;
+                q.s1 = (glyph.atlas_x + glyph.width) as f32 * itw;
+                q.t1 = (glyph.atlas_y + glyph.height) as f32 * ith;
 
-            cmd.quads.push(q);
+                cmd.quads.push(q);
 
-            cursor_x += x_advance;
-            cursor_y += y_advance;
+                cursor_x += x_advance;
+                cursor_y += y_advance;
+            }
+        
         }
 
         layout.bbox[2] = cursor_x as f32;
@@ -373,15 +382,73 @@ impl FontManager {
 
         Ok(glyph)
     }
+    
+    fn resolve_fonts(faces: &HashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
+        if faces.is_empty() { 
+            return Err(FontManagerError::NoFontsAdded);
+        }
+        
+        let mut res = Vec::new();
+        
+        let mut is_in_preferred_face = true;
+        
+        let preffered_face = if faces.contains_key(preferred_face) {
+            faces.get(preferred_face).unwrap()
+        } else {
+            faces.values().next().unwrap()
+        };
+        
+        let mut current_face = preffered_face;
+        
+        let mut current_range: Range<usize> = 0..0;
+        
+        for c in text.chars() {
+            
+            if !is_in_preferred_face {
+                if preffered_face.ft_face.get_char_index(c as usize) != 0 {
+                    res.push((current_face.ft_face.postscript_name().unwrap(), current_range.clone()));
+                    
+                    current_face = preffered_face;
+                    current_range = current_range.end..current_range.end;
+                    
+                    is_in_preferred_face = true;
+                    
+                }
+            } else if current_face.ft_face.get_char_index(c as usize) == 0 {
+                
+                let new_face = faces.values().find(|face| face.ft_face.get_char_index(c as usize) != 0);
+                
+                if let Some(face) = new_face {
+                    res.push((current_face.ft_face.postscript_name().unwrap(), current_range.clone()));
+                    
+                    current_face = face;
+                    current_range = current_range.end..current_range.end;
+                    
+                    is_in_preferred_face = false;
+                }
+            }
+            
+            current_range.end += 1;
+            
+            
+        }
+        
+        res.push((current_face.ft_face.postscript_name().unwrap(), current_range));
+        
+        //dbg!(&res);
+        
+        Ok(res)
+    }
 }
 
 #[derive(Debug)]
 pub enum FontManagerError {
     GeneralError(String),
     FontNotFound,
+    NoFontsAdded,
     IoError(io::Error),
     FreetypeError(ft::Error),
-    ShaperError(shaper::ShaperError)
+    ShaperError(shaper::ShaperError),
 }
 
 impl fmt::Display for FontManagerError {
