@@ -5,6 +5,9 @@ use std::error::Error;
 use ttf_parser::{GlyphId, Font};
 use unicode_normalization::{char, UnicodeNormalization};
 
+// TODO: Lose the dependency on ttf parser and make a trait ShaperInfo
+// them implement ShaperInfo fot freetype face
+
 type Result<T> = std::result::Result<T, ShaperError>;
 
 pub struct GlyphInfo {
