@@ -100,7 +100,7 @@ impl Path {
     }
 
     /// Returns iterator over Commands
-    fn commands<'a>(&'a self) -> impl Iterator<Item = &'a Command> {
+    fn commands(&self) -> impl Iterator<Item = &Command> {
         self.commands.iter()
     }
 
@@ -165,12 +165,10 @@ impl Path {
             } else {
                 while da < 0.0 { da += PI * 2.0 }
             }
+        } else if da.abs() >= PI * 2.0 {
+            da = -PI * 2.0;
         } else {
-            if da.abs() >= PI * 2.0 {
-                da = -PI * 2.0;
-            } else {
-                while da > 0.0 { da -= PI * 2.0 }
-            }
+            while da > 0.0 { da -= PI * 2.0 }
         }
 
         // Split arc into max 90 degree segments.
@@ -194,7 +192,7 @@ impl Path {
             let tany = dx*r*kappa;
 
             if i == 0 {
-                let first_move = if self.commands.len() > 0 { Command::LineTo(x, y) } else { Command::MoveTo(x, y) };
+                let first_move = if !self.commands.is_empty() { Command::LineTo(x, y) } else { Command::MoveTo(x, y) };
                 commands.push(first_move);
             } else {
                 commands.push(Command::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
@@ -206,14 +204,14 @@ impl Path {
             ptany = tany;
         }
 
-        self.append_commands(&mut commands);
+        self.append_commands(&commands);
 
         self
     }
 
     /// Adds an arc segment at the corner defined by the last path point, and two specified points.
     pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) -> &mut Self {
-        if self.commands.len() == 0 {
+        if self.commands.is_empty() {
             return self;
         }
 
@@ -266,7 +264,7 @@ impl Path {
 
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> &mut Self {
-        self.append_commands(&mut [
+        self.append_commands(&[
             Command::MoveTo(x, y),
             Command::LineTo(x, y + h),
             Command::LineTo(x + w, y + h),
@@ -303,7 +301,7 @@ impl Path {
             let rx_tl = rad_top_left.min(halfw) * w.signum();
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
-            self.append_commands(&mut [
+            self.append_commands(&[
                 Command::MoveTo(x, y + ry_tl),
                 Command::LineTo(x, y + h - ry_bl),
                 Command::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
@@ -322,7 +320,7 @@ impl Path {
 
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) -> &mut Self {
-        self.append_commands(&mut [
+        self.append_commands(&[
             Command::MoveTo(cx-rx, cy),
             Command::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
             Command::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
@@ -490,7 +488,7 @@ impl CachedPath {
     }
 
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
-        if self.contours.len() == 0 { return }
+        if self.contours.is_empty() { return }
 
         let count = &mut self.contours.last_mut().unwrap().count;
 
@@ -526,8 +524,8 @@ impl CachedPath {
 
         let dx = x4 - x1;
         let dy = y4 - y1;
-        let d2 = (((x2 - x4) * dy - (y2 - y4) * dx)).abs();
-        let d3 = (((x3 - x4) * dy - (y3 - y4) * dx)).abs();
+        let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
+        let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
 
         if (d2 + d3)*(d2 + d3) < tess_tol * (dx*dx + dy*dy) {
             self.add_point(x4, y4, atype, dist_tol);

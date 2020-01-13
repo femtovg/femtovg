@@ -21,6 +21,7 @@ use crate::{Vertex, Paint, Scissor, ImageId, ImageFlags};
 use crate::path::{Contour, Convexity};
 use crate::math::Transform2D;
 
+#[allow(clippy::all)]
 mod gl {
     include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
 }
@@ -240,7 +241,7 @@ impl Renderer for GlRenderer {
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
 
-            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, 0 as *const c_void);
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, ptr::null::<c_void>());
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
         }
         

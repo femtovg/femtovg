@@ -216,7 +216,7 @@ impl FontManager {
         Ok(())
     }
 
-    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str) -> Result<TextLayout> {
+    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut dyn Renderer, style: FontStyle, text: &str) -> Result<TextLayout> {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
         let mut line_height = style.size as f32;
@@ -297,7 +297,7 @@ impl FontManager {
 // Private
 impl FontManager {
 
-    fn glyph(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut Box<dyn Renderer>, stroker: &ft::Stroker, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
+    fn glyph(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut dyn Renderer, stroker: &ft::Stroker, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
         let glyph_id = GlyphId::new(glyph_index, style);
 
         if let Some(glyph) = face.glyphs.get(&glyph_id) {

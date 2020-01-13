@@ -67,7 +67,7 @@ impl Atlas {
         // Perform the actual packing.
         self.add_skyline_level(besti.unwrap(), bestx, besty, rect_width, rect_height);
 
-        return Some((bestx, besty));
+        Some((bestx, besty))
     }
 
     fn insert_node(&mut self, idx: usize, x: usize, y: usize, width: usize) {

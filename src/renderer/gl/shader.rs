@@ -65,7 +65,7 @@ impl Shader {
                 gl::GetProgramInfoLog(shader.prog, log_length, ptr::null_mut(), info_log.as_mut_ptr() as *mut GLchar);
 
                 return Err(match str::from_utf8(&info_log) {
-                    Ok(msg) => ShaderError::ProgramLinkError(format!("{}", msg)),
+                    Ok(msg) => ShaderError::ProgramLinkError(msg.to_string()),
                     Err(err) => ShaderError::ProgramLinkError(format!("{}", err)),
                 });
             }

@@ -536,7 +536,7 @@ impl Canvas {
         style.set_blur(paint.font_blur() * scale);
         style.set_render_style(render_style);
 
-        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text).unwrap();
+        let layout = self.font_manager.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
 
         for cmd in &layout.cmds {
             let mut verts = Vec::new();
