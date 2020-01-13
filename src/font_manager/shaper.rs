@@ -42,9 +42,7 @@ impl<'a> ShaperFace<'a> {
 
         let mut ids_iter = ids.into_iter().peekable();
 
-        let mut prev = None;
-
-        while let Some((c, glyph_id)) = ids_iter.next() {
+        while let Some((_c, glyph_id)) = ids_iter.next() {
             let mut info = GlyphInfo {
                 glyph_index: glyph_id.0 as u32,
                 x_advance: 0,
@@ -67,7 +65,6 @@ impl<'a> ShaperFace<'a> {
             info.x_advance = (x_advance as f32 * scale) as i32;
 
             positions.push(info);
-            prev = Some((c, glyph_id));
         }
 
         Ok(positions)
@@ -77,7 +74,7 @@ impl<'a> ShaperFace<'a> {
         let mut ids = Vec::new();
 
         // Iterate over the composed form of characters, the composed form
-        // will prpbably will better designed if it's present in the font
+        // will prpbably be better designed if it's present in the font
         let mut chars = text.chars().nfc().peekable();
 
         while let Some(c) = chars.next() {
@@ -94,12 +91,12 @@ impl<'a> ShaperFace<'a> {
                 ids.push((c, glyph_id));
             } else if !char::is_combining_mark(c) {
                 let mut decomposed = Vec::new(); // TODO: maybe use smallvec
-                
+
                 // try to find glyph ids from the decomposed char
                 char::decompose_canonical(c, |c| {
                     decomposed.push((c, self.face.glyph_index(c).unwrap_or(GlyphId(0))));
                 });
-                
+
                 // if all scalars are not present in the font file show just a single glyph id 0
                 if decomposed.iter().all(|tuple| tuple.1 == GlyphId(0)) {
                     ids.push((c, GlyphId(0)));
@@ -108,7 +105,7 @@ impl<'a> ShaperFace<'a> {
                 }
             }
         }
-        
+
         ids
     }
 

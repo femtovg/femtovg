@@ -137,16 +137,33 @@ struct Glyph {
 }
 
 struct FontFace {
+    id: usize,
     ft_face: ft::Face,
     data: Vec<u8>,
+    is_serif: bool,
+    is_italic: bool,
+    is_bold: bool,
     glyphs: HashMap<GlyphId, Glyph>
 }
 
 impl FontFace {
-    pub fn new(face: ft::Face, data: Vec<u8>) -> Self {
+    pub fn new(id: usize, face: ft::Face, data: Vec<u8>) -> Self {
+
+        let is_serif = if let Some(ps_name) = face.postscript_name() {
+            ps_name.to_lowercase().contains("serif")
+        } else {
+            false
+        };
+
+        let style_flags = face.style_flags();
+
         Self {
+            id: id,
             ft_face: face,
             data: data,
+            is_serif: is_serif,
+            is_italic: style_flags.contains(ft::StyleFlag::ITALIC),
+            is_bold: style_flags.contains(ft::StyleFlag::BOLD),
             glyphs: Default::default()
         }
     }
@@ -161,6 +178,7 @@ pub struct FontManager {
     library: ft::Library,
     faces: HashMap<PostscriptName, FontFace>,
     textures: Vec<FontTexture>,
+    last_face_id: usize,
 }
 
 // Public
@@ -171,6 +189,7 @@ impl FontManager {
             library: ft::Library::init()?,
             faces: Default::default(),
             textures: Default::default(),
+            last_face_id: Default::default()
         })
     }
 
@@ -188,7 +207,9 @@ impl FontManager {
             FontManagerError::GeneralError("Cannot read font postscript name".to_string())
         })?;
 
-        self.faces.insert(postscript_name, FontFace::new(face, data));
+        self.faces.insert(postscript_name, FontFace::new(self.last_face_id, face, data));
+
+        self.last_face_id = self.last_face_id.wrapping_add(1);
 
         Ok(())
     }
@@ -197,18 +218,17 @@ impl FontManager {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
         let mut line_height = style.size as f32;
-        
+
         let mut cmd_map = FnvHashMap::default();
-        
+
         let mut layout = TextLayout {
             bbox: [x, y - line_height, x, y],
             cmds: Vec::new()
         };
-            
-        let faces = Self::resolve_fonts(&mut self.faces, text, style.font_name)?;
-        
+
+        let faces = Self::face_character_range(&self.faces, text, style.font_name)?;
+
         for (face_name, str_range) in faces {
-        
             let face = self.faces.get_mut(&face_name).ok_or(FontManagerError::FontNotFound)?;
 
             face.ft_face.set_pixel_sizes(0, style.size).unwrap();
@@ -223,7 +243,7 @@ impl FontManager {
             if experimental_shaper {
                 let face = ShaperFace::new(&face.data)?;
 
-                glyph_positions = face.shape(text, style.size)?;
+                glyph_positions = face.shape(&text[str_range], style.size)?;
             } else {
                 let hb_font = unsafe {
                     let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
@@ -232,7 +252,7 @@ impl FontManager {
                     //hb::Font::from_raw(raw_font)
                 };
 
-                let buffer = UnicodeBuffer::new().add_str(text);
+                let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
                 let output = hb::shape(&hb_font, buffer, &[]);
 
                 let positions = output.get_glyph_positions();
@@ -290,7 +310,7 @@ impl FontManager {
                 cursor_x += x_advance;
                 cursor_y += y_advance;
             }
-        
+
         }
 
         layout.bbox[2] = cursor_x as f32;
@@ -382,62 +402,85 @@ impl FontManager {
 
         Ok(glyph)
     }
-    
-    fn resolve_fonts(faces: &HashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
-        if faces.is_empty() { 
+
+    fn face_character_range(faces: &HashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
+        if faces.is_empty() {
             return Err(FontManagerError::NoFontsAdded);
         }
-        
+
         let mut res = Vec::new();
-        
-        let mut is_in_preferred_face = true;
-        
+
         let preffered_face = if faces.contains_key(preferred_face) {
             faces.get(preferred_face).unwrap()
         } else {
             faces.values().next().unwrap()
         };
-        
+
         let mut current_face = preffered_face;
-        
         let mut current_range: Range<usize> = 0..0;
-        
-        for c in text.chars() {
-            
-            if !is_in_preferred_face {
+
+        for (index, c) in text.char_indices() {
+            current_range.end = index;
+
+            // Prefer the user provided face
+            if current_face.id != preffered_face.id {
                 if preffered_face.ft_face.get_char_index(c as usize) != 0 {
                     res.push((current_face.ft_face.postscript_name().unwrap(), current_range.clone()));
-                    
+
                     current_face = preffered_face;
                     current_range = current_range.end..current_range.end;
-                    
-                    is_in_preferred_face = true;
-                    
                 }
             } else if current_face.ft_face.get_char_index(c as usize) == 0 {
-                
-                let new_face = faces.values().find(|face| face.ft_face.get_char_index(c as usize) != 0);
-                
-                if let Some(face) = new_face {
+                // fallback faces
+                let compat_face = Self::find_fallback_face(faces, preffered_face, c);
+
+                if let Some(face) = compat_face {
                     res.push((current_face.ft_face.postscript_name().unwrap(), current_range.clone()));
-                    
+
                     current_face = face;
                     current_range = current_range.end..current_range.end;
-                    
-                    is_in_preferred_face = false;
                 }
             }
-            
-            current_range.end += 1;
-            
-            
         }
-        
+
+        current_range.end = text.len();
+
         res.push((current_face.ft_face.postscript_name().unwrap(), current_range));
-        
-        //dbg!(&res);
-        
+
         Ok(res)
+    }
+
+    fn find_fallback_face<'a>(faces: &'a HashMap<PostscriptName, FontFace>, preffered_face: &'a FontFace, c: char) -> Option<&'a FontFace> {
+
+        let mut face = faces.values().find(|face| {
+            face.is_serif == preffered_face.is_serif &&
+            face.is_bold == preffered_face.is_bold &&
+            face.is_italic == preffered_face.is_italic &&
+            face.ft_face.get_char_index(c as usize) != 0
+        });
+
+        if face.is_none() {
+            face = faces.values().find(|face| {
+                face.is_serif == preffered_face.is_serif &&
+                face.is_italic == preffered_face.is_italic &&
+                face.ft_face.get_char_index(c as usize) != 0
+            });
+        }
+
+        if face.is_none() {
+            face = faces.values().find(|face| {
+                face.is_serif == preffered_face.is_serif &&
+                face.ft_face.get_char_index(c as usize) != 0
+            });
+        }
+
+        if face.is_none() {
+            face = faces.values().find(|face| {
+                face.ft_face.get_char_index(c as usize) != 0
+            });
+        }
+
+        face
     }
 }
 

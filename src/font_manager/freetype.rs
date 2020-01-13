@@ -51,6 +51,13 @@ bitflags! {
     }
 }
 
+bitflags! {
+    pub struct StyleFlag: ffi::FT_UInt {
+        const BOLD   = ffi::FT_STYLE_FLAG_BOLD;
+        const ITALIC = ffi::FT_STYLE_FLAG_ITALIC;
+    }
+}
+
 pub type FtResult<T> = Result<T, Error>;
 
 pub struct Library {
@@ -221,6 +228,24 @@ impl Face {
                 Some(unsafe { (*size).metrics })
             }
         }
+    }
+
+    pub fn style_name(&self) -> Option<String> {
+        let style_name = unsafe { (*self.raw).style_name };
+
+        if style_name.is_null() {
+            None
+        } else {
+            let style_name = unsafe {
+                CStr::from_ptr(style_name as *const _).to_bytes().to_vec()
+            };
+            String::from_utf8(style_name).ok()
+        }
+    }
+
+    pub fn style_flags(&self) -> StyleFlag {
+        let style_flags = unsafe { (*self.raw).style_flags };
+        StyleFlag::from_bits_truncate(style_flags as u32)
     }
 
     #[inline(always)]
