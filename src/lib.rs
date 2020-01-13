@@ -15,7 +15,7 @@ pub mod renderer;
 use renderer::{Renderer, TextureType};
 
 pub mod font_manager;
-pub use font_manager::{FontManager, FontStyle, FontManagerError};
+pub use font_manager::{FontManager, FontStyle, FontManagerError, GlyphRenderStyle};
 
 pub mod math;
 use crate::math::*;
@@ -408,7 +408,7 @@ impl Canvas {
     }
 
     /// Fills the current path with current fill style.
-    pub fn fill(&mut self, path: &Path, paint: &Paint) {
+    pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
         //self.flatten_paths(&path.commands);
 
         let mut cache = CachedPath::new(path, self.state().transform, self.tess_tol, self.dist_tol);
@@ -441,7 +441,7 @@ impl Canvas {
     }
 
     /// Fills the current path with current stroke style.
-    pub fn stroke(&mut self, path: &Path, paint: &Paint) {
+    pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
         let scale = self.state().transform.average_scale();
         let mut stroke_width = (paint.stroke_width() * scale).max(0.0).min(200.0);
 
@@ -495,6 +495,10 @@ impl Canvas {
         self.font_manager.add_font_file(file_path).expect("cannot add font");
     }
 
+    pub fn add_font_mem(&mut self, data: Vec<u8>) {
+        self.font_manager.add_font_mem(data).expect("cannot add font");
+    }
+
     /*
     pub fn text_bounds(&mut self, x: f32, y: f32, text: &str) -> [f32; 4] {
         let scale = self.font_scale() * self.device_px_ratio;
@@ -522,24 +526,32 @@ impl Canvas {
         bounds
     }*/
 
-    pub fn text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
+    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
+        self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill);
+    }
+
+    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
+        self.draw_text(x, y, text, paint, GlyphRenderStyle::Stroke {
+            line_width: paint.stroke_width().ceil() as u32
+        });
+    }
+
+    // Private
+
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint, render_style: GlyphRenderStyle) {
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
         let mut paint = paint.clone();
 
-        //let mut style = FontStyle::new("DroidSerif");
-        //let mut style = FontStyle::new("Roboto-Regular");
-        //let mut style = FontStyle::new("Amiri-Regular");
-        //let mut style = FontStyle::new("NotoSansDevanagari-Regular");
         let mut style = FontStyle::new(paint.font_name());
-
         style.set_size((paint.font_size() as f32 * scale) as u32);
         style.set_letter_spacing(paint.letter_spacing() * scale);
         style.set_blur(paint.font_blur() * scale);
+        style.set_render_style(render_style);
 
-        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text, paint.experimental_shaper()).unwrap();
+        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text).unwrap();
 
         for cmd in &layout.cmds {
             let mut verts = Vec::new();
@@ -576,8 +588,6 @@ impl Canvas {
             self.renderer.render_triangles(&paint, scissor, &verts);
         }
     }
-
-    // Private
 
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();

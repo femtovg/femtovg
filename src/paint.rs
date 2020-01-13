@@ -20,8 +20,7 @@ pub struct Paint {
     font_size: u32,
     letter_spacing: f32,
     font_blur: f32,
-    text_valign: VAlign,
-    experimental_shaper: bool
+    text_valign: VAlign
 }
 
 impl Default for Paint {
@@ -43,8 +42,7 @@ impl Default for Paint {
             font_size: 16,
             letter_spacing: 0.0,
             font_blur: 0.0,
-            text_valign: VAlign::default(),
-            experimental_shaper: false
+            text_valign: VAlign::default()
         }
     }
 }
@@ -330,13 +328,5 @@ impl Paint {
 
     pub fn set_text_valign(&mut self, valign: VAlign) {
         self.text_valign = valign;
-    }
-
-    pub fn experimental_shaper(&self) -> bool {
-        self.experimental_shaper
-    }
-
-    pub fn set_experimental_shaper(&mut self, enabled: bool) {
-        self.experimental_shaper = enabled;
     }
 }

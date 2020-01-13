@@ -6,25 +6,18 @@ use std::ops::Range;
 use std::error::Error;
 use std::collections::HashMap;
 
-use harfbuzz_rs as hb;
-use self::hb::hb as hb_sys;
-use self::hb::UnicodeBuffer;
-
 use fnv::FnvHashMap;
 use image::{DynamicImage, GrayImage, Luma};
 
 use super::{ImageId, Atlas, Renderer, ImageFlags, renderer::TextureType};
 
-mod freetype;
-use self::freetype as ft;
+//mod freetype;
+use freetype as ft;
 
 mod shaper;
-use shaper::{ShaperFace, GlyphInfo};
+use shaper::ShaperFace;
 
-// TODO: Font fallback for missing characters
 // TODO: Color fonts
-// TODO: Nearest font matching
-// TODO: StyledString type like iOS attributed string? or this may be implementen on top of this lib
 // TODO: Stroking letters
 
 const TEXTURE_SIZE: u32 = 512;
@@ -35,14 +28,14 @@ type Result<T> = std::result::Result<T, FontManagerError>;
 type PostscriptName = String;
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
-pub enum RenderStyle {
+pub enum GlyphRenderStyle {
     Fill,
     Stroke {
         line_width: u32
     }
 }
 
-impl Default for RenderStyle {
+impl Default for GlyphRenderStyle {
     fn default() -> Self {
         Self::Fill
     }
@@ -77,7 +70,7 @@ pub struct FontStyle<'a> {
     size: u32,
     blur: f32,
     letter_spacing: f32,
-    render_style: RenderStyle
+    render_style: GlyphRenderStyle
 }
 
 impl<'a> FontStyle<'a> {
@@ -102,6 +95,10 @@ impl<'a> FontStyle<'a> {
     pub fn set_letter_spacing(&mut self, letter_spacing: f32) {
         self.letter_spacing = letter_spacing;
     }
+
+    pub fn set_render_style(&mut self, render_style: GlyphRenderStyle) {
+        self.render_style = render_style;
+    }
 }
 
 #[derive(Hash, Eq, PartialEq)]
@@ -109,7 +106,7 @@ struct GlyphId {
     glyph_index: u32,
     size: u32,
     blur: u32,
-    render_style: RenderStyle
+    render_style: GlyphRenderStyle
 }
 
 impl GlyphId {
@@ -162,8 +159,8 @@ impl FontFace {
             ft_face: face,
             data: data,
             is_serif: is_serif,
-            is_italic: style_flags.contains(ft::StyleFlag::ITALIC),
-            is_bold: style_flags.contains(ft::StyleFlag::BOLD),
+            is_italic: style_flags.contains(ft::face::StyleFlag::ITALIC),
+            is_bold: style_flags.contains(ft::face::StyleFlag::BOLD),
             glyphs: Default::default()
         }
     }
@@ -176,6 +173,7 @@ pub struct FontTexture {
 
 pub struct FontManager {
     library: ft::Library,
+    stroker: ft::Stroker,
     faces: HashMap<PostscriptName, FontFace>,
     textures: Vec<FontTexture>,
     last_face_id: usize,
@@ -185,8 +183,12 @@ pub struct FontManager {
 impl FontManager {
 
     pub fn new() -> Result<Self> {
+        let library = ft::Library::init()?;
+        let stroker = library.new_stroker()?;
+
         Ok(Self {
-            library: ft::Library::init()?,
+            library: library,
+            stroker: stroker,
             faces: Default::default(),
             textures: Default::default(),
             last_face_id: Default::default()
@@ -214,7 +216,7 @@ impl FontManager {
         Ok(())
     }
 
-    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str, experimental_shaper: bool) -> Result<TextLayout> {
+    pub fn layout_text(&mut self, x: f32, y: f32, renderer: &mut Box<dyn Renderer>, style: FontStyle, text: &str) -> Result<TextLayout> {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
         let mut line_height = style.size as f32;
@@ -238,36 +240,8 @@ impl FontManager {
             let itw = 1.0 / TEXTURE_SIZE as f32;
             let ith = 1.0 / TEXTURE_SIZE as f32;
 
-            let mut glyph_positions = Vec::new();
-
-            if experimental_shaper {
-                let face = ShaperFace::new(&face.data)?;
-
-                glyph_positions = face.shape(&text[str_range], style.size)?;
-            } else {
-                let hb_font = unsafe {
-                    let raw_font = hb_sys::hb_ft_font_create_referenced(face.ft_face.raw_mut());
-                    //hb_sys::hb_ot_font_set_funcs(raw_font);
-                    hb::Owned::from_raw(raw_font)
-                    //hb::Font::from_raw(raw_font)
-                };
-
-                let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
-                let output = hb::shape(&hb_font, buffer, &[]);
-
-                let positions = output.get_glyph_positions();
-                let infos = output.get_glyph_infos();
-
-                for (position, info) in positions.iter().zip(infos) {
-                    glyph_positions.push(GlyphInfo {
-                        glyph_index: info.codepoint,
-                        x_advance: position.x_advance >> 6,
-                        y_advance: position.y_advance >> 6,
-                        x_offset: position.x_offset >> 6,
-                        y_offset: position.y_offset >> 6
-                    });
-                }
-            }
+            let shaper_face = ShaperFace::new(&face.data)?;
+            let glyph_positions = shaper_face.shape(&text[str_range], style.size)?;
 
             // No subpixel positioning / full hinting
 
@@ -279,9 +253,7 @@ impl FontManager {
                 let x_offset = position.x_offset;
                 let y_offset = position.y_offset;
 
-                //dbg!(format!("{:?} {:?}", position.x_advance >> 6, position.x_advance / 64.0));
-
-                let glyph = Self::glyph(&mut self.textures, face, renderer, style, gid)?;
+                let glyph = Self::glyph(&mut self.textures, face, renderer, &self.stroker, style, gid)?;
 
                 let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
                 let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
@@ -325,22 +297,35 @@ impl FontManager {
 // Private
 impl FontManager {
 
-    fn glyph(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut Box<dyn Renderer>, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
+    fn glyph(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut Box<dyn Renderer>, stroker: &ft::Stroker, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
         let glyph_id = GlyphId::new(glyph_index, style);
 
         if let Some(glyph) = face.glyphs.get(&glyph_id) {
             return Ok(*glyph);
         }
 
-        let padding = GLYPH_PADDING + style.blur.ceil() as u32;
+        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
-        face.ft_face.load_glyph(glyph_index, ft::LoadFlag::RENDER | ft::LoadFlag::NO_HINTING)?;
+        face.ft_face.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT)?;
 
-        let ft_glyph = face.ft_face.glyph();
-        let ft_bitmap = ft_glyph.bitmap();
+        let glyph_slot = face.ft_face.glyph();
+        let mut glyph = glyph_slot.get_glyph()?;
 
-        let width = ft_glyph.bitmap().width() as u32 + padding * 2;
-        let height = ft_glyph.bitmap().rows() as u32 + padding * 2;
+        if let GlyphRenderStyle::Stroke { line_width } = style.render_style {
+            stroker.set(line_width as i64 * 32, ft::stroker::StrokerLineCap::Round, ft::stroker::StrokerLineJoin::Round, 0);
+
+            glyph = glyph.stroke(stroker)?;
+
+            padding += line_width;
+        }
+
+        let bitmap_glyph = glyph.to_bitmap(ft::RenderMode::Normal, None)?;
+        let ft_bitmap = bitmap_glyph.bitmap();
+        let bitmap_left = bitmap_glyph.left();
+        let bitmap_top = bitmap_glyph.top();
+
+        let width = ft_bitmap.width() as u32 + padding * 2;
+        let height = ft_bitmap.rows() as u32 + padding * 2;
 
         // Find a free location in one of the the atlases
         let texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
@@ -392,8 +377,8 @@ impl FontManager {
             height: height,
             atlas_x: atlas_x as u32,
             atlas_y: atlas_y as u32,
-            bearing_x: ft_glyph.bitmap_left(),
-            bearing_y: ft_glyph.bitmap_top(),
+            bearing_x: bitmap_left,
+            bearing_y: bitmap_top,
             padding: padding,
             texture_index: tex_index,
         };
