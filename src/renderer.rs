@@ -1,7 +1,8 @@
 
 use image::DynamicImage;
 
-use super::{Paint, Contour, Scissor, ImageId, Vertex, ImageFlags};
+use crate::{Paint, Scissor, ImageId, Vertex, ImageFlags};
+use crate::path::Contour;
 
 mod gl;
 pub use gl::GlRenderer;

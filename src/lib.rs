@@ -26,7 +26,6 @@ pub use paint::Paint;
 mod path;
 pub use path::{CachedPath, Path};
 
-// TODO: Use Convexity enum to describe path concave/convex
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
 // TODO: Drawing works before the call to begin frame for some reason
 // TODO: rethink image creation and resource creation in general, it's currently blocking,
@@ -132,20 +131,6 @@ impl Vertex {
     pub fn set(&mut self, x: f32, y: f32, u: f32, v: f32) {
         *self = Self { x, y, u, v };
     }
-}
-
-// TODO: We need an iterator for the contour points that loops by chunks of 2
-
-#[derive(Clone, Default, Debug)]
-pub struct Contour {
-    first: usize,
-    count: usize,
-    closed: bool,
-    bevel: usize,
-    fill: Vec<Vertex>,
-    stroke: Vec<Vertex>,
-    winding: Winding,
-    convex: bool
 }
 
 #[derive(Copy, Clone)]

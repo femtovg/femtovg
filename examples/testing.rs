@@ -91,37 +91,22 @@ fn main() {
 
                 let size = windowed_context.window().inner_size().to_physical(dpi_factor);
 
-                //x += 0.1;
-
                 let t = start.elapsed().as_secs_f32();
 
                 canvas.begin_frame(size.width as f32, size.height as f32, dpi_factor as f32);
 
-                //draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
-
-                //draw_rects(&mut canvas, 15.0, 15.0);
-
-                //draw_caps(&mut canvas, 15.0, 110.0);
-
-                //draw_joins(&mut canvas, 110.0, 110.0);
-
-                //draw_lines(&mut canvas, 205.0, 110.0);
-
-                //draw_shadows(&mut canvas);
+                draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
+                draw_rects(&mut canvas, 15.0, 15.0);
+                draw_caps(&mut canvas, 15.0, 110.0);
+                draw_joins(&mut canvas, 110.0, 110.0);
+                draw_lines(&mut canvas, 205.0, 110.0);
+                draw_shadows(&mut canvas);
 
                 if true {
 
 					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
-
-					let lines = vec![
-						"en: am. Englisch [ˈjuːnikoʊd], lié à la brit. Englisch [ˈjuːnikəʊd]; dt. [ˈjuːnikoːt]) ist ein in".to_string(),
-						"bileşenlerine ayrılış bilgileri, sıralama kuralı, büyük-küçük harf bilgisi, yazılış yönü bilgisi gibi".to_string(),
-						text,
-						"¼ i⁹ i₉ Юнико́д[1] (чаще всего) или Унико́д Йй".to_string(),
-					];
-
 
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
 
@@ -137,117 +122,12 @@ fn main() {
 
                     paint.set_stroke_width(1.0);
                     paint.set_font_size(font_size);
+                    //paint.set_font_blur(1.0);
                     paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
                     //paint.set_font_name("NotoSans-Regular".to_string());
 
-					let mut y = 10.0 + font_size as f32;
-
-					for line in lines {
-						canvas.fill_text(15.0 + x, y, &line, &paint);
-						canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
-
-						y += font_size as f32 * 2.0 + 40.0;
-					}
-
-
-                    //paint.set_font_blur(1.0);
-                    //canvas.set_fill_color(Color::rgbaf(0.0, 0.0, 0.0, 0.3));
-                    //canvas.text(15.0 + x, 80.0 + y, text);
-
-                    //canvas.text(15.0 + x, 30.0 + bounds[3] - bounds[1], "qpowieqpwoei");
-                }
-
-
-                /*
-                canvas.set_line_cap(LineCap::Butt);
-                canvas.set_line_join(LineJoin::Miter);
-                canvas.begin_path();
-                canvas.move_to(200.0, 100.0);
-                canvas.line_to(350.0, 100.0);
-                canvas.line_to(500.0, 100.0 + (x.sin() * 50.0));
-                canvas.stroke();
-
-                canvas.set_line_cap(LineCap::Round);
-                canvas.set_line_join(LineJoin::Round);
-                canvas.begin_path();
-                canvas.move_to(200.0, 200.0);
-                canvas.line_to(350.0, 200.0);
-                canvas.line_to(500.0, 200.0 + (x.sin() * 50.0));
-                canvas.stroke();
-
-                canvas.set_line_cap(LineCap::Square);
-                canvas.set_line_join(LineJoin::Bevel);
-                canvas.begin_path();
-                canvas.move_to(200.0, 300.0);
-                canvas.line_to(350.0, 300.0);
-                canvas.line_to(500.0, 300.0 + (x.sin() * 50.0));
-                canvas.stroke();
-                */
-
-                /*
-                canvas.begin_path();
-                canvas.rect(10.0, 20.0, 200.0, 100.0);
-                canvas.set_stroke_width(10.0);
-                canvas.stroke();
-                */
-
-                //canvas.rounded_rect(10.0, 20.0, 200.0, 100.0, 10.0);
-                //canvas.rounded_rect_varying(10.0, 20.0, 200.0, 100.0, 5.0, 10.0, 15.0, 20.0);
-                //canvas.rounded_rect_varying(20.0 + (x.sin() * 10.0), 20.0, 200.0, 100.0, 5.0, 10.0, 15.0, 20.0);
-                //canvas.rect(50.0, 50.0, 300.0, 400.0);
-
-                /*
-                canvas.begin_path();
-                canvas.move_to(100.0, 100.0);
-                canvas.line_to(300.0, 150.0);
-                canvas.line_to(300.0, 350.0);
-                canvas.line_to(100.0, 300.0);
-                canvas.fill();
-                */
-
-                //canvas.rotate(math::Deg(x));
-                //canvas.translate(10.0, 20.0);
-                //canvas.skew_x(math::Deg(10.0));
-
-                // Gradients
-                /*
-                if false {
-                    let stroke_paint = Paint::linear_gradient(50.0, 50.0, 150.0, 150.0, Color::rgb(255, 0, 0), Color::rgb(0, 0, 0));
-
-                    canvas.begin_path();
-                    canvas.rounded_rect(50.0, 50.0, 100.0, 100.0, 10.0);
-                    canvas.fill(&Paint::linear_gradient(50.0, 50.0, 150.0, 150.0, Color::rgb(0, 0, 0), Color::rgb(255, 0, 0)));
-                    canvas.stroke(&stroke_paint);
-
-                    canvas.save();
-                    canvas.translate(170.0, 50.0);
-                    canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 100.0, 100.0);
-                    canvas.fill(&Paint::box_gradient(0.0, 0.0, 100.0, 100.0, 0.0, 20.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0)));
-                    canvas.restore();
-
-                    canvas.save();
-                    canvas.translate(290.0, 50.0);
-                    canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 100.0, 100.0);
-                    canvas.fill(&Paint::radial_gradient(50.0, 50.0, 0.0, 50.0, Color::rgb(0, 0, 0), Color::rgb(255, 255, 255)));
-                    canvas.restore();
-                }*/
-
-                // arc_to test
-
-                if false {
-                    let mut path = Path::new();
-                    path.move_to(20.0, 20.0);
-                    path.line_to(100.0, 20.0);
-                    path.arc_to(150.0, 20.0, 150.0, 70.0, 50.0);
-                    path.line_to(150.0, 120.0);
-
-                    canvas.save();
-                    canvas.translate(10.0, 10.0);
-
-                    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
-                    canvas.restore();
+					canvas.fill_text(15.0, 220.0, &text, &paint);
+                    //canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
                 }
 
                 // Image

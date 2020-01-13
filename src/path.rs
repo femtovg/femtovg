@@ -4,7 +4,7 @@ use std::f32::consts::PI;
 use bitflags::bitflags;
 
 use crate::math::{self, Transform2D};
-use crate::{Vertex, Contour, Winding, LineCap, LineJoin};
+use crate::{Vertex, Winding, LineCap, LineJoin};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
@@ -16,6 +16,19 @@ enum Command {
     BezierTo(f32, f32, f32, f32, f32, f32),
     Close,
     Winding(Winding)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Convexity {
+    Cocave,
+    Convex,
+    Unknown
+}
+
+impl Default for Convexity {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 bitflags! {
@@ -54,6 +67,20 @@ impl Point {
 
         area * 0.5
     }
+}
+
+// TODO: We need an iterator for the contour points that loops by chunks of 2
+
+#[derive(Clone, Default, Debug)]
+pub struct Contour {
+    first: usize,
+    count: usize,
+    closed: bool,
+    bevel: usize,
+    pub(crate) fill: Vec<Vertex>,
+    pub(crate) stroke: Vec<Vertex>,
+    winding: Winding,
+    pub(crate) convexity: Convexity
 }
 
 #[derive(Clone, Default)]
@@ -538,7 +565,7 @@ impl CachedPath {
         //self.cache.verts.clear();
         //self.cache.verts.reserve(vertex_count);
 
-        let convex = self.contours.len() == 1 && self.contours[0].convex;
+        let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
         for contour in &mut self.contours {
             let points = &self.points[contour.first..(contour.first + contour.count)];
@@ -660,7 +687,7 @@ impl CachedPath {
                         points[i-1]
                     };
 
-                    if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
+                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
                             round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
                         } else {
@@ -696,7 +723,7 @@ impl CachedPath {
                     p1 = points[i];
                     p0 = points[i-1];
 
-                    if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
+                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
                             round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
                         } else {
@@ -792,7 +819,7 @@ impl CachedPath {
                 }
             }
 
-            contour.convex = nleft == contour.count;
+            contour.convexity = if nleft == contour.count { Convexity::Convex } else { Convexity::Cocave };
         }
     }
 }

@@ -17,8 +17,8 @@ use image::DynamicImage;
 // TODO: Remove let shader_header = "#version 100"; we only support gles2
 
 use super::{Renderer, TextureType};
-use super::super::{Vertex, Paint, Contour, Scissor, ImageId, ImageFlags};
-
+use crate::{Vertex, Paint, Scissor, ImageId, ImageFlags};
+use crate::path::{Contour, Convexity};
 use crate::math::Transform2D;
 
 mod gl {
@@ -290,7 +290,7 @@ impl Renderer for GlRenderer {
         call.contour_count = contours.len();
         call.image = paint.image();
 
-        if contours.len() == 1 && contours[0].convex {
+        if contours.len() == 1 && contours[0].convexity == Convexity::Convex {
             call.call_type = CallType::ConvexFill;
             call.triangle_count = 0; // Bounding box fill quad not needed for convex fill
         }
