@@ -2,7 +2,7 @@
 use std::str;
 use std::ptr;
 use std::mem;
-use std::ffi::{NulError, CString, CStr, c_void};
+use std::ffi::{NulError, CStr, c_void};
 use std::{error::Error, fmt};
 
 use fnv::FnvHashMap;
@@ -26,6 +26,9 @@ mod gl {
 }
 
 use gl::types::*;
+
+mod shader;
+use shader::{Shader, ShaderError};
 
 mod uniform_array;
 use uniform_array::UniformArray;
@@ -103,7 +106,7 @@ pub struct GlRenderer {
     stencil_strokes: bool,
     is_opengles: bool,
     view: [f32; 2],
-    shader: GlShader,
+    shader: Shader,
     vert_arr: GLuint,
     vert_buff: GLuint,
     uniforms: Vec<UniformArray>,
@@ -123,16 +126,16 @@ impl GlRenderer {
         let debug = true;
         let stencil_strokes = true;
 
-        let shader_header = "#version 100";
-
         gl::load_with(load_fn);
+        
+        let frag_shader_src = include_str!("gl/main-fs.glsl");
+        let vert_shader_src = include_str!("gl/main-vs.glsl");
 
         let shader = if antialias {
-            GlShader::new(shader_header, "#define EDGE_AA 1", FILL_VERTEX_SRC, FILL_FRAGMENT_SRC)?
+            Shader::new("#define EDGE_AA 1", vert_shader_src, frag_shader_src)?
         } else {
-            GlShader::new(shader_header, "", FILL_VERTEX_SRC, FILL_FRAGMENT_SRC)?
+            Shader::new("", vert_shader_src, frag_shader_src)?
         };
-
 
         let mut renderer = Self {
             antialias: antialias,
@@ -210,7 +213,7 @@ impl Renderer for GlRenderer {
     fn render_flush(&mut self) {
 
         unsafe {
-            gl::UseProgram(self.shader.prog);
+            self.shader.bind();
 
             gl::Enable(gl::CULL_FACE);
 
@@ -239,11 +242,11 @@ impl Renderer for GlRenderer {
 
             gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, 0 as *const c_void);
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
-
-            // Set view and texture just once per frame.
-            gl::Uniform1i(self.shader.loc_tex, 0);
-            gl::Uniform2fv(self.shader.loc_viewsize, 1, self.view.as_ptr());
         }
+        
+        // Set view and texture just once per frame.
+        self.shader.set_tex(0);
+        self.shader.set_view(self.view);
 
         self.check_error("render_flush prepare");
 
@@ -268,9 +271,10 @@ impl Renderer for GlRenderer {
 
             gl::Disable(gl::CULL_FACE);
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
-            gl::UseProgram(0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
+        
+        self.shader.unbind();
 
         self.check_error("render_flush done");
 
@@ -568,10 +572,6 @@ impl GlRenderer {
         uniforms.set_outer_col(paint.outer_color().premultiplied().to_array());
 
         let (scissor_ext, scissor_scale) = if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
-            //uniforms.scissor_ext[0] = 1.0;
-            //uniforms.scissor_ext[1] = 1.0;
-            //uniforms.scissor_scale[0] = 1.0;
-            //uniforms.scissor_scale[1] = 1.0;
             ([1.0, 1.0], [1.0, 1.0])
         } else {
             uniforms.set_scissor_mat(scissor.transform.inversed().to_mat3x4());
@@ -580,11 +580,7 @@ impl GlRenderer {
                 (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
                 (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
             ];
-
-            // uniforms.scissor_ext[0] = scissor.extent[0];
-            // uniforms.scissor_ext[1] = scissor.extent[1];
-            // uniforms.scissor_scale[0] = (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe;
-            // uniforms.scissor_scale[1] = (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe;
+            
             (scissor.extent, scissor_scale)
         };
 
@@ -770,11 +766,7 @@ impl GlRenderer {
     }
 
     fn set_uniforms(&self, offset: usize, image_id: Option<ImageId>) {
-        unsafe {
-            //gl::BindBufferRange(gl::UNIFORM_BUFFER, FRAG_BINDING, self.frag_buff, offset as isize, mem::size_of::<FragUniforms>() as isize);
-            gl::Uniform4fv(self.shader.loc_frag, UniformArray::size() as i32, self.uniforms[offset].as_ptr());
-        }
-
+        self.shader.set_config(UniformArray::size() as i32, self.uniforms[offset].as_ptr());
         self.check_error("set_uniforms uniforms");
 
         let tex = image_id.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
@@ -793,10 +785,6 @@ impl Drop for GlRenderer {
             unsafe { gl::DeleteTextures(1, &texture.tex); }
         }
 
-        //if self.frag_buff != 0 {
-        //    unsafe { gl::DeleteBuffers(1, &self.frag_buff); }
-        //}
-
         if self.vert_arr != 0 {
             unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
         }
@@ -807,143 +795,10 @@ impl Drop for GlRenderer {
     }
 }
 
-// TODO: Rename inner_col to inner_collor. Same for outer_col
-#[repr(C)]
-#[derive(Copy, Clone, Default, Debug)]
-struct FragUniforms {
-    scissor_mat: [f32; 12],
-    paint_mat: [f32; 12],
-    inner_col: [f32; 4],
-    outer_col: [f32; 4],
-    scissor_ext: [f32; 2],
-    scissor_scale: [f32; 2],
-    extent: [f32; 2],
-    radius: f32,
-    feather: f32,
-    stroke_mult: f32,
-    stroke_thr: f32,
-    tex_type: i32,
-    shader_type: i32,
-    padding: [f32; 20]// Padding to 256
-}
-
-struct GlShader {
-    prog: GLuint,
-    vert: GLuint,
-    frag: GLuint,
-    loc_viewsize: GLint,
-    loc_tex: GLint,
-    loc_frag: GLint,
-}
-
-impl GlShader {
-
-    pub fn new(header: &str, opts: &str, vertex_src: &str, fragment_src: &str) -> Result<Self, GlRendererError> {
-
-        let vertex_src = CString::new(format!("{}\n{}{}", header, opts, vertex_src))?;
-        let fragment_src = CString::new(format!("{}\n{}\n{}", header, opts, fragment_src))?;
-
-        let mut shader = unsafe {
-            GlShader {
-                prog: gl::CreateProgram(),
-                vert: gl::CreateShader(gl::VERTEX_SHADER),
-                frag: gl::CreateShader(gl::FRAGMENT_SHADER),
-                loc_viewsize: Default::default(),
-                loc_tex: Default::default(),
-                loc_frag: Default::default(),
-            }
-        };
-
-        // Compile and link
-        unsafe {
-            gl::ShaderSource(shader.vert, 1, &vertex_src.as_ptr(), ptr::null());
-            gl::CompileShader(shader.vert);
-            Self::check_shader_ok(shader.vert, "vertex")?;
-
-            gl::ShaderSource(shader.frag, 1, &fragment_src.as_ptr(), ptr::null());
-            gl::CompileShader(shader.frag);
-            Self::check_shader_ok(shader.frag, "fragment")?;
-
-            gl::AttachShader(shader.prog, shader.vert);
-            gl::AttachShader(shader.prog, shader.frag);
-
-            gl::BindAttribLocation(shader.prog, 0, CString::new("vertex").unwrap().as_ptr());
-            gl::BindAttribLocation(shader.prog, 1, CString::new("tcoord").unwrap().as_ptr());
-
-            gl::LinkProgram(shader.prog);
-
-            let mut success = i32::from(gl::FALSE);
-            gl::GetProgramiv(shader.prog, gl::LINK_STATUS, &mut success);
-
-            if success != i32::from(gl::TRUE) {
-                let mut log_length = 0;
-                gl::GetProgramiv(shader.prog, gl::INFO_LOG_LENGTH, &mut log_length);
-
-                let mut info_log = Vec::with_capacity(log_length as usize);
-                info_log.set_len((log_length as usize) - 1);
-
-                gl::GetProgramInfoLog(shader.prog, log_length, ptr::null_mut(), info_log.as_mut_ptr() as *mut GLchar);
-
-                return Err(match str::from_utf8(&info_log) {
-                    Ok(msg) => GlRendererError::ProgramLinkError(format!("{}", msg)),
-                    Err(err) => GlRendererError::ProgramLinkError(format!("{}", err)),
-                });
-            }
-        }
-
-        // Uniform locations
-        unsafe {
-            shader.loc_viewsize = gl::GetUniformLocation(shader.prog, CString::new("viewSize").unwrap().as_ptr());
-            shader.loc_tex = gl::GetUniformLocation(shader.prog, CString::new("tex").unwrap().as_ptr());
-            shader.loc_frag = gl::GetUniformLocation(shader.prog, CString::new("frag").unwrap().as_ptr());
-        }
-
-        Ok(shader)
-    }
-
-    fn check_shader_ok(shader: GLuint, stage: &str) -> Result<(), GlRendererError> {
-        let mut success = i32::from(gl::FALSE);
-
-        unsafe { gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success); }
-
-        if success != i32::from(gl::TRUE) {
-            let mut log_length = 0;
-
-            let info_log = unsafe {
-                gl::GetShaderiv(shader, gl::INFO_LOG_LENGTH, &mut log_length);
-
-                let mut info_log = Vec::with_capacity(log_length as usize);
-                info_log.set_len((log_length as usize) - 1);
-
-                gl::GetShaderInfoLog(shader, log_length, ptr::null_mut(), info_log.as_mut_ptr() as *mut GLchar);
-
-                info_log
-            };
-
-            Err(match str::from_utf8(&info_log) {
-                Ok(msg) => GlRendererError::ShaderCompileError(format!("{} {}", stage, msg)),
-                Err(err) => GlRendererError::ShaderCompileError(format!("{} {}", stage, err)),
-            })
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl Drop for GlShader {
-    fn drop(&mut self) {
-        unsafe {
-            gl::DeleteProgram(self.prog);
-            gl::DeleteShader(self.frag);
-            gl::DeleteShader(self.vert);
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum GlRendererError {
     ShaderCompileError(String),
-    ProgramLinkError(String),
+    ShaderError(ShaderError),
     GeneralError(String)
 }
 
@@ -959,148 +814,10 @@ impl From<NulError> for GlRendererError {
     }
 }
 
-impl Error for GlRendererError {}
-
-const FILL_VERTEX_SRC: &str = r#"
-uniform vec2 viewSize;
-
-attribute vec2 vertex;
-attribute vec2 tcoord;
-
-varying vec2 ftcoord;
-varying vec2 fpos;
-
-void main(void) {
-    ftcoord = tcoord;
-    fpos = vertex;
-    gl_Position = vec4(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0, 1);
-}
-"#;
-
-const FILL_FRAGMENT_SRC: &str = r#"
-precision mediump float;
-
-#define UNIFORMARRAY_SIZE 11
-
-uniform vec4 frag[UNIFORMARRAY_SIZE];
-
-#define scissorMat mat3(frag[0].xyz, frag[1].xyz, frag[2].xyz)
-#define paintMat mat3(frag[3].xyz, frag[4].xyz, frag[5].xyz)
-#define innerCol frag[6]
-#define outerCol frag[7]
-#define scissorExt frag[8].xy
-#define scissorScale frag[8].zw
-#define extent frag[9].xy
-#define radius frag[9].z
-#define feather frag[9].w
-#define strokeMult frag[10].x
-#define strokeThr frag[10].y
-#define texType int(frag[10].z)
-#define shaderType int(frag[10].w)
-
-/*
-layout(std140) uniform frag {
-    mat3 scissorMat;
-    mat3 paintMat;
-    vec4 innerCol;
-    vec4 outerCol;
-    vec2 scissorExt;
-    vec2 scissorScale;
-    vec2 extent;
-    float radius;
-    float feather;
-    float strokeMult;
-    float strokeThr;
-    int texType;
-    int shader_type;
-};*/
-
-uniform sampler2D tex;
-
-varying vec2 ftcoord;
-varying vec2 fpos;
-
-float sdroundrect(vec2 pt, vec2 ext, float rad) {
-    vec2 ext2 = ext - vec2(rad,rad);
-    vec2 d = abs(pt) - ext2;
-    return min(max(d.x,d.y),0.0) + length(max(d,0.0)) - rad;
-}
-
-// Scissoring
-float scissorMask(vec2 p) {
-    vec2 sc = (abs((scissorMat * vec3(p,1.0)).xy) - scissorExt);
-    sc = vec2(0.5,0.5) - sc * scissorScale;
-    return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
-}
-
-#ifdef EDGE_AA
-// Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
-float strokeMask() {
-    return min(1.0, (1.0-abs(ftcoord.x*2.0-1.0))*strokeMult) * min(1.0, ftcoord.y);
-    //TODO: Using this smoothstep preduces maybe better results when combined with fringe_width of 2, but it may look blurrier to some people
-    //maybe this should be controlled via flag
-    //return smoothstep(0.0, 1.0, (1.0-abs(ftcoord.x*2.0-1.0))*strokeMult) * smoothstep(0.0, 1.0, ftcoord.y);
-}
-#endif
-
-void main(void) {
-
-    vec4 result;
-
-    float scissor = scissorMask(fpos);
-
-#ifdef EDGE_AA
-    float strokeAlpha = strokeMask();
-
-    if (strokeAlpha < strokeThr) discard;
-#else
-    float strokeAlpha = 1.0;
-#endif
-
-    if (shaderType == 0) {
-        // Gradient
-
-        // Calculate gradient color using box gradient
-        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
-
-        float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-        vec4 color = mix(innerCol,outerCol,d);
-
-        // Combine alpha
-        color *= strokeAlpha * scissor;
-        result = color;
-    } else if (shaderType == 1) {
-        // Image
-
-        // Calculate color from texture
-        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
-
-        vec4 color = texture2D(tex, pt);
-
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
-
-        // Apply color tint and alpha.
-        color *= innerCol;
-
-        // Combine alpha
-        color *= strokeAlpha * scissor;
-
-        result = color;
-    } else if (shaderType == 2) {
-        // Stencil fill
-        result = vec4(1,1,1,1);
-    } else if (shaderType == 3) {
-        // Textured tris
-        vec4 color = texture2D(tex, ftcoord);
-
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
-
-        color *= scissor;
-        result = color * innerCol;
+impl From<ShaderError> for GlRendererError {
+    fn from(error: ShaderError) -> Self {
+        GlRendererError::ShaderError(error)
     }
-
-    gl_FragColor = result;
 }
-"#;
+
+impl Error for GlRendererError {}
