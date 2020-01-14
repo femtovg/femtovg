@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::GlRenderer, Path, math};
+use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::{gpu_stencil::{GpuStencil, OpenGl}, Void}, Path, math};
 
 fn main() {
     let el = EventLoop::new();
@@ -18,8 +18,12 @@ fn main() {
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (1, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
-    let renderer = GlRenderer::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer);
+    //let renderer = GlRenderer::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+
+    //let backend = Void::new();
+    let stencil_backend = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+    let backend = GpuStencil::new(stencil_backend);
+    let mut canvas = Canvas::new(backend);
 
     //canvas.begin_frame(800.0, 600.0, 1.0);
     //draw_rects(&mut canvas, 15.0, 15.0);
@@ -93,7 +97,8 @@ fn main() {
 
                 let t = start.elapsed().as_secs_f32();
 
-                canvas.begin_frame(size.width as f32, size.height as f32, dpi_factor as f32);
+                canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
+                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgb(255, 255, 255));
 
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);

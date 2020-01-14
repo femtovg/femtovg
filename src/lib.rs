@@ -185,17 +185,27 @@ impl Canvas {
         canvas
     }
 
+    pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
+        self.renderer.set_size(width, height, dpi);
+    }
+
+    pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
+        self.renderer.clear_rect(x, y, width, height, color);
+    }
+
+    /*
     pub fn begin_frame(&mut self, window_width: f32, window_height: f32, device_px_ratio: f32) {
-        self.state_stack.clear();
-        self.save();
 
         self.set_device_pixel_ratio(device_px_ratio);
 
-        self.renderer.render_viewport(window_width, window_height);
-    }
+        //self.renderer.render_viewport(window_width, window_height);
+    }*/
 
     pub fn end_frame(&mut self) {
-        self.renderer.render_flush();
+        self.renderer.flush();
+
+        self.state_stack.clear();
+        self.save();
     }
 
     // State Handling
@@ -394,84 +404,62 @@ impl Canvas {
 
     /// Fills the current path with current fill style.
     pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
-        //self.flatten_paths(&path.commands);
-
-        let mut cache = CachedPath::new(path, self.state().transform, self.tess_tol, self.dist_tol);
-
         let mut paint = paint.clone();
+        let mut path = path.clone();
 
-        if self.renderer.edge_antialiasing() && paint.shape_anti_alias() {
-            //self.expand_fill(&mut cache, self.fringe_width, LineJoin::Miter, 2.4);
-            cache.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
-        } else {
-            cache.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
-        }
+        // Transform path
+        path.transform(self.state().transform);
 
+        // Transform paint
         let mut transform = paint.transform();
         transform.multiply(&self.state().transform);
         paint.set_transform(transform);
 
         // Apply global alpha
-        let mut inner_color = paint.inner_color();
-        inner_color.a *= self.state().alpha;
-        paint.set_inner_color(inner_color);
+        paint.inner_color_mut().a *= self.state().alpha;
+        paint.outer_color_mut().a *= self.state().alpha;
 
-        let mut outer_color = paint.outer_color();
-        outer_color.a *= self.state().alpha;
-        paint.set_outer_color(outer_color);
+        let scissor = self.state().scissor;
 
-        let scissor = &self.state_stack.last().unwrap().scissor;
-
-        self.renderer.render_fill(&paint, scissor, self.fringe_width, cache.bounds, &cache.contours);
+        //self.renderer.fill(&paint, scissor, self.fringe_width, cache.bounds, &cache.contours);
+        self.renderer.fill(&paint, &scissor, &path);
     }
 
     /// Fills the current path with current stroke style.
     pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
         let scale = self.state().transform.average_scale();
-        let mut stroke_width = (paint.stroke_width() * scale).max(0.0).min(200.0);
-
-        let mut cache = CachedPath::new(path, self.state().transform, self.tess_tol, self.dist_tol);
 
         let mut paint = paint.clone();
+        let mut path = path.clone();
 
-        if stroke_width < self.fringe_width {
-            // If the stroke width is less than pixel size, use alpha to emulate coverage.
-            // Since coverage is area, scale by alpha*alpha.
-            let alpha = (stroke_width / self.fringe_width).max(0.0).min(1.0);
+        // Transform path
+        path.transform(self.state().transform);
 
-            let mut inner_color = paint.inner_color();
-            inner_color.a *= alpha*alpha;
-            paint.set_inner_color(inner_color);
-
-            let mut outer_color = paint.outer_color();
-            outer_color.a *= alpha*alpha;
-            paint.set_outer_color(outer_color);
-
-            stroke_width = self.fringe_width;
-        }
-
+        // Transform paint
         let mut transform = paint.transform();
         transform.multiply(&self.state().transform);
         paint.set_transform(transform);
 
-        // Apply global alpha
-        let mut inner_color = paint.inner_color();
-        inner_color.a *= self.state().alpha;
-        paint.set_inner_color(inner_color);
+        // Scale stroke width by current transform scale
+        paint.set_stroke_width((paint.stroke_width() * scale).max(0.0).min(200.0));
 
-        let mut outer_color = paint.outer_color();
-        outer_color.a *= self.state().alpha;
-        paint.set_outer_color(outer_color);
+        if paint.stroke_width() < self.fringe_width {
+            // If the stroke width is less than pixel size, use alpha to emulate coverage.
+            // Since coverage is area, scale by alpha*alpha.
+            let alpha = (paint.stroke_width() / self.fringe_width).max(0.0).min(1.0);
 
-        if self.renderer.edge_antialiasing() && paint.shape_anti_alias() {
-            cache.expand_stroke(stroke_width * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
-        } else {
-            cache.expand_stroke(stroke_width * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
+            paint.inner_color_mut().a *= alpha*alpha;
+            paint.outer_color_mut().a *= alpha*alpha;
+            paint.set_stroke_width(self.fringe_width)
         }
 
-        let scissor = &self.state_stack.last().unwrap().scissor;
+        // Apply global alpha
+        paint.inner_color_mut().a *= self.state().alpha;
+        paint.outer_color_mut().a *= self.state().alpha;
 
-        self.renderer.render_stroke(&paint, scissor, self.fringe_width, stroke_width, &cache.contours);
+        let scissor = self.state().scissor;
+
+        self.renderer.stroke(&paint, &scissor, &path);
     }
 
     // Text
@@ -570,7 +558,7 @@ impl Canvas {
 
             let scissor = &self.state_stack.last().unwrap().scissor;
 
-            self.renderer.render_triangles(&paint, scissor, &verts);
+            self.renderer.triangles(&paint, scissor, &verts);
         }
     }
 

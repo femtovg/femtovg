@@ -206,12 +206,20 @@ impl Paint {
         self.inner_color = color;
     }
 
+    pub fn inner_color_mut(&mut self) -> &mut Color {
+        &mut self.inner_color
+    }
+
     pub fn outer_color(&self) -> Color {
         self.outer_color
     }
 
     pub fn set_outer_color(&mut self, color: Color) {
         self.outer_color = color;
+    }
+
+    pub fn outer_color_mut(&mut self) -> &mut Color {
+        &mut self.outer_color
     }
 
     pub fn image(&self) -> Option<ImageId> {

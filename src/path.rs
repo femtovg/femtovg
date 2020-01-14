@@ -20,7 +20,7 @@ enum Command {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Convexity {
-    Cocave,
+    Concave,
     Convex,
     Unknown
 }
@@ -67,20 +67,6 @@ impl Point {
 
         area * 0.5
     }
-}
-
-// TODO: We need an iterator for the contour points that loops by chunks of 2
-
-#[derive(Clone, Default, Debug)]
-pub struct Contour {
-    first: usize,
-    count: usize,
-    closed: bool,
-    bevel: usize,
-    pub(crate) fill: Vec<Vertex>,
-    pub(crate) stroke: Vec<Vertex>,
-    winding: Winding,
-    pub(crate) convexity: Convexity
 }
 
 #[derive(Clone, Default)]
@@ -338,6 +324,26 @@ impl Path {
         self
     }
 
+    pub fn transform(&mut self, transform: Transform2D) {
+        // Convert commands to a set of contours
+        for cmd in &mut self.commands {
+            match cmd {
+                Command::MoveTo(x, y) => {
+                    transform.transform_point(x, y, *x, *y);
+                }
+                Command::LineTo(x, y) => {
+                    transform.transform_point(x, y, *x, *y);
+                }
+                Command::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                    transform.transform_point(c1x, c1y, *c1x, *c1y);
+					transform.transform_point(c2x, c2y, *c2x, *c2y);
+					transform.transform_point(x, y, *x, *y);
+                }
+                _ => ()
+            }
+        }
+    }
+
     fn append_commands(&mut self, commands: &[Command]) {
         for cmd in commands.iter() {
             match cmd {
@@ -361,6 +367,20 @@ impl Path {
     }
 }
 
+// TODO: We need an iterator for the contour points that loops by chunks of 2
+
+#[derive(Clone, Default, Debug)]
+pub struct Contour {
+    first: usize,
+    count: usize,
+    closed: bool,
+    bevel: usize,
+    pub(crate) fill: Vec<Vertex>,
+    pub(crate) stroke: Vec<Vertex>,
+    winding: Winding,
+    pub(crate) convexity: Convexity
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct CachedPath {
     pub(crate) contours: Vec<Contour>,
@@ -370,7 +390,7 @@ pub struct CachedPath {
 
 impl CachedPath {
 
-    pub fn new(path: &Path, transform: Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
+    pub fn new(path: &Path, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = CachedPath::default();
 
         // Convert commands to a set of contours
@@ -378,31 +398,14 @@ impl CachedPath {
             match cmd {
                 Command::MoveTo(x, y) => {
                     cache.add_contour();
-
-                    let mut tx = *x;
-                    let mut ty = *y;
-
-                    transform.transform_point(&mut tx, &mut ty, *x, *y);
-
-                    cache.add_point(tx, ty, PointFlags::CORNER, dist_tol);
+                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Command::LineTo(x, y) => {
-                    let mut tx = *x;
-                    let mut ty = *y;
-
-                    transform.transform_point(&mut tx, &mut ty, *x, *y);
-
-                    cache.add_point(tx, ty, PointFlags::CORNER, dist_tol);
+                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Command::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.last_point() {
-                        let (mut tc1x, mut tc1y, mut tc2x, mut tc2y, mut tx, mut ty) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-
-                        transform.transform_point(&mut tc1x, &mut tc1y, *c1x, *c1y);
-                        transform.transform_point(&mut tc2x, &mut tc2y, *c2x, *c2y);
-                        transform.transform_point(&mut tx, &mut ty, *x, *y);
-
-                        cache.tesselate_bezier(last.x, last.y, tc1x, tc1y, tc2x, tc2y, tx, ty, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                        cache.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Command::Close => {
@@ -817,7 +820,7 @@ impl CachedPath {
                 }
             }
 
-            contour.convexity = if nleft == contour.count { Convexity::Convex } else { Convexity::Cocave };
+            contour.convexity = if nleft == contour.count { Convexity::Convex } else { Convexity::Concave };
         }
     }
 }
