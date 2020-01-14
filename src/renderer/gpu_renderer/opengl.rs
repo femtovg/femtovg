@@ -7,7 +7,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::DynamicImage;
 
-use super::{Command, GpuStencilBackend, Flavor, Params};
+use super::{Command, GpuRendererBackend, Flavor, Params};
 use crate::{Color, ImageFlags, Vertex};
 use crate::renderer::{ImageId, TextureType};
 
@@ -267,7 +267,7 @@ impl OpenGl {
     }
 }
 
-impl GpuStencilBackend for OpenGl {
+impl GpuRendererBackend for OpenGl {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             gl::Viewport(x as i32, y as i32, width as i32, height as i32);

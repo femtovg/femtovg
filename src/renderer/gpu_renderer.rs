@@ -8,7 +8,7 @@ use crate::renderer::{TextureType, ImageId, Renderer};
 mod opengl;
 pub use opengl::OpenGl;
 
-pub trait GpuStencilBackend {
+pub trait GpuRendererBackend {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color);
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
@@ -69,20 +69,20 @@ impl Command {
     }
 }
 
-pub struct GpuStencil {
+pub struct GpuRenderer<T> {
     stencil_strokes: bool,
-    backend: Box<dyn GpuStencilBackend>,
+    backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
     fringe_width: f32
 }
 
-impl GpuStencil {
+impl<T: GpuRendererBackend> GpuRenderer<T> {
 
-    pub fn new<R: GpuStencilBackend + 'static>(backend: R) -> Self {
+    pub fn new(backend: T) -> Self {
         Self {
             stencil_strokes: true,
-            backend: Box::new(backend),
+            backend: backend,
             cmds: Default::default(),
             verts: Default::default(),
             fringe_width: 1.0
@@ -91,7 +91,7 @@ impl GpuStencil {
 
 }
 
-impl Renderer for GpuStencil {
+impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     fn flush(&mut self) {
         self.backend.render(&self.verts, &self.cmds);
         self.cmds.clear();
@@ -119,7 +119,7 @@ impl Renderer for GpuStencil {
         }
 
         let flavor = if cache.contours.len() == 1 && cache.contours[0].convexity == Convexity::Convex {
-            let params = Params::new(self.backend.as_mut(), paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let params = Params::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
             Flavor::ConvexFill { params }
         } else {
@@ -127,7 +127,7 @@ impl Renderer for GpuStencil {
             fill_params.stroke_thr = -1.0;
             fill_params.shader_type = ShaderType::Simple.to_i32() as f32;//TODO to_f32 method
 
-            let stroke_params = Params::new(self.backend.as_mut(), paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let stroke_params = Params::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
             Flavor::ConcaveFill { fill_params, stroke_params }
         };
@@ -179,10 +179,10 @@ impl Renderer for GpuStencil {
             cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
         }
 
-        let params = Params::new(self.backend.as_mut(), paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let params = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if self.stencil_strokes {
-            let pass2 = Params::new(self.backend.as_mut(), paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let pass2 = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
             Flavor::StencilStroke { pass1: params, pass2 }
         } else {
@@ -210,7 +210,7 @@ impl Renderer for GpuStencil {
     }
 
     fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {
-        let mut params = Params::new(self.backend.as_mut(), paint, scissor, 1.0, 1.0, -1.0);
+        let mut params = Params::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
         params.shader_type = ShaderType::Img.to_i32() as f32; // TODO:
 
         let mut cmd = Command::new(Flavor::Triangles { params });
@@ -277,7 +277,7 @@ pub struct Params {
 
 impl Params {
 
-    fn new(backend: &dyn GpuStencilBackend, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
+    fn new<T: GpuRendererBackend>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
 
         let mut params = Self::default();
 

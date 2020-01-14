@@ -7,7 +7,7 @@ use crate::{Color, Paint, Path, Scissor, ImageId, Vertex, ImageFlags};
 mod void;
 pub use void::Void;
 
-pub mod gpu_stencil;
+pub mod gpu_renderer;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {
