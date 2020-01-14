@@ -15,10 +15,9 @@ use super::{ImageId, Atlas, Renderer, ImageFlags, renderer::TextureType};
 use freetype as ft;
 
 mod shaper;
-use shaper::ShaperFace;
 
 // TODO: Color fonts
-// TODO: Stroking letters
+// TODO: Letter spacing
 
 const TEXTURE_SIZE: u32 = 512;
 const GLYPH_PADDING: u32 = 2;
@@ -240,8 +239,7 @@ impl FontManager {
             let itw = 1.0 / TEXTURE_SIZE as f32;
             let ith = 1.0 / TEXTURE_SIZE as f32;
 
-            let shaper_face = ShaperFace::new(&face.data)?;
-            let glyph_positions = shaper_face.shape(&text[str_range], style.size)?;
+            let glyph_positions = shaper::shape(&face.ft_face, &text[str_range])?;
 
             // No subpixel positioning / full hinting
 
