@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::{gpu_renderer::{GpuRenderer, OpenGl}, Void}, Path, math};
+use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::{gpu_renderer::GpuRenderer, Void}, Path, math};
 
 fn main() {
     let el = EventLoop::new();
@@ -19,8 +19,7 @@ fn main() {
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     //let backend = Void::new();
-    let gl_backend = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
-    let backend = GpuRenderer::new(gl_backend);
+    let backend = GpuRenderer::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
     let mut canvas = Canvas::new(backend);
 
     //canvas.begin_frame(800.0, 600.0, 1.0);

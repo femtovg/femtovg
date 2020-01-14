@@ -1,4 +1,6 @@
 
+use std::ffi::c_void;
+
 use image::DynamicImage;
 
 use crate::{ImageFlags, Vertex, Paint, Scissor, Path, Color, LineJoin, Transform2D};
@@ -80,7 +82,6 @@ pub struct GpuRenderer<T> {
 }
 
 impl<T: GpuRendererBackend> GpuRenderer<T> {
-
     pub fn new(backend: T) -> Self {
         Self {
             stencil_strokes: true,
@@ -90,7 +91,12 @@ impl<T: GpuRendererBackend> GpuRenderer<T> {
             fringe_width: 1.0
         }
     }
+}
 
+impl GpuRenderer<OpenGl> {
+    pub fn with_gl<F>(load_fn: F) -> Self where F: Fn(&'static str) -> *const c_void {
+        Self::new(OpenGl::new(load_fn).expect("Cannot create opengl backend"))
+    }
 }
 
 impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
