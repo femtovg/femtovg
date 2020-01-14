@@ -5,7 +5,7 @@ use bitflags::bitflags;
 
 use crate::math;
 use crate::renderer::Vertex;
-use crate::path::{Path, Command};
+use crate::path::{Path, Verb};
 use crate::{Winding, LineCap, LineJoin};
 
 // TODO: We need an iterator for the contour points that loops by chunks of 2
@@ -86,24 +86,24 @@ impl GpuPath {
         let mut cache = GpuPath::default();
 
         // Convert commands to a set of contours
-        for cmd in path.commands() {
-            match cmd {
-                Command::MoveTo(x, y) => {
+        for verb in path.verbs() {
+            match verb {
+                Verb::MoveTo(x, y) => {
                     cache.add_contour();
                     cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
-                Command::LineTo(x, y) => {
+                Verb::LineTo(x, y) => {
                     cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
-                Command::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.last_point() {
                         cache.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
-                Command::Close => {
+                Verb::Close => {
                     cache.last_contour().map(|contour| contour.closed = true);
                 }
-                Command::Winding(winding) => {
+                Verb::Winding(winding) => {
                     cache.last_contour().map(|contour| contour.winding = *winding);
                 }
             }

@@ -10,7 +10,7 @@ const KAPPA90: f32 = 0.5522847493;
 //TODO: We have commands elsewhere - rename this to verb
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-pub enum Command {
+pub enum Verb {
     MoveTo(f32, f32),
     LineTo(f32, f32),
     BezierTo(f32, f32, f32, f32, f32, f32),
@@ -20,9 +20,9 @@ pub enum Command {
 
 #[derive(Clone, Default)]
 pub struct Path {
-    commands: Vec<Command>,
-    commandx: f32,
-    commandy: f32,
+    verbs: Vec<Verb>,
+    lastx: f32,
+    lasty: f32,
     dist_tol: f32
 }
 
@@ -36,35 +36,35 @@ impl Path {
 
     /// Returns iterator over Commands
     //TODO: Rename this to verbs()
-    pub fn commands(&self) -> impl Iterator<Item = &Command> {
-        self.commands.iter()
+    pub fn verbs(&self) -> impl Iterator<Item = &Verb> {
+        self.verbs.iter()
     }
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) -> &mut Self {
-        self.append_commands(&[Command::MoveTo(x, y)]);
+        self.append(&[Verb::MoveTo(x, y)]);
         self
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) -> &mut Self {
-        self.append_commands(&[Command::LineTo(x, y)]);
+        self.append(&[Verb::LineTo(x, y)]);
         self
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) -> &mut Self {
-        self.append_commands(&[Command::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+        self.append(&[Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
         self
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) -> &mut Self {
-        let x0 = self.commandx;
-        let y0 = self.commandy;
+        let x0 = self.lastx;
+        let y0 = self.lasty;
 
-        self.append_commands(&[
-            Command::BezierTo(
+        self.append(&[
+            Verb::BezierTo(
                 x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0),
                 x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y),
                 x, y
@@ -76,13 +76,13 @@ impl Path {
 
     /// Closes current sub-path with a line segment.
     pub fn close(&mut self) -> &mut Self {
-        self.append_commands(&[Command::Close]);
+        self.append(&[Verb::Close]);
         self
     }
 
     /// Sets the current sub-path winding, see Winding and Solidity
     pub fn set_winding(&mut self, winding: Winding) -> &mut Self {
-        self.append_commands(&[Command::Winding(winding)]);
+        self.append(&[Verb::Winding(winding)]);
         self
     }
 
@@ -128,10 +128,10 @@ impl Path {
             let tany = dx*r*kappa;
 
             if i == 0 {
-                let first_move = if !self.commands.is_empty() { Command::LineTo(x, y) } else { Command::MoveTo(x, y) };
+                let first_move = if !self.verbs.is_empty() { Verb::LineTo(x, y) } else { Verb::MoveTo(x, y) };
                 commands.push(first_move);
             } else {
-                commands.push(Command::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
+                commands.push(Verb::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
             }
 
             px = x;
@@ -140,19 +140,19 @@ impl Path {
             ptany = tany;
         }
 
-        self.append_commands(&commands);
+        self.append(&commands);
 
         self
     }
 
     /// Adds an arc segment at the corner defined by the last path point, and two specified points.
     pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) -> &mut Self {
-        if self.commands.is_empty() {
+        if self.verbs.is_empty() {
             return self;
         }
 
-        let x0 = self.commandx;
-        let y0 = self.commandy;
+        let x0 = self.lastx;
+        let y0 = self.lasty;
 
         // Handle degenerate cases.
         if math::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
@@ -200,12 +200,12 @@ impl Path {
 
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) -> &mut Self {
-        self.append_commands(&[
-            Command::MoveTo(x, y),
-            Command::LineTo(x, y + h),
-            Command::LineTo(x + w, y + h),
-            Command::LineTo(x + w, y),
-            Command::Close
+        self.append(&[
+            Verb::MoveTo(x, y),
+            Verb::LineTo(x, y + h),
+            Verb::LineTo(x + w, y + h),
+            Verb::LineTo(x + w, y),
+            Verb::Close
         ]);
 
         self
@@ -237,17 +237,17 @@ impl Path {
             let rx_tl = rad_top_left.min(halfw) * w.signum();
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
-            self.append_commands(&[
-                Command::MoveTo(x, y + ry_tl),
-                Command::LineTo(x, y + h - ry_bl),
-                Command::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
-                Command::LineTo(x + w - rx_br, y + h),
-                Command::BezierTo(x + w - rx_br*(1.0 - KAPPA90), y + h, x + w, y + h - ry_br*(1.0 - KAPPA90), x + w, y + h - ry_br),
-                Command::LineTo(x + w, y + ry_tr),
-                Command::BezierTo(x + w, y + ry_tr*(1.0 - KAPPA90), x + w - rx_tr*(1.0 - KAPPA90), y, x + w - rx_tr, y),
-                Command::LineTo(x + rx_tl, y),
-                Command::BezierTo(x + rx_tl*(1.0 - KAPPA90), y, x, y + ry_tl*(1.0 - KAPPA90), x, y + ry_tl),
-                Command::Close
+            self.append(&[
+                Verb::MoveTo(x, y + ry_tl),
+                Verb::LineTo(x, y + h - ry_bl),
+                Verb::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
+                Verb::LineTo(x + w - rx_br, y + h),
+                Verb::BezierTo(x + w - rx_br*(1.0 - KAPPA90), y + h, x + w, y + h - ry_br*(1.0 - KAPPA90), x + w, y + h - ry_br),
+                Verb::LineTo(x + w, y + ry_tr),
+                Verb::BezierTo(x + w, y + ry_tr*(1.0 - KAPPA90), x + w - rx_tr*(1.0 - KAPPA90), y, x + w - rx_tr, y),
+                Verb::LineTo(x + rx_tl, y),
+                Verb::BezierTo(x + rx_tl*(1.0 - KAPPA90), y, x, y + ry_tl*(1.0 - KAPPA90), x, y + ry_tl),
+                Verb::Close
             ]);
         }
 
@@ -256,13 +256,13 @@ impl Path {
 
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) -> &mut Self {
-        self.append_commands(&[
-            Command::MoveTo(cx-rx, cy),
-            Command::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
-            Command::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
-            Command::BezierTo(cx+rx, cy-ry*KAPPA90, cx+rx*KAPPA90, cy-ry, cx, cy-ry),
-            Command::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
-            Command::Close
+        self.append(&[
+            Verb::MoveTo(cx-rx, cy),
+            Verb::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
+            Verb::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
+            Verb::BezierTo(cx+rx, cy-ry*KAPPA90, cx+rx*KAPPA90, cy-ry, cx, cy-ry),
+            Verb::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
+            Verb::Close
         ]);
 
         self
@@ -276,15 +276,15 @@ impl Path {
 
     pub fn transform(&mut self, transform: Transform2D) {
         // Convert commands to a set of contours
-        for cmd in &mut self.commands {
-            match cmd {
-                Command::MoveTo(x, y) => {
+        for verb in &mut self.verbs {
+            match verb {
+                Verb::MoveTo(x, y) => {
                     transform.transform_point(x, y, *x, *y);
                 }
-                Command::LineTo(x, y) => {
+                Verb::LineTo(x, y) => {
                     transform.transform_point(x, y, *x, *y);
                 }
-                Command::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     transform.transform_point(c1x, c1y, *c1x, *c1y);
 					transform.transform_point(c2x, c2y, *c2x, *c2y);
 					transform.transform_point(x, y, *x, *y);
@@ -294,25 +294,25 @@ impl Path {
         }
     }
 
-    fn append_commands(&mut self, commands: &[Command]) {
-        for cmd in commands.iter() {
-            match cmd {
-                Command::MoveTo(x, y) => {
-                    self.commandx = *x;
-                    self.commandy = *y;
+    fn append(&mut self, verbs: &[Verb]) {
+        for verb in verbs.iter() {
+            match verb {
+                Verb::MoveTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
                 }
-                Command::LineTo(x, y) => {
-                    self.commandx = *x;
-                    self.commandy = *y;
+                Verb::LineTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
                 }
-                Command::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
-                    self.commandx = *x;
-                    self.commandy = *y;
+                Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
                 }
                 _ => ()
             }
         }
 
-        self.commands.extend_from_slice(commands);
+        self.verbs.extend_from_slice(verbs);
     }
 }
