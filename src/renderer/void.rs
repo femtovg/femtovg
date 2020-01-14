@@ -1,0 +1,32 @@
+#![allow(unused_variables)]
+
+use image::DynamicImage;
+
+use crate::{Path, Color, Paint, Scissor};
+use super::{Renderer, ImageId, Vertex, TextureType, ImageFlags};
+
+#[derive(Default)]
+pub struct Void;
+
+impl Void {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Renderer for Void {
+    fn flush(&mut self) {}
+    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {}
+    fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
+
+    fn fill(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {}
+    fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {}
+    fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {}
+
+    fn create_texture(&mut self, texture_type: TextureType, width: u32, height: u32, flags: ImageFlags) -> ImageId {
+        ImageId(0)
+    }
+
+    fn update_texture(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32, w: u32, h: u32) {}
+    fn delete_texture(&mut self, id: ImageId) {}
+}
