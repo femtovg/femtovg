@@ -24,7 +24,7 @@ mod paint;
 pub use paint::Paint;
 
 mod path;
-pub use path::{CachedPath, Path};
+pub use path::{Path};
 
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
 // TODO: Drawing works before the call to begin frame for some reason

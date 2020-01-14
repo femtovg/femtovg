@@ -2,8 +2,10 @@
 use image::DynamicImage;
 
 use crate::{ImageFlags, Vertex, Paint, Scissor, Path, Color, LineJoin, Transform2D};
-use crate::path::{Convexity, CachedPath};
 use crate::renderer::{TextureType, ImageId, Renderer};
+
+mod gpu_path;
+use gpu_path::{Convexity, GpuPath};
 
 mod opengl;
 pub use opengl::OpenGl;
@@ -110,15 +112,15 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     fn fill(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {
 
         // TODO: don't hardcode tes_tol and dist_tol here
-        let mut cache = CachedPath::new(path, 0.25, 0.01);
+        let mut gpu_path = GpuPath::new(path, 0.25, 0.01);
 
         if paint.shape_anti_alias() {
-            cache.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
+            gpu_path.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
         } else {
-            cache.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
+            gpu_path.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
         }
 
-        let flavor = if cache.contours.len() == 1 && cache.contours[0].convexity == Convexity::Convex {
+        let flavor = if gpu_path.contours.len() == 1 && gpu_path.contours[0].convexity == Convexity::Convex {
             let params = Params::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
             Flavor::ConvexFill { params }
@@ -137,7 +139,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         let mut offset = self.verts.len();
 
-        for contour in cache.contours {
+        for contour in gpu_path.contours {
             let mut drawable = Drawable::default();
 
             if !contour.fill.is_empty() {
@@ -157,10 +159,10 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         if let Flavor::ConcaveFill {..} = cmd.flavor {
             // Quad
-            self.verts.push(Vertex::new(cache.bounds[2], cache.bounds[3], 0.5, 1.0));
-            self.verts.push(Vertex::new(cache.bounds[2], cache.bounds[1], 0.5, 1.0));
-            self.verts.push(Vertex::new(cache.bounds[0], cache.bounds[3], 0.5, 1.0));
-            self.verts.push(Vertex::new(cache.bounds[0], cache.bounds[1], 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds[2], gpu_path.bounds[3], 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds[2], gpu_path.bounds[1], 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds[0], gpu_path.bounds[3], 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds[0], gpu_path.bounds[1], 0.5, 1.0));
 
             cmd.triangles_verts = Some((offset, 4));
         }
@@ -171,12 +173,12 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {
         let tess_tol = 0.25;
         // TODO: don't hardcode tes_tol and dist_tol here
-        let mut cache = CachedPath::new(path, tess_tol, 0.01);
+        let mut gpu_path = GpuPath::new(path, tess_tol, 0.01);
 
         if paint.shape_anti_alias() {
-            cache.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
+            gpu_path.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
         } else {
-            cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
+            gpu_path.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
         }
 
         let params = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
@@ -194,7 +196,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         let mut offset = self.verts.len();
 
-        for contour in cache.contours {
+        for contour in gpu_path.contours {
             let mut drawable = Drawable::default();
 
             if !contour.stroke.is_empty() {
