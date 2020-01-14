@@ -68,7 +68,7 @@ pub struct FontStyle<'a> {
     font_name: &'a str,
     size: u32,
     blur: f32,
-    letter_spacing: f32,
+    letter_spacing: i32,
     render_style: GlyphRenderStyle
 }
 
@@ -78,7 +78,7 @@ impl<'a> FontStyle<'a> {
             font_name: name,
             size: 16,
             blur: 0.0,
-            letter_spacing: 0.0,
+            letter_spacing: 0,
             render_style: Default::default()
         }
     }
@@ -91,7 +91,7 @@ impl<'a> FontStyle<'a> {
         self.blur = blur;
     }
 
-    pub fn set_letter_spacing(&mut self, letter_spacing: f32) {
+    pub fn set_letter_spacing(&mut self, letter_spacing: i32) {
         self.letter_spacing = letter_spacing;
     }
 
@@ -135,7 +135,6 @@ struct Glyph {
 struct FontFace {
     id: usize,
     ft_face: ft::Face,
-    data: Vec<u8>,
     is_serif: bool,
     is_italic: bool,
     is_bold: bool,
@@ -143,7 +142,7 @@ struct FontFace {
 }
 
 impl FontFace {
-    pub fn new(id: usize, face: ft::Face, data: Vec<u8>) -> Self {
+    pub fn new(id: usize, face: ft::Face) -> Self {
 
         let is_serif = if let Some(ps_name) = face.postscript_name() {
             ps_name.to_lowercase().contains("serif")
@@ -156,7 +155,6 @@ impl FontFace {
         Self {
             id: id,
             ft_face: face,
-            data: data,
             is_serif: is_serif,
             is_italic: style_flags.contains(ft::face::StyleFlag::ITALIC),
             is_bold: style_flags.contains(ft::face::StyleFlag::BOLD),
@@ -202,13 +200,13 @@ impl FontManager {
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<()> {
 
-        let face = self.library.new_memory_face(data.clone(), 0)?;
+        let face = self.library.new_memory_face(data, 0)?;
 
         let postscript_name = face.postscript_name().ok_or_else(|| {
             FontManagerError::GeneralError("Cannot read font postscript name".to_string())
         })?;
 
-        self.faces.insert(postscript_name, FontFace::new(self.last_face_id, face, data));
+        self.faces.insert(postscript_name, FontFace::new(self.last_face_id, face));
 
         self.last_face_id = self.last_face_id.wrapping_add(1);
 
@@ -277,7 +275,7 @@ impl FontManager {
 
                 cmd.quads.push(q);
 
-                cursor_x += x_advance;
+                cursor_x += x_advance + style.letter_spacing;
                 cursor_y += y_advance;
             }
 

@@ -18,7 +18,7 @@ pub struct Paint {
     line_join: LineJoin,
     font_name: String,
     font_size: u32,
-    letter_spacing: f32,
+    letter_spacing: i32,
     font_blur: f32,
     text_valign: VAlign
 }
@@ -40,7 +40,7 @@ impl Default for Paint {
             line_join: Default::default(),
             font_name: String::from("NotoSans-Regular"),
             font_size: 16,
-            letter_spacing: 0.0,
+            letter_spacing: 0,
             font_blur: 0.0,
             text_valign: VAlign::default()
         }
@@ -306,11 +306,11 @@ impl Paint {
         self.font_size = size;
     }
 
-    pub fn letter_spacing(&self) -> f32 {
+    pub fn letter_spacing(&self) -> i32 {
         self.letter_spacing
     }
 
-    pub fn set_letter_spacing(&mut self, spacing: f32) {
+    pub fn set_letter_spacing(&mut self, spacing: i32) {
         self.letter_spacing = spacing;
     }
 

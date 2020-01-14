@@ -122,6 +122,7 @@ fn main() {
 
                     paint.set_stroke_width(1.0);
                     paint.set_font_size(font_size);
+                    //paint.set_letter_spacing(3);
                     //paint.set_font_blur(1.0);
                     paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
                     //paint.set_font_name("NotoSans-Regular".to_string());

@@ -25,7 +25,6 @@ pub struct GlyphInfo {
     pub y_offset: i32
 }
 
-
 pub fn shape(source: &dyn ShaperSource, text: &str) -> Result<Vec<GlyphInfo>> {
     let mut positions: Vec<GlyphInfo> = Vec::new();
 

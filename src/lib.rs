@@ -532,7 +532,7 @@ impl Canvas {
 
         let mut style = FontStyle::new(paint.font_name());
         style.set_size((paint.font_size() as f32 * scale) as u32);
-        style.set_letter_spacing(paint.letter_spacing() * scale);
+        style.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
         style.set_blur(paint.font_blur() * scale);
         style.set_render_style(render_style);
 
