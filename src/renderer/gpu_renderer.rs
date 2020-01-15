@@ -3,7 +3,7 @@ use std::ffi::c_void;
 
 use image::DynamicImage;
 
-use crate::{ImageFlags, Vertex, Paint, Scissor, Path, Color, LineJoin, Transform2D};
+use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin, Transform2D};
 use crate::renderer::{ImageId, Renderer};
 
 mod gpu_path;
@@ -85,7 +85,8 @@ pub struct GpuRenderer<T> {
     backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
-    fringe_width: f32
+    fringe_width: f32,
+    current_path: Option<GpuPath>
 }
 
 impl<T: GpuRendererBackend> GpuRenderer<T> {
@@ -95,7 +96,8 @@ impl<T: GpuRendererBackend> GpuRenderer<T> {
             backend: backend,
             cmds: Default::default(),
             verts: Default::default(),
-            fringe_width: 1.0
+            fringe_width: 1.0,
+            current_path: None
         }
     }
 }
@@ -122,10 +124,25 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.backend.set_size(width, height, dpi);
     }
 
-    fn fill(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {
+    fn set_current_path(&mut self, verbs: &[Verb]) {
+        if self.current_path.is_none() {
+            // TODO: don't hardcode tes_tol and dist_tol here
+            self.current_path = Some(GpuPath::new(verbs, 0.25, 0.01));
+        }
+    }
+
+    fn clear_current_path(&mut self) {
+        self.current_path = None;
+    }
+
+    fn fill(&mut self, paint: &Paint, scissor: &Scissor) {
 
         // TODO: don't hardcode tes_tol and dist_tol here
-        let mut gpu_path = GpuPath::new(path, 0.25, 0.01);
+        let gpu_path = if let Some(gpu_path) = self.current_path.as_mut() {
+            gpu_path
+        } else {
+            return;
+        };
 
         if paint.shape_anti_alias() {
             gpu_path.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
@@ -152,7 +169,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         let mut offset = self.verts.len();
 
-        for contour in gpu_path.contours {
+        for contour in &gpu_path.contours {
             let mut drawable = Drawable::default();
 
             if !contour.fill.is_empty() {
@@ -183,10 +200,14 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.cmds.push(cmd);
     }
 
-    fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {
+    fn stroke(&mut self, paint: &Paint, scissor: &Scissor) {
         let tess_tol = 0.25;
-        // TODO: don't hardcode tes_tol and dist_tol here
-        let mut gpu_path = GpuPath::new(path, tess_tol, 0.01);
+
+        let gpu_path = if let Some(gpu_path) = self.current_path.as_mut() {
+            gpu_path
+        } else {
+            return;
+        };
 
         if paint.shape_anti_alias() {
             gpu_path.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
@@ -209,7 +230,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         let mut offset = self.verts.len();
 
-        for contour in gpu_path.contours {
+        for contour in &gpu_path.contours {
             let mut drawable = Drawable::default();
 
             if !contour.stroke.is_empty() {

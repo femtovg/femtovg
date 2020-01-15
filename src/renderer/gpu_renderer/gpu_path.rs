@@ -5,8 +5,7 @@ use bitflags::bitflags;
 
 use crate::math;
 use crate::renderer::Vertex;
-use crate::path::{Path, Verb};
-use crate::{Winding, LineCap, LineJoin};
+use crate::{Verb, Winding, LineCap, LineJoin};
 
 // TODO: We need an iterator for the contour points that loops by chunks of 2
 
@@ -82,11 +81,11 @@ pub struct GpuPath {
 
 impl GpuPath {
 
-    pub fn new(path: &Path, tess_tol: f32, dist_tol: f32) -> Self {
+    pub fn new(path: &[Verb], tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = GpuPath::default();
 
         // Convert commands to a set of contours
-        for verb in path.verbs() {
+        for verb in path {
             match verb {
                 Verb::MoveTo(x, y) => {
                     cache.add_contour();
