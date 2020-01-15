@@ -2,14 +2,14 @@
 use std::path::Path as FilePath;
 use std::{error::Error, fmt};
 
-use image::{DynamicImage, GenericImageView};
+use image::DynamicImage;
 use bitflags::bitflags;
 
 mod color;
 pub use color::Color;
 
 pub mod renderer;
-use renderer::{Renderer, TextureType};
+use renderer::Renderer;
 
 pub mod font_cache;
 pub use font_cache::{FontCache, FontStyle, FontManagerError, GlyphRenderStyle};
@@ -232,42 +232,32 @@ impl Canvas {
     // Images
 
     /// Creates image by loading it from the disk from specified file name.
-    pub fn create_image<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, CanvasError> {
+    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, CanvasError> {
         let image = image::open(filename)?;
 
-        Ok(self.create_image_rgba(flags, &image))
+        Ok(self.create_image(image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
     pub fn create_image_mem(&mut self, flags: ImageFlags, data: &[u8]) -> Result<ImageId, CanvasError> {
         let image = image::load_from_memory(data)?;
 
-        Ok(self.create_image_rgba(flags, &image))
+        Ok(self.create_image(image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image_rgba(&mut self, flags: ImageFlags, image: &DynamicImage) -> ImageId {
-        let w = image.width();
-        let h = image.height();
-
-        let image_id = self.renderer.create_texture(TextureType::Rgba, w, h, flags);
-
-        self.renderer.update_texture(image_id, image, 0, 0, w, h);
-
-        image_id
+    pub fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+        self.renderer.create_image(image, flags)
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage) {
-        let w = image.width();
-        let h = image.height();
-
-        self.renderer.update_texture(id, image, 0, 0, w, h);
+    pub fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+        self.renderer.update_image(id, image, x, y);
     }
 
     /// Deletes created image.
     pub fn delete_image(&mut self, id: ImageId) {
-        self.renderer.delete_texture(id);
+        self.renderer.delete_image(id);
     }
 
     // Transforms
@@ -502,6 +492,7 @@ impl Canvas {
 
     fn draw_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint, render_style: GlyphRenderStyle) {
         let transform = self.state().transform;
+        let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
@@ -516,7 +507,7 @@ impl Canvas {
         let layout = self.font_cache.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
 
         for cmd in &layout.cmds {
-            let mut verts = Vec::new();
+            let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
             for quad in &cmd.quads {
                 let (mut p0, mut p1, mut p2, mut p3, mut p4, mut p5, mut p6, mut p7) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
@@ -537,17 +528,10 @@ impl Canvas {
             paint.set_image(Some(cmd.image_id));
 
             // Apply global alpha
-            let mut inner_color = paint.inner_color();
-            inner_color.a *= self.state().alpha;
-            paint.set_inner_color(inner_color);
+            paint.inner_color_mut().a *= self.state().alpha;
+            paint.outer_color_mut().a *= self.state().alpha;
 
-            let mut outer_color = paint.outer_color();
-            outer_color.a *= self.state().alpha;
-            paint.set_outer_color(outer_color);
-
-            let scissor = &self.state_stack.last().unwrap().scissor;
-
-            self.renderer.triangles(&paint, scissor, &verts);
+            self.renderer.triangles(&paint, &scissor, &verts);
         }
     }
 

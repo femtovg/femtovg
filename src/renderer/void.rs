@@ -3,7 +3,7 @@
 use image::DynamicImage;
 
 use crate::{Path, Color, Paint, Scissor};
-use super::{Renderer, ImageId, Vertex, TextureType, ImageFlags};
+use super::{Renderer, ImageId, Vertex, ImageFlags};
 
 #[derive(Default)]
 pub struct Void;
@@ -23,10 +23,10 @@ impl Renderer for Void {
     fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {}
     fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {}
 
-    fn create_texture(&mut self, texture_type: TextureType, width: u32, height: u32, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
         ImageId(0)
     }
 
-    fn update_texture(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32, w: u32, h: u32) {}
-    fn delete_texture(&mut self, id: ImageId) {}
+    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {}
+    fn delete_image(&mut self, id: ImageId) {}
 }

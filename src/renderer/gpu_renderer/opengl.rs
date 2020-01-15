@@ -5,11 +5,11 @@ use std::ffi::{CStr, NulError, c_void};
 use std::{error::Error, fmt};
 
 use fnv::FnvHashMap;
-use image::DynamicImage;
+use image::{DynamicImage, GenericImageView};
 
-use super::{Command, GpuRendererBackend, Flavor, Params};
+use super::{Command, GpuRendererBackend, Flavor, Params, TextureType};
 use crate::{Color, ImageFlags, Vertex};
-use crate::renderer::{ImageId, TextureType};
+use crate::renderer::ImageId;
 
 mod shader;
 use shader::{Shader, ShaderError};
@@ -348,13 +348,15 @@ impl GpuRendererBackend for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_texture(&mut self, texture_type: TextureType, width: u32, height: u32, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+        let size = image.dimensions();
+
         let mut texture = Texture {
             tex: 0,
-            width: width,
-            height: height,
+            width: size.0,
+            height: size.1,
             flags: flags,
-            tex_type: texture_type
+            tex_type: TextureType::Rgba
         };
 
         unsafe {
@@ -366,15 +368,40 @@ impl GpuRendererBackend for OpenGl {
             gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
         }
 
-        match texture.tex_type {
-            TextureType::Rgba => unsafe {
-                gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, width as i32, height as i32, 0, gl::RGBA, gl::UNSIGNED_BYTE, ptr::null());
-            },
-            TextureType::Alpha => unsafe {
+        match image {
+            DynamicImage::ImageLuma8(gray_image) => unsafe {
                 let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
 
-                gl::TexImage2D(gl::TEXTURE_2D, 0, format as i32, width as i32, height as i32, 0, format, gl::UNSIGNED_BYTE, ptr::null());
-            }
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    format as i32,
+                    texture.width as i32,
+                    texture.height as i32,
+                    0,
+                    format,
+                    gl::UNSIGNED_BYTE,
+                    gray_image.into_raw().as_ptr() as *const GLvoid
+                );
+
+                texture.tex_type = TextureType::Alpha;
+            },
+            DynamicImage::ImageRgba8(rgba_image) => unsafe {
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGBA as i32,
+                    texture.width as i32,
+                    texture.height as i32,
+                    0,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    rgba_image.into_raw().as_ptr() as *const GLvoid
+                );
+
+                texture.tex_type = TextureType::Rgba;
+            },
+            _ => panic!("Unsupported image format")
         }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
@@ -433,45 +460,66 @@ impl GpuRendererBackend for OpenGl {
         ImageId(id)
     }
 
-    fn update_texture(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32, w: u32, h: u32) {
+    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+        let size = image.dimensions();
+
         let texture = match self.textures.get(&id) {
             Some(texture) => texture,
             None => return
         };
 
-        if x + w > texture.width {
+        if x + size.0 > texture.width {
             panic!();// TODO: error handling
         }
 
-        if y + h > texture.height {
+        if y + size.1 > texture.height {
             panic!();// TODO: error handling
         }
 
-        // TODO: the comments bellow had to me made for font support (partial texture update)
-        // So now this function expects that the image provided is the entire update data,
-        // before it expected the full image and only updated a region from it
         unsafe {
             gl::BindTexture(gl::TEXTURE_2D, texture.tex);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            //gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
-
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, w as i32);///////
-
-            //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, x as i32);
-            //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, y as i32);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, size.0 as i32);
         }
 
-        match texture.tex_type {
-            TextureType::Rgba => unsafe {
-                let image = image.to_rgba();
-                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, gl::RGBA, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
-            },
-            TextureType::Alpha => unsafe {
-                let image = image.to_luma();
+        match image {
+            DynamicImage::ImageLuma8(gray_image) => unsafe {
                 let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
 
-                gl::TexSubImage2D(gl::TEXTURE_2D, 0, x as i32, y as i32, w as i32, h as i32, format, gl::UNSIGNED_BYTE, image.into_raw().as_ptr() as *const GLvoid);
+                if texture.tex_type != TextureType::Alpha {
+                    panic!("Attemped to update Aplha texture with Rgba image");
+                }
+
+                gl::TexSubImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    x as i32,
+                    y as i32,
+                    size.0 as i32,
+                    size.1 as i32,
+                    format,
+                    gl::UNSIGNED_BYTE,
+                    gray_image.into_raw().as_ptr() as *const GLvoid
+                );
             }
+            DynamicImage::ImageRgba8(rgba_image) => unsafe {
+                if texture.tex_type != TextureType::Rgba {
+                    panic!("Attemped to update Rgba texture with Alpha image");
+                }
+
+                gl::TexSubImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    x as i32,
+                    y as i32,
+                    size.0 as i32,
+                    size.1 as i32,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    rgba_image.into_raw().as_ptr() as *const GLvoid
+                );
+            }
+            _ => panic!("Unsupported image format")
         }
 
         unsafe {
@@ -483,7 +531,7 @@ impl GpuRendererBackend for OpenGl {
         }
     }
 
-    fn delete_texture(&mut self, id: ImageId) {
+    fn delete_image(&mut self, id: ImageId) {
         if let Some(texture) = self.textures.remove(&id) {
             unsafe {
                 gl::DeleteTextures(1, &texture.tex);

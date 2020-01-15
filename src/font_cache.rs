@@ -7,9 +7,9 @@ use std::error::Error;
 use std::collections::HashMap;
 
 use fnv::FnvHashMap;
-use image::{DynamicImage, GrayImage, Luma};
+use image::{DynamicImage, GrayImage, Luma, GenericImage};
 
-use super::{ImageId, Renderer, ImageFlags, renderer::TextureType};
+use super::{ImageId, Renderer, ImageFlags};
 
 use freetype as ft;
 
@@ -298,6 +298,8 @@ impl FontCache {
 
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
+        // Load Freetype glyph slot and fill or stroke
+
         face.ft_face.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT)?;
 
         let glyph_slot = face.ft_face.glyph();
@@ -319,24 +321,7 @@ impl FontCache {
         let width = ft_bitmap.width() as u32 + padding * 2;
         let height = ft_bitmap.rows() as u32 + padding * 2;
 
-        // Find a free location in one of the the atlases
-        let texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
-            texture.atlas.add_rect(width as usize, height as usize).map(|loc| (index, loc))
-        });
-
-        // Or create a new atlas
-        let (tex_index, (atlas_x, atlas_y)) = texture_search_result.unwrap_or_else(|| {
-            let image_id = renderer.create_texture(TextureType::Alpha, TEXTURE_SIZE, TEXTURE_SIZE, ImageFlags::empty());
-
-            let mut atlas = Atlas::new(TEXTURE_SIZE as usize, TEXTURE_SIZE as usize);
-            let loc = atlas.add_rect(width as usize, height as usize).unwrap();
-
-            textures.push(FontTexture { atlas, image_id });
-
-            (textures.len() - 1, loc)
-        });
-
-        // Extract image data
+        // Extract image data from the freetype bitmap and add padding
         let mut glyph_image = GrayImage::new(width, height);
 
         let mut ft_glyph_offset = 0;
@@ -360,8 +345,30 @@ impl FontCache {
 
         //glyph_image.save("/home/ptodorov/glyph_test.png");
 
-        // Upload image
-        renderer.update_texture(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32, width, height);
+        // Find a free location in one of the the atlases
+        let texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
+            texture.atlas.add_rect(width as usize, height as usize).map(|loc| (index, loc))
+        });
+
+        let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
+            // A location for the new glyph was found in an extisting atlas
+            renderer.update_image(textures[tex_index].image_id, DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32);
+
+            (tex_index, (atlas_x, atlas_y))
+        } else {
+            // All atlases are exausted and a new one must be created
+            let mut atlas = Atlas::new(TEXTURE_SIZE as usize, TEXTURE_SIZE as usize);
+            let loc = atlas.add_rect(width as usize, height as usize).unwrap();
+
+            let mut image = GrayImage::new(TEXTURE_SIZE, TEXTURE_SIZE);
+            image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
+
+            let image_id = renderer.create_image(DynamicImage::ImageLuma8(image), ImageFlags::empty());
+
+            textures.push(FontTexture { atlas, image_id });
+
+            (textures.len() - 1, loc)
+        };
 
         let glyph = Glyph {
             index: glyph_index,
@@ -469,6 +476,7 @@ pub enum FontManagerError {
     IoError(io::Error),
     FreetypeError(ft::Error),
     ShaperError(shaper::ShaperError),
+    ImageError(image::ImageError)
 }
 
 impl fmt::Display for FontManagerError {
@@ -492,6 +500,12 @@ impl From<ft::Error> for FontManagerError {
 impl From<shaper::ShaperError> for FontManagerError {
     fn from(error: shaper::ShaperError) -> Self {
         Self::ShaperError(error)
+    }
+}
+
+impl From<image::ImageError> for FontManagerError {
+    fn from(error: image::ImageError) -> Self {
+        Self::ImageError(error)
     }
 }
 

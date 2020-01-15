@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use image::DynamicImage;
 
 use crate::{ImageFlags, Vertex, Paint, Scissor, Path, Color, LineJoin, Transform2D};
-use crate::renderer::{TextureType, ImageId, Renderer};
+use crate::renderer::{ImageId, Renderer};
 
 mod gpu_path;
 use gpu_path::{Convexity, GpuPath};
@@ -18,14 +18,19 @@ pub trait GpuRendererBackend {
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
 
-    // TODO: rethink this texture API
-    fn create_texture(&mut self, texture_type: TextureType, width: u32, height: u32, flags: ImageFlags) -> ImageId;
-    fn update_texture(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32, w: u32, h: u32);
-    fn delete_texture(&mut self, id: ImageId);
+    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId;
+    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32);
+    fn delete_image(&mut self, id: ImageId);
 
     fn texture_flags(&self, id: ImageId) -> ImageFlags;
     fn texture_size(&self, id: ImageId) -> (u32, u32);
     fn texture_type(&self, id: ImageId) -> Option<TextureType>;
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TextureType {
+    Rgba,
+    Alpha
 }
 
 #[derive(Debug)]
@@ -229,16 +234,16 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.verts.extend_from_slice(verts);
     }
 
-    fn create_texture(&mut self, texture_type: TextureType, width: u32, height: u32, flags: ImageFlags) -> ImageId {
-        self.backend.create_texture(texture_type, width, height, flags)
+    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+        self.backend.create_image(image, flags)
     }
 
-    fn update_texture(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32, w: u32, h: u32) {
-        self.backend.update_texture(id, image, x, y, w, h);
+    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+        self.backend.update_image(id, image, x, y);
     }
 
-    fn delete_texture(&mut self, id: ImageId) {
-        self.backend.delete_texture(id);
+    fn delete_image(&mut self, id: ImageId) {
+        self.backend.delete_image(id);
     }
 }
 
