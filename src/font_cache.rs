@@ -9,15 +9,17 @@ use std::collections::HashMap;
 use fnv::FnvHashMap;
 use image::{DynamicImage, GrayImage, Luma};
 
-use super::{ImageId, Atlas, Renderer, ImageFlags, renderer::TextureType};
+use super::{ImageId, Renderer, ImageFlags, renderer::TextureType};
 
-//mod freetype;
 use freetype as ft;
 
 mod shaper;
 
+mod atlas;
+use atlas::Atlas;
+
 // TODO: Color fonts
-// TODO: Letter spacing
+// TODO: Vertical Text Align
 
 const TEXTURE_SIZE: u32 = 512;
 const GLYPH_PADDING: u32 = 2;
@@ -168,7 +170,7 @@ pub struct FontTexture {
     image_id: ImageId
 }
 
-pub struct FontManager {
+pub struct FontCache {
     library: ft::Library,
     stroker: ft::Stroker,
     faces: HashMap<PostscriptName, FontFace>,
@@ -176,8 +178,7 @@ pub struct FontManager {
     last_face_id: usize,
 }
 
-// Public
-impl FontManager {
+impl FontCache {
 
     pub fn new() -> Result<Self> {
         let library = ft::Library::init()?;
@@ -287,11 +288,6 @@ impl FontManager {
 
         Ok(layout)
     }
-
-}
-
-// Private
-impl FontManager {
 
     fn glyph(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut dyn Renderer, stroker: &ft::Stroker, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
         let glyph_id = GlyphId::new(glyph_index, style);

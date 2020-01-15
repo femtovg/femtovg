@@ -8,14 +8,11 @@ use bitflags::bitflags;
 mod color;
 pub use color::Color;
 
-mod atlas;
-pub use atlas::Atlas;
-
 pub mod renderer;
 use renderer::{Renderer, TextureType};
 
-pub mod font_manager;
-pub use font_manager::{FontManager, FontStyle, FontManagerError, GlyphRenderStyle};
+pub mod font_cache;
+pub use font_cache::{FontCache, FontStyle, FontManagerError, GlyphRenderStyle};
 
 pub mod math;
 use crate::math::*;
@@ -152,7 +149,7 @@ impl Default for State {
 
 pub struct Canvas {
     renderer: Box<dyn Renderer>,
-    font_manager: FontManager,
+    font_cache: FontCache,
     state_stack: Vec<State>,
     tess_tol: f32,
     dist_tol: f32,
@@ -165,11 +162,11 @@ impl Canvas {
     pub fn new<R: Renderer + 'static>(renderer: R) -> Self {
 
         // TODO: Return result from this method instead of unwrapping
-        let font_manager = FontManager::new().unwrap();
+        let font_manager = FontCache::new().unwrap();
 
         let mut canvas = Self {
             renderer: Box::new(renderer),
-            font_manager: font_manager,
+            font_cache: font_manager,
             state_stack: Default::default(),
             tess_tol: Default::default(),
             dist_tol: Default::default(),
@@ -192,14 +189,6 @@ impl Canvas {
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         self.renderer.clear_rect(x, y, width, height, color);
     }
-
-    /*
-    pub fn begin_frame(&mut self, window_width: f32, window_height: f32, device_px_ratio: f32) {
-
-        self.set_device_pixel_ratio(device_px_ratio);
-
-        //self.renderer.render_viewport(window_width, window_height);
-    }*/
 
     pub fn end_frame(&mut self) {
         self.renderer.flush();
@@ -465,11 +454,11 @@ impl Canvas {
     // Text
 
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) {
-        self.font_manager.add_font_file(file_path).expect("cannot add font");
+        self.font_cache.add_font_file(file_path).expect("cannot add font");
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) {
-        self.font_manager.add_font_mem(data).expect("cannot add font");
+        self.font_cache.add_font_mem(data).expect("cannot add font");
     }
 
     /*
@@ -524,7 +513,7 @@ impl Canvas {
         style.set_blur(paint.font_blur() * scale);
         style.set_render_style(render_style);
 
-        let layout = self.font_manager.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
+        let layout = self.font_cache.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
 
         for cmd in &layout.cmds {
             let mut verts = Vec::new();

@@ -88,6 +88,8 @@ fn main() {
                 _ => (),
             }
             Event::RedrawRequested(_) => {
+                let cpu_start = Instant::now();
+
                 let dpi_factor = windowed_context.window().hidpi_factor();
 
                 let size = windowed_context.window().inner_size().to_physical(dpi_factor);
@@ -154,7 +156,13 @@ fn main() {
                     canvas.restore();
                 }*/
 
+                canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {:?}", cpu_start.elapsed()), &Paint::color(Color::hex("454545")));
+
+                let gpu_time = Instant::now();
+
                 canvas.end_frame();
+
+                canvas.fill_text(15.0, size.height as f32 - 25.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
 
                 windowed_context.swap_buffers().unwrap();
             }
