@@ -1,6 +1,7 @@
 
 use std::ptr;
 use std::mem;
+use std::ops::DerefMut;
 use std::ffi::{CStr, NulError, c_void};
 use std::{error::Error, fmt};
 
@@ -36,7 +37,7 @@ pub struct OpenGl {
     debug: bool,
     antialias: bool,
     is_opengles: bool,
-    view: [f32; 2],
+    view: [f32; 2],// This mybe should be u32
     shader: Shader,
     vert_arr: GLuint,
     vert_buff: GLuint,
@@ -348,7 +349,7 @@ impl GpuRendererBackend for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
         let size = image.dimensions();
 
         let mut texture = Texture {
@@ -381,7 +382,7 @@ impl GpuRendererBackend for OpenGl {
                     0,
                     format,
                     gl::UNSIGNED_BYTE,
-                    gray_image.into_raw().as_ptr() as *const GLvoid
+                    gray_image.as_ref().as_ptr() as *const GLvoid
                 );
 
                 texture.tex_type = TextureType::Alpha;
@@ -396,7 +397,7 @@ impl GpuRendererBackend for OpenGl {
                     0,
                     gl::RGBA,
                     gl::UNSIGNED_BYTE,
-                    rgba_image.into_raw().as_ptr() as *const GLvoid
+                    rgba_image.as_ref().as_ptr() as *const GLvoid
                 );
 
                 texture.tex_type = TextureType::Rgba;
@@ -460,7 +461,7 @@ impl GpuRendererBackend for OpenGl {
         ImageId(id)
     }
 
-    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
         let size = image.dimensions();
 
         let texture = match self.textures.get(&id) {
@@ -499,7 +500,7 @@ impl GpuRendererBackend for OpenGl {
                     size.1 as i32,
                     format,
                     gl::UNSIGNED_BYTE,
-                    gray_image.into_raw().as_ptr() as *const GLvoid
+                    gray_image.as_ref().as_ptr() as *const GLvoid
                 );
             }
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
@@ -516,7 +517,7 @@ impl GpuRendererBackend for OpenGl {
                     size.1 as i32,
                     gl::RGBA,
                     gl::UNSIGNED_BYTE,
-                    rgba_image.into_raw().as_ptr() as *const GLvoid
+                    rgba_image.as_ref().as_ptr() as *const GLvoid
                 );
             }
             _ => panic!("Unsupported image format")
@@ -553,6 +554,18 @@ impl GpuRendererBackend for OpenGl {
         let tex = self.textures.get(&id).unwrap();
 
         Some(tex.tex_type)
+    }
+
+    fn screenshot(&mut self) -> DynamicImage {
+        let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
+
+        unsafe {
+            gl::ReadPixels(0, 0, self.view[0] as i32, self.view[1] as i32, gl::RGBA, gl::UNSIGNED_BYTE, image.deref_mut().as_ptr() as *mut GLvoid);
+        }
+
+        image = image::imageops::flip_vertical(&image);
+
+        DynamicImage::ImageRgba8(image)
     }
 }
 

@@ -197,6 +197,10 @@ impl Canvas {
         self.save();
     }
 
+    pub fn screenshot(&mut self) -> Option<DynamicImage> {
+        self.renderer.screenshot()
+    }
+
     // State Handling
 
     /// Pushes and saves the current render state into a state stack.
@@ -235,23 +239,23 @@ impl Canvas {
     pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, CanvasError> {
         let image = image::open(filename)?;
 
-        Ok(self.create_image(image, flags))
+        Ok(self.create_image(&image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
     pub fn create_image_mem(&mut self, flags: ImageFlags, data: &[u8]) -> Result<ImageId, CanvasError> {
         let image = image::load_from_memory(data)?;
 
-        Ok(self.create_image(image, flags))
+        Ok(self.create_image(&image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+    pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
         self.renderer.create_image(image, flags)
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
         self.renderer.update_image(id, image, x, y);
     }
 

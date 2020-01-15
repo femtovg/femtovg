@@ -352,7 +352,7 @@ impl FontCache {
 
         let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
             // A location for the new glyph was found in an extisting atlas
-            renderer.update_image(textures[tex_index].image_id, DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32);
+            renderer.update_image(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32);
 
             (tex_index, (atlas_x, atlas_y))
         } else {
@@ -363,7 +363,7 @@ impl FontCache {
             let mut image = GrayImage::new(TEXTURE_SIZE, TEXTURE_SIZE);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
-            let image_id = renderer.create_image(DynamicImage::ImageLuma8(image), ImageFlags::empty());
+            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
 
             textures.push(FontTexture { atlas, image_id });
 

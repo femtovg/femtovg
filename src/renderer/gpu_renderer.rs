@@ -18,13 +18,15 @@ pub trait GpuRendererBackend {
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
 
-    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId;
-    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32);
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId;
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32);
     fn delete_image(&mut self, id: ImageId);
 
     fn texture_flags(&self, id: ImageId) -> ImageFlags;
     fn texture_size(&self, id: ImageId) -> (u32, u32);
     fn texture_type(&self, id: ImageId) -> Option<TextureType>;
+
+    fn screenshot(&mut self) -> DynamicImage;
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -234,16 +236,20 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.verts.extend_from_slice(verts);
     }
 
-    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
         self.backend.create_image(image, flags)
     }
 
-    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
         self.backend.update_image(id, image, x, y);
     }
 
     fn delete_image(&mut self, id: ImageId) {
         self.backend.delete_image(id);
+    }
+
+    fn screenshot(&mut self) -> Option<DynamicImage> {
+        Some(self.backend.screenshot())
     }
 }
 

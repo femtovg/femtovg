@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, renderer::{gpu_renderer::GpuRenderer, Void}, Path, math};
+use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, ImageFlags, renderer::{gpu_renderer::GpuRenderer, Void}, Path, math};
 
 fn main() {
     let el = EventLoop::new();
@@ -52,6 +52,8 @@ fn main() {
     let mut y: f32 = 0.0;
     let mut rot = 0.0;
 
+    let mut screenshot_image_id = None;
+
     let start = Instant::now();
 
     el.run(move |event, _, control_flow| {
@@ -81,6 +83,15 @@ fn main() {
                 }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::E), state: ElementState::Pressed, .. }, .. } => {
                     rot += 0.5;
+                }
+                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::S), state: ElementState::Pressed, .. }, .. } => {
+                    if let Some(screenshot_image_id) = screenshot_image_id {
+                        canvas.delete_image(screenshot_image_id);
+                    }
+
+                    if let Some(image) = canvas.screenshot() {
+                        screenshot_image_id = Some(canvas.create_image(&image, ImageFlags::empty()));
+                    }
                 }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit
@@ -114,12 +125,6 @@ fn main() {
 
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
 
-                    //dbg!(bounds);
-                    //canvas.rotate(math::Deg(rot));
-                    //canvas.begin_path();
-                    //canvas.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
-                    //canvas.stroke();
-
                     let mut paint = Paint::color(Color::hex("454545"));
 
                     let font_size = 20;
@@ -133,6 +138,19 @@ fn main() {
 
 					canvas.fill_text(15.0, 220.0, &text, &paint);
                     //canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
+                }
+
+                if let Some(image_id) = screenshot_image_id {
+                    let x = size.width as f32 - 512.0;
+                    let y = size.height as f32 - 512.0;
+
+                    let paint = Paint::create_image(image_id, x, y, 512.0, 512.0, math::Rad(0.0), 1.0);
+
+                    let mut path = Path::new();
+                    path.rect(x, y, 512.0, 512.0);
+                    canvas.fill_path(&path, &paint);
+
+                    canvas.stroke_path(&path, &Paint::color(Color::hex("454545")));
                 }
 
                 // Image

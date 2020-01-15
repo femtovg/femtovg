@@ -23,10 +23,10 @@ impl Renderer for Void {
     fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path) {}
     fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {}
 
-    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
         ImageId(0)
     }
 
-    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32) {}
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {}
     fn delete_image(&mut self, id: ImageId) {}
 }

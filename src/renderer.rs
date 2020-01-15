@@ -17,9 +17,11 @@ pub trait Renderer {
     fn stroke(&mut self, paint: &Paint, scissor: &Scissor, path: &Path);
     fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]);
 
-    fn create_image(&mut self, image: DynamicImage, flags: ImageFlags) -> ImageId;
-    fn update_image(&mut self, id: ImageId, image: DynamicImage, x: u32, y: u32);
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId;
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32);
     fn delete_image(&mut self, id: ImageId);
 
-    //fn screenshot(&mut self) -> DynamicImage;
+    fn screenshot(&mut self) -> Option<DynamicImage> {
+        None
+    }
 }
