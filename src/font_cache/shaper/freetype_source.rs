@@ -20,7 +20,7 @@ impl ShaperSource for ft::Face {
     }
 
     fn glyph_advance(&self, glyph_index: u32) -> (i32, i32) {
-        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_AUTOHINT);
+        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_HINTING);
 
         let adv = self.glyph().advance();
 
@@ -28,13 +28,13 @@ impl ShaperSource for ft::Face {
     }
 
     fn glyph_bearing(&self, glyph_index: u32) -> (i32, i32) {
-        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_AUTOHINT);
+        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_HINTING);
 
         (self.glyph().bitmap_left(), self.glyph().bitmap_top())
     }
 
     fn glyph_size(&self, glyph_index: u32) -> (i32, i32) {
-        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_AUTOHINT);
+        let _ = self.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_HINTING);
 
         let metrics = self.glyph().metrics();
 
