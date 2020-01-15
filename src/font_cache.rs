@@ -300,7 +300,7 @@ impl FontCache {
 
         // Load Freetype glyph slot and fill or stroke
 
-        face.ft_face.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT)?;
+        face.ft_face.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_AUTOHINT)?;
 
         let glyph_slot = face.ft_face.glyph();
         let mut glyph = glyph_slot.get_glyph()?;

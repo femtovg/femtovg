@@ -22,22 +22,18 @@ fn main() {
     let backend = GpuRenderer::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
     let mut canvas = Canvas::new(backend);
 
-    //canvas.begin_frame(800.0, 600.0, 1.0);
-    //draw_rects(&mut canvas, 15.0, 15.0);
-    //canvas.end_frame();
-    //return;
-
-    //canvas.add_font("../rust-engine/game/assets/fonts/Roboto-Regular.ttf");
-    //canvas.add_font("/home/ptodorov/Workspace/harfbuzz-example/fonts/amiri-regular.ttf");
-    //canvas.add_font(String::from("/usr/share/fonts/droid/DroidSerif-Regular.ttf"));
-
     canvas.add_font("/usr/share/fonts/noto/NotoSans-Regular.ttf");
-    canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");
-    canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
+
+
+    // canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");
+    // canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
+    // canvas.add_font("/usr/share/fonts/TTF/VeraSe.ttf"); // <- Kerning
+
+
+
+
 
     //canvas.add_font("/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf");
-
-    canvas.add_font("/usr/share/fonts/TTF/VeraSe.ttf"); // <- Kerning
     //canvas.add_font("/usr/share/fonts/TTF/VeraIt.ttf"); // <- Kerning
     //canvas.add_font("/usr/share/fonts/TTF/TSCu_Times.ttf");
 
@@ -122,6 +118,7 @@ fn main() {
 					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
+                    let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiam est erat, fringilla ut felis id, pharetra finibus ligula. Aliquam tincidunt quam at purus venenatis mattis. Quisque consectetur nulla turpis, ultricies consequat erat efficitur et. Duis vitae tellus ante. Proin id dapibus libero. Nunc justo velit, lacinia ut risus varius, feugiat ullamcorper augue. Nam rhoncus tellus vel velit scelerisque tincidunt. Integer tempor lectus id lobortis bibendum. Cras ipsum nunc, convallis vitae ultrices in, ullamcorper quis ante. Mauris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
 
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
 
@@ -172,14 +169,22 @@ fn main() {
                     canvas.fill();
                     canvas.restore();
                 }*/
+                let elapsed = cpu_start.elapsed().as_secs_f32();
 
-                canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {:?}", cpu_start.elapsed()), &Paint::color(Color::hex("454545")));
+                canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {}", elapsed), &Paint::color(Color::hex("454545")));
+
+                canvas.begin_path();
+                canvas.rect(15.0, size.height as f32 - 40.0, 200.0*(elapsed / 0.016), 3.0);
+                canvas.fill_path(&Paint::color(Color::hex("000000")));
+                canvas.begin_path();
+                canvas.rect(15.0, size.height as f32 - 40.0, 200.0, 3.0);
+                canvas.stroke_path(&Paint::color(Color::hex("bababa")));
 
                 let gpu_time = Instant::now();
 
                 canvas.end_frame();
 
-                canvas.fill_text(15.0, size.height as f32 - 25.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
+                canvas.fill_text(15.0, size.height as f32 - 20.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
 
                 windowed_context.swap_buffers().unwrap();
             }

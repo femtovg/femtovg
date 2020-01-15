@@ -29,6 +29,7 @@ pub fn shape(source: &dyn ShaperSource, text: &str) -> Result<Vec<GlyphInfo>> {
     let mut positions: Vec<GlyphInfo> = Vec::new();
 
     // convert to glyph ids
+
     let ids = find_glyph_indexes(source, text);
 
     let mut ids_iter = ids.into_iter().peekable();
