@@ -13,7 +13,7 @@ pub mod renderer;
 use renderer::Renderer;
 
 mod font_cache;
-use font_cache::{FontCache, FontStyle, FontManagerError, GlyphRenderStyle};
+use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
 
 pub mod math;
 use crate::math::*;
@@ -514,7 +514,7 @@ impl Canvas {
 
         let mut x0 = self.lastx;
         let mut y0 = self.lasty;
-        
+
         self.state().transform.inversed().transform_point(&mut x0, &mut y0, self.lastx, self.lasty);
 
         // Handle degenerate cases.
@@ -831,7 +831,7 @@ impl Canvas {
 pub enum CanvasError {
     GeneralError(String),
     ImageError(image::ImageError),
-    FontError(FontManagerError)
+    FontError(FontCacheError)
 }
 
 impl fmt::Display for CanvasError {
@@ -846,8 +846,8 @@ impl From<image::ImageError> for CanvasError {
     }
 }
 
-impl From<FontManagerError> for CanvasError {
-    fn from(error: FontManagerError) -> Self {
+impl From<FontCacheError> for CanvasError {
+    fn from(error: FontCacheError) -> Self {
         Self::FontError(error)
     }
 }

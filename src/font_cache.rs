@@ -24,7 +24,7 @@ use atlas::Atlas;
 const TEXTURE_SIZE: u32 = 512;
 const GLYPH_PADDING: u32 = 2;
 
-type Result<T> = std::result::Result<T, FontManagerError>;
+type Result<T> = std::result::Result<T, FontCacheError>;
 
 type PostscriptName = String;
 
@@ -205,7 +205,7 @@ impl FontCache {
         let face = self.library.new_memory_face(data, 0)?;
 
         let postscript_name = face.postscript_name().ok_or_else(|| {
-            FontManagerError::GeneralError("Cannot read font postscript name".to_string())
+            FontCacheError::GeneralError("Cannot read font postscript name".to_string())
         })?;
 
         self.faces.insert(postscript_name, FontFace::new(self.last_face_id, face));
@@ -230,7 +230,7 @@ impl FontCache {
         let faces = Self::face_character_range(&self.faces, text, style.font_name)?;
 
         for (face_name, str_range) in faces {
-            let face = self.faces.get_mut(&face_name).ok_or(FontManagerError::FontNotFound)?;
+            let face = self.faces.get_mut(&face_name).ok_or(FontCacheError::FontNotFound)?;
 
             face.ft_face.set_pixel_sizes(0, style.size).unwrap();
 
@@ -390,7 +390,7 @@ impl FontCache {
 
     fn face_character_range(faces: &HashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
         if faces.is_empty() {
-            return Err(FontManagerError::NoFontsAdded);
+            return Err(FontCacheError::NoFontsAdded);
         }
 
         let mut res = Vec::new();
@@ -470,7 +470,7 @@ impl FontCache {
 }
 
 #[derive(Debug)]
-pub enum FontManagerError {
+pub enum FontCacheError {
     GeneralError(String),
     FontNotFound,
     NoFontsAdded,
@@ -480,34 +480,34 @@ pub enum FontManagerError {
     ImageError(image::ImageError)
 }
 
-impl fmt::Display for FontManagerError {
+impl fmt::Display for FontCacheError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "font manager error")
     }
 }
 
-impl From<io::Error> for FontManagerError {
+impl From<io::Error> for FontCacheError {
     fn from(error: io::Error) -> Self {
         Self::IoError(error)
     }
 }
 
-impl From<ft::Error> for FontManagerError {
+impl From<ft::Error> for FontCacheError {
     fn from(error: ft::Error) -> Self {
         Self::FreetypeError(error)
     }
 }
 
-impl From<shaper::ShaperError> for FontManagerError {
+impl From<shaper::ShaperError> for FontCacheError {
     fn from(error: shaper::ShaperError) -> Self {
         Self::ShaperError(error)
     }
 }
 
-impl From<image::ImageError> for FontManagerError {
+impl From<image::ImageError> for FontCacheError {
     fn from(error: image::ImageError) -> Self {
         Self::ImageError(error)
     }
 }
 
-impl Error for FontManagerError {}
+impl Error for FontCacheError {}
