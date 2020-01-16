@@ -2,6 +2,8 @@
 use crate::math::{Transform2D, Vector2D, Angle};
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
+// TODO: Don't own the font name
+
 #[derive(Clone, Debug)]
 pub struct Paint {
     transform: Transform2D,
