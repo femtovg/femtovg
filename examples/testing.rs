@@ -32,7 +32,7 @@ fn main() {
 
     //canvas.set_font(font_id);
 
-    let image_id = canvas.create_image_file("examples/assets/image.jpg", ImageFlags::empty()).expect("Cannot create image");
+    let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::empty()).expect("Cannot create image");
 
     //dbg!(canvas.text_bounds(15.0, 300.0, "Hello World"));
 
@@ -149,10 +149,10 @@ fn main() {
                     canvas.save();
                     canvas.translate(10.0, 250.0);
 
-                    let paint = Paint::create_image(image_id, 0.0, 0.0, 350.0, 300.0, 0.0, 1.0);
+                    let paint = Paint::create_image(image_id, 0.0, 0.0, 293.0, 293.0, 0.0, 1.0);
 
                     canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 350.0, 300.0);
+                    canvas.rect(0.0, 0.0, 293.0, 293.0);
                     canvas.fill_path(&paint);
 
                     canvas.restore();
