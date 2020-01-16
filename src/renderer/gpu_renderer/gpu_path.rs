@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::math::{self, Box2D, Point2D};
+use crate::geometry::{self, Box2D, Point2D};
 use crate::renderer::Vertex;
 use crate::{Verb, Winding, LineCap, LineJoin};
 
@@ -53,7 +53,7 @@ impl Point {
             let p1 = points[i-1];
             let p2 = points[i];
 
-            area += math::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+            area += geometry::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
         }
 
         area * 0.5
@@ -125,7 +125,7 @@ impl GpuPath {
             let p1 = points.first().copied().unwrap();
 
             // If the first and last points are the same, remove the last, mark as closed path.
-            if math::pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
+            if geometry::pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
                 contour.count -= 1;
                 //p0 = points[path.count-1];
                 contour.closed = true;
@@ -157,7 +157,7 @@ impl GpuPath {
 
                 p0.dx = p1.x - p0.x;
                 p0.dy = p1.y - p0.y;
-                p0.len = math::normalize(&mut p0.dx, &mut p0.dy);
+                p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
 
                 cache.bounds.min.min(Point2D::new(p0.x, p0.y));
                 cache.bounds.max.max(Point2D::new(p0.x, p0.y));
@@ -191,7 +191,7 @@ impl GpuPath {
 
         if *count > 0 {
             if let Some(point) = self.points.last_mut() {
-                if math::pt_equals(point.x, point.y, x, y, dist_tol) {
+                if geometry::pt_equals(point.x, point.y, x, y, dist_tol) {
                     point.flags |= flags;
                     return;
                 }
@@ -405,7 +405,7 @@ impl GpuPath {
                 let mut dx = p1.x - p0.x;
                 let mut dy = p1.y - p0.y;
 
-                math::normalize(&mut dx, &mut dy);
+                geometry::normalize(&mut dx, &mut dy);
 
                 match line_cap {
                     LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, dx, dy, w, -aa*0.5, aa, u0, u1),
@@ -437,7 +437,7 @@ impl GpuPath {
                 let mut dx = p1.x - p0.x;
                 let mut dy = p1.y - p0.y;
 
-                math::normalize(&mut dx, &mut dy);
+                geometry::normalize(&mut dx, &mut dy);
 
                 match line_cap {
                     LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, dx, dy, w, -aa*0.5, aa, u0, u1),

@@ -3,7 +3,7 @@ use std::ffi::c_void;
 
 use image::DynamicImage;
 
-use crate::math::*;
+use crate::geometry::*;
 use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin};
 use crate::renderer::{ImageId, Renderer};
 

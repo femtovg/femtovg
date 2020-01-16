@@ -1,5 +1,5 @@
 
-use crate::math::{Transform2D, Vector2D, Angle};
+use crate::geometry::{Transform2D, Vector2D, Angle};
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
 // TODO: Don't own the font name
@@ -37,7 +37,7 @@ impl Default for Paint {
             outer_color: Default::default(),
             image: Default::default(),
             shape_anti_alias: true,
-            stencil_strokes: true,
+            stencil_strokes: false,
             stroke_width: 1.0,
             miter_limit: 10.0,
             line_cap: Default::default(),

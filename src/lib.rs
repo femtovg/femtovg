@@ -15,8 +15,8 @@ use renderer::Renderer;
 mod font_cache;
 use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
 
-pub mod math;
-use crate::math::*;
+pub mod geometry;
+use crate::geometry::*;
 
 mod paint;
 pub use paint::Paint;
@@ -517,9 +517,9 @@ impl Canvas {
         }
 
         // Handle degenerate cases.
-        if math::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
-            math::pt_equals(x1, y1, x2, y2, self.dist_tol) ||
-            math::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol ||
+        if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
+            geometry::pt_equals(x1, y1, x2, y2, self.dist_tol) ||
+            geometry::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol ||
             radius < self.dist_tol {
             self.line_to(x1, y1);
         }
@@ -529,8 +529,8 @@ impl Canvas {
         let mut dx1 = x2 - x1;
         let mut dy1 = y2 - y1;
 
-        math::normalize(&mut dx0, &mut dy0);
-        math::normalize(&mut dx1, &mut dy1);
+        geometry::normalize(&mut dx0, &mut dy0);
+        geometry::normalize(&mut dx1, &mut dy1);
 
         let a = (dx0*dx1 + dy0*dy1).acos();
         let d = radius / (a/2.0).tan();
@@ -541,7 +541,7 @@ impl Canvas {
 
         let (cx, cy, a0, a1, dir);
 
-        if math::cross(dx0, dy0, dx1, dy1) > 0.0 {
+        if geometry::cross(dx0, dy0, dx1, dy1) > 0.0 {
             cx = x1 + dx0*d + dy0*radius;
             cy = y1 + dy0*d + -dx0*radius;
             a0 = dx0.atan2(-dy0);
@@ -801,7 +801,7 @@ impl Canvas {
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
 
-        math::quantize(avg_scale, 0.01).min(4.0)
+        geometry::quantize(avg_scale, 0.01).min(4.0)
     }
 
     fn state(&self) -> &State {
