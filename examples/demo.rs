@@ -45,7 +45,7 @@ struct Demo {
 
 fn main() {
     let demos = vec![
-        Demo { name: String::from("Lines"), draw_fn: line},
+        Demo { name: String::from("Lines"), draw_fn: lines},
     ];
 
     let el = EventLoop::new();

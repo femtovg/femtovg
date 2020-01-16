@@ -186,10 +186,10 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         if let Flavor::ConcaveFill {..} = cmd.flavor {
             // Quad
-            self.verts.push(Vertex::new(gpu_path.bounds[2], gpu_path.bounds[3], 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds[2], gpu_path.bounds[1], 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds[0], gpu_path.bounds[3], 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds[0], gpu_path.bounds[1], 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.max.x, gpu_path.bounds.max.y, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.max.x, gpu_path.bounds.min.y, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.min.x, gpu_path.bounds.max.y, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.min.x, gpu_path.bounds.min.y, 0.5, 1.0));
 
             cmd.triangles_verts = Some((offset, 4));
         }

@@ -3,6 +3,7 @@ pub type Vector2D = euclid::default::Vector2D<f32>;
 pub type Point2D = euclid::default::Point2D<f32>;
 pub type Size2D = euclid::default::Size2D<f32>;
 pub type Rect = euclid::default::Rect<f32>;
+pub type Box2D = euclid::default::Box2D<f32>;
 pub type Transform2D = euclid::default::Transform2D<f32>;
 pub type Angle = euclid::Angle<f32>;
 

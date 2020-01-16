@@ -22,7 +22,7 @@ fn main() {
     let backend = GpuRenderer::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
     let mut canvas = Canvas::new(backend);
 
-    canvas.add_font("examples/assets/NotoSerif-Regular.ttf");
+    canvas.add_font("examples/assets/NotoSans-Regular.ttf");
 
 
     // canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");

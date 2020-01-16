@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::math;
+use crate::math::{self, Box2D, Point2D};
 use crate::renderer::Vertex;
 use crate::{Verb, Winding, LineCap, LineJoin};
 
@@ -72,11 +72,21 @@ pub struct Contour {
     pub(crate) convexity: Convexity
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct GpuPath {
     pub(crate) contours: Vec<Contour>,
-    pub(crate) bounds: [f32; 4],
+    pub(crate) bounds: Box2D,
     points: Vec<Point>,
+}
+
+impl Default for GpuPath {
+    fn default() -> Self {
+        Self {
+            contours: Default::default(),
+            bounds: Box2D::new(Point2D::new(1e6, 1e6), Point2D::new(-1e6, -1e6)),
+            points: Default::default()
+        }
+    }
 }
 
 impl GpuPath {
@@ -107,11 +117,6 @@ impl GpuPath {
                 }
             }
         }
-
-        cache.bounds[0] = 1e6;
-        cache.bounds[1] = 1e6;
-        cache.bounds[2] = -1e6;
-        cache.bounds[3] = -1e6;
 
         for contour in &mut cache.contours {
             let mut points = &mut cache.points[contour.first..(contour.first + contour.count)];
@@ -154,10 +159,8 @@ impl GpuPath {
                 p0.dy = p1.y - p0.y;
                 p0.len = math::normalize(&mut p0.dx, &mut p0.dy);
 
-                cache.bounds[0] = cache.bounds[0].min(p0.x);
-                cache.bounds[1] = cache.bounds[1].min(p0.y);
-                cache.bounds[2] = cache.bounds[2].max(p0.x);
-                cache.bounds[3] = cache.bounds[3].max(p0.y);
+                cache.bounds.min.min(Point2D::new(p0.x, p0.y));
+                cache.bounds.max.max(Point2D::new(p0.x, p0.y));
             }
         }
 
