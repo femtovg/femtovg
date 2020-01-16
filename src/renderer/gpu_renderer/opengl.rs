@@ -387,6 +387,21 @@ impl GpuRendererBackend for OpenGl {
 
                 texture.tex_type = TextureType::Alpha;
             },
+            DynamicImage::ImageRgb8(rgb_image) => unsafe {
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGB as i32,
+                    texture.width as i32,
+                    texture.height as i32,
+                    0,
+                    gl::RGB,
+                    gl::UNSIGNED_BYTE,
+                    rgb_image.as_ref().as_ptr() as *const GLvoid
+                );
+
+                texture.tex_type = TextureType::Rgb;
+            },
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
@@ -488,7 +503,7 @@ impl GpuRendererBackend for OpenGl {
                 let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
 
                 if texture.tex_type != TextureType::Alpha {
-                    panic!("Attemped to update Aplha texture with Rgba image");
+                    panic!("Attemped to update texture with an image of a different format");
                 }
 
                 gl::TexSubImage2D(
@@ -503,9 +518,26 @@ impl GpuRendererBackend for OpenGl {
                     gray_image.as_ref().as_ptr() as *const GLvoid
                 );
             }
+            DynamicImage::ImageRgb8(rgb_image) => unsafe {
+                if texture.tex_type != TextureType::Rgb {
+                    panic!("Attemped to update texture with an image of a different format");
+                }
+
+                gl::TexSubImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    x as i32,
+                    y as i32,
+                    size.0 as i32,
+                    size.1 as i32,
+                    gl::RGB,
+                    gl::UNSIGNED_BYTE,
+                    rgb_image.as_ref().as_ptr() as *const GLvoid
+                );
+            }
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
                 if texture.tex_type != TextureType::Rgba {
-                    panic!("Attemped to update Rgba texture with Alpha image");
+                    panic!("Attemped to update texture with an image of a different format");
                 }
 
                 gl::TexSubImage2D(

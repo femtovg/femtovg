@@ -23,24 +23,16 @@ fn main() {
     let mut canvas = Canvas::new(backend);
 
     canvas.add_font("examples/assets/NotoSans-Regular.ttf");
-
-
     // canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");
     // canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
     // canvas.add_font("/usr/share/fonts/TTF/VeraSe.ttf"); // <- Kerning
-
-
-
-
-
     //canvas.add_font("/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf");
     //canvas.add_font("/usr/share/fonts/TTF/VeraIt.ttf"); // <- Kerning
     //canvas.add_font("/usr/share/fonts/TTF/TSCu_Times.ttf");
 
     //canvas.set_font(font_id);
 
-    //let image_id = canvas.create_image("/home/ptodorov/Pictures/EGzVIXuXkAIyHhw.jpg", ImageFlags::empty()).expect("Cannot create image");
-    //let image_id = canvas.create_image("/home/ptodorov/Downloads/645565.jpg", ImageFlags::PREMULTIPLIED).expect("Cannot create image");
+    let image_id = canvas.create_image_file("examples/assets/image.jpg", ImageFlags::empty()).expect("Cannot create image");
 
     //dbg!(canvas.text_bounds(15.0, 300.0, "Hello World"));
 
@@ -152,25 +144,20 @@ fn main() {
                 }
 
                 // Image
-                /*
-                if false {
+                if true {
 
                     canvas.save();
-                    //canvas.translate(170.0, 170.0);
+                    canvas.translate(10.0, 250.0);
 
-                    canvas.set_fill_color(Color::hex("#70c1b3"));
-                    canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 512.0, 512.0);
-                    canvas.fill();
-
-                    let paint = Paint::image(graphics::ImageId(0), 0.0, 0.0, 512.0, 512.0, math::Rad(0.0), 1.0);
-                    canvas.set_fill_paint(paint);
+                    let paint = Paint::create_image(image_id, 0.0, 0.0, 350.0, 300.0, 0.0, 1.0);
 
                     canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 512.0, 512.0);
-                    canvas.fill();
+                    canvas.rect(0.0, 0.0, 350.0, 300.0);
+                    canvas.fill_path(&paint);
+
                     canvas.restore();
-                }*/
+                }
+
                 let elapsed = cpu_start.elapsed().as_secs_f32();
 
                 canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {}", elapsed), &Paint::color(Color::hex("454545")));

@@ -32,6 +32,7 @@ pub trait GpuRendererBackend {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {
+    Rgb,
     Rgba,
     Alpha
 }
