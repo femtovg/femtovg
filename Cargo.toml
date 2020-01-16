@@ -16,6 +16,7 @@ bitflags = "1.2.1"
 image = "0.23.0-preview.0"
 freetype-rs = "0.23.0"
 unicode-normalization = "0.1.11"
+euclid = "0.20.7"
 
 [build-dependencies]
 gl_generator = "0.13"

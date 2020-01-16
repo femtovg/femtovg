@@ -31,11 +31,11 @@ pub use paint::Paint;
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug)]
 pub enum Verb {
-    MoveTo(f32, f32),
-    LineTo(f32, f32),
-    BezierTo(f32, f32, f32, f32, f32, f32),
+    MoveTo(Point2D),
+    LineTo(Point2D),
+    BezierTo(Point2D, Point2D, Point2D),// TODO: use struct here {c1, c2, pos}
     Close,
     Winding(Winding)
 }
@@ -66,7 +66,7 @@ bitflags! {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug)]
 pub struct Scissor {
     transform: Transform2D,
     extent: [f32; 2],
@@ -159,12 +159,12 @@ impl Default for State {
 }
 
 pub struct Canvas {
+    pub size: Size2D,
     renderer: Box<dyn Renderer>,
     font_cache: FontCache,
     state_stack: Vec<State>,
     verbs: Vec<Verb>,
-    lastx: f32,
-    lasty: f32,
+    last: Point2D,
     tess_tol: f32,
     dist_tol: f32,
     fringe_width: f32,
@@ -179,12 +179,12 @@ impl Canvas {
         let font_manager = FontCache::new().unwrap();
 
         let mut canvas = Self {
+            size: Default::default(),
             renderer: Box::new(renderer),
             font_cache: font_manager,
             state_stack: Default::default(),
             verbs: Default::default(),
-            lastx: Default::default(),
-            lasty: Default::default(),
+            last: Default::default(),
             tess_tol: Default::default(),
             dist_tol: Default::default(),
             fringe_width: Default::default(),
@@ -200,6 +200,7 @@ impl Canvas {
     }
 
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
+        self.size = Size2D::new(width as f32, height as f32);
         self.renderer.set_size(width, height, dpi);
     }
 
@@ -294,43 +295,41 @@ impl Canvas {
     ///   [b d f]
     ///   [0 0 1]
     pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
-        let transform = Transform2D([a, b, c, d, e, f]);
-        self.state_mut().transform.premultiply(&transform);
+        let new = Transform2D::column_major(a, b, c, d, e, f);
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_transform(&new);
     }
 
     /// Translates the current coordinate system.
     pub fn translate(&mut self, x: f32, y: f32) {
-        let mut t = Transform2D::identity();
-        t.translate(x, y);
-        self.state_mut().transform.premultiply(&t);
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_translate(Vector2D::new(x, y));
     }
 
     /// Rotates the current coordinate system. Angle is specified in radians.
-    pub fn rotate<R: Into<Rad>>(&mut self, angle: R) {
-        let mut t = Transform2D::identity();
-        t.rotate(angle);
-        self.state_mut().transform.premultiply(&t);
+    pub fn rotate(&mut self, angle: f32) {
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_rotate(Angle::radians(-angle));
     }
 
     /// Skews the current coordinate system along X axis. Angle is specified in radians.
-    pub fn skew_x<R: Into<Rad>>(&mut self, angle: R) {
-        let mut t = Transform2D::identity();
-        t.skew_x(angle);
-        self.state_mut().transform.premultiply(&t);
+    pub fn skew_x(&mut self, angle: f32) {
+        let new = Transform2D::create_skew_x(Angle::radians(angle));
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_transform(&new);
     }
 
     /// Skews the current coordinate system along Y axis. Angle is specified in radians.
-    pub fn skew_y<R: Into<Rad>>(&mut self, angle: R) {
-        let mut t = Transform2D::identity();
-        t.skew_y(angle);
-        self.state_mut().transform.premultiply(&t);
+    pub fn skew_y(&mut self, angle: f32) {
+        let new = Transform2D::create_skew_y(Angle::radians(angle));
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_transform(&new);
     }
 
     /// Scales the current coordinate system.
     pub fn scale(&mut self, x: f32, y: f32) {
-        let mut t = Transform2D::identity();
-        t.scale(x, y);
-        self.state_mut().transform.premultiply(&t);
+        let t = &mut self.state_mut().transform;
+        *t = t.pre_scale(x, y);
     }
 
     /// Returns the current transformation matrix
@@ -349,10 +348,8 @@ impl Canvas {
         let w = w.max(0.0);
         let h = h.max(0.0);
 
-        state.scissor.transform = Transform2D::identity();
-        state.scissor.transform[4] = x + w * 0.5;
-        state.scissor.transform[5] = y + h * 0.5;
-        state.scissor.transform.premultiply(&state.transform);
+        let t = Transform2D::create_translation(x + w * 0.5, y + h * 0.5);
+        state.scissor.transform = t.pre_transform(&state.transform);
 
         state.scissor.extent[0] = w * 0.5;
         state.scissor.extent[1] = h * 0.5;
@@ -378,23 +375,21 @@ impl Canvas {
         // Transform the current scissor rect into current transform space.
         // If there is difference in rotation, this will be approximation.
 
-        let mut pxform = Transform2D::identity();
+        if let Some(pxform) = state.transform.inverse() {
+            let ex = state.scissor.extent[0];
+            let ey = state.scissor.extent[1];
 
-        let mut invxform = state.transform;
-        invxform.inverse();
+            let tex = ex*pxform.m11.abs() + ey*pxform.m21.abs();
+            let tey = ex*pxform.m12.abs() + ey*pxform.m22.abs();
 
-        pxform.multiply(&invxform);
+            let a = Rect::new(Point2D::new(pxform.m31-tex, pxform.m32-tey), Size2D::new(tex*2.0, tey*2.0));
 
-        let ex = state.scissor.extent[0];
-        let ey = state.scissor.extent[1];
-
-        let tex = ex*pxform[0].abs() + ey*pxform[2].abs();
-        let tey = ex*pxform[1].abs() + ey*pxform[3].abs();
-
-        let a = Rect::new(pxform[4]-tex, pxform[5]-tey, tex*2.0, tey*2.0);
-        let res = a.intersect(Rect::new(x, y, w, h));
-
-        self.scissor(res.x, res.y, res.w, res.h);
+            if let Some(res) = a.intersection(&Rect::new(Point2D::new(x, y), Size2D::new(w, h))) {
+                self.scissor(res.origin.x, res.origin.y, res.size.width, res.size.height);
+            } else {
+                self.scissor(0.0, 0.0, 0.0, 0.0);
+            }
+        }
     }
 
     /// Reset and disables scissoring.
@@ -412,29 +407,29 @@ impl Canvas {
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
-        self.append_verbs(&mut [Verb::MoveTo(x, y)]);
+        self.append_verbs(&mut [Verb::MoveTo(Point2D::new(x, y))]);
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
-        self.append_verbs(&mut [Verb::LineTo(x, y)]);
+        self.append_verbs(&mut [Verb::LineTo(Point2D::new(x, y))]);
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
-        self.append_verbs(&mut [Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+        self.append_verbs(&mut [Verb::BezierTo(Point2D::new(c1x, c1y), Point2D::new(c2x, c2y), Point2D::new(x, y))]);
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
-        let x0 = self.lastx;
-        let y0 = self.lasty;
+        let x0 = self.last.x;
+        let y0 = self.last.y;
 
         self.append_verbs(&mut [
             Verb::BezierTo(
-                x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0),
-                x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y),
-                x, y
+                Point2D::new(x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0)),
+                Point2D::new(x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y)),
+                Point2D::new(x, y)
             )
         ]);
     }
@@ -491,10 +486,10 @@ impl Canvas {
             let tany = dx*r*kappa;
 
             if i == 0 {
-                let first_move = if !self.verbs.is_empty() { Verb::LineTo(x, y) } else { Verb::MoveTo(x, y) };
+                let first_move = if !self.verbs.is_empty() { Verb::LineTo(Point2D::new(x, y)) } else { Verb::MoveTo(Point2D::new(x, y)) };
                 commands.push(first_move);
             } else {
-                commands.push(Verb::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
+                commands.push(Verb::BezierTo(Point2D::new(px+ptanx, py+ptany), Point2D::new(x-tanx, y-tany), Point2D::new(x, y)));
             }
 
             px = x;
@@ -512,10 +507,14 @@ impl Canvas {
             return;
         }
 
-        let mut x0 = self.lastx;
-        let mut y0 = self.lasty;
+        let mut x0 = self.last.x;
+        let mut y0 = self.last.y;
 
-        self.state().transform.inversed().transform_point(&mut x0, &mut y0, self.lastx, self.lasty);
+        if let Some(inv) = self.state().transform.inverse() {
+            let res = inv.transform_point(self.last);
+            x0 = res.x;
+            y0 = res.y;
+        }
 
         // Handle degenerate cases.
         if math::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
@@ -562,10 +561,10 @@ impl Canvas {
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.append_verbs(&mut [
-            Verb::MoveTo(x, y),
-            Verb::LineTo(x, y + h),
-            Verb::LineTo(x + w, y + h),
-            Verb::LineTo(x + w, y),
+            Verb::MoveTo(Point2D::new(x, y)),
+            Verb::LineTo(Point2D::new(x, y + h)),
+            Verb::LineTo(Point2D::new(x + w, y + h)),
+            Verb::LineTo(Point2D::new(x + w, y)),
             Verb::Close
         ]);
     }
@@ -596,15 +595,15 @@ impl Canvas {
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
             self.append_verbs(&mut [
-                Verb::MoveTo(x, y + ry_tl),
-                Verb::LineTo(x, y + h - ry_bl),
-                Verb::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
-                Verb::LineTo(x + w - rx_br, y + h),
-                Verb::BezierTo(x + w - rx_br*(1.0 - KAPPA90), y + h, x + w, y + h - ry_br*(1.0 - KAPPA90), x + w, y + h - ry_br),
-                Verb::LineTo(x + w, y + ry_tr),
-                Verb::BezierTo(x + w, y + ry_tr*(1.0 - KAPPA90), x + w - rx_tr*(1.0 - KAPPA90), y, x + w - rx_tr, y),
-                Verb::LineTo(x + rx_tl, y),
-                Verb::BezierTo(x + rx_tl*(1.0 - KAPPA90), y, x, y + ry_tl*(1.0 - KAPPA90), x, y + ry_tl),
+                Verb::MoveTo(Point2D::new(x, y + ry_tl)),
+                Verb::LineTo(Point2D::new(x, y + h - ry_bl)),
+                Verb::BezierTo(Point2D::new(x, y + h - ry_bl*(1.0 - KAPPA90)), Point2D::new(x + rx_bl*(1.0 - KAPPA90), y + h), Point2D::new(x + rx_bl, y + h)),
+                Verb::LineTo(Point2D::new(x + w - rx_br, y + h)),
+                Verb::BezierTo(Point2D::new(x + w - rx_br*(1.0 - KAPPA90), y + h), Point2D::new(x + w, y + h - ry_br*(1.0 - KAPPA90)), Point2D::new(x + w, y + h - ry_br)),
+                Verb::LineTo(Point2D::new(x + w, y + ry_tr)),
+                Verb::BezierTo(Point2D::new(x + w, y + ry_tr*(1.0 - KAPPA90)), Point2D::new(x + w - rx_tr*(1.0 - KAPPA90), y), Point2D::new(x + w - rx_tr, y)),
+                Verb::LineTo(Point2D::new(x + rx_tl, y)),
+                Verb::BezierTo(Point2D::new(x + rx_tl*(1.0 - KAPPA90), y), Point2D::new(x, y + ry_tl*(1.0 - KAPPA90)), Point2D::new(x, y + ry_tl)),
                 Verb::Close
             ]);
         }
@@ -613,11 +612,11 @@ impl Canvas {
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
         self.append_verbs(&mut [
-            Verb::MoveTo(cx-rx, cy),
-            Verb::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
-            Verb::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
-            Verb::BezierTo(cx+rx, cy-ry*KAPPA90, cx+rx*KAPPA90, cy-ry, cx, cy-ry),
-            Verb::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
+            Verb::MoveTo(Point2D::new(cx-rx, cy)),
+            Verb::BezierTo(Point2D::new(cx-rx, cy+ry*KAPPA90), Point2D::new(cx-rx*KAPPA90, cy+ry), Point2D::new(cx, cy+ry)),
+            Verb::BezierTo(Point2D::new(cx+rx*KAPPA90, cy+ry), Point2D::new(cx+rx, cy+ry*KAPPA90), Point2D::new(cx+rx, cy)),
+            Verb::BezierTo(Point2D::new(cx+rx, cy-ry*KAPPA90), Point2D::new(cx+rx*KAPPA90, cy-ry), Point2D::new(cx, cy-ry)),
+            Verb::BezierTo(Point2D::new(cx-rx*KAPPA90, cy-ry), Point2D::new(cx-rx, cy-ry*KAPPA90), Point2D::new(cx-rx, cy)),
             Verb::Close
         ]);
     }
@@ -633,8 +632,7 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        let mut transform = paint.transform();
-        transform.multiply(&self.state().transform);
+        let transform = paint.transform().pre_transform(&self.state().transform);
         paint.set_transform(transform);
 
         // Apply global alpha
@@ -654,8 +652,7 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        let mut transform = paint.transform();
-        transform.multiply(&self.state().transform);
+        let transform = paint.transform().pre_transform(&self.state().transform);
         paint.set_transform(transform);
 
         // Scale stroke width by current transform scale
@@ -750,12 +747,10 @@ impl Canvas {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
             for quad in &cmd.quads {
-                let (mut p0, mut p1, mut p2, mut p3, mut p4, mut p5, mut p6, mut p7) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-
-                transform.transform_point(&mut p0, &mut p1, quad.x0*invscale, quad.y0*invscale);
-                transform.transform_point(&mut p2, &mut p3, quad.x1*invscale, quad.y0*invscale);
-                transform.transform_point(&mut p4, &mut p5, quad.x1*invscale, quad.y1*invscale);
-                transform.transform_point(&mut p6, &mut p7, quad.x0*invscale, quad.y1*invscale);
+                let (p0, p1) = transform.transform_point(Point2D::new(quad.x0*invscale, quad.y0*invscale)).to_tuple();
+                let (p2, p3) = transform.transform_point(Point2D::new(quad.x1*invscale, quad.y0*invscale)).to_tuple();
+                let (p4, p5) = transform.transform_point(Point2D::new(quad.x1*invscale, quad.y1*invscale)).to_tuple();
+                let (p6, p7) = transform.transform_point(Point2D::new(quad.x0*invscale, quad.y1*invscale)).to_tuple();
 
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
@@ -781,22 +776,20 @@ impl Canvas {
 		// transform
 		for cmd in verbs.iter_mut() {
 			match cmd {
-				Verb::MoveTo(x, y) => {
-					transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
+				Verb::MoveTo(point) => {
+                    self.last = *point;
+                    *point = transform.transform_point(self.last);
 				}
-				Verb::LineTo(x, y) => {
-					transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
+				Verb::LineTo(point) => {
+					self.last = *point;
+                    *point = transform.transform_point(self.last);
 				}
-				Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-					transform.transform_point(c1x, c1y, *c1x, *c1y);
-					transform.transform_point(c2x, c2y, *c2x, *c2y);
-					transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
+				Verb::BezierTo(c1, c2, point) => {
+                    self.last = *point;
+
+                    *c1 = transform.transform_point(*c1);
+                    *c2 = transform.transform_point(*c2);
+                    *point = transform.transform_point(self.last);
 				}
 				_ => ()
 			}

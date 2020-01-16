@@ -87,16 +87,16 @@ impl GpuPath {
         // Convert commands to a set of contours
         for verb in path {
             match verb {
-                Verb::MoveTo(x, y) => {
+                Verb::MoveTo(point) => {
                     cache.add_contour();
-                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                    cache.add_point(point.x, point.y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::LineTo(x, y) => {
-                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                Verb::LineTo(point) => {
+                    cache.add_point(point.x, point.y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                Verb::BezierTo(c1, c2, point) => {
                     if let Some(last) = cache.last_point() {
-                        cache.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                        cache.tesselate_bezier(last.x, last.y, c1.x, c1.y, c2.x, c2.y, point.x, point.y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Verb::Close => {

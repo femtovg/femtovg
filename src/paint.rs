@@ -1,5 +1,5 @@
 
-use crate::math::{Rad, Transform2D};
+use crate::math::{Transform2D, Vector2D, Angle};
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
 #[derive(Clone, Debug)]
@@ -59,13 +59,11 @@ impl Paint {
     /// Creates and returns an image pattern.
     ///
     /// Parameters (cx,cy) specify the left-top location of the image pattern, (w,h) the size of one image,
-    /// angle rotation around the top-left corner, id is handle to the image to render.
-    pub fn create_image<A: Into<Rad>>(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: A, alpha: f32) -> Paint {
+    /// radians rotation around the top-left corner, id is handle to the image to render.
+    pub fn create_image(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: f32, alpha: f32) -> Paint {
         let mut paint = Self::default();
 
-        paint.transform.rotate(angle);
-        paint.transform[4] = cx;
-        paint.transform[5] = cy;
+        paint.transform = Transform2D::create_rotation(Angle::radians(angle)).post_translate(Vector2D::new(cx, cy));
 
         paint.extent[0] = w;
         paint.extent[1] = h;
@@ -97,11 +95,11 @@ impl Paint {
             dy = 1.0;
         }
 
-        paint.transform = Transform2D([
+        paint.transform = Transform2D::column_major(
             dy, -dx,
             dx, dy,
             start_x - dx*large, start_y - dy*large
-        ]);
+        );
 
         paint.extent[0] = large;
         paint.extent[1] = large + d*0.5;
@@ -124,10 +122,7 @@ impl Paint {
     pub fn box_gradient(x: f32, y: f32, w: f32, h: f32, r: f32, f: f32, inner_color: Color, outer_color: Color) -> Self {
         let mut paint = Self::default();
 
-        paint.transform = Transform2D::default();
-
-        paint.transform[4] = x+w*0.5;
-        paint.transform[5] = y+h*0.5;
+        paint.transform = Transform2D::create_translation(x+w*0.5, y+h*0.5);
 
         paint.extent[0] = w*0.5;
         paint.extent[1] = h*0.5;
@@ -152,8 +147,7 @@ impl Paint {
         let r = (inr + outr) * 0.5;
         let f = outr - inr;
 
-        paint.transform[4] = cx;
-        paint.transform[5] = cy;
+        paint.transform = Transform2D::create_translation(cx, cy);
 
         paint.extent[0] = r;
         paint.extent[1] = r;

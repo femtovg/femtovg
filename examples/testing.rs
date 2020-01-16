@@ -113,12 +113,14 @@ fn main() {
                 draw_lines(&mut canvas, 205.0, 110.0);
                 draw_shadows(&mut canvas);
 
+                //draw_state_stack(&mut canvas);
+
                 if true {
 
 					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
-                    let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiam est erat, fringilla ut felis id, pharetra finibus ligula. Aliquam tincidunt quam at purus venenatis mattis. Quisque consectetur nulla turpis, ultricies consequat erat efficitur et. Duis vitae tellus ante. Proin id dapibus libero. Nunc justo velit, lacinia ut risus varius, feugiat ullamcorper augue. Nam rhoncus tellus vel velit scelerisque tincidunt. Integer tempor lectus id lobortis bibendum. Cras ipsum nunc, convallis vitae ultrices in, ullamcorper quis ante. Mauris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
+                    let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
 
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
 
@@ -141,7 +143,7 @@ fn main() {
                     let x = size.width as f32 - 512.0;
                     let y = size.height as f32 - 512.0;
 
-                    let paint = Paint::create_image(image_id, x, y, 512.0, 512.0, math::Rad(0.0), 1.0);
+                    let paint = Paint::create_image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
 
                     canvas.begin_path();
                     canvas.rect(x, y, 512.0, 512.0);
@@ -347,6 +349,45 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.restore();
 }
 
+fn draw_state_stack(canvas: &mut Canvas) {
+    let rect_width = 150.0;
+    let rect_height = 75.0;
+
+    canvas.save();
+    // save state 1
+    canvas.translate(canvas.size.width / 2.0, canvas.size.height / 2.0);
+
+    canvas.save();
+    // save state 2
+    canvas.rotate(std::f32::consts::PI / 4.0);
+
+    canvas.save();
+    // save state 3
+    canvas.scale(2.0, 2.0);
+
+    canvas.begin_path();
+    canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
+    canvas.fill_path(&Paint::color(Color::hex("#0000AA")));
+
+    canvas.restore();
+    // restore state 3
+    canvas.begin_path();
+    canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
+    canvas.fill_path(&Paint::color(Color::hex("#AA0000")));
+
+    canvas.restore();
+    // restore state 2
+    canvas.begin_path();
+    canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
+    canvas.fill_path(&Paint::color(Color::hex("#AAAA00")));
+
+    canvas.restore();
+    // restore state 1
+    canvas.begin_path();
+    canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
+    canvas.fill_path(&Paint::color(Color::hex("#00AA00")));
+}
+
 fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
 
     let fill_paint = Paint::color(Color::hex("#70c1b3"));
@@ -391,7 +432,7 @@ fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
 
     canvas.save();
     canvas.translate(40.0, 0.0);
-    canvas.rotate(math::Deg(45.0));
+    canvas.rotate(45.0f32.to_radians());
 
     canvas.begin_path();
     canvas.rounded_rect(0.0, 0.0, 55.0, 55.0, 5.0);
@@ -400,7 +441,7 @@ fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
 
     canvas.translate(95.0, 0.0);
     canvas.save();
-    canvas.skew_x(math::Deg(-10.0));
+    canvas.skew_x(-10.0f32.to_radians());
 
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);
