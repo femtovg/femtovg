@@ -12,8 +12,8 @@ pub use color::Color;
 pub mod renderer;
 use renderer::Renderer;
 
-pub mod font_cache;
-pub use font_cache::{FontCache, FontStyle, FontManagerError, GlyphRenderStyle};
+mod font_cache;
+use font_cache::{FontCache, FontStyle, FontManagerError, GlyphRenderStyle};
 
 pub mod math;
 use crate::math::*;
@@ -21,6 +21,7 @@ use crate::math::*;
 mod paint;
 pub use paint::Paint;
 
+// TODO: path_contains_point method
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
 // TODO: Drawing works before the call to begin frame for some reason
 // TODO: rethink image creation and resource creation in general, it's currently blocking,
@@ -259,7 +260,7 @@ impl Canvas {
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image_mem(&mut self, flags: ImageFlags, data: &[u8]) -> Result<ImageId, CanvasError> {
+    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, CanvasError> {
         let image = image::load_from_memory(data)?;
 
         Ok(self.create_image(&image, flags))
@@ -511,8 +512,10 @@ impl Canvas {
             return;
         }
 
-        let x0 = self.lastx;
-        let y0 = self.lasty;
+        let mut x0 = self.lastx;
+        let mut y0 = self.lasty;
+        
+        self.state().transform.inversed().transform_point(&mut x0, &mut y0, self.lastx, self.lasty);
 
         // Handle degenerate cases.
         if math::pt_equals(x0, y0, x1, y1, self.dist_tol) ||

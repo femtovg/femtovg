@@ -2,6 +2,11 @@
 use std::convert::From;
 use std::ops::{Index, IndexMut, Deref, DerefMut};
 
+// TODO: Revise visibility of these methods
+// TODO: Remove Deg and Rad
+// TODO: Refactor transform API so that it's not awkward to use
+// TODO: 3D transform
+
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
 }

@@ -134,6 +134,7 @@ struct Glyph {
     texture_index: usize,
 }
 
+// TODO: move this struct to it's own module and implement ShaperSource on it with caching
 struct FontFace {
     id: usize,
     ft_face: ft::Face,
