@@ -37,7 +37,7 @@ pub struct OpenGl {
     debug: bool,
     antialias: bool,
     is_opengles: bool,
-    view: [f32; 2],// This mybe should be u32
+    view: [f32; 2],
     shader: Shader,
     vert_arr: GLuint,
     vert_buff: GLuint,

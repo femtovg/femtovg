@@ -11,8 +11,9 @@ pub struct Paint {
     inner_color: Color,
     outer_color: Color,
     image: Option<ImageId>,
-    shape_anti_alias: bool,
     stroke_width: f32,
+    shape_anti_alias: bool,
+    stencil_strokes: bool,
     miter_limit: f32,
     line_cap: LineCap,
     line_join: LineJoin,
@@ -34,6 +35,7 @@ impl Default for Paint {
             outer_color: Default::default(),
             image: Default::default(),
             shape_anti_alias: true,
+            stencil_strokes: true,
             stroke_width: 1.0,
             miter_limit: 10.0,
             line_cap: Default::default(),
@@ -246,6 +248,15 @@ impl Paint {
     /// Sets whether shapes drawn with this paint will be anti aliased. Enabled by default.
     pub fn set_shape_anti_alias(&mut self, value: bool) {
         self.shape_anti_alias = value;
+    }
+
+    pub fn stencil_strokes(&self) -> bool {
+        self.stencil_strokes
+    }
+
+    /// Sets whether to use higher quality stencil strokes.
+    pub fn set_stencil_strokes(&mut self, value: bool) {
+        self.stencil_strokes = value;
     }
 
     /// Returns the current stroke line width.

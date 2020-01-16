@@ -81,7 +81,6 @@ impl Command {
 }
 
 pub struct GpuRenderer<T> {
-    stencil_strokes: bool,
     backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
@@ -92,7 +91,6 @@ pub struct GpuRenderer<T> {
 impl<T: GpuRendererBackend> GpuRenderer<T> {
     pub fn new(backend: T) -> Self {
         Self {
-            stencil_strokes: true,
             backend: backend,
             cmds: Default::default(),
             verts: Default::default(),
@@ -136,8 +134,6 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn fill(&mut self, paint: &Paint, scissor: &Scissor) {
-
-        // TODO: don't hardcode tes_tol and dist_tol here
         let gpu_path = if let Some(gpu_path) = self.current_path.as_mut() {
             gpu_path
         } else {
@@ -217,7 +213,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         let params = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
-        let flavor = if self.stencil_strokes {
+        let flavor = if paint.stencil_strokes() {
             let pass2 = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
             Flavor::StencilStroke { pass1: params, pass2 }
