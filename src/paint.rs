@@ -81,6 +81,7 @@ impl Default for Paint<'_> {
 }
 
 impl<'a> Paint<'a> {
+    /// Creates a new solid color paint
     pub fn color(color: Color) -> Self {
         let mut new = Self::default();
         new.flavor = PaintFlavor::Color(color);

@@ -716,8 +716,6 @@ impl Canvas {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut paint = paint.clone();
-
         let mut style = FontStyle::new(paint.font_name());
         style.set_size((paint.font_size() as f32 * scale) as u32);
         style.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
@@ -759,12 +757,6 @@ impl Canvas {
 
             // Apply global alpha
             paint.mul_alpha(self.state().alpha);
-
-            //paint.image = Some(cmd.image_id);
-
-            // Apply global alpha
-            //paint.inner_color.a *= self.state().alpha;
-            //paint.outer_color.a *= self.state().alpha;
 
             self.renderer.triangles(&paint, &scissor, &verts);
         }
