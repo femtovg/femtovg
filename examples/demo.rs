@@ -105,27 +105,27 @@ fn main() {
                 draw_lines(&mut canvas, 205.0, 110.0);
                 draw_shadows(&mut canvas);
 
-                draw_state_stack(&mut canvas);
+                //draw_state_stack(&mut canvas);
 
                 if true {
 
 					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
-                    let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
+                    //let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
 
                     //let bounds = canvas.text_bounds(15.0, 300.0, text);
 
                     let mut paint = Paint::color(Color::hex("454545"));
 
-                    let font_size = 20;
+                    let font_size = 16;
 
                     paint.set_stroke_width(1.0);
                     paint.set_font_size(font_size);
                     //paint.set_letter_spacing(3);
                     //paint.set_font_blur(1.0);
-                    paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
-                    //paint.set_font_name("NotoSans-Regular".to_string());
+                    //paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
+                    paint.set_font_name("NotoSans-Regular");
 
 					canvas.fill_text(15.0, 220.0, &text, &paint);
                     //canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
@@ -353,25 +353,25 @@ fn draw_state_stack(canvas: &mut Canvas) {
 
     canvas.begin_path();
     canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&Paint::color(Color::hex("#0000AA")));
+    canvas.fill_path(&Paint::color(Color::hex("#0000FF")));
 
     canvas.restore();
     // restore state 3
     canvas.begin_path();
     canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&Paint::color(Color::hex("#AA0000")));
+    canvas.fill_path(&Paint::color(Color::hex("#FF0000")));
 
     canvas.restore();
     // restore state 2
     canvas.begin_path();
     canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&Paint::color(Color::hex("#AAAA00")));
+    canvas.fill_path(&Paint::color(Color::hex("#FFFF00")));
 
     canvas.restore();
     // restore state 1
     canvas.begin_path();
     canvas.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&Paint::color(Color::hex("#00AA00")));
+    canvas.fill_path(&Paint::color(Color::hex("#00FF00")));
 }
 
 fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {

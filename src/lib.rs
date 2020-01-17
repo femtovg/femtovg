@@ -204,6 +204,7 @@ impl Canvas {
         self.height = height as f32;
         self.dist_tol = 0.01 / dpi;
         self.fringe_width = 1.0 / dpi;
+        self.device_px_ratio = dpi;
 
         self.renderer.set_size(width, height, dpi);
     }

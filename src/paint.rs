@@ -2,10 +2,8 @@
 use crate::geometry::Transform2D;
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
-// TODO: Don't own the font name
-
 #[derive(Clone, Debug)]
-pub struct Paint {
+pub struct Paint<'a> {
     transform: Transform2D,
     extent: [f32; 2],
     radius: f32,
@@ -19,14 +17,14 @@ pub struct Paint {
     miter_limit: f32,
     line_cap: LineCap,
     line_join: LineJoin,
-    font_name: String,
+    font_name: &'a str,
     font_size: u32,
     letter_spacing: i32,
     font_blur: f32,
     text_valign: VAlign
 }
 
-impl Default for Paint {
+impl Default for Paint<'_> {
     fn default() -> Self {
         Self {
             transform: Default::default(),
@@ -42,7 +40,7 @@ impl Default for Paint {
             miter_limit: 10.0,
             line_cap: Default::default(),
             line_join: Default::default(),
-            font_name: String::from("NotoSans-Regular"),
+            font_name: "NotoSans-Regular",
             font_size: 16,
             letter_spacing: 0,
             font_blur: 0.0,
@@ -51,7 +49,7 @@ impl Default for Paint {
     }
 }
 
-impl Paint {
+impl<'a> Paint<'a> {
     pub fn color(color: Color) -> Self {
         let mut new = Self::default();
         new.set_color(color);
@@ -62,7 +60,7 @@ impl Paint {
     ///
     /// Parameters (cx,cy) specify the left-top location of the image pattern, (w,h) the size of one image,
     /// radians rotation around the top-left corner, id is handle to the image to render.
-    pub fn create_image(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: f32, alpha: f32) -> Paint {
+    pub fn create_image(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: f32, alpha: f32) -> Self {
         let mut paint = Self::default();
 
         paint.transform.rotate(angle);
@@ -310,7 +308,7 @@ impl Paint {
     /// Sets the font name for text drawn with this paint
     ///
     /// This needs to be the Fonts postscript name. Eg. "NotoSans-Regular"
-    pub fn set_font_name(&mut self, name: String) {
+    pub fn set_font_name(&mut self, name: &'a str) {
         self.font_name = name;
     }
 
