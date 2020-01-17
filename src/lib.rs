@@ -562,6 +562,7 @@ impl Canvas {
         self.rounded_rect_varying(x, y, w, h, r, r, r, r);
     }
 
+    // TODO: Test this with tiny angles < 0.001
     /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
     pub fn rounded_rect_varying(&mut self, x: f32, y: f32, w: f32, h: f32, rad_top_left: f32, rad_top_right: f32, rad_bottom_right: f32, rad_bottom_left: f32) {
         if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {

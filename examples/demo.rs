@@ -124,6 +124,19 @@ fn main() {
                 canvas.line_to(79.0, 90.0);
                 canvas.close();
                 canvas.stroke_path(&Paint::color(Color::rgb(220, 20, 20)));
+                //canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+                
+                canvas.begin_path();
+                canvas.rect(100.0, 10.0, 100.0, 100.0);
+                //canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+                
+                canvas.begin_path();
+                canvas.move_to(220.0, 10.0);
+                canvas.line_to(320.0, 10.0);
+                canvas.line_to(300.0, 60.0);
+                canvas.line_to(320.0, 110.0);
+                canvas.line_to(220.0, 110.0);
+                canvas.close();
                 canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
 
                 if false {
