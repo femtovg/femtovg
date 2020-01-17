@@ -6,6 +6,9 @@ use crate::{Color, Paint, Verb, Scissor, ImageId, ImageFlags};
 mod void;
 pub use void::Void;
 
+mod image_renderer;
+pub use image_renderer::ImageRenderer;
+
 pub mod gpu_renderer;
 
 pub trait Renderer {
