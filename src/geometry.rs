@@ -1,6 +1,5 @@
 
-use std::convert::From;
-use std::ops::{Index, IndexMut, Deref, DerefMut};
+use std::ops::{Index, IndexMut};
 
 // TODO: Revise visibility of these methods
 // TODO: Refactor transform API so that it's not awkward to use

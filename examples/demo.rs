@@ -493,9 +493,6 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
     canvas.arc(cx, cy, r1, a1, a0, Winding::CCW);
     canvas.close();
 
-    //canvas.begin_path();
-    //canvas.rect(cx-r, cy-r, r*2.0, r*2.0);
-
     let ax = cx + a0.cos() * (r0+r1)*0.5;
     let ay = cy + a0.sin() * (r0+r1)*0.5;
     let bx = cx + a1.cos() * (r0+r1)*0.5;

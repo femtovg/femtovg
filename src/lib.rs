@@ -167,7 +167,6 @@ pub struct Canvas {
     verbs: Vec<Verb>,
     lastx: f32,
     lasty: f32,
-    tess_tol: f32,
     dist_tol: f32,
     fringe_width: f32,
     device_px_ratio: f32,
@@ -189,16 +188,13 @@ impl Canvas {
             verbs: Default::default(),
             lastx: Default::default(),
             lasty: Default::default(),
-            tess_tol: Default::default(),
-            dist_tol: Default::default(),
-            fringe_width: Default::default(),
+            dist_tol: 0.01,
+            fringe_width: 1.0,
             device_px_ratio: Default::default(),
         };
 
         canvas.save();
         canvas.reset();
-
-        canvas.set_device_pixel_ratio(1.0);
 
         canvas
     }
@@ -206,6 +202,9 @@ impl Canvas {
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
         self.width = width as f32;
         self.height = height as f32;
+        self.dist_tol = 0.01 / dpi;
+        self.fringe_width = 1.0 / dpi;
+
         self.renderer.set_size(width, height, dpi);
     }
 
@@ -822,13 +821,6 @@ impl Canvas {
 
     fn state_mut(&mut self) -> &mut State {
         self.state_stack.last_mut().unwrap()
-    }
-
-    fn set_device_pixel_ratio(&mut self, ratio: f32) {
-        self.tess_tol = 0.25 / ratio;
-        self.dist_tol = 0.01 / ratio;
-        self.fringe_width = 1.0 / ratio;
-        self.device_px_ratio = ratio;
     }
 }
 

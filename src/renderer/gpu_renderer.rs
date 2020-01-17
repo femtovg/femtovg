@@ -86,8 +86,10 @@ pub struct GpuRenderer<T> {
     backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
+    current_path: Option<GpuPath>,
+    tess_tol: f32,
+    dist_tol: f32,
     fringe_width: f32,
-    current_path: Option<GpuPath>
 }
 
 impl<T: GpuRendererBackend> GpuRenderer<T> {
@@ -96,8 +98,10 @@ impl<T: GpuRendererBackend> GpuRenderer<T> {
             backend: backend,
             cmds: Default::default(),
             verts: Default::default(),
+            current_path: None,
+            tess_tol: 0.25,
+            dist_tol: 0.01,
             fringe_width: 1.0,
-            current_path: None
         }
     }
 }
@@ -120,14 +124,16 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
-        // TODO: use dpi to calculate fringe_width, tes_tol and dist_tol
+        self.tess_tol = 0.25 / dpi;
+        self.dist_tol = 0.01 / dpi;
+        self.fringe_width = 1.0 / dpi;
+
         self.backend.set_size(width, height, dpi);
     }
 
     fn set_current_path(&mut self, verbs: &[Verb]) {
         if self.current_path.is_none() {
-            // TODO: don't hardcode tes_tol and dist_tol here
-            self.current_path = Some(GpuPath::new(verbs, 0.25, 0.01));
+            self.current_path = Some(GpuPath::new(verbs, self.tess_tol, self.dist_tol));
         }
     }
 
