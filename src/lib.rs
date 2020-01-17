@@ -432,7 +432,7 @@ impl Canvas {
     }
 
     /// Sets the current sub-path winding, see Winding and Solidity
-    pub fn set_winding(&mut self, winding: Winding) {
+    pub fn path_winding(&mut self, winding: Winding) {
         self.append_verbs(&mut [Verb::Winding(winding)]);
     }
 

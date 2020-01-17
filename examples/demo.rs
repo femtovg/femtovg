@@ -11,8 +11,7 @@ use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, ImageFlags, ren
 
 fn main() {
     let el = EventLoop::new();
-    //let wb = WindowBuilder::new().with_inner_size((800.0, 600.0).into()).with_title("A fantastic window!");
-    let wb = WindowBuilder::new().with_title("A fantastic window!");
+    let wb = WindowBuilder::new().with_inner_size((1000.0, 600.0).into()).with_title("rscanvas demo");
 
     let windowed_context = ContextBuilder::new().with_vsync(true).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (1, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
@@ -23,6 +22,10 @@ fn main() {
     let mut canvas = Canvas::new(backend);
 
     canvas.add_font("examples/assets/NotoSans-Regular.ttf");
+    canvas.add_font("examples/assets/NotoSans-Bold.ttf");
+    canvas.add_font("examples/assets/Roboto-Bold.ttf");
+    canvas.add_font("examples/assets/Roboto-Light.ttf");
+    canvas.add_font("examples/assets/Roboto-Regular.ttf");
     // canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");
     // canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
     // canvas.add_font("/usr/share/fonts/TTF/VeraSe.ttf"); // <- Kerning
@@ -88,26 +91,31 @@ fn main() {
             }
             Event::RedrawRequested(_) => {
                 let cpu_start = Instant::now();
-
                 let dpi_factor = windowed_context.window().hidpi_factor();
-
                 let size = windowed_context.window().inner_size().to_physical(dpi_factor);
 
                 let t = start.elapsed().as_secs_f32();
 
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgb(255, 255, 255));
+                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
+                let height = size.height as f32;
+                let width = size.width as f32;
+
+                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);
                 draw_caps(&mut canvas, 15.0, 110.0);
                 draw_joins(&mut canvas, 110.0, 110.0);
                 draw_lines(&mut canvas, 205.0, 110.0);
                 draw_shadows(&mut canvas);
-
+                */
                 //draw_state_stack(&mut canvas);
 
-                if true {
+                if false {
 
 					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
@@ -144,7 +152,7 @@ fn main() {
                 }
 
                 // Image
-                if true {
+                if false {
                     canvas.save();
                     canvas.translate(490.0, 110.0);
 
@@ -157,6 +165,7 @@ fn main() {
                     canvas.restore();
                 }
 
+                /*
                 let elapsed = cpu_start.elapsed().as_secs_f32();
 
                 canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {}", elapsed), &Paint::color(Color::hex("454545")));
@@ -173,7 +182,9 @@ fn main() {
                 canvas.end_frame();
 
                 canvas.fill_text(15.0, size.height as f32 - 20.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
+                */
 
+                canvas.end_frame();
                 windowed_context.swap_buffers().unwrap();
             }
             Event::MainEventsCleared => {
@@ -182,6 +193,167 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn draw_graph(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
+
+    let dx = w / 5.0;
+    let mut sx = [0.0; 6];
+    let mut sy = [0.0; 6];
+
+    let samples = [
+        (1.0+(t*1.2345+(t*0.33457).cos()*0.44).sin())*0.5,
+        (1.0+(t*0.68363+(t*1.3).cos()*1.55).sin())*0.5,
+        (1.0+(t*1.1642+(t*0.33457).cos()*1.24).sin())*0.5,
+        (1.0+(t*0.56345+(t*1.63).cos()*0.14).sin())*0.5,
+        (1.0+(t*1.6245+(t*0.254).cos()*0.3).sin())*0.5,
+        (1.0+(t*0.345+(t*0.03).cos()*0.6).sin())*0.5,
+    ];
+
+    for i in 0..6 {
+        sx[i] = x+ i as f32 * dx;
+		sy[i] = y+h*samples[i]*0.8;
+    }
+
+    // Graph background
+    let bg = Paint::linear_gradient(x,y,x,y+h, Color::rgba(0,160,192,0), Color::rgba(0,160,192,64));
+
+    canvas.begin_path();
+    canvas.move_to(sx[0], sy[0]);
+
+    for i in 1..6 {
+        canvas.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
+    }
+
+    canvas.line_to(x+w, y+h);
+    canvas.line_to(x, y+h);
+    canvas.fill_path(&bg);
+
+    // Graph line
+    canvas.begin_path();
+    canvas.move_to(sx[0], sy[0] + 2.0);
+
+    for i in 1..6 {
+        canvas.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
+    }
+
+    let mut line = Paint::color(Color::rgba(0,160,192,255));
+    line.set_stroke_width(3.0);
+    canvas.stroke_path(&line);
+
+    // Graph sample pos
+    for i in 0..6 {
+        let bg = Paint::radial_gradient(sx[i], sy[i] + 2.0, 3.0, 8.0, Color::rgba(0,0,0,32), Color::rgba(0,0,0,0));
+        canvas.begin_path();
+        canvas.rect(sx[i] - 10.0, sy[i] - 10.0 + 2.0, 20.0, 20.0);
+        canvas.fill_path(&bg);
+    }
+
+    canvas.begin_path();
+    for i in 0..6 { canvas.circle(sx[i], sy[i], 4.0); }
+    canvas.fill_path(&Paint::color(Color::rgba(0,160,192,255)));
+
+    canvas.begin_path();
+    for i in 0..6 { canvas.circle(sx[i], sy[i], 2.0); }
+    canvas.fill_path(&Paint::color(Color::rgba(220,220,220,255)));
+
+}
+
+fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32) {
+    let corner_radius = 3.0;
+
+    canvas.save();
+
+	// Window
+	canvas.begin_path();
+    canvas.rounded_rect(x, y, w, h, corner_radius);
+	canvas.fill_path(&Paint::color(Color::rgba(28, 30, 34, 192)));
+
+	// Drop shadow
+    let shadow_paint = Paint::box_gradient(x, y + 2.0, w, h, corner_radius * 2.0, 10.0, Color::rgba(0,0,0,128), Color::rgba(0,0,0,0));
+	canvas.begin_path();
+	canvas.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
+	canvas.rounded_rect(x, y, w, h, corner_radius);
+	canvas.path_winding(Winding::CW);
+	canvas.fill_path(&shadow_paint);
+
+	// Header
+	let header_paint = Paint::linear_gradient(x, y, x, y + 15.0, Color::rgba(255,255,255,8), Color::rgba(0,0,0,16));
+	canvas.begin_path();
+	canvas.rounded_rect(x + 1.0, y + 1.0, w - 2.0, 30.0, corner_radius - 1.0);
+	canvas.fill_path(&header_paint);
+
+	canvas.begin_path();
+	canvas.move_to(x + 0.5, y + 0.5 + 30.0);
+	canvas.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
+    canvas.stroke_path(&Paint::color(Color::rgba(0, 0, 0, 32)));
+
+    let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 128));
+    text_paint.set_font_size(16);
+    text_paint.set_font_name("Roboto-Bold");
+	//nvgTextAlign(vg,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE); // TODO:
+    text_paint.set_font_blur(2.0);
+	canvas.fill_text(x + 10.0, y + 19.0 + 1.0, title, &text_paint);
+
+    text_paint.set_font_blur(0.0);
+    text_paint.set_color(Color::rgba(220, 220, 220, 160));
+
+	canvas.fill_text(x + 10.0, y + 19.0, title, &text_paint);
+
+	canvas.restore();
+}
+
+fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
+    canvas.save();
+
+    let pad = 5.0;
+    let s = w / 9.0 - pad * 2.0;
+
+    let joins = [LineJoin::Miter, LineJoin::Round, LineJoin::Bevel];
+    let caps = [LineCap::Butt, LineCap::Round, LineCap::Square];
+
+    let mut pts = [0.0; 4*2];
+    pts[0] = -s * 0.25 + (t*0.3).cos() * s * 0.5;
+    pts[1] = (t * 0.3).sin() * s * 0.5;
+    pts[2] = -s * 0.25;
+    pts[3] = 0.0;
+    pts[4] = s * 0.25;
+    pts[5] = 0.0;
+    pts[6] = s * 0.25 + (-t * 0.3).cos() * s * 0.5;
+    pts[7] = (-t * 0.3).sin() * s * 0.5;
+
+    for (i, cap) in caps.iter().enumerate() {
+        for (j, join) in joins.iter().enumerate() {
+            let fx = x + s * 0.5 + (i as f32 * 3.0 + j as f32) / 9.0 * w + pad;
+            let fy = y - s * 0.5 + pad;
+
+            let mut paint = Paint::color(Color::rgba(0,0,0,160));
+            paint.set_line_cap(*cap);
+            paint.set_line_join(*join);
+            paint.set_stroke_width(s * 0.3);
+
+            canvas.begin_path();
+            canvas.move_to(fx+pts[0], fy+pts[1]);
+            canvas.line_to(fx+pts[2], fy+pts[3]);
+            canvas.line_to(fx+pts[4], fy+pts[5]);
+            canvas.line_to(fx+pts[6], fy+pts[7]);
+            canvas.stroke_path(&paint);
+
+            paint.set_line_cap(LineCap::Butt);
+            paint.set_line_join(LineJoin::Bevel);
+            paint.set_stroke_width(1.0);
+            paint.set_color(Color::rgba(0,192,255,255));
+
+            canvas.begin_path();
+            canvas.move_to(fx+pts[0], fy+pts[1]);
+            canvas.line_to(fx+pts[2], fy+pts[3]);
+            canvas.line_to(fx+pts[4], fy+pts[5]);
+            canvas.line_to(fx+pts[6], fy+pts[7]);
+            canvas.stroke_path(&paint);
+        }
+    }
+
+    canvas.restore();
 }
 
 fn draw_shadows(canvas: &mut Canvas) {
@@ -302,6 +474,7 @@ fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.restore();
 }
 
+/*
 fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.save();
     canvas.translate(x, y);
@@ -334,7 +507,7 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
 
     canvas.restore();
 }
-
+*/
 fn draw_state_stack(canvas: &mut Canvas) {
     let rect_width = 150.0;
     let rect_height = 75.0;

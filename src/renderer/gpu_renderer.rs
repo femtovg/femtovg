@@ -3,7 +3,6 @@ use std::ffi::c_void;
 
 use image::DynamicImage;
 
-use crate::geometry::*;
 use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin};
 use crate::renderer::{ImageId, Renderer};
 use crate::paint::PaintFlavor;
@@ -42,7 +41,7 @@ pub enum TextureType {
 }
 
 #[derive(Debug)]
-pub enum Flavor {
+pub enum CommandFlavor {
     ConvexFill {
         gpu_paint: GpuPaint
     },
@@ -69,14 +68,14 @@ pub struct Drawable {
 }
 
 pub struct Command {
-    flavor: Flavor,
+    flavor: CommandFlavor,
     drawables: Vec<Drawable>,
     triangles_verts: Option<(usize, usize)>,
     image: Option<ImageId>,
 }
 
 impl Command {
-    pub fn new(flavor: Flavor) -> Self {
+    pub fn new(flavor: CommandFlavor) -> Self {
         Self {
             flavor: flavor,
             drawables: Default::default(),
@@ -161,7 +160,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         let flavor = if gpu_path.contours.len() == 1 && gpu_path.contours[0].convexity == Convexity::Convex {
             let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            Flavor::ConvexFill { gpu_paint }
+            CommandFlavor::ConvexFill { gpu_paint }
         } else {
             let mut fill_paint = GpuPaint::default();
             fill_paint.stroke_thr = -1.0;
@@ -169,7 +168,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
             let stroke_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            Flavor::ConcaveFill { fill_paint, stroke_paint }
+            CommandFlavor::ConcaveFill { fill_paint, stroke_paint }
         };
 
         let mut cmd = Command::new(flavor);
@@ -198,7 +197,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
             cmd.drawables.push(drawable);
         }
 
-        if let Flavor::ConcaveFill {..} = cmd.flavor {
+        if let CommandFlavor::ConcaveFill {..} = cmd.flavor {
             // Quad
             self.verts.push(Vertex::new(gpu_path.bounds.maxx, gpu_path.bounds.maxy, 0.5, 1.0));
             self.verts.push(Vertex::new(gpu_path.bounds.maxx, gpu_path.bounds.miny, 0.5, 1.0));
@@ -231,9 +230,9 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         let flavor = if paint.stencil_strokes() {
             let paint2 = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
-            Flavor::StencilStroke { paint1: gpu_paint, paint2 }
+            CommandFlavor::StencilStroke { paint1: gpu_paint, paint2 }
         } else {
-            Flavor::Stroke { gpu_paint }
+            CommandFlavor::Stroke { gpu_paint }
         };
 
         let mut cmd = Command::new(flavor);
@@ -263,7 +262,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         let mut gpu_paint = GpuPaint::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
         gpu_paint.shader_type = ShaderType::Img.to_f32();
 
-        let mut cmd = Command::new(Flavor::Triangles { gpu_paint });
+        let mut cmd = Command::new(CommandFlavor::Triangles { gpu_paint });
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);

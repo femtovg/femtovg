@@ -8,7 +8,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, GpuRendererBackend, Flavor, GpuPaint, TextureType};
+use super::{Command, GpuRendererBackend, CommandFlavor, GpuPaint, TextureType};
 use crate::{Color, ImageFlags};
 use crate::renderer::{Vertex, ImageId};
 
@@ -326,11 +326,11 @@ impl GpuRendererBackend for OpenGl {
             unsafe { gl::BlendFuncSeparate(gl::ONE, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA); }
 
             match cmd.flavor {
-                Flavor::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
-                Flavor::ConcaveFill { fill_paint, stroke_paint } => self.concave_fill(cmd, fill_paint, stroke_paint),
-                Flavor::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
-                Flavor::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
-                Flavor::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
+                CommandFlavor::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
+                CommandFlavor::ConcaveFill { fill_paint, stroke_paint } => self.concave_fill(cmd, fill_paint, stroke_paint),
+                CommandFlavor::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
+                CommandFlavor::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
+                CommandFlavor::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
             }
         }
 

@@ -186,6 +186,11 @@ impl<'a> Paint<'a> {
         new
     }
 
+    /// Creates a new solid color paint
+    pub fn set_color(&mut self, color: Color) {
+        self.flavor = PaintFlavor::Color(color);
+    }
+
     /// Returns boolean if the shapes drawn with this paint will be antialiased.
     pub fn shape_anti_alias(&self) -> bool {
         self.shape_anti_alias
