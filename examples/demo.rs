@@ -135,7 +135,7 @@ fn main() {
                     let x = size.width as f32 - 512.0;
                     let y = size.height as f32 - 512.0;
 
-                    let paint = Paint::create_image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
+                    let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
 
                     canvas.begin_path();
                     canvas.rect(x, y, 512.0, 512.0);
@@ -148,7 +148,7 @@ fn main() {
                     canvas.save();
                     canvas.translate(490.0, 110.0);
 
-                    let paint = Paint::create_image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
+                    let paint = Paint::image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
 
                     canvas.begin_path();
                     canvas.rect(0.0, 0.0, 80.0, 80.0);

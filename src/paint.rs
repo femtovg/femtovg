@@ -1,4 +1,5 @@
 
+
 use crate::geometry::Transform2D;
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
@@ -43,6 +44,31 @@ pub(crate) enum PaintFlavor {
     }
 }
 
+/// Struct controlling how graphical shapes are rendered.
+///
+/// The Paint struct is a relatively lightweight object which contains all the information needed to
+/// display something on a canvas. Unlike the HTML canvas where the current drawing style is stored
+/// in an internal stack this paint object is simply passed to the relevant drawing methods on the canvas.
+///
+/// Clients code can have as many paints as they desire for different use cases and styles. This makes
+/// the internal stack in the [Canvas](struct.Canvas.html) struct much lighter since it only needs to contain the transform
+/// stack and current scissor rectangle.
+///
+/// # Example
+/// ```
+/// use rscanvas::{Paint, Color, Canvas, renderer::Void};
+///
+/// let mut canvas = Canvas::new(Void);
+///
+/// let fill_paint = Paint::color(Color::hex("454545"));
+/// let mut stroke_paint = Paint::color(Color::hex("bababa"));
+/// stroke_paint.set_stroke_width(4.0);
+///
+/// canvas.begin_path();
+/// canvas.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
+/// canvas.fill_path(&fill_paint);
+/// canvas.stroke_path(&stroke_paint);
+/// ```
 #[derive(Clone, Debug)]
 pub struct Paint<'a> {
     pub(crate) flavor: PaintFlavor,
@@ -88,11 +114,28 @@ impl<'a> Paint<'a> {
         new
     }
 
-    /// Creates and returns an image pattern.
+    /// Creates a new image pattern paint.
     ///
-    /// Parameters (cx,cy) specify the left-top location of the image pattern, (w,h) the size of one image,
-    /// radians rotation around the top-left corner, id is handle to the image to render.
-    pub fn create_image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
+    /// * `id` - is handle to the image to render
+    /// * `cx` `cy` - Specify the top-left location of the image pattern
+    /// * `width` `height` - The size of one image
+    /// * `angle` - Rotation around the top-left corner
+    /// * `alpha` - Transparency applied on the image
+    ///
+    /// # Example
+    /// ```
+    /// use rscanvas::{Paint, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void);
+    ///
+    /// let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
+    /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
+    ///
+    /// canvas.begin_path();
+    /// canvas.rect(10.0, 10.0, 85.0, 85.0);
+    /// canvas.fill_path(&fill_paint);
+    /// ```
+    pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
         new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, alpha, tint: Color::white() };
         new

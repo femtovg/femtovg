@@ -8,12 +8,6 @@ use super::{Renderer, ImageId, Vertex, ImageFlags};
 #[derive(Default)]
 pub struct Void;
 
-impl Void {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl Renderer for Void {
     fn flush(&mut self) {}
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {}

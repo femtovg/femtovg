@@ -749,7 +749,7 @@ impl Canvas {
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
             }
 
-            let mut paint = Paint::create_image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            let mut paint = Paint::image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 
             if let PaintFlavor::Image { tint, .. } = &mut paint.flavor {
                 *tint = text_color;
