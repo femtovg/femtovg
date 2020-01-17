@@ -1,5 +1,5 @@
 
-use super::Params;
+use super::GpuPaint;
 
 const UNIFORMARRAY_SIZE: usize = 11;
 
@@ -78,23 +78,23 @@ impl UniformArray {
     }
 }
 
-impl From<Params> for UniformArray {
-    fn from(params: Params) -> Self {
+impl From<GpuPaint> for UniformArray {
+    fn from(gpu_paint: GpuPaint) -> Self {
         let mut arr = Self::default();
 
-        arr.set_scissor_mat(params.scissor_mat);
-        arr.set_paint_mat(params.paint_mat);
-        arr.set_inner_col(params.inner_col);
-        arr.set_outer_col(params.outer_col);
-        arr.set_scissor_ext(params.scissor_ext);
-        arr.set_scissor_scale(params.scissor_scale);
-        arr.set_extent(params.extent);
-        arr.set_radius(params.radius);
-        arr.set_feather(params.feather);
-        arr.set_stroke_mult(params.stroke_mult);
-        arr.set_stroke_thr(params.stroke_thr);
-        arr.set_shader_type(params.shader_type);
-        arr.set_tex_type(params.tex_type);
+        arr.set_scissor_mat(gpu_paint.scissor_mat);
+        arr.set_paint_mat(gpu_paint.paint_mat);
+        arr.set_inner_col(gpu_paint.inner_col);
+        arr.set_outer_col(gpu_paint.outer_col);
+        arr.set_scissor_ext(gpu_paint.scissor_ext);
+        arr.set_scissor_scale(gpu_paint.scissor_scale);
+        arr.set_extent(gpu_paint.extent);
+        arr.set_radius(gpu_paint.radius);
+        arr.set_feather(gpu_paint.feather);
+        arr.set_stroke_mult(gpu_paint.stroke_mult);
+        arr.set_stroke_thr(gpu_paint.stroke_thr);
+        arr.set_shader_type(gpu_paint.shader_type);
+        arr.set_tex_type(gpu_paint.tex_type);
 
         arr
     }

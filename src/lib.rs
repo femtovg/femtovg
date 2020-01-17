@@ -20,6 +20,7 @@ use crate::geometry::*;
 
 mod paint;
 pub use paint::Paint;
+use paint::PaintFlavor;
 
 // TODO: path_contains_point method
 // TODO: Rename tess_tol and dist_tol to tesselation_tolerance and distance_tolerance
@@ -619,11 +620,10 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        paint.transform.multiply(&self.state().transform);
+        paint.transform = self.state().transform;
 
         // Apply global alpha
-        paint.inner_color.a *= self.state().alpha;
-        paint.outer_color.a *= self.state().alpha;
+        paint.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
 
@@ -638,7 +638,7 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        paint.transform.multiply(&self.state().transform);
+        paint.transform = self.state().transform;
 
         // Scale stroke width by current transform scale
         paint.set_stroke_width((paint.stroke_width() * scale).max(0.0).min(200.0));
@@ -648,14 +648,12 @@ impl Canvas {
             // Since coverage is area, scale by alpha*alpha.
             let alpha = (paint.stroke_width() / self.fringe_width).max(0.0).min(1.0);
 
-            paint.inner_color.a *= alpha*alpha;
-            paint.outer_color.a *= alpha*alpha;
+            paint.mul_alpha(alpha*alpha);
             paint.set_stroke_width(self.fringe_width)
         }
 
         // Apply global alpha
-        paint.inner_color.a *= self.state().alpha;
-        paint.outer_color.a *= self.state().alpha;
+        paint.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
 
@@ -728,6 +726,12 @@ impl Canvas {
 
         let layout = self.font_cache.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
 
+        let text_color = if let PaintFlavor::Color(color) = paint.flavor {
+            color
+        } else {
+            Color::black()
+        };
+
         for cmd in &layout.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
@@ -747,11 +751,20 @@ impl Canvas {
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
             }
 
-            paint.image = Some(cmd.image_id);
+            let mut paint = Paint::create_image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+
+            if let PaintFlavor::Image { tint, .. } = &mut paint.flavor {
+                *tint = text_color;
+            }
 
             // Apply global alpha
-            paint.inner_color.a *= self.state().alpha;
-            paint.outer_color.a *= self.state().alpha;
+            paint.mul_alpha(self.state().alpha);
+
+            //paint.image = Some(cmd.image_id);
+
+            // Apply global alpha
+            //paint.inner_color.a *= self.state().alpha;
+            //paint.outer_color.a *= self.state().alpha;
 
             self.renderer.triangles(&paint, &scissor, &verts);
         }

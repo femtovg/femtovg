@@ -6,9 +6,13 @@ use image::DynamicImage;
 use crate::geometry::*;
 use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin};
 use crate::renderer::{ImageId, Renderer};
+use crate::paint::PaintFlavor;
 
 mod gpu_path;
 use gpu_path::{Convexity, GpuPath};
+
+mod gpu_paint;
+use gpu_paint::GpuPaint;
 
 mod opengl;
 pub use opengl::OpenGl;
@@ -40,21 +44,21 @@ pub enum TextureType {
 #[derive(Debug)]
 pub enum Flavor {
     ConvexFill {
-        params: Params
+        gpu_paint: GpuPaint
     },
     ConcaveFill {
-        fill_params: Params,
-        stroke_params: Params,
+        fill_paint: GpuPaint,
+        stroke_paint: GpuPaint,
     },
     Stroke {
-        params: Params
+        gpu_paint: GpuPaint
     },
     StencilStroke {
-        pass1: Params,
-        pass2: Params
+        paint1: GpuPaint,
+        paint2: GpuPaint
     },
     Triangles {
-        params: Params
+        gpu_paint: GpuPaint
     },
 }
 
@@ -155,21 +159,24 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         }
 
         let flavor = if gpu_path.contours.len() == 1 && gpu_path.contours[0].convexity == Convexity::Convex {
-            let params = Params::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            Flavor::ConvexFill { params }
+            Flavor::ConvexFill { gpu_paint }
         } else {
-            let mut fill_params = Params::default();
-            fill_params.stroke_thr = -1.0;
-            fill_params.shader_type = ShaderType::Simple.to_i32() as f32;//TODO to_f32 method
+            let mut fill_paint = GpuPaint::default();
+            fill_paint.stroke_thr = -1.0;
+            fill_paint.shader_type = ShaderType::Simple.to_i32() as f32;//TODO to_f32 method
 
-            let stroke_params = Params::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let stroke_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            Flavor::ConcaveFill { fill_params, stroke_params }
+            Flavor::ConcaveFill { fill_paint, stroke_paint }
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.image = paint.image;
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
 
         let mut offset = self.verts.len();
 
@@ -219,18 +226,21 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
             gpu_path.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
         }
 
-        let params = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
-            let pass2 = Params::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let paint2 = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
-            Flavor::StencilStroke { pass1: params, pass2 }
+            Flavor::StencilStroke { paint1: gpu_paint, paint2 }
         } else {
-            Flavor::Stroke { params }
+            Flavor::Stroke { gpu_paint }
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.image = paint.image;
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
 
         let mut offset = self.verts.len();
 
@@ -250,11 +260,15 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {
-        let mut params = Params::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
-        params.shader_type = ShaderType::Img.to_i32() as f32; // TODO:
+        let mut gpu_paint = GpuPaint::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
+        gpu_paint.shader_type = ShaderType::Img.to_f32();
 
-        let mut cmd = Command::new(Flavor::Triangles { params });
-        cmd.image = paint.image;
+        let mut cmd = Command::new(Flavor::Triangles { gpu_paint });
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
+
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
         self.cmds.push(cmd);
 
@@ -300,7 +314,17 @@ impl ShaderType {
             Self::Img => 3,
         }
     }
+
+    pub fn to_f32(self) -> f32 {
+        match self {
+            Self::FillGradient => 0.0,
+            Self::FillImage => 1.0,
+            Self::Simple => 2.0,
+            Self::Img => 3.0,
+        }
+    }
 }
+
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Params {
@@ -318,7 +342,7 @@ pub struct Params {
     shader_type: f32,
     tex_type: f32
 }
-
+/*
 impl Params {
 
     fn new<T: GpuRendererBackend>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
@@ -396,4 +420,4 @@ impl Params {
         params
     }
 
-}
+}*/

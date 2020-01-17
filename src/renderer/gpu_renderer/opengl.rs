@@ -8,7 +8,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, GpuRendererBackend, Flavor, Params, TextureType};
+use super::{Command, GpuRendererBackend, Flavor, GpuPaint, TextureType};
 use crate::{Color, ImageFlags};
 use crate::renderer::{Vertex, ImageId};
 
@@ -104,8 +104,8 @@ impl OpenGl {
         eprintln!("({}) Error on {} - {}", err, label, message);
     }
 
-    fn convex_fill(&self, cmd: &Command, params: Params) {
-        self.set_uniforms(params, cmd.image);
+    fn convex_fill(&self, cmd: &Command, gpu_paint: GpuPaint) {
+        self.set_uniforms(gpu_paint, cmd.image);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
@@ -120,7 +120,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, cmd: &Command, fill_params: Params, stroke_params: Params) {
+    fn concave_fill(&self, cmd: &Command, fill_paint: GpuPaint, stroke_paint: GpuPaint) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -128,7 +128,7 @@ impl OpenGl {
             gl::ColorMask(gl::FALSE, gl::FALSE, gl::FALSE, gl::FALSE);
         }
 
-        self.set_uniforms(fill_params, None);
+        self.set_uniforms(fill_paint, None);
 
         unsafe {
             gl::StencilOpSeparate(gl::FRONT, gl::KEEP, gl::KEEP, gl::INCR_WRAP);
@@ -148,7 +148,7 @@ impl OpenGl {
             gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
         }
 
-        self.set_uniforms(stroke_params, cmd.image);
+        self.set_uniforms(stroke_paint, cmd.image);
 
         if self.antialias {
             unsafe {
@@ -178,8 +178,8 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, cmd: &Command, params: Params) {
-        self.set_uniforms(params, cmd.image);
+    fn stroke(&self, cmd: &Command, paint: GpuPaint) {
+        self.set_uniforms(paint, cmd.image);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -190,7 +190,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, cmd: &Command, params1: Params, params2: Params) {
+    fn stencil_stroke(&self, cmd: &Command, paint1: GpuPaint, paint2: GpuPaint) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -200,7 +200,7 @@ impl OpenGl {
             gl::StencilOp(gl::KEEP, gl::KEEP, gl::INCR);
         }
 
-        self.set_uniforms(params2, cmd.image);
+        self.set_uniforms(paint2, cmd.image);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -209,7 +209,7 @@ impl OpenGl {
         }
 
         // Draw anti-aliased pixels.
-        self.set_uniforms(params1, cmd.image);
+        self.set_uniforms(paint1, cmd.image);
 
         unsafe {
             gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
@@ -243,8 +243,8 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, cmd: &Command, params: Params) {
-        self.set_uniforms(params, cmd.image);
+    fn triangles(&self, cmd: &Command, paint: GpuPaint) {
+        self.set_uniforms(paint, cmd.image);
 
         if let Some((start, count)) = cmd.triangles_verts {
             unsafe { gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32); }
@@ -253,8 +253,8 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, params: Params, image_id: Option<ImageId>) {
-        let arr = UniformArray::from(params);
+    fn set_uniforms(&self, paint: GpuPaint, image_id: Option<ImageId>) {
+        let arr = UniformArray::from(paint);
         self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
@@ -326,11 +326,11 @@ impl GpuRendererBackend for OpenGl {
             unsafe { gl::BlendFuncSeparate(gl::ONE, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA); }
 
             match cmd.flavor {
-                Flavor::ConvexFill { params } => self.convex_fill(cmd, params),
-                Flavor::ConcaveFill { fill_params, stroke_params } => self.concave_fill(cmd, fill_params, stroke_params),
-                Flavor::Stroke { params } => self.stroke(cmd, params),
-                Flavor::StencilStroke { pass1, pass2 } => self.stencil_stroke(cmd, pass1, pass2),
-                Flavor::Triangles { params } => self.triangles(cmd, params),
+                Flavor::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
+                Flavor::ConcaveFill { fill_paint, stroke_paint } => self.concave_fill(cmd, fill_paint, stroke_paint),
+                Flavor::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
+                Flavor::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
+                Flavor::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
             }
         }
 
