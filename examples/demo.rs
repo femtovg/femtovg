@@ -102,9 +102,10 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                //draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                //draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                //draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);
@@ -114,6 +115,16 @@ fn main() {
                 draw_shadows(&mut canvas);
                 */
                 //draw_state_stack(&mut canvas);
+
+                canvas.begin_path();
+                canvas.move_to(50.0, 0.0);
+                canvas.line_to(21.0, 90.0);
+                canvas.line_to(98.0, 35.0);
+                canvas.line_to(2.0, 35.0);
+                canvas.line_to(79.0, 90.0);
+                canvas.close();
+                canvas.stroke_path(&Paint::color(Color::rgb(220, 20, 20)));
+                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
 
                 if false {
 

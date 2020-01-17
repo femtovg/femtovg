@@ -46,8 +46,8 @@ pub enum CommandFlavor {
         gpu_paint: GpuPaint
     },
     ConcaveFill {
+        stencil_paint: GpuPaint,
         fill_paint: GpuPaint,
-        stroke_paint: GpuPaint,
     },
     Stroke {
         gpu_paint: GpuPaint
@@ -162,13 +162,13 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
             CommandFlavor::ConvexFill { gpu_paint }
         } else {
-            let mut fill_paint = GpuPaint::default();
-            fill_paint.stroke_thr = -1.0;
-            fill_paint.shader_type = ShaderType::Simple.to_i32() as f32;//TODO to_f32 method
+            let mut stencil_paint = GpuPaint::default();
+            stencil_paint.stroke_thr = -1.0;
+            stencil_paint.shader_type = ShaderType::Stencil.to_f32();
 
-            let stroke_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let fill_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            CommandFlavor::ConcaveFill { fill_paint, stroke_paint }
+            CommandFlavor::ConcaveFill { stencil_paint, fill_paint }
         };
 
         let mut cmd = Command::new(flavor);
@@ -296,29 +296,20 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 enum ShaderType {
     FillGradient,
     FillImage,
-    Simple,
+    Stencil,
     Img
 }
 
 impl Default for ShaderType {
-    fn default() -> Self { Self::Simple }
+    fn default() -> Self { Self::FillGradient }
 }
 
 impl ShaderType {
-    pub fn to_i32(self) -> i32 {
-        match self {
-            Self::FillGradient => 0,
-            Self::FillImage => 1,
-            Self::Simple => 2,
-            Self::Img => 3,
-        }
-    }
-
     pub fn to_f32(self) -> f32 {
         match self {
             Self::FillGradient => 0.0,
             Self::FillImage => 1.0,
-            Self::Simple => 2.0,
+            Self::Stencil => 2.0,
             Self::Img => 3.0,
         }
     }

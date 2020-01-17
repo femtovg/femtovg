@@ -1,4 +1,5 @@
 
+// TODO: Start cap and end cap
 
 use crate::geometry::Transform2D;
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};

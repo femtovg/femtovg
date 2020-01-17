@@ -120,7 +120,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, cmd: &Command, fill_paint: GpuPaint, stroke_paint: GpuPaint) {
+    fn concave_fill(&self, cmd: &Command, stencil_paint: GpuPaint, fill_paint: GpuPaint) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -128,7 +128,7 @@ impl OpenGl {
             gl::ColorMask(gl::FALSE, gl::FALSE, gl::FALSE, gl::FALSE);
         }
 
-        self.set_uniforms(fill_paint, None);
+        self.set_uniforms(stencil_paint, None);
 
         unsafe {
             gl::StencilOpSeparate(gl::FRONT, gl::KEEP, gl::KEEP, gl::INCR_WRAP);
@@ -148,7 +148,7 @@ impl OpenGl {
             gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
         }
 
-        self.set_uniforms(stroke_paint, cmd.image);
+        self.set_uniforms(fill_paint, cmd.image);
 
         if self.antialias {
             unsafe {
@@ -327,7 +327,7 @@ impl GpuRendererBackend for OpenGl {
 
             match cmd.flavor {
                 CommandFlavor::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
-                CommandFlavor::ConcaveFill { fill_paint, stroke_paint } => self.concave_fill(cmd, fill_paint, stroke_paint),
+                CommandFlavor::ConcaveFill { stencil_paint, fill_paint } => self.concave_fill(cmd, stencil_paint, fill_paint),
                 CommandFlavor::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
                 CommandFlavor::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
                 CommandFlavor::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
