@@ -105,7 +105,7 @@ fn main() {
                 draw_lines(&mut canvas, 205.0, 110.0);
                 draw_shadows(&mut canvas);
 
-                //draw_state_stack(&mut canvas);
+                draw_state_stack(&mut canvas);
 
                 if true {
 
