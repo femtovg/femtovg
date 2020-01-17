@@ -1,5 +1,5 @@
 
-use crate::geometry::{Transform2D, Vector2D, Angle};
+use crate::geometry::Transform2D;
 use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
 // TODO: Don't own the font name
@@ -37,7 +37,7 @@ impl Default for Paint {
             outer_color: Default::default(),
             image: Default::default(),
             shape_anti_alias: true,
-            stencil_strokes: false,
+            stencil_strokes: true,
             stroke_width: 1.0,
             miter_limit: 10.0,
             line_cap: Default::default(),
@@ -65,7 +65,8 @@ impl Paint {
     pub fn create_image(id: ImageId, cx: f32, cy: f32, w: f32, h: f32, angle: f32, alpha: f32) -> Paint {
         let mut paint = Self::default();
 
-        paint.transform = Transform2D::create_rotation(Angle::radians(angle)).post_translate(Vector2D::new(cx, cy));
+        paint.transform.rotate(angle);
+        paint.transform.translate(cx, cy);
 
         paint.extent[0] = w;
         paint.extent[1] = h;
@@ -97,11 +98,11 @@ impl Paint {
             dy = 1.0;
         }
 
-        paint.transform = Transform2D::column_major(
+        paint.transform = Transform2D([
             dy, -dx,
             dx, dy,
             start_x - dx*large, start_y - dy*large
-        );
+        ]);
 
         paint.extent[0] = large;
         paint.extent[1] = large + d*0.5;
@@ -124,7 +125,7 @@ impl Paint {
     pub fn box_gradient(x: f32, y: f32, w: f32, h: f32, r: f32, f: f32, inner_color: Color, outer_color: Color) -> Self {
         let mut paint = Self::default();
 
-        paint.transform = Transform2D::create_translation(x+w*0.5, y+h*0.5);
+        paint.transform = Transform2D::new_translation(x+w*0.5, y+h*0.5);
 
         paint.extent[0] = w*0.5;
         paint.extent[1] = h*0.5;
@@ -149,7 +150,7 @@ impl Paint {
         let r = (inr + outr) * 0.5;
         let f = outr - inr;
 
-        paint.transform = Transform2D::create_translation(cx, cy);
+        paint.transform = Transform2D::new_translation(cx, cy);
 
         paint.extent[0] = r;
         paint.extent[1] = r;

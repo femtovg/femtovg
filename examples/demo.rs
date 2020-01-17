@@ -32,7 +32,7 @@ fn main() {
 
     //canvas.set_font(font_id);
 
-    let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::empty()).expect("Cannot create image");
+    let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
     //dbg!(canvas.text_bounds(15.0, 300.0, "Hello World"));
 
@@ -145,14 +145,13 @@ fn main() {
 
                 // Image
                 if true {
-
                     canvas.save();
-                    canvas.translate(10.0, 250.0);
+                    canvas.translate(490.0, 110.0);
 
-                    let paint = Paint::create_image(image_id, 0.0, 0.0, 293.0, 293.0, 0.0, 1.0);
+                    let paint = Paint::create_image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
 
                     canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 293.0, 293.0);
+                    canvas.rect(0.0, 0.0, 80.0, 80.0);
                     canvas.fill_path(&paint);
 
                     canvas.restore();
@@ -342,7 +341,7 @@ fn draw_state_stack(canvas: &mut Canvas) {
 
     canvas.save();
     // save state 1
-    canvas.translate(canvas.size.width / 2.0, canvas.size.height / 2.0);
+    canvas.translate(canvas.width / 2.0, canvas.height / 2.0);
 
     canvas.save();
     // save state 2
@@ -490,9 +489,12 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
     canvas.save();
 
     canvas.begin_path();
-    canvas.arc(cx,cy, r0, a0, a1, Winding::CW);
-    canvas.arc(cx,cy, r1, a1, a0, Winding::CCW);
+    canvas.arc(cx, cy, r0, a0, a1, Winding::CW);
+    canvas.arc(cx, cy, r1, a1, a0, Winding::CCW);
     canvas.close();
+
+    //canvas.begin_path();
+    //canvas.rect(cx-r, cy-r, r*2.0, r*2.0);
 
     let ax = cx + a0.cos() * (r0+r1)*0.5;
     let ay = cy + a0.sin() * (r0+r1)*0.5;

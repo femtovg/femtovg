@@ -187,10 +187,10 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
 
         if let Flavor::ConcaveFill {..} = cmd.flavor {
             // Quad
-            self.verts.push(Vertex::new(gpu_path.bounds.max.x, gpu_path.bounds.max.y, 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds.max.x, gpu_path.bounds.min.y, 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds.min.x, gpu_path.bounds.max.y, 0.5, 1.0));
-            self.verts.push(Vertex::new(gpu_path.bounds.min.x, gpu_path.bounds.min.y, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.maxx, gpu_path.bounds.maxy, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.maxx, gpu_path.bounds.miny, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.minx, gpu_path.bounds.maxy, 0.5, 1.0));
+            self.verts.push(Vertex::new(gpu_path.bounds.minx, gpu_path.bounds.miny, 0.5, 1.0));
 
             cmd.triangles_verts = Some((offset, 4));
         }
@@ -325,14 +325,11 @@ impl Params {
         let (scissor_ext, scissor_scale) = if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
             ([1.0, 1.0], [1.0, 1.0])
         } else {
-            if let Some(inv) = scissor.transform.inverse() {
-                params.scissor_mat = inv.to_mat3x4();
-            }
-
+            params.scissor_mat = scissor.transform.inversed().to_mat3x4();
 
             let scissor_scale = [
-                (scissor.transform.m11*scissor.transform.m11 + scissor.transform.m21*scissor.transform.m21).sqrt() / fringe,
-                (scissor.transform.m12*scissor.transform.m12 + scissor.transform.m22*scissor.transform.m22).sqrt() / fringe
+                (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
+                (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
             ];
 
             (scissor.extent, scissor_scale)
@@ -350,20 +347,23 @@ impl Params {
         let inv_transform;
 
         if let Some(image_id) = paint.image() {
-
             let texture_flags = backend.texture_flags(image_id);
 
             if texture_flags.contains(ImageFlags::FLIP_Y) {
-                // TODO: Test this
-                let mut m1 = Transform2D::create_translation(0.0, extent[1] * 0.5).post_transform(&paint.transform());
+                let mut m1 = Transform2D::identity();
+                m1.translate(0.0, extent[1] * 0.5);
+                m1.multiply(&paint.transform());
 
-                let m2 = Transform2D::create_scale(1.0, -1.0).post_transform(&m1);
+                let mut m2 = Transform2D::identity();
+                m2.scale(1.0, -1.0);
+                m2.multiply(&m1);
 
-                m1 = m1.post_translate(Vector2D::new(0.0, -extent[1] * 0.5)).post_transform(&m2);
+                m1.translate(0.0, -extent[1] * 0.5);
+                m1.multiply(&m2);
 
-                inv_transform = m1.inverse();
+                inv_transform = m1.inversed();
             } else {
-                inv_transform = paint.transform().inverse();
+                inv_transform = paint.transform().inversed();
             }
 
             params.shader_type = ShaderType::FillImage.to_i32() as f32;// TODO: To f32 native method
@@ -378,12 +378,10 @@ impl Params {
             params.radius = paint.radius();
             params.feather = paint.feather();
 
-            inv_transform = paint.transform().inverse();
+            inv_transform = paint.transform().inversed();
         }
 
-        if let Some(inv) = inv_transform {
-            params.paint_mat = inv.to_mat3x4();
-        }
+        params.paint_mat = inv_transform.to_mat3x4();
 
         params
     }

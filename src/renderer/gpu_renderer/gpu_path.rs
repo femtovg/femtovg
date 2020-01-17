@@ -3,7 +3,7 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Box2D, Point2D};
+use crate::geometry::{self, Bounds};
 use crate::renderer::Vertex;
 use crate::{Verb, Winding, LineCap, LineJoin};
 
@@ -72,21 +72,11 @@ pub struct Contour {
     pub(crate) convexity: Convexity
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct GpuPath {
     pub(crate) contours: Vec<Contour>,
-    pub(crate) bounds: Box2D,
+    pub(crate) bounds: Bounds,
     points: Vec<Point>,
-}
-
-impl Default for GpuPath {
-    fn default() -> Self {
-        Self {
-            contours: Default::default(),
-            bounds: Box2D::new(Point2D::new(1e6, 1e6), Point2D::new(-1e6, -1e6)),
-            points: Default::default()
-        }
-    }
 }
 
 impl GpuPath {
@@ -97,16 +87,16 @@ impl GpuPath {
         // Convert commands to a set of contours
         for verb in path {
             match verb {
-                Verb::MoveTo(point) => {
+                Verb::MoveTo(x, y) => {
                     cache.add_contour();
-                    cache.add_point(point.x, point.y, PointFlags::CORNER, dist_tol);
+                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::LineTo(point) => {
-                    cache.add_point(point.x, point.y, PointFlags::CORNER, dist_tol);
+                Verb::LineTo(x, y) => {
+                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::BezierTo(c1, c2, point) => {
+                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.last_point() {
-                        cache.tesselate_bezier(last.x, last.y, c1.x, c1.y, c2.x, c2.y, point.x, point.y, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                        cache.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Verb::Close => {
@@ -159,8 +149,10 @@ impl GpuPath {
                 p0.dy = p1.y - p0.y;
                 p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
 
-                cache.bounds.min.min(Point2D::new(p0.x, p0.y));
-                cache.bounds.max.max(Point2D::new(p0.x, p0.y));
+                cache.bounds.minx = cache.bounds.minx.min(p0.x);
+                cache.bounds.miny = cache.bounds.miny.min(p0.y);
+                cache.bounds.maxx = cache.bounds.maxx.max(p0.x);
+                cache.bounds.maxy = cache.bounds.maxy.max(p0.y);
             }
         }
 
