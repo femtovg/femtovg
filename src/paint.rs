@@ -48,11 +48,11 @@ pub(crate) enum PaintFlavor {
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
 /// display something on a canvas. Unlike the HTML canvas where the current drawing style is stored
-/// in an internal stack this paint object is simply passed to the relevant drawing methods on the canvas.
+/// in an internal stack this paint struct is simply passed to the relevant drawing methods on the canvas.
 ///
 /// Clients code can have as many paints as they desire for different use cases and styles. This makes
-/// the internal stack in the [Canvas](struct.Canvas.html) struct much lighter since it only needs to contain the transform
-/// stack and current scissor rectangle.
+/// the internal stack in the [Canvas](struct.Canvas.html) struct much lighter since it only needs to
+/// contain the transform stack and current scissor rectangle.
 ///
 /// # Example
 /// ```
