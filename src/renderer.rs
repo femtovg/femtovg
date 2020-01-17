@@ -1,7 +1,7 @@
 
 use image::DynamicImage;
 
-use crate::{Color, Paint, Verb, Scissor, ImageId, Vertex, ImageFlags};
+use crate::{Color, Paint, Verb, Scissor, ImageId, ImageFlags};
 
 mod void;
 pub use void::Void;
@@ -26,5 +26,24 @@ pub trait Renderer {
 
     fn screenshot(&mut self) -> Option<DynamicImage> {
         None
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
+#[repr(C)]
+pub struct Vertex {
+    x: f32,
+    y: f32,
+    u: f32,
+    v: f32
+}
+
+impl Vertex {
+    pub fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
+        Self { x, y, u, v }
+    }
+
+    pub fn set(&mut self, x: f32, y: f32, u: f32, v: f32) {
+        *self = Self { x, y, u, v };
     }
 }

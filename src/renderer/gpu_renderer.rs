@@ -169,7 +169,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.image = paint.image();
+        cmd.image = paint.image;
 
         let mut offset = self.verts.len();
 
@@ -230,7 +230,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.image = paint.image();
+        cmd.image = paint.image;
 
         let mut offset = self.verts.len();
 
@@ -254,7 +254,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         params.shader_type = ShaderType::Img.to_i32() as f32; // TODO:
 
         let mut cmd = Command::new(Flavor::Triangles { params });
-        cmd.image = paint.image();
+        cmd.image = paint.image;
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
         self.cmds.push(cmd);
 
@@ -325,26 +325,30 @@ impl Params {
 
         let mut params = Self::default();
 
-        params.inner_col = paint.inner_color().premultiplied().to_array();
-        params.outer_col = paint.outer_color().premultiplied().to_array();
+        params.inner_col = paint.inner_color.premultiplied().to_array();
+        params.outer_col = paint.outer_color.premultiplied().to_array();
 
-        let (scissor_ext, scissor_scale) = if scissor.extent[0] < -0.5 || scissor.extent[1] < -0.5 {
-            ([1.0, 1.0], [1.0, 1.0])
+        let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
+            if ext[0] < -0.5 || ext[1] < -0.5 {
+                ([1.0, 1.0], [1.0, 1.0])
+            } else {
+                params.scissor_mat = scissor.transform.inversed().to_mat3x4();
+
+                let scissor_scale = [
+                    (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
+                    (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
+                ];
+
+                (ext, scissor_scale)
+            }
         } else {
-            params.scissor_mat = scissor.transform.inversed().to_mat3x4();
-
-            let scissor_scale = [
-                (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
-                (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
-            ];
-
-            (scissor.extent, scissor_scale)
+            ([1.0, 1.0], [1.0, 1.0])
         };
 
         params.scissor_ext = scissor_ext;
         params.scissor_scale = scissor_scale;
 
-        let extent = paint.extent();
+        let extent = paint.extent;
 
         params.extent = extent;
         params.stroke_mult = (width*0.5 + fringe*0.5) / fringe;
@@ -352,13 +356,13 @@ impl Params {
 
         let inv_transform;
 
-        if let Some(image_id) = paint.image() {
+        if let Some(image_id) = paint.image {
             let texture_flags = backend.texture_flags(image_id);
 
             if texture_flags.contains(ImageFlags::FLIP_Y) {
                 let mut m1 = Transform2D::identity();
                 m1.translate(0.0, extent[1] * 0.5);
-                m1.multiply(&paint.transform());
+                m1.multiply(&paint.transform);
 
                 let mut m2 = Transform2D::identity();
                 m2.scale(1.0, -1.0);
@@ -369,7 +373,7 @@ impl Params {
 
                 inv_transform = m1.inversed();
             } else {
-                inv_transform = paint.transform().inversed();
+                inv_transform = paint.transform.inversed();
             }
 
             params.shader_type = ShaderType::FillImage.to_i32() as f32;// TODO: To f32 native method
@@ -381,10 +385,10 @@ impl Params {
             };
         } else {
             params.shader_type = ShaderType::FillGradient.to_i32() as f32;// TODO: To f32 native method
-            params.radius = paint.radius();
-            params.feather = paint.feather();
+            params.radius = paint.radius;
+            params.feather = paint.feather;
 
-            inv_transform = paint.transform().inversed();
+            inv_transform = paint.transform.inversed();
         }
 
         params.paint_mat = inv_transform.to_mat3x4();

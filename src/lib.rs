@@ -10,12 +10,12 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-use renderer::Renderer;
+use renderer::{Vertex, Renderer};
 
 mod font_cache;
 use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
 
-pub mod geometry;
+pub(crate) mod geometry;
 use crate::geometry::*;
 
 mod paint;
@@ -69,14 +69,14 @@ bitflags! {
 #[derive(Copy, Clone, Debug)]
 pub struct Scissor {
     transform: Transform2D,
-    extent: [f32; 2],
+    extent: Option<[f32; 2]>,
 }
 
 impl Default for Scissor {
     fn default() -> Self {
         Self {
             transform: Default::default(),
-            extent: [-1.0, -1.0]// TODO: Use Option instead of relying on -1s
+            extent: None
         }
     }
 }
@@ -121,25 +121,6 @@ impl Default for LineJoin {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub u32);
-
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
-#[repr(C)]
-pub struct Vertex {
-    x: f32,
-    y: f32,
-    u: f32,
-    v: f32
-}
-
-impl Vertex {
-    pub fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
-        Self { x, y, u, v }
-    }
-
-    pub fn set(&mut self, x: f32, y: f32, u: f32, v: f32) {
-        *self = Self { x, y, u, v };
-    }
-}
 
 #[derive(Copy, Clone)]
 struct State {
@@ -359,8 +340,7 @@ impl Canvas {
         t.premultiply(&state.transform);
         state.scissor.transform = t;
 
-        state.scissor.extent[0] = w * 0.5;
-        state.scissor.extent[1] = h * 0.5;
+        state.scissor.extent = Some([w * 0.5, h * 0.5]);
     }
 
     /// Intersects current scissor rectangle with the specified rectangle.
@@ -374,11 +354,12 @@ impl Canvas {
         let state = self.state_mut();
 
         // If no previous scissor has been set, set the scissor as current scissor.
-        // TODO: Make state.scissor an Option instead of relying on extent being less than 0
-        if state.scissor.extent[0] < 0.0 {
+        if state.scissor.extent.is_none() {
             self.scissor(x, y, w, h);
             return;
         }
+
+        let extent = state.scissor.extent.unwrap();
 
         // Transform the current scissor rect into current transform space.
         // If there is difference in rotation, this will be approximation.
@@ -390,8 +371,8 @@ impl Canvas {
 
         pxform.multiply(&invxform);
 
-        let ex = state.scissor.extent[0];
-        let ey = state.scissor.extent[1];
+        let ex = extent[0];
+        let ey = extent[1];
 
         let tex = ex*pxform[0].abs() + ey*pxform[2].abs();
         let tey = ex*pxform[1].abs() + ey*pxform[3].abs();
@@ -638,13 +619,11 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        let mut transform = paint.transform();
-        transform.multiply(&self.state().transform);
-        paint.set_transform(transform);
+        paint.transform.multiply(&self.state().transform);
 
         // Apply global alpha
-        paint.inner_color_mut().a *= self.state().alpha;
-        paint.outer_color_mut().a *= self.state().alpha;
+        paint.inner_color.a *= self.state().alpha;
+        paint.outer_color.a *= self.state().alpha;
 
         let scissor = self.state().scissor;
 
@@ -659,9 +638,7 @@ impl Canvas {
         let mut paint = paint.clone();
 
         // Transform paint
-        let mut transform = paint.transform();
-        transform.multiply(&self.state().transform);
-        paint.set_transform(transform);
+        paint.transform.multiply(&self.state().transform);
 
         // Scale stroke width by current transform scale
         paint.set_stroke_width((paint.stroke_width() * scale).max(0.0).min(200.0));
@@ -671,14 +648,14 @@ impl Canvas {
             // Since coverage is area, scale by alpha*alpha.
             let alpha = (paint.stroke_width() / self.fringe_width).max(0.0).min(1.0);
 
-            paint.inner_color_mut().a *= alpha*alpha;
-            paint.outer_color_mut().a *= alpha*alpha;
+            paint.inner_color.a *= alpha*alpha;
+            paint.outer_color.a *= alpha*alpha;
             paint.set_stroke_width(self.fringe_width)
         }
 
         // Apply global alpha
-        paint.inner_color_mut().a *= self.state().alpha;
-        paint.outer_color_mut().a *= self.state().alpha;
+        paint.inner_color.a *= self.state().alpha;
+        paint.outer_color.a *= self.state().alpha;
 
         let scissor = self.state().scissor;
 
@@ -770,11 +747,11 @@ impl Canvas {
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
             }
 
-            paint.set_image(Some(cmd.image_id));
+            paint.image = Some(cmd.image_id);
 
             // Apply global alpha
-            paint.inner_color_mut().a *= self.state().alpha;
-            paint.outer_color_mut().a *= self.state().alpha;
+            paint.inner_color.a *= self.state().alpha;
+            paint.outer_color.a *= self.state().alpha;
 
             self.renderer.triangles(&paint, &scissor, &verts);
         }

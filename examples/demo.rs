@@ -271,7 +271,7 @@ fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.save();
     canvas.translate(x, y);
 
-    let w = 80.0;
+    //let w = 80.0;
 
     canvas.begin_path();
     canvas.rect(0.0, 0.0, 80.0, 80.0);

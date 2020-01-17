@@ -4,13 +4,13 @@ use super::{Color, ImageId, LineCap, LineJoin, VAlign};
 
 #[derive(Clone, Debug)]
 pub struct Paint<'a> {
-    transform: Transform2D,
-    extent: [f32; 2],
-    radius: f32,
-    feather: f32,
-    inner_color: Color,
-    outer_color: Color,
-    image: Option<ImageId>,
+    pub(crate) transform: Transform2D,
+    pub(crate) extent: [f32; 2],
+    pub(crate) radius: f32,
+    pub(crate) feather: f32,
+    pub(crate) inner_color: Color,
+    pub(crate) outer_color: Color,
+    pub(crate) image: Option<ImageId>,
     stroke_width: f32,
     shape_anti_alias: bool,
     stencil_strokes: bool,
@@ -30,7 +30,7 @@ impl Default for Paint<'_> {
             transform: Default::default(),
             extent: Default::default(),
             radius: Default::default(),
-            feather: Default::default(),
+            feather: 1.0,
             inner_color: Color::white(),
             outer_color: Default::default(),
             image: Default::default(),
@@ -52,7 +52,8 @@ impl Default for Paint<'_> {
 impl<'a> Paint<'a> {
     pub fn color(color: Color) -> Self {
         let mut new = Self::default();
-        new.set_color(color);
+        new.inner_color = color;
+        new.outer_color = color;
         new
     }
 
@@ -163,78 +164,6 @@ impl<'a> Paint<'a> {
         paint
     }
 
-    pub fn transform(&self) -> Transform2D {
-        self.transform
-    }
-
-    pub fn set_transform(&mut self, transform: Transform2D) {
-        self.transform = transform;
-    }
-
-    pub fn extent(&self) -> [f32; 2] {
-        self.extent
-    }
-
-    pub fn set_extent(&mut self, extent: [f32; 2]) {
-        self.extent = extent;
-    }
-
-    pub fn radius(&self) -> f32 {
-        self.radius
-    }
-
-    pub fn set_radius(&mut self, radius: f32) {
-        self.radius = radius;
-    }
-
-    pub fn feather(&self) -> f32 {
-        self.feather
-    }
-
-    pub fn set_feather(&mut self, feather: f32) {
-        self.feather = feather;
-    }
-
-    pub fn inner_color(&self) -> Color {
-        self.inner_color
-    }
-
-    pub fn set_inner_color(&mut self, color: Color) {
-        self.inner_color = color;
-    }
-
-    pub fn inner_color_mut(&mut self) -> &mut Color {
-        &mut self.inner_color
-    }
-
-    pub fn outer_color(&self) -> Color {
-        self.outer_color
-    }
-
-    pub fn set_outer_color(&mut self, color: Color) {
-        self.outer_color = color;
-    }
-
-    pub fn outer_color_mut(&mut self) -> &mut Color {
-        &mut self.outer_color
-    }
-
-    pub fn image(&self) -> Option<ImageId> {
-        self.image
-    }
-
-    pub fn set_image(&mut self, image: Option<ImageId>) {
-        self.image = image;
-    }
-
-    pub fn set_color(&mut self, color: Color) {
-        self.transform = Transform2D::identity();
-        self.radius = 0.0;
-        self.feather = 1.0;
-        self.inner_color = color;
-        self.outer_color = color;
-    }
-
     /// Returns boolean if the shapes drawn with this paint will be antialiased.
     pub fn shape_anti_alias(&self) -> bool {
         self.shape_anti_alias
@@ -245,6 +174,7 @@ impl<'a> Paint<'a> {
         self.shape_anti_alias = value;
     }
 
+    /// True if this paint uses higher quality stencil strokes.
     pub fn stencil_strokes(&self) -> bool {
         self.stencil_strokes
     }
@@ -308,38 +238,57 @@ impl<'a> Paint<'a> {
     /// Sets the font name for text drawn with this paint
     ///
     /// This needs to be the Fonts postscript name. Eg. "NotoSans-Regular"
+    /// Only has effect on canvas text operations
     pub fn set_font_name(&mut self, name: &'a str) {
         self.font_name = name;
     }
 
+    /// Returns the current font size
+    ///
+    /// Only has effect on canvas text operations
     pub fn font_size(&self) -> u32 {
         self.font_size
     }
 
+    /// Sets the font size.
+    ///
+    /// Only has effect on canvas text operations
     pub fn set_font_size(&mut self, size: u32) {
         self.font_size = size;
     }
 
+    /// Returns the current letter spacing
     pub fn letter_spacing(&self) -> i32 {
         self.letter_spacing
     }
 
+    /// Sets the letter spacing for this paint
+    ///
+    /// Only has effect on canvas text operations
     pub fn set_letter_spacing(&mut self, spacing: i32) {
         self.letter_spacing = spacing;
     }
 
+    /// Returns the current font blur
     pub fn font_blur(&self) -> f32 {
         self.font_blur
     }
 
+    /// Sets the font blur radius
+    ///
+    /// Useful for implementing text shadow. Only has effect on canvas text operations
     pub fn set_font_blur(&mut self, blur: f32) {
         self.font_blur = blur;
     }
 
+    /// Returns the current vertical align
     pub fn text_valign(&self) -> VAlign {
         self.text_valign
     }
 
+    /// Sets the text vertical alignment for this paint
+    ///
+    /// Only has effect on canvas text operations
     pub fn set_text_valign(&mut self, valign: VAlign) {
         self.text_valign = valign;
     }

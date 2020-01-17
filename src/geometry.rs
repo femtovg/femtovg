@@ -238,9 +238,3 @@ impl Default for Bounds {
         }
     }
 }
-
-impl Bounds {
-    pub fn new(minx: f32, miny: f32, maxx: f32, maxy: f32) -> Self {
-        Self { minx, miny, maxx, maxy }
-    }
-}

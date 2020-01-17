@@ -9,8 +9,8 @@ use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
 use super::{Command, GpuRendererBackend, Flavor, Params, TextureType};
-use crate::{Color, ImageFlags, Vertex};
-use crate::renderer::ImageId;
+use crate::{Color, ImageFlags};
+use crate::renderer::{Vertex, ImageId};
 
 mod shader;
 use shader::{Shader, ShaderError};
