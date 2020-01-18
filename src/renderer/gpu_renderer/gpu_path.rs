@@ -449,6 +449,13 @@ impl GpuPath {
 
             contour.bevel = 0;
 
+            let mut x_sign = 0;
+            let mut y_sign = 0;
+            let mut x_first_sign = 0; // Sign of first nonzero edge vector x
+            let mut y_first_sign = 0; // Sign of first nonzero edge vector y
+            let mut x_flips = 0; // Number of sign changes in x
+            let mut y_flips = 0; // Number of sign changes in y
+
             for i in 0..contour.count {
 
                 let p0 = if i == 0 {
@@ -487,6 +494,39 @@ impl GpuPath {
                     p1.flags |= PointFlags::LEFT;
                 }
 
+                // Determine sign for convexity
+                if p1.dx > 0.0 {
+                    if x_sign == 0 {
+                        x_first_sign = 1;
+                    } else if x_sign < 0 {
+                        x_flips = x_flips + 1;
+                    }
+                    x_sign = 1;
+                } else if p1.dx < 0.0 {
+                    if x_sign == 0 {
+                        x_first_sign = -1;
+                    } else if x_sign > 0 {
+                        x_flips = x_flips + 1;
+                    }
+                    x_sign = -1;
+                }
+
+                if p1.dy > 0.0 {
+                    if y_sign == 0 {
+                        y_first_sign = 1;
+                    } else if y_sign < 0 {
+                        y_flips = y_flips + 1;
+                    }
+                    y_sign = 1;
+                } else if p1.dy < 0.0 {
+                    if y_sign == 0 {
+                        y_first_sign = -1;
+                    } else if y_sign > 0 {
+                        y_flips = y_flips + 1;
+                    }
+                    y_sign = -1;
+                }
+
                 // Calculate if we should use bevel or miter for inner join.
                 let limit = (p0.len.min(p1.len) * iw).max(1.01);
 
@@ -506,7 +546,17 @@ impl GpuPath {
                 }
             }
 
-            contour.convexity = if nleft == contour.count { Convexity::Convex } else { Convexity::Concave };
+            if x_sign != 0 && x_first_sign != 0 && x_sign != x_first_sign {
+                x_flips = x_flips + 1
+            }
+
+            if y_sign != 0 && y_first_sign != 0 && y_sign != y_first_sign {
+                y_flips = y_flips + 1
+            }
+
+            let convex = x_flips == 2 && y_flips == 2;
+
+            contour.convexity = if nleft == contour.count && convex { Convexity::Convex } else { Convexity::Concave };
         }
     }
 }

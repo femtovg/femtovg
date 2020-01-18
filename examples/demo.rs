@@ -105,7 +105,7 @@ fn main() {
                 //draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 //draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 //draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
-                
+
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);
@@ -123,13 +123,13 @@ fn main() {
                 canvas.line_to(2.0, 35.0);
                 canvas.line_to(79.0, 90.0);
                 canvas.close();
-                canvas.stroke_path(&Paint::color(Color::rgb(220, 20, 20)));
-                //canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
-                
+                //canvas.stroke_path(&Paint::color(Color::rgb(220, 20, 20)));
+                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+
                 canvas.begin_path();
                 canvas.rect(100.0, 10.0, 100.0, 100.0);
-                //canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
-                
+                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+
                 canvas.begin_path();
                 canvas.move_to(220.0, 10.0);
                 canvas.line_to(320.0, 10.0);
