@@ -21,23 +21,11 @@ fn main() {
     let backend = Stc::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
     let mut canvas = Canvas::new(backend);
 
-    canvas.add_font("examples/assets/NotoSans-Regular.ttf");
-    canvas.add_font("examples/assets/NotoSans-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    // canvas.add_font("/usr/share/fonts/noto/NotoSerif-Regular.ttf");
-    // canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
-    // canvas.add_font("/usr/share/fonts/TTF/VeraSe.ttf"); // <- Kerning
-    //canvas.add_font("/usr/share/fonts/noto/NotoSansDevanagari-Regular.ttf");
-    //canvas.add_font("/usr/share/fonts/TTF/VeraIt.ttf"); // <- Kerning
-    //canvas.add_font("/usr/share/fonts/TTF/TSCu_Times.ttf");
-
-    //canvas.set_font(font_id);
 
     let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
-
-    //dbg!(canvas.text_bounds(15.0, 300.0, "Hello World"));
 
     let mut x: f32 = 0.0;
     let mut y: f32 = 0.0;
@@ -116,24 +104,7 @@ fn main() {
                 */
                 //draw_state_stack(&mut canvas);
 
-                let mut evenodd_fill = Paint::color(Color::rgb(220, 220, 220));
-                evenodd_fill.set_fill_rule(FillRule::EvenOdd);
-
-                let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
-                nonzero_fill.set_fill_rule(FillRule::NonZero);
-
-                let mut path = Path::new();
-                path.move_to(50.0, 0.0);
-                path.line_to(21.0, 90.0);
-                path.line_to(98.0, 35.0);
-                path.line_to(2.0, 35.0);
-                path.line_to(79.0, 90.0);
-                path.close();
-                canvas.fill_path(&path, &evenodd_fill);
-
-                canvas.translate(100.0, 0.0);
-
-                canvas.fill_path(&path, &nonzero_fill);
+                draw_fills(&mut canvas, 750.0, 500.0);
 
                 if false {
 
@@ -155,7 +126,7 @@ fn main() {
                     //paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
                     paint.set_font_name("NotoSans-Regular");
 
-					canvas.fill_text(15.0, 220.0, &text, &paint);
+                    canvas.fill_text(15.0, 220.0, &text, &paint);
                     //canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
                 }
 
@@ -216,7 +187,6 @@ fn main() {
 }
 
 fn draw_graph(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
-
     let dx = w / 5.0;
     let mut sx = [0.0; 6];
     let mut sy = [0.0; 6];
@@ -322,7 +292,7 @@ fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32)
 	canvas.restore();
 }
 
-fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
+fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, _h: f32, t: f32) {
     canvas.save();
 
     let pad = 5.0;
@@ -371,6 +341,32 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
             canvas.stroke_path(&path, &paint);
         }
     }
+
+    canvas.restore();
+}
+
+fn draw_fills(canvas: &mut Canvas, x: f32, y: f32) {
+    canvas.save();
+    canvas.translate(x, y);
+
+    let mut evenodd_fill = Paint::color(Color::rgb(220, 220, 220));
+    evenodd_fill.set_fill_rule(FillRule::EvenOdd);
+
+    let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
+    nonzero_fill.set_fill_rule(FillRule::NonZero);
+
+    let mut path = Path::new();
+    path.move_to(50.0, 0.0);
+    path.line_to(21.0, 90.0);
+    path.line_to(98.0, 35.0);
+    path.line_to(2.0, 35.0);
+    path.line_to(79.0, 90.0);
+    path.close();
+    canvas.fill_path(&path, &evenodd_fill);
+
+    canvas.translate(100.0, 0.0);
+
+    canvas.fill_path(&path, &nonzero_fill);
 
     canvas.restore();
 }
