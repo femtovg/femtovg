@@ -27,6 +27,7 @@ pub enum Verb {
     Winding(Winding)
 }
 
+/// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
 #[derive(Default, Clone)]
 pub struct Path {
     pub(crate) transform: Transform2D,
