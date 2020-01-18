@@ -284,12 +284,17 @@ impl StcBackend for OpenGl {
             gl::Viewport(x as i32, y as i32, width as i32, height as i32);
             gl::ClearColor(color.r, color.g, color.b, color.a);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+            gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
         }
     }
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
         self.view[1] = height as f32;
+
+        unsafe {
+            gl::Viewport(0, 0, width as i32, height as i32);
+        }
     }
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]) {

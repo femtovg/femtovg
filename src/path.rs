@@ -84,17 +84,17 @@ impl Path {
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
-        self.append(&mut [Verb::MoveTo(x, y)]);
+        self.append(&[Verb::MoveTo(x, y)]);
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
-        self.append(&mut [Verb::LineTo(x, y)]);
+        self.append(&[Verb::LineTo(x, y)]);
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
-        self.append(&mut [Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+        self.append(&[Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
@@ -102,7 +102,7 @@ impl Path {
         let x0 = self.lastx;
         let y0 = self.lasty;
 
-        self.append(&mut [
+        self.append(&[
             Verb::BezierTo(
                 x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0),
                 x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y),
@@ -113,12 +113,12 @@ impl Path {
 
     /// Closes current sub-path with a line segment.
     pub fn close(&mut self) {
-        self.append(&mut [Verb::Close]);
+        self.append(&[Verb::Close]);
     }
 
     /// Sets the current sub-path winding, see Winding and Solidity
     pub fn winding(&mut self, winding: Winding) {
-        self.append(&mut [Verb::Winding(winding)]);
+        self.append(&[Verb::Winding(winding)]);
     }
 
     /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
@@ -175,7 +175,7 @@ impl Path {
             ptany = tany;
         }
 
-        self.append(&mut commands);
+        self.append(&commands);
     }
 
     /// Adds an arc segment at the corner defined by the last path point, and two specified points.
@@ -230,7 +230,7 @@ impl Path {
 
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.append(&mut [
+        self.append(&[
             Verb::MoveTo(x, y),
             Verb::LineTo(x, y + h),
             Verb::LineTo(x + w, y + h),
@@ -265,7 +265,7 @@ impl Path {
             let rx_tl = rad_top_left.min(halfw) * w.signum();
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
-            self.append(&mut [
+            self.append(&[
                 Verb::MoveTo(x, y + ry_tl),
                 Verb::LineTo(x, y + h - ry_bl),
                 Verb::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
@@ -282,7 +282,7 @@ impl Path {
 
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
-        self.append(&mut [
+        self.append(&[
             Verb::MoveTo(cx-rx, cy),
             Verb::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
             Verb::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
@@ -297,30 +297,29 @@ impl Path {
         self.ellipse(cx, cy, r, r);
     }
 
-    fn append(&mut self, verbs: &mut [Verb]) {
-		for cmd in verbs.iter() {
+    /// Appends a slice of verbs to the path
+    pub fn append(&mut self, verbs: &[Verb]) {
+        for cmd in verbs.iter().rev() {
             match cmd {
-				Verb::MoveTo(x, y) => {
-					//transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
-				}
-				Verb::LineTo(x, y) => {
-					//transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
-				}
-				Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
-					//transform.transform_point(c1x, c1y, *c1x, *c1y);
-					//transform.transform_point(c2x, c2y, *c2x, *c2y);
-					//transform.transform_point(x, y, *x, *y);
-					self.lastx = *x;
-					self.lasty = *y;
-				}
-				_ => ()
-			}
-		}
+                Verb::MoveTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+                    break;
+                }
+                Verb::LineTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+                    break;
+                }
+                Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+                    break;
+                }
+                _ => ()
+            }
+        }
 
-		self.verbs.extend_from_slice(verbs);
-	}
+        self.verbs.extend_from_slice(verbs);
+    }
 }

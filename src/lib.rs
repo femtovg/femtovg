@@ -130,8 +130,8 @@ impl Default for State {
 }
 
 pub struct Canvas {
-    pub width: f32,
-    pub height: f32,
+    width: f32,
+    height: f32,
     renderer: Box<dyn Renderer>,
     font_cache: FontCache,
     state_stack: Vec<State>,
@@ -173,6 +173,16 @@ impl Canvas {
 
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         self.renderer.clear_rect(x, y, width, height, color);
+    }
+
+    /// Returns the with of the canvas
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// Returns the height of the canvas
+    pub fn height(&self) -> f32 {
+        self.height
     }
 
     /// Tells the renderer to execute all drawing commands and clears the current internal state
@@ -378,7 +388,7 @@ impl Canvas {
     pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
         let transform = self.state().transform;
 
-        let mut paint = paint.clone();
+        let mut paint = *paint;
 
         // Transform paint
         paint.transform = self.state().transform;
@@ -399,7 +409,7 @@ impl Canvas {
         let transform = self.state().transform;
         let scale = transform.average_scale();
 
-        let mut paint = paint.clone();
+        let mut paint = *paint;
 
         // Transform paint
         paint.transform = transform;

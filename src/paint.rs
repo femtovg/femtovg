@@ -70,7 +70,7 @@ pub(crate) enum PaintFlavor {
 /// canvas.fill_path(&fill_paint);
 /// canvas.stroke_path(&stroke_paint);
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Paint<'a> {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
