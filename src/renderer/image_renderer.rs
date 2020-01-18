@@ -15,6 +15,7 @@ use crate::geometry::Transform2D;
 use crate::{Path, Color, Paint, Scissor};
 use super::{Renderer, ImageId, Vertex, ImageFlags};
 
+/// Image renderer for software rendering **NOT IMPLEMENTED**
 pub struct ImageRenderer {
     image: RgbaImage,
     last_image_id: u32,

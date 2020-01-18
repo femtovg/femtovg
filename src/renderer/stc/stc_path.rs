@@ -73,16 +73,16 @@ pub struct Contour {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GpuPath {
+pub struct StcPath {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: Bounds,
     points: Vec<Point>,
 }
 
-impl GpuPath {
+impl StcPath {
 
     pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
-        let mut cache = GpuPath::default();
+        let mut cache = StcPath::default();
 
         // Convert commands to a set of contours
         for verb in path.verbs() {

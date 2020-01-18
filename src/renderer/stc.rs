@@ -1,3 +1,4 @@
+//! GPU renderer implemented via stencil-then-cover technique
 
 use std::ffi::c_void;
 
@@ -8,16 +9,16 @@ use crate::renderer::{ImageId, Renderer};
 use crate::paint::PaintFlavor;
 use crate::geometry::Transform2D;
 
-mod gpu_path;
-use gpu_path::{Convexity, GpuPath};
+mod stc_path;
+use stc_path::{Convexity, StcPath};
 
-mod gpu_paint;
-use gpu_paint::GpuPaint;
+mod stc_paint;
+use stc_paint::StcPaint;
 
 mod opengl;
 pub use opengl::OpenGl;
 
-pub trait GpuRendererBackend {
+pub trait StcBackend {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color);
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
@@ -44,21 +45,21 @@ pub enum TextureType {
 #[derive(Debug)]
 pub enum CommandFlavor {
     ConvexFill {
-        gpu_paint: GpuPaint
+        gpu_paint: StcPaint
     },
     ConcaveFill {
-        stencil_paint: GpuPaint,
-        fill_paint: GpuPaint,
+        stencil_paint: StcPaint,
+        fill_paint: StcPaint,
     },
     Stroke {
-        gpu_paint: GpuPaint
+        gpu_paint: StcPaint
     },
     StencilStroke {
-        paint1: GpuPaint,
-        paint2: GpuPaint
+        paint1: StcPaint,
+        paint2: StcPaint
     },
     Triangles {
-        gpu_paint: GpuPaint
+        gpu_paint: StcPaint
     },
 }
 
@@ -90,7 +91,7 @@ impl Command {
     }
 }
 
-pub struct GpuRenderer<T> {
+pub struct Stc<T> {
     backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
@@ -99,7 +100,7 @@ pub struct GpuRenderer<T> {
     fringe_width: f32,
 }
 
-impl<T: GpuRendererBackend> GpuRenderer<T> {
+impl<T: StcBackend> Stc<T> {
     pub fn new(backend: T) -> Self {
         Self {
             backend: backend,
@@ -112,13 +113,13 @@ impl<T: GpuRendererBackend> GpuRenderer<T> {
     }
 }
 
-impl GpuRenderer<OpenGl> {
+impl Stc<OpenGl> {
     pub fn with_gl<F>(load_fn: F) -> Self where F: Fn(&'static str) -> *const c_void {
         Self::new(OpenGl::new(load_fn).expect("Cannot create opengl backend"))
     }
 }
 
-impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
+impl<T: StcBackend> Renderer for Stc<T> {
     fn flush(&mut self) {
         self.backend.render(&self.verts, &self.cmds);
         self.cmds.clear();
@@ -138,7 +139,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn fill(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
-        let mut gpu_path = GpuPath::new(path, transform, self.tess_tol, self.dist_tol);
+        let mut gpu_path = StcPath::new(path, transform, self.tess_tol, self.dist_tol);
 
         if paint.shape_anti_alias() {
             gpu_path.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
@@ -147,15 +148,15 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         }
 
         let flavor = if gpu_path.contours.len() == 1 && gpu_path.contours[0].convexity == Convexity::Convex {
-            let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let gpu_paint = StcPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
             CommandFlavor::ConvexFill { gpu_paint }
         } else {
-            let mut stencil_paint = GpuPaint::default();
+            let mut stencil_paint = StcPaint::default();
             stencil_paint.stroke_thr = -1.0;
             stencil_paint.shader_type = ShaderType::Stencil.to_f32();
 
-            let fill_paint = GpuPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
+            let fill_paint = StcPaint::new(&self.backend, paint, scissor, self.fringe_width, self.fringe_width, -1.0);
 
             CommandFlavor::ConcaveFill { stencil_paint, fill_paint }
         };
@@ -202,7 +203,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn stroke(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
-        let mut gpu_path = GpuPath::new(path, transform, self.tess_tol, self.dist_tol);
+        let mut gpu_path = StcPath::new(path, transform, self.tess_tol, self.dist_tol);
 
         if paint.shape_anti_alias() {
             gpu_path.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
@@ -210,10 +211,10 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
             gpu_path.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         }
 
-        let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let gpu_paint = StcPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
-            let paint2 = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let paint2 = StcPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
             CommandFlavor::StencilStroke { paint1: gpu_paint, paint2 }
         } else {
@@ -245,7 +246,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
     }
 
     fn triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
-        let mut gpu_paint = GpuPaint::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
+        let mut gpu_paint = StcPaint::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
         gpu_paint.shader_type = ShaderType::Img.to_f32();
 
         let mut cmd = Command::new(CommandFlavor::Triangles { gpu_paint });

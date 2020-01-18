@@ -6,6 +6,7 @@ use crate::geometry::Transform2D;
 use crate::{Path, Color, Paint, Scissor};
 use super::{Renderer, ImageId, Vertex, ImageFlags};
 
+/// Void renderer. Intended for testing and documentation.
 #[derive(Default)]
 pub struct Void;
 

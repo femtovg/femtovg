@@ -1,3 +1,4 @@
+//! Module containing renderer implementations
 
 use image::DynamicImage;
 
@@ -10,9 +11,9 @@ pub use void::Void;
 mod image_renderer;
 pub use image_renderer::ImageRenderer;
 
-// TODO: Rename gpu_renderer to stc (stencil then cover)
-pub mod gpu_renderer;
+pub mod stc;
 
+/// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer {
     fn flush(&mut self);
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color);
@@ -31,6 +32,7 @@ pub trait Renderer {
     }
 }
 
+/// Vertex struct for specifying triangle geometry
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
 #[repr(C)]
 pub struct Vertex {

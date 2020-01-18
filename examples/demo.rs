@@ -5,9 +5,9 @@ use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyC
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
-use glutin::{GlRequest, Api};
+//use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, Path, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{gpu_renderer::GpuRenderer}};
+use rscanvas::{Canvas, Color, Paint, Path, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{stc::Stc}};
 
 fn main() {
     let el = EventLoop::new();
@@ -18,7 +18,7 @@ fn main() {
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     //let backend = Void::new();
-    let backend = GpuRenderer::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
+    let backend = Stc::with_gl(|s| windowed_context.get_proc_address(s) as *const _);
     let mut canvas = Canvas::new(backend);
 
     canvas.add_font("examples/assets/NotoSans-Regular.ttf");
