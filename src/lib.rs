@@ -330,9 +330,9 @@ impl Canvas {
         let w = w.max(0.0);
         let h = h.max(0.0);
 
-        let mut t = Transform2D::new_translation(x + w * 0.5, y + h * 0.5);
-        t.premultiply(&state.transform);
-        state.scissor.transform = t;
+        let mut transform = Transform2D::new_translation(x + w * 0.5, y + h * 0.5);
+        transform.premultiply(&state.transform);
+        state.scissor.transform = transform;
 
         state.scissor.extent = Some([w * 0.5, h * 0.5]);
     }
@@ -371,8 +371,8 @@ impl Canvas {
         let tex = ex*pxform[0].abs() + ey*pxform[2].abs();
         let tey = ex*pxform[1].abs() + ey*pxform[3].abs();
 
-        let a = Rect::new(pxform[4]-tex, pxform[5]-tey, tex*2.0, tey*2.0);
-        let res = a.intersect(Rect::new(x, y, w, h));
+        let rect = Rect::new(pxform[4]-tex, pxform[5]-tey, tex*2.0, tey*2.0);
+        let res = rect.intersect(Rect::new(x, y, w, h));
 
         self.scissor(res.x, res.y, res.w, res.h);
     }

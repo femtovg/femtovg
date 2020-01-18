@@ -1,4 +1,5 @@
 
+use std::ops::Range;
 use std::f32::consts::PI;
 
 use bitflags::bitflags;
@@ -60,16 +61,29 @@ impl Point {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct Contour {
-    first: usize,
-    count: usize,
+    points: Range<usize>,
     closed: bool,
     bevel: usize,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     winding: Winding,
     pub(crate) convexity: Convexity
+}
+
+impl Default for Contour {
+    fn default() -> Self {
+        Self {
+            points: 0..0,
+            closed: Default::default(),
+            bevel: Default::default(),
+            fill: Default::default(),
+            stroke: Default::default(),
+            winding: Default::default(),
+            convexity: Default::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -114,21 +128,21 @@ impl StcPath {
         }
 
         for contour in &mut cache.contours {
-            let mut points = &mut cache.points[contour.first..(contour.first + contour.count)];
+            let mut points = &mut cache.points[contour.points.clone()];
 
             let p0 = points.last().copied().unwrap();
             let p1 = points.first().copied().unwrap();
 
             // If the first and last points are the same, remove the last, mark as closed path.
             if geometry::pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
-                contour.count -= 1;
+                contour.points.end -= 1;
                 //p0 = points[path.count-1];
                 contour.closed = true;
-                points = &mut cache.points[contour.first..(contour.first + contour.count)];
+                points = &mut cache.points[contour.points.clone()];
             }
 
             // Enforce winding.
-            if contour.count > 2 {
+            if contour.points.end - contour.points.start > 2 {
                 let area = Point::poly_area(points);
 
                 if contour.winding == Winding::CCW && area < 0.0 {
@@ -141,7 +155,7 @@ impl StcPath {
             }
 
             // TODO: this is doggy and fishy.
-            for i in 0..contour.count {
+            for i in 0..(contour.points.end - contour.points.start) {
                 let p1 = points[i];
 
                 let p0 = if i == 0 {
@@ -167,7 +181,8 @@ impl StcPath {
     fn add_contour(&mut self) {
         let mut contour = Contour::default();
 
-        contour.first = self.points.len();
+        contour.points.start = self.points.len();
+        contour.points.end = self.points.len();
 
         self.contours.push(contour);
     }
@@ -184,9 +199,9 @@ impl StcPath {
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
         if self.contours.is_empty() { return }
 
-        let count = &mut self.contours.last_mut().unwrap().count;
+        let point_range = &mut self.contours.last_mut().unwrap().points;
 
-        if *count > 0 {
+        if point_range.end - point_range.start > 0 {
             if let Some(point) = self.points.last_mut() {
                 if geometry::pt_equals(point.x, point.y, x, y, dist_tol) {
                     point.flags |= flags;
@@ -201,7 +216,7 @@ impl StcPath {
         point.flags = flags;
 
         self.points.push(point);
-        *count += 1;
+        point_range.end += 1;
     }
 
     fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: PointFlags, tess_tol: f32, dist_tol: f32) {
@@ -260,14 +275,14 @@ impl StcPath {
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
         for contour in &mut self.contours {
-            let points = &self.points[contour.first..(contour.first + contour.count)];
+            let points = &self.points[contour.points.clone()];
 
             contour.stroke.clear();
 
             let woff = 0.5 * aa;
 
             if fringe {
-                for i in 0..contour.count {
+                for i in 0..points.len() {
                     let p1 = points[i];
 
                     let p0 = if i == 0 {
@@ -300,8 +315,8 @@ impl StcPath {
                     }
                 }
             } else {
-                for i in 0..contour.count {
-                    contour.fill.push(Vertex::new(points[i].x, points[i].y, 0.5, 1.0));
+                for point in points {
+                    contour.fill.push(Vertex::new(point.x, point.y, 0.5, 1.0));
                 }
             }
 
@@ -318,7 +333,7 @@ impl StcPath {
                     lu = 0.5;    // Set outline fade at middle.
                 }
 
-                for i in 0..contour.count {
+                for i in 0..points.len() {
                     let p1 = points[i];
 
                     let p0 = if i == 0 {
@@ -362,7 +377,7 @@ impl StcPath {
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
-            let points = &self.points[contour.first..(contour.first + contour.count)];
+            let points = &self.points[contour.points.clone()];
 
             contour.stroke.clear();
 
@@ -370,11 +385,11 @@ impl StcPath {
 
             if contour.closed {
 
-                for i in 0..contour.count {
+                for i in 0..points.len() {
                     let p1 = points[i];
 
                     let p0 = if i == 0 {
-                        points[contour.count-1]
+                        points[points.len()-1]
                     } else {
                         points[i-1]
                     };
@@ -411,7 +426,7 @@ impl StcPath {
                 }
 
                 // loop
-                for i in 1..(contour.count - 1) {
+                for i in 1..(points.len() - 1) {
                     p1 = points[i];
                     p0 = points[i-1];
 
@@ -428,8 +443,8 @@ impl StcPath {
                 }
 
                 // Add cap
-                p0 = points[contour.count - 2];
-                p1 = points[contour.count - 1];
+                p0 = points[points.len() - 2];
+                p1 = points[points.len() - 1];
 
                 let mut dx = p1.x - p0.x;
                 let mut dy = p1.y - p0.y;
@@ -449,7 +464,7 @@ impl StcPath {
         let inv_stroke_width = if stroke_width > 0.0 { 1.0 / stroke_width } else { 0.0 };
 
         for contour in &mut self.contours {
-            let points = &mut self.points[contour.first..(contour.first+contour.count)];
+            let points = &mut self.points[contour.points.clone()];
             let mut nleft = 0;
 
             contour.bevel = 0;
@@ -461,10 +476,10 @@ impl StcPath {
             let mut x_flips = 0; // Number of sign changes in x
             let mut y_flips = 0; // Number of sign changes in y
 
-            for i in 0..contour.count {
+            for i in 0..points.len() {
 
                 let p0 = if i == 0 {
-                    points.get(contour.count-1).cloned().unwrap()
+                    points.get(points.len()-1).cloned().unwrap()
                 } else {
                     points.get(i-1).cloned().unwrap()
                 };
@@ -552,16 +567,16 @@ impl StcPath {
             }
 
             if x_sign != 0 && x_first_sign != 0 && x_sign != x_first_sign {
-                x_flips = x_flips + 1
+                x_flips += 1;
             }
 
             if y_sign != 0 && y_first_sign != 0 && y_sign != y_first_sign {
-                y_flips = y_flips + 1
+                y_flips += 1;
             }
 
             let convex = x_flips == 2 && y_flips == 2;
 
-            contour.convexity = if nleft == contour.count && convex { Convexity::Convex } else { Convexity::Concave };
+            contour.convexity = if nleft == points.len() && convex { Convexity::Convex } else { Convexity::Concave };
         }
     }
 }
