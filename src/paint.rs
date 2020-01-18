@@ -2,7 +2,7 @@
 // TODO: Start cap and end cap
 
 use crate::geometry::Transform2D;
-use super::{Color, ImageId, LineCap, LineJoin, VAlign};
+use super::{Color, ImageId, LineCap, LineJoin, VAlign, FillRule};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {
@@ -84,7 +84,8 @@ pub struct Paint<'a> {
     pub(crate) font_size: u32,
     pub(crate) letter_spacing: i32,
     pub(crate) font_blur: f32,
-    pub(crate) text_valign: VAlign
+    pub(crate) text_valign: VAlign,
+    pub(crate) fill_rule: FillRule
 }
 
 impl Default for Paint<'_> {
@@ -102,7 +103,8 @@ impl Default for Paint<'_> {
             font_size: 16,
             letter_spacing: 0,
             font_blur: 0.0,
-            text_valign: VAlign::default()
+            text_valign: VAlign::default(),
+            fill_rule: Default::default(),
         }
     }
 }
@@ -319,6 +321,18 @@ impl<'a> Paint<'a> {
     /// Only has effect on canvas text operations
     pub fn set_text_valign(&mut self, valign: VAlign) {
         self.text_valign = valign;
+    }
+
+    /// Retrieves the current fill rule setting for this paint
+    pub fn fill_rule(&self) -> FillRule {
+        self.fill_rule
+    }
+
+    /// Sets the current rule to be used when filling a path
+    ///
+    /// https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/fill-rule
+    pub fn set_fill_rule(&mut self, rule: FillRule) {
+        self.fill_rule = rule;
     }
 
     pub(crate) fn mul_alpha(&mut self, a: f32) {

@@ -9,7 +9,7 @@ use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
 use super::{Command, GpuRendererBackend, CommandFlavor, GpuPaint, TextureType};
-use crate::{Color, ImageFlags};
+use crate::{Color, ImageFlags, FillRule};
 use crate::renderer::{Vertex, ImageId};
 
 mod shader;
@@ -126,6 +126,7 @@ impl OpenGl {
             gl::StencilMask(0xff);
             gl::StencilFunc(gl::ALWAYS, 0, 0xff);
             gl::ColorMask(gl::FALSE, gl::FALSE, gl::FALSE, gl::FALSE);
+            //gl::DepthMask(gl::FALSE);
         }
 
         self.set_uniforms(stencil_paint, None);
@@ -146,13 +147,18 @@ impl OpenGl {
             gl::Enable(gl::CULL_FACE);
             // Draw anti-aliased pixels
             gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
+            //gl::DepthMask(gl::TRUE);
         }
 
         self.set_uniforms(fill_paint, cmd.image);
 
         if self.antialias {
             unsafe {
-                gl::StencilFunc(gl::EQUAL, 0x00, 0xff);
+                match cmd.fill_rule {
+                    FillRule::NonZero => gl::StencilFunc(gl::EQUAL, 0x0, 0xff),
+                    FillRule::EvenOdd => gl::StencilFunc(gl::EQUAL, 0x0, 0x1)
+                }
+
                 gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
             }
 
@@ -165,7 +171,11 @@ impl OpenGl {
         }
 
         unsafe {
-            gl::StencilFunc(gl::NOTEQUAL, 0x0, 0xff);
+            match cmd.fill_rule {
+                FillRule::NonZero => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0xff),
+                FillRule::EvenOdd => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0x1)
+            }
+
             gl::StencilOp(gl::ZERO, gl::ZERO, gl::ZERO);
 
             if let Some((start, count)) = cmd.triangles_verts {

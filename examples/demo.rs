@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, Winding, ImageFlags, renderer::{ImageRenderer, gpu_renderer::GpuRenderer, Void}};
+use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{ImageRenderer, gpu_renderer::GpuRenderer, Void}};
 
 fn main() {
     let el = EventLoop::new();
@@ -102,9 +102,9 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
-                //draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                //draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                //draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
 
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
@@ -116,6 +116,12 @@ fn main() {
                 */
                 //draw_state_stack(&mut canvas);
 
+                let mut evenodd_fill = Paint::color(Color::rgb(220, 220, 220));
+                evenodd_fill.set_fill_rule(FillRule::EvenOdd);
+
+                let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
+                nonzero_fill.set_fill_rule(FillRule::NonZero);
+
                 canvas.begin_path();
                 canvas.move_to(50.0, 0.0);
                 canvas.line_to(21.0, 90.0);
@@ -123,25 +129,21 @@ fn main() {
                 canvas.line_to(2.0, 35.0);
                 canvas.line_to(79.0, 90.0);
                 canvas.close();
-                //canvas.stroke_path(&Paint::color(Color::rgb(220, 20, 20)));
-                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+                canvas.fill_path(&evenodd_fill);
+                canvas.translate(100.0, 0.0);
 
                 canvas.begin_path();
-                canvas.rect(100.0, 10.0, 100.0, 100.0);
-                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
-
-                canvas.begin_path();
-                canvas.move_to(220.0, 10.0);
-                canvas.line_to(320.0, 10.0);
-                canvas.line_to(300.0, 60.0);
-                canvas.line_to(320.0, 110.0);
-                canvas.line_to(220.0, 110.0);
+                canvas.move_to(50.0, 0.0);
+                canvas.line_to(21.0, 90.0);
+                canvas.line_to(98.0, 35.0);
+                canvas.line_to(2.0, 35.0);
+                canvas.line_to(79.0, 90.0);
                 canvas.close();
-                canvas.fill_path(&Paint::color(Color::rgb(220, 220, 220)));
+                canvas.fill_path(&nonzero_fill);
 
                 if false {
 
-					let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
+                    let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
                     let cursive_joining = format!("Cursive Joining: اللغة العربية");
                     let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
                     //let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");

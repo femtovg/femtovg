@@ -42,6 +42,18 @@ pub enum Verb {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum FillRule {
+    EvenOdd,
+    NonZero
+}
+
+impl Default for FillRule {
+    fn default() -> Self {
+        Self::NonZero
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum VAlign {
     Top,
     Middle,

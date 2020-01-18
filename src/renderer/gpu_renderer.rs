@@ -3,7 +3,7 @@ use std::ffi::c_void;
 
 use image::DynamicImage;
 
-use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin};
+use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin, FillRule};
 use crate::renderer::{ImageId, Renderer};
 use crate::paint::PaintFlavor;
 
@@ -72,6 +72,7 @@ pub struct Command {
     drawables: Vec<Drawable>,
     triangles_verts: Option<(usize, usize)>,
     image: Option<ImageId>,
+    fill_rule: FillRule
 }
 
 impl Command {
@@ -81,6 +82,7 @@ impl Command {
             drawables: Default::default(),
             triangles_verts: Default::default(),
             image: Default::default(),
+            fill_rule: Default::default(),
         }
     }
 }
@@ -172,6 +174,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         };
 
         let mut cmd = Command::new(flavor);
+        cmd.fill_rule = paint.fill_rule;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
