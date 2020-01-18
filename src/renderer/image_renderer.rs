@@ -11,12 +11,12 @@ use image::{
     imageops::{self, FilterType},
 };
 
-use crate::{Verb, Color, Paint, Scissor};
+use crate::geometry::Transform2D;
+use crate::{Path, Color, Paint, Scissor};
 use super::{Renderer, ImageId, Vertex, ImageFlags};
 
 pub struct ImageRenderer {
     image: RgbaImage,
-    current_path: Option<Vec<Verb>>,
     last_image_id: u32,
     images: FnvHashMap<ImageId, DynamicImage>
 }
@@ -25,7 +25,6 @@ impl ImageRenderer {
     pub fn new() -> Self {
         Self {
             image: RgbaImage::new(1,1),
-            current_path: None,
             last_image_id: Default::default(),
             images: Default::default()
         }
@@ -45,39 +44,9 @@ impl Renderer for ImageRenderer {
         self.image = imageops::resize(&self.image, width, height, FilterType::Nearest);
     }
 
-    fn set_current_path(&mut self, verbs: &[Verb]) {
-        if self.current_path.is_none() {
-            self.current_path = Some(verbs.to_owned());
-        }
-    }
-
-    fn clear_current_path(&mut self) {
-        self.current_path = None;
-    }
-
-    fn fill(&mut self, paint: &Paint, scissor: &Scissor) {
-        let path = if let Some(path) = self.current_path.as_ref() {
-            path
-        } else {
-            return;
-        };
-
-        // Maybe some day
-    }
-
-    fn stroke(&mut self, paint: &Paint, scissor: &Scissor) {
-        let path = if let Some(path) = self.current_path.as_ref() {
-            path
-        } else {
-            return;
-        };
-
-        // Maybe some day
-    }
-
-    fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {
-        // Maybe some day
-    }
+    fn fill(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {}
+    fn stroke(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {}
+    fn triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {}
 
     fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
         let id = self.last_image_id;

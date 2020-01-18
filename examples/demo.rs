@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{ImageRenderer, gpu_renderer::GpuRenderer, Void}};
+use rscanvas::{Canvas, Color, Paint, Path, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{gpu_renderer::GpuRenderer}};
 
 fn main() {
     let el = EventLoop::new();
@@ -122,24 +122,18 @@ fn main() {
                 let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
                 nonzero_fill.set_fill_rule(FillRule::NonZero);
 
-                canvas.begin_path();
-                canvas.move_to(50.0, 0.0);
-                canvas.line_to(21.0, 90.0);
-                canvas.line_to(98.0, 35.0);
-                canvas.line_to(2.0, 35.0);
-                canvas.line_to(79.0, 90.0);
-                canvas.close();
-                canvas.fill_path(&evenodd_fill);
+                let mut path = Path::new();
+                path.move_to(50.0, 0.0);
+                path.line_to(21.0, 90.0);
+                path.line_to(98.0, 35.0);
+                path.line_to(2.0, 35.0);
+                path.line_to(79.0, 90.0);
+                path.close();
+                canvas.fill_path(&path, &evenodd_fill);
+
                 canvas.translate(100.0, 0.0);
 
-                canvas.begin_path();
-                canvas.move_to(50.0, 0.0);
-                canvas.line_to(21.0, 90.0);
-                canvas.line_to(98.0, 35.0);
-                canvas.line_to(2.0, 35.0);
-                canvas.line_to(79.0, 90.0);
-                canvas.close();
-                canvas.fill_path(&nonzero_fill);
+                canvas.fill_path(&path, &nonzero_fill);
 
                 if false {
 
@@ -171,10 +165,10 @@ fn main() {
 
                     let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
 
-                    canvas.begin_path();
-                    canvas.rect(x, y, 512.0, 512.0);
-                    canvas.fill_path(&paint);
-                    canvas.stroke_path(&Paint::color(Color::hex("454545")));
+                    let mut path = Path::new();
+                    path.rect(x, y, 512.0, 512.0);
+                    canvas.fill_path(&path, &paint);
+                    canvas.stroke_path(&path, &Paint::color(Color::hex("454545")));
                 }
 
                 // Image
@@ -184,9 +178,9 @@ fn main() {
 
                     let paint = Paint::image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
 
-                    canvas.begin_path();
-                    canvas.rect(0.0, 0.0, 80.0, 80.0);
-                    canvas.fill_path(&paint);
+                    let mut path = Path::new();
+                    path.rect(x, y, 512.0, 512.0);
+                    canvas.fill_path(&path, &paint);
 
                     canvas.restore();
                 }
@@ -210,7 +204,7 @@ fn main() {
                 canvas.fill_text(15.0, size.height as f32 - 20.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
                 */
 
-                canvas.end_frame();
+                canvas.flush();
                 windowed_context.swap_buffers().unwrap();
             }
             Event::MainEventsCleared => {
@@ -244,45 +238,44 @@ fn draw_graph(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
     // Graph background
     let bg = Paint::linear_gradient(x,y,x,y+h, Color::rgba(0,160,192,0), Color::rgba(0,160,192,64));
 
-    canvas.begin_path();
-    canvas.move_to(sx[0], sy[0]);
+    let mut path = Path::new();
+    path.move_to(sx[0], sy[0]);
 
     for i in 1..6 {
-        canvas.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
+        path.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
     }
 
-    canvas.line_to(x+w, y+h);
-    canvas.line_to(x, y+h);
-    canvas.fill_path(&bg);
+    path.line_to(x+w, y+h);
+    path.line_to(x, y+h);
+    canvas.fill_path(&path, &bg);
 
     // Graph line
-    canvas.begin_path();
-    canvas.move_to(sx[0], sy[0] + 2.0);
+    let mut path = Path::new();
+    path.move_to(sx[0], sy[0] + 2.0);
 
     for i in 1..6 {
-        canvas.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
+        path.bezier_to(sx[i-1]+dx*0.5,sy[i-1], sx[i]-dx*0.5,sy[i], sx[i],sy[i]);
     }
 
     let mut line = Paint::color(Color::rgba(0,160,192,255));
     line.set_stroke_width(3.0);
-    canvas.stroke_path(&line);
+    canvas.stroke_path(&path, &line);
 
     // Graph sample pos
     for i in 0..6 {
         let bg = Paint::radial_gradient(sx[i], sy[i] + 2.0, 3.0, 8.0, Color::rgba(0,0,0,32), Color::rgba(0,0,0,0));
-        canvas.begin_path();
-        canvas.rect(sx[i] - 10.0, sy[i] - 10.0 + 2.0, 20.0, 20.0);
-        canvas.fill_path(&bg);
+        let mut path = Path::new();
+        path.rect(sx[i] - 10.0, sy[i] - 10.0 + 2.0, 20.0, 20.0);
+        canvas.fill_path(&path, &bg);
     }
 
-    canvas.begin_path();
-    for i in 0..6 { canvas.circle(sx[i], sy[i], 4.0); }
-    canvas.fill_path(&Paint::color(Color::rgba(0,160,192,255)));
+    let mut path = Path::new();
+    for i in 0..6 { path.circle(sx[i], sy[i], 4.0); }
+    canvas.fill_path(&path, &Paint::color(Color::rgba(0,160,192,255)));
 
-    canvas.begin_path();
-    for i in 0..6 { canvas.circle(sx[i], sy[i], 2.0); }
-    canvas.fill_path(&Paint::color(Color::rgba(220,220,220,255)));
-
+    let mut path = Path::new();
+    for i in 0..6 { path.circle(sx[i], sy[i], 2.0); }
+    canvas.fill_path(&path, &Paint::color(Color::rgba(220,220,220,255)));
 }
 
 fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32) {
@@ -291,28 +284,28 @@ fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32)
     canvas.save();
 
 	// Window
-	canvas.begin_path();
-    canvas.rounded_rect(x, y, w, h, corner_radius);
-	canvas.fill_path(&Paint::color(Color::rgba(28, 30, 34, 192)));
+	let mut path = Path::new();
+    path.rounded_rect(x, y, w, h, corner_radius);
+	canvas.fill_path(&path, &Paint::color(Color::rgba(28, 30, 34, 192)));
 
 	// Drop shadow
     let shadow_paint = Paint::box_gradient(x, y + 2.0, w, h, corner_radius * 2.0, 10.0, Color::rgba(0,0,0,128), Color::rgba(0,0,0,0));
-	canvas.begin_path();
-	canvas.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
-	canvas.rounded_rect(x, y, w, h, corner_radius);
-	canvas.path_winding(Winding::CW);
-	canvas.fill_path(&shadow_paint);
+	let mut path = Path::new();
+	path.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
+	path.rounded_rect(x, y, w, h, corner_radius);
+	path.winding(Winding::CW);
+	canvas.fill_path(&path, &shadow_paint);
 
 	// Header
 	let header_paint = Paint::linear_gradient(x, y, x, y + 15.0, Color::rgba(255,255,255,8), Color::rgba(0,0,0,16));
-	canvas.begin_path();
-	canvas.rounded_rect(x + 1.0, y + 1.0, w - 2.0, 30.0, corner_radius - 1.0);
-	canvas.fill_path(&header_paint);
+	let mut path = Path::new();
+	path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, 30.0, corner_radius - 1.0);
+	canvas.fill_path(&path, &header_paint);
 
-	canvas.begin_path();
-	canvas.move_to(x + 0.5, y + 0.5 + 30.0);
-	canvas.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
-    canvas.stroke_path(&Paint::color(Color::rgba(0, 0, 0, 32)));
+	let mut path = Path::new();
+	path.move_to(x + 0.5, y + 0.5 + 30.0);
+	path.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
+    canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
 
     let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 128));
     text_paint.set_font_size(16);
@@ -358,30 +351,31 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
             paint.set_line_join(*join);
             paint.set_stroke_width(s * 0.3);
 
-            canvas.begin_path();
-            canvas.move_to(fx+pts[0], fy+pts[1]);
-            canvas.line_to(fx+pts[2], fy+pts[3]);
-            canvas.line_to(fx+pts[4], fy+pts[5]);
-            canvas.line_to(fx+pts[6], fy+pts[7]);
-            canvas.stroke_path(&paint);
+            let mut path = Path::new();
+            path.move_to(fx+pts[0], fy+pts[1]);
+            path.line_to(fx+pts[2], fy+pts[3]);
+            path.line_to(fx+pts[4], fy+pts[5]);
+            path.line_to(fx+pts[6], fy+pts[7]);
+            canvas.stroke_path(&path, &paint);
 
             paint.set_line_cap(LineCap::Butt);
             paint.set_line_join(LineJoin::Bevel);
             paint.set_stroke_width(1.0);
             paint.set_color(Color::rgba(0,192,255,255));
 
-            canvas.begin_path();
-            canvas.move_to(fx+pts[0], fy+pts[1]);
-            canvas.line_to(fx+pts[2], fy+pts[3]);
-            canvas.line_to(fx+pts[4], fy+pts[5]);
-            canvas.line_to(fx+pts[6], fy+pts[7]);
-            canvas.stroke_path(&paint);
+            let mut path = Path::new();
+            path.move_to(fx+pts[0], fy+pts[1]);
+            path.line_to(fx+pts[2], fy+pts[3]);
+            path.line_to(fx+pts[4], fy+pts[5]);
+            path.line_to(fx+pts[6], fy+pts[7]);
+            canvas.stroke_path(&path, &paint);
         }
     }
 
     canvas.restore();
 }
 
+/*
 fn draw_shadows(canvas: &mut Canvas) {
     canvas.save();
 
@@ -702,3 +696,4 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
 
     canvas.restore();
 }
+*/

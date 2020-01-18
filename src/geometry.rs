@@ -156,9 +156,10 @@ impl Transform2D {
         inv
     }
 
-    pub fn transform_point(&self, dx: &mut f32, dy: &mut f32, sx: f32, sy: f32) {
-        *dx = sx*self[0] + sy*self[2] + self[4];
-        *dy = sx*self[1] + sy*self[3] + self[5];
+    pub fn transform_point(&self, sx: f32, sy: f32) -> (f32, f32) {
+        let dx = sx*self[0] + sy*self[2] + self[4];
+        let dy = sx*self[1] + sy*self[3] + self[5];
+        (dx, dy)
     }
 
     pub fn average_scale(&self) -> f32 {

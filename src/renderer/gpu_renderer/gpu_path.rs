@@ -3,9 +3,9 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Bounds};
+use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Verb, Winding, LineCap, LineJoin};
+use crate::{Verb, Path, Winding, LineCap, LineJoin};
 
 // TODO: We need an iterator for the contour points that loops by chunks of 2
 
@@ -81,22 +81,27 @@ pub struct GpuPath {
 
 impl GpuPath {
 
-    pub fn new(path: &[Verb], tess_tol: f32, dist_tol: f32) -> Self {
+    pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = GpuPath::default();
 
         // Convert commands to a set of contours
-        for verb in path {
+        for verb in path.verbs() {
             match verb {
                 Verb::MoveTo(x, y) => {
                     cache.add_contour();
-                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                    let (x, y) = transform.transform_point(*x, *y);
+                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    cache.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                    let (x, y) = transform.transform_point(*x, *y);
+                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.last_point() {
-                        cache.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                        let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
+                        let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
+                        let (x, y) = transform.transform_point(*x, *y);
+                        cache.tesselate_bezier(last.x, last.y, c1x, c1y, c2x, c2y, x, y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Verb::Close => {

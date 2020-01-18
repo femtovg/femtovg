@@ -108,25 +108,25 @@ impl Shader {
             Ok(())
         }
     }
-    
+
     pub(crate) fn bind(&self) {
         unsafe { gl::UseProgram(self.prog); }
     }
-    
+
     pub(crate) fn unbind(&self) {
         unsafe { gl::UseProgram(0); }
     }
-    
+
     pub(crate) fn set_tex(&self, tex: GLint) {
         unsafe { gl::Uniform1i(self.loc_tex, tex); }
     }
-    
+
     pub(crate) fn set_view(&self, view: [f32; 2]) {
         unsafe { gl::Uniform2fv(self.loc_viewsize, 1, view.as_ptr()); }
     }
-    
+
     pub(crate) fn set_config(&self, count: i32, ptr: *const f32) {
-        unsafe { 
+        unsafe {
             gl::Uniform4fv(self.loc_frag, count, ptr);
         }
     }

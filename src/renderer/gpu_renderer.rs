@@ -3,9 +3,10 @@ use std::ffi::c_void;
 
 use image::DynamicImage;
 
-use crate::{ImageFlags, Vertex, Paint, Scissor, Verb, Color, LineJoin, FillRule};
+use crate::{ImageFlags, Vertex, Paint, Scissor, Path, Color, LineJoin, FillRule};
 use crate::renderer::{ImageId, Renderer};
 use crate::paint::PaintFlavor;
+use crate::geometry::Transform2D;
 
 mod gpu_path;
 use gpu_path::{Convexity, GpuPath};
@@ -72,7 +73,8 @@ pub struct Command {
     drawables: Vec<Drawable>,
     triangles_verts: Option<(usize, usize)>,
     image: Option<ImageId>,
-    fill_rule: FillRule
+    fill_rule: FillRule,
+    transform: Transform2D,
 }
 
 impl Command {
@@ -83,6 +85,7 @@ impl Command {
             triangles_verts: Default::default(),
             image: Default::default(),
             fill_rule: Default::default(),
+            transform: Default::default()
         }
     }
 }
@@ -91,7 +94,6 @@ pub struct GpuRenderer<T> {
     backend: T,
     cmds: Vec<Command>,
     verts: Vec<Vertex>,
-    current_path: Option<GpuPath>,
     tess_tol: f32,
     dist_tol: f32,
     fringe_width: f32,
@@ -103,7 +105,6 @@ impl<T: GpuRendererBackend> GpuRenderer<T> {
             backend: backend,
             cmds: Default::default(),
             verts: Default::default(),
-            current_path: None,
             tess_tol: 0.25,
             dist_tol: 0.01,
             fringe_width: 1.0,
@@ -136,22 +137,8 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.backend.set_size(width, height, dpi);
     }
 
-    fn set_current_path(&mut self, verbs: &[Verb]) {
-        if self.current_path.is_none() {
-            self.current_path = Some(GpuPath::new(verbs, self.tess_tol, self.dist_tol));
-        }
-    }
-
-    fn clear_current_path(&mut self) {
-        self.current_path = None;
-    }
-
-    fn fill(&mut self, paint: &Paint, scissor: &Scissor) {
-        let gpu_path = if let Some(gpu_path) = self.current_path.as_mut() {
-            gpu_path
-        } else {
-            return;
-        };
+    fn fill(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
+        let mut gpu_path = GpuPath::new(path, transform, self.tess_tol, self.dist_tol);
 
         if paint.shape_anti_alias() {
             gpu_path.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
@@ -174,6 +161,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         };
 
         let mut cmd = Command::new(flavor);
+        cmd.transform = *transform;
         cmd.fill_rule = paint.fill_rule;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
@@ -213,19 +201,13 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.cmds.push(cmd);
     }
 
-    fn stroke(&mut self, paint: &Paint, scissor: &Scissor) {
-        let tess_tol = 0.25;
-
-        let gpu_path = if let Some(gpu_path) = self.current_path.as_mut() {
-            gpu_path
-        } else {
-            return;
-        };
+    fn stroke(&mut self, path: &Path, paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
+        let mut gpu_path = GpuPath::new(path, transform, self.tess_tol, self.dist_tol);
 
         if paint.shape_anti_alias() {
-            gpu_path.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
+            gpu_path.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         } else {
-            gpu_path.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), tess_tol);
+            gpu_path.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         }
 
         let gpu_paint = GpuPaint::new(&self.backend, paint, scissor, paint.stroke_width(), self.fringe_width, -1.0);
@@ -239,6 +221,7 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         };
 
         let mut cmd = Command::new(flavor);
+        cmd.transform = *transform;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
@@ -261,11 +244,12 @@ impl<T: GpuRendererBackend> Renderer for GpuRenderer<T> {
         self.cmds.push(cmd);
     }
 
-    fn triangles(&mut self, paint: &Paint, scissor: &Scissor, verts: &[Vertex]) {
+    fn triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
         let mut gpu_paint = GpuPaint::new(&self.backend, paint, scissor, 1.0, 1.0, -1.0);
         gpu_paint.shader_type = ShaderType::Img.to_f32();
 
         let mut cmd = Command::new(CommandFlavor::Triangles { gpu_paint });
+        cmd.transform = *transform;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
