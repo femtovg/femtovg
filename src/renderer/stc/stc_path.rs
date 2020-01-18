@@ -235,12 +235,12 @@ impl StcPath {
         self.tesselate_bezier(x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, atype, tess_tol, dist_tol);
     }
 
-    pub(crate) fn expand_fill(&mut self, w: f32, line_join: LineJoin, miter_limit: f32, fringe_width: f32) {
+    pub(crate) fn expand_fill(&mut self, stroke_width: f32, line_join: LineJoin, miter_limit: f32, fringe_width: f32) {
 
-        let fringe = w > 0.0;
+        let fringe = stroke_width > 0.0;
         let aa = fringe_width;
 
-        self.calculate_joins(w, line_join, miter_limit);
+        self.calculate_joins(stroke_width, line_join, miter_limit);
 
         // Calculate max vertex usage.
         /*
@@ -306,8 +306,8 @@ impl StcPath {
             }
 
             if fringe {
-                let mut lw = w + woff;
-                let rw = w - woff;
+                let mut lw = stroke_width + woff;
+                let rw = stroke_width - woff;
                 let mut lu = 0.0;
                 let ru = 1.0;
 
@@ -345,13 +345,13 @@ impl StcPath {
     }
 
     // TODO: instead of passing 3 paint values here we can just pass the paint struct as a parameter
-    pub(crate) fn expand_stroke(&mut self, w: f32, fringe: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
+    pub(crate) fn expand_stroke(&mut self, stroke_width: f32, fringe: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
         let aa = fringe;
         let mut u0 = 0.0;
         let mut u1 = 1.0;
-        let ncap = curve_divisions(w, PI, tess_tol);
+        let ncap = curve_divisions(stroke_width, PI, tess_tol);
 
-        let w = w + (aa * 0.5);
+        let stroke_width = stroke_width + (aa * 0.5);
 
         // Disable the gradient used for antialiasing when antialiasing is not used.
         if aa == 0.0 {
@@ -359,7 +359,7 @@ impl StcPath {
             u1 = 0.5;
         }
 
-        self.calculate_joins(w, line_join, miter_limit);
+        self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
             let points = &self.points[contour.first..(contour.first + contour.count)];
@@ -381,13 +381,13 @@ impl StcPath {
 
                     if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
-                            round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
+                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
                         } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, aa);
+                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
                         }
                     } else {
-                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * w), p1.y + (p1.dmy * w), u0, 1.0));
-                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * w), p1.y - (p1.dmy * w), u1, 1.0));
+                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
+                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
                     }
                 }
 
@@ -405,9 +405,9 @@ impl StcPath {
                 geometry::normalize(&mut dx, &mut dy);
 
                 match line_cap {
-                    LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, dx, dy, w, -aa*0.5, aa, u0, u1),
-                    LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, dx, dy, w, w-aa, aa, u0, u1),
-                    LineCap::Round => round_cap_start(&mut contour.stroke, &p0, dx, dy, w, ncap as usize, aa, u0, u1),
+                    LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, -aa*0.5, aa, u0, u1),
+                    LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, stroke_width-aa, aa, u0, u1),
+                    LineCap::Round => round_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, ncap as usize, aa, u0, u1),
                 }
 
                 // loop
@@ -417,13 +417,13 @@ impl StcPath {
 
                     if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
-                            round_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, ncap as usize, aa);
+                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
                         } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, w, w, u0, u1, aa);
+                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
                         }
                     } else {
-                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * w), p1.y + (p1.dmy * w), u0, 1.0));
-                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * w), p1.y - (p1.dmy * w), u1, 1.0));
+                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
+                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
                     }
                 }
 
@@ -437,16 +437,16 @@ impl StcPath {
                 geometry::normalize(&mut dx, &mut dy);
 
                 match line_cap {
-                    LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, dx, dy, w, -aa*0.5, aa, u0, u1),
-                    LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, dx, dy, w, w-aa, aa, u0, u1),
-                    LineCap::Round => round_cap_end(&mut contour.stroke, &p1, dx, dy, w, ncap as usize, aa, u0, u1),
+                    LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, -aa*0.5, aa, u0, u1),
+                    LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, stroke_width-aa, aa, u0, u1),
+                    LineCap::Round => round_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, ncap as usize, aa, u0, u1),
                 }
             }
         }
     }
 
-    fn calculate_joins(&mut self, w: f32, line_join: LineJoin, miter_limit: f32) {
-        let iw = if w > 0.0 { 1.0 / w } else { 0.0 };
+    fn calculate_joins(&mut self, stroke_width: f32, line_join: LineJoin, miter_limit: f32) {
+        let inv_stroke_width = if stroke_width > 0.0 { 1.0 / stroke_width } else { 0.0 };
 
         for contour in &mut self.contours {
             let points = &mut self.points[contour.first..(contour.first+contour.count)];
@@ -504,14 +504,14 @@ impl StcPath {
                     if x_sign == 0 {
                         x_first_sign = 1;
                     } else if x_sign < 0 {
-                        x_flips = x_flips + 1;
+                        x_flips += 1;
                     }
                     x_sign = 1;
                 } else if p1.dx < 0.0 {
                     if x_sign == 0 {
                         x_first_sign = -1;
                     } else if x_sign > 0 {
-                        x_flips = x_flips + 1;
+                        x_flips += 1;
                     }
                     x_sign = -1;
                 }
@@ -520,20 +520,20 @@ impl StcPath {
                     if y_sign == 0 {
                         y_first_sign = 1;
                     } else if y_sign < 0 {
-                        y_flips = y_flips + 1;
+                        y_flips += 1;
                     }
                     y_sign = 1;
                 } else if p1.dy < 0.0 {
                     if y_sign == 0 {
                         y_first_sign = -1;
                     } else if y_sign > 0 {
-                        y_flips = y_flips + 1;
+                        y_flips += 1;
                     }
                     y_sign = -1;
                 }
 
                 // Calculate if we should use bevel or miter for inner join.
-                let limit = (p0.len.min(p1.len) * iw).max(1.01);
+                let limit = (p0.len.min(p1.len) * inv_stroke_width).max(1.01);
 
                 if (dmr2 * limit * limit) < 1.0 {
                     p1.flags |= PointFlags::INNERBEVEL;
