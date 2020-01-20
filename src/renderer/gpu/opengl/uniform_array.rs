@@ -1,5 +1,5 @@
 
-use super::StcPaint;
+use super::GpuPaint;
 
 const UNIFORMARRAY_SIZE: usize = 11;
 
@@ -78,8 +78,8 @@ impl UniformArray {
     }
 }
 
-impl From<StcPaint> for UniformArray {
-    fn from(gpu_paint: StcPaint) -> Self {
+impl From<GpuPaint> for UniformArray {
+    fn from(gpu_paint: GpuPaint) -> Self {
         let mut arr = Self::default();
 
         arr.set_scissor_mat(gpu_paint.scissor_mat);

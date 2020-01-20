@@ -2,10 +2,10 @@
 use crate::{ImageFlags, Scissor};
 use crate::paint::{Paint, PaintFlavor};
 use crate::geometry::Transform2D;
-use super::{ShaderType, TextureType, StcBackend};
+use super::{ShaderType, TextureType, GpuBackend};
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct StcPaint {
+pub struct GpuPaint {
     pub(super) scissor_mat: [f32; 12],
     pub(super) paint_mat: [f32; 12],
     pub(super) inner_col: [f32; 4],
@@ -21,10 +21,10 @@ pub struct StcPaint {
     pub(super) tex_type: f32
 }
 
-impl StcPaint {
+impl GpuPaint {
 
-    pub fn new<T: StcBackend>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
-        let mut gpu_paint = StcPaint::default();
+    pub fn new<T: GpuBackend>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
+        let mut gpu_paint = GpuPaint::default();
 
         // Scissor
         let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {

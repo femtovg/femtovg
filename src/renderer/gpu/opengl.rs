@@ -8,7 +8,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, StcBackend, CommandFlavor, StcPaint, TextureType};
+use super::{Command, GpuBackend, CommandFlavor, GpuPaint, TextureType};
 use crate::{Color, ImageFlags, FillRule};
 use crate::renderer::{Vertex, ImageId};
 
@@ -104,7 +104,7 @@ impl OpenGl {
         eprintln!("({}) Error on {} - {}", err, label, message);
     }
 
-    fn convex_fill(&self, cmd: &Command, gpu_paint: StcPaint) {
+    fn convex_fill(&self, cmd: &Command, gpu_paint: GpuPaint) {
         self.set_uniforms(gpu_paint, cmd.image);
 
         for drawable in &cmd.drawables {
@@ -120,7 +120,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, cmd: &Command, stencil_paint: StcPaint, fill_paint: StcPaint) {
+    fn concave_fill(&self, cmd: &Command, stencil_paint: GpuPaint, fill_paint: GpuPaint) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -188,7 +188,7 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, cmd: &Command, paint: StcPaint) {
+    fn stroke(&self, cmd: &Command, paint: GpuPaint) {
         self.set_uniforms(paint, cmd.image);
 
         for drawable in &cmd.drawables {
@@ -200,7 +200,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, cmd: &Command, paint1: StcPaint, paint2: StcPaint) {
+    fn stencil_stroke(&self, cmd: &Command, paint1: GpuPaint, paint2: GpuPaint) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -253,7 +253,7 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, cmd: &Command, paint: StcPaint) {
+    fn triangles(&self, cmd: &Command, paint: GpuPaint) {
         self.set_uniforms(paint, cmd.image);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -263,7 +263,7 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, paint: StcPaint, image_id: Option<ImageId>) {
+    fn set_uniforms(&self, paint: GpuPaint, image_id: Option<ImageId>) {
         let arr = UniformArray::from(paint);
         self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
@@ -278,7 +278,7 @@ impl OpenGl {
     }
 }
 
-impl StcBackend for OpenGl {
+impl GpuBackend for OpenGl {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             gl::Viewport(x as i32, y as i32, width as i32, height as i32);

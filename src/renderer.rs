@@ -11,7 +11,7 @@ pub use void::Void;
 mod image_renderer;
 pub use image_renderer::ImageRenderer;
 
-pub mod stc;
+pub mod gpu;
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer {
