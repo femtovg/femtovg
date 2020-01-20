@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 //use glutin::{GlRequest, Api};
 
-use rscanvas::{Canvas, Color, Paint, Path, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{stc::Stc}};
+use rscanvas::{Renderer, Canvas, Color, Paint, Path, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::{stc::Stc}};
 
 fn main() {
     let el = EventLoop::new();
@@ -186,7 +186,7 @@ fn main() {
     });
 }
 
-fn draw_graph(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
+fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, t: f32) {
     let dx = w / 5.0;
     let mut sx = [0.0; 6];
     let mut sy = [0.0; 6];
@@ -248,7 +248,7 @@ fn draw_graph(canvas: &mut Canvas, x: f32, y: f32, w: f32, h: f32, t: f32) {
     canvas.fill_path(&path, &Paint::color(Color::rgba(220,220,220,255)));
 }
 
-fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
     let corner_radius = 3.0;
 
     canvas.save();
@@ -292,7 +292,7 @@ fn draw_window(canvas: &mut Canvas, title: &str, x: f32, y: f32, w: f32, h: f32)
 	canvas.restore();
 }
 
-fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, _h: f32, t: f32) {
+fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {
     canvas.save();
 
     let pad = 5.0;
@@ -345,7 +345,7 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32, w: f32, _h: f32, t: f32) {
     canvas.restore();
 }
 
-fn draw_fills(canvas: &mut Canvas, x: f32, y: f32) {
+fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.save();
     canvas.translate(x, y);
 

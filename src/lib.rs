@@ -9,7 +9,7 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-use renderer::{Vertex, Renderer};
+pub use renderer::{Vertex, Renderer};
 
 mod font_cache;
 use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
@@ -129,19 +129,19 @@ impl Default for State {
     }
 }
 
-pub struct Canvas {
+pub struct Canvas<T> {
     width: f32,
     height: f32,
-    renderer: Box<dyn Renderer>,
+    renderer: T,
     font_cache: FontCache,
     state_stack: Vec<State>,
     fringe_width: f32,
     device_px_ratio: f32,
 }
 
-impl Canvas {
+impl<T> Canvas<T> where T: Renderer {
 
-    pub fn new<R: Renderer + 'static>(renderer: R) -> Self {
+    pub fn new(renderer: T) -> Self {
 
         // TODO: Return result from this method instead of unwrapping
         let font_manager = FontCache::new().unwrap();
@@ -149,7 +149,7 @@ impl Canvas {
         let mut canvas = Self {
             width: Default::default(),
             height: Default::default(),
-            renderer: Box::new(renderer),
+            renderer: renderer,
             font_cache: font_manager,
             state_stack: Default::default(),
             fringe_width: 1.0,
@@ -498,7 +498,7 @@ impl Canvas {
         style.set_blur(paint.font_blur() * scale);
         style.set_render_style(render_style);
 
-        let layout = self.font_cache.layout_text(x, y, self.renderer.as_mut(), style, text).unwrap();
+        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, style, text).unwrap();
 
         let text_color = if let PaintFlavor::Color(color) = paint.flavor {
             color
