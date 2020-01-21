@@ -182,10 +182,10 @@ pub struct Canvas<T> {
 
 impl<T> Canvas<T> where T: Renderer {
 
-    pub fn new(renderer: T) -> Self {
+    pub fn new(renderer: T) -> Result<Self, CanvasError> {
 
         // TODO: Return result from this method instead of unwrapping
-        let font_manager = FontCache::new().unwrap();
+        let font_manager = FontCache::new()?;
 
         let mut canvas = Self {
             width: Default::default(),
@@ -208,7 +208,7 @@ impl<T> Canvas<T> where T: Renderer {
         canvas.save();
         canvas.reset();
 
-        canvas
+        Ok(canvas)
     }
 
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
@@ -244,6 +244,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.cmds.clear();
         self.verts.clear();
         self.state_stack.clear();
+        self.path_cache.clear();
         self.save();
     }
 

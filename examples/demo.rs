@@ -11,14 +11,14 @@ use gpucanvas::{Renderer, Canvas, Color, Paint, LineCap, LineJoin, FillRule, Win
 
 fn main() {
     let el = EventLoop::new();
-    let wb = WindowBuilder::new().with_inner_size((1000.0, 600.0).into()).with_title("rscanvas demo");
+    let wb = WindowBuilder::new().with_inner_size((1000.0, 600.0).into()).with_title("gpucanvas demo");
 
     let windowed_context = ContextBuilder::new().with_vsync(true).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (1, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer);
+    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
@@ -34,6 +34,9 @@ fn main() {
 
     let start = Instant::now();
 
+    let mut mousex = 0.0;
+    let mut mousey = 0.0;
+
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -43,6 +46,10 @@ fn main() {
                 WindowEvent::Resized(logical_size) => {
                     let dpi_factor = windowed_context.window().hidpi_factor();
                     windowed_context.resize(logical_size.to_physical(dpi_factor));
+                }
+                WindowEvent::CursorMoved { device_id: _, position, modifiers: _} => {
+                    mousex = position.x as f32;
+                    mousey = position.y as f32;
                 }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Left), state: ElementState::Pressed, .. }, .. } => {
                     x -= 1.2;
@@ -88,6 +95,7 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
+                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
@@ -182,6 +190,65 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32, t: f32) {
+    let ex = w *0.23;
+    let ey = h * 0.5;
+    let lx = x + ex;
+    let ly = y + ey;
+    let rx = x + w - ex;
+    let ry = y + ey;
+    let br = if ex < ey { ex } else { ey } * 0.5;
+    let blink = 1.0 - (t*0.5).sin().powf(200.0)*0.8;
+
+    let bg = Paint::linear_gradient(x, y + h * 0.5, x + w * 0.1, y + h, Color::rgba(0,0,0,32), Color::rgba(0,0,0,16));
+	canvas.begin_path();
+	canvas.ellipse(lx + 3.0, ly + 16.0, ex, ey);
+	canvas.ellipse(rx + 3.0, ry + 16.0, ex, ey);
+	canvas.fill_path(&bg);
+
+	let bg = Paint::linear_gradient(x, y + h * 0.25, x + w * 0.1, y + h, Color::rgba(220,220,220,255), Color::rgba(128,128,128,255));
+	canvas.begin_path();
+	canvas.ellipse(lx, ly, ex, ey);
+	canvas.ellipse(rx, ry, ex, ey);
+	canvas.fill_path(&bg);
+
+	let mut dx = (mx - rx) / (ex * 10.0);
+	let mut dy = (my - ry) / (ey * 10.0);
+	let d = (dx*dx+dy*dy).sqrt();
+	if d > 1.0 {
+		dx /= d; dy /= d;
+	}
+
+	dx *= ex*0.4;
+	dy *= ey*0.5;
+	canvas.begin_path();
+	canvas.ellipse(lx + dx, ly + dy + ey * 0.25 * (1.0 - blink), br, br * blink);
+	canvas.fill_path(&Paint::color(Color::rgba(32,32,32,255)));
+
+	let mut dx = (mx - rx) / (ex * 10.0);
+	let mut dy = (my - ry) / (ey * 10.0);
+	let d = (dx*dx+dy*dy).sqrt();
+	if d > 1.0 {
+		dx /= d; dy /= d;
+	}
+
+	dx *= ex*0.4;
+	dy *= ey*0.5;
+	canvas.begin_path();
+	canvas.ellipse(rx + dx, ry + dy + ey * 0.25 * (1.0 - blink), br, br*blink);
+	canvas.fill_path(&Paint::color(Color::rgba(32,32,32,255)));
+
+	let gloss = Paint::radial_gradient(lx - ex * 0.25, ly - ey * 0.5, ex * 0.1, ex * 0.75, Color::rgba(255,255,255,128), Color::rgba(255,255,255,0));
+	canvas.begin_path();
+	canvas.ellipse(lx,ly, ex,ey);
+	canvas.fill_path(&gloss);
+
+	let gloss = Paint::radial_gradient(rx - ex * 0.25, ry - ey * 0.5, ex * 0.1, ex * 0.75, Color::rgba(255,255,255,128), Color::rgba(255,255,255,0));
+	canvas.begin_path();
+	canvas.ellipse(rx, ry, ex, ey);
+	canvas.fill_path(&gloss);
 }
 
 fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, t: f32) {
