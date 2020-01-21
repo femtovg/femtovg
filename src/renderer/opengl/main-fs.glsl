@@ -41,8 +41,8 @@ float scissorMask(vec2 p) {
 // Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
 float strokeMask() {
     return min(1.0, (1.0-abs(ftcoord.x*2.0-1.0))*strokeMult) * min(1.0, ftcoord.y);
-    //TODO: Using this smoothstep preduces maybe better results when combined with fringe_width of 2, but it may look blurrier to some people
-    //maybe this should be controlled via flag
+    // Using this smoothstep preduces maybe better results when combined with fringe_width of 2, but it may look blurrier
+    // maybe this should be controlled via flag
     //return smoothstep(0.0, 1.0, (1.0-abs(ftcoord.x*2.0-1.0))*strokeMult) * smoothstep(0.0, 1.0, ftcoord.y);
 }
 #endif

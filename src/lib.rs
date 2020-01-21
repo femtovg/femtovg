@@ -24,7 +24,7 @@ mod font_cache;
 use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
 
 pub(crate) mod geometry;
-use crate::geometry::*;
+use geometry::*;
 
 mod paint;
 pub use paint::Paint;
@@ -34,10 +34,6 @@ mod path_cache;
 use path_cache::{PathCache, Convexity};
 
 // TODO: path_contains_point method
-// TODO: Drawing works before the call to begin frame for some reason
-// TODO: rethink image creation and resource creation in general, it's currently blocking,
-//         it would be awesome if its non-blocking and maybe async. Or maybe resource creation
-//         should be a functionality provided by the current renderer implementation, not by the canvas itself.
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
@@ -269,8 +265,6 @@ pub struct Canvas<T> {
 impl<T> Canvas<T> where T: Renderer {
 
     pub fn new(renderer: T) -> Result<Self, CanvasError> {
-
-        // TODO: Return result from this method instead of unwrapping
         let font_manager = FontCache::new()?;
 
         let mut canvas = Self {

@@ -39,10 +39,6 @@ fn main() {
 
     let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
-    let mut x: f32 = 0.0;
-    let mut y: f32 = 0.0;
-    let mut rot = 0.0;
-
     let mut screenshot_image_id = None;
 
     let start = Instant::now();
@@ -62,27 +58,9 @@ fn main() {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
-                WindowEvent::CursorMoved { device_id: _, position, modifiers: _} => {
+                WindowEvent::CursorMoved { device_id: _, position, ..} => {
                     mousex = position.x as f32;
                     mousey = position.y as f32;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Left), state: ElementState::Pressed, .. }, .. } => {
-                    x -= 1.2;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Right), state: ElementState::Pressed, .. }, .. } => {
-                    x += 1.2;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Up), state: ElementState::Pressed, .. }, .. } => {
-                    y -= 1.2;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Down), state: ElementState::Pressed, .. }, .. } => {
-                    y += 1.2;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Q), state: ElementState::Pressed, .. }, .. } => {
-                    rot -= 0.5;
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::E), state: ElementState::Pressed, .. }, .. } => {
-                    rot += 0.5;
                 }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::S), state: ElementState::Pressed, .. }, .. } => {
                     if let Some(screenshot_image_id) = screenshot_image_id {
@@ -178,7 +156,7 @@ fn main() {
                     let paint = Paint::image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
 
                     canvas.begin_path();
-                    canvas.rect(x, y, 512.0, 512.0);
+                    canvas.rect(10.0, 10.0, 512.0, 512.0);
                     canvas.fill_path(paint);
 
                     canvas.restore();
@@ -447,9 +425,6 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     let mut evenodd_fill = Paint::color(Color::rgb(220, 220, 220));
     evenodd_fill.set_fill_rule(FillRule::EvenOdd);
 
-    let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
-    nonzero_fill.set_fill_rule(FillRule::NonZero);
-
     canvas.begin_path();
     canvas.move_to(50.0, 0.0);
     canvas.line_to(21.0, 90.0);
@@ -460,6 +435,10 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.fill_path(evenodd_fill);
 
     canvas.translate(100.0, 0.0);
+    
+    let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
+    nonzero_fill.set_fill_rule(FillRule::NonZero);
+    
     canvas.begin_path();
     canvas.move_to(50.0, 0.0);
     canvas.line_to(21.0, 90.0);
@@ -534,125 +513,6 @@ impl PerfGraph {
 }
 
 /*
-fn draw_shadows(canvas: &mut Canvas) {
-    canvas.save();
-
-    let paint = Paint::color(Color::hex("#efeeee"));
-
-    let rect_w = 80.0;
-    let rect_h = 80.0;
-    let x = 395.0;
-    let y = 110.0;
-
-    let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 16.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
-    canvas.begin_path();
-    canvas.rounded_rect(x + 6.0, y + 6.0, rect_w, rect_h, 12.0);
-    canvas.fill_path(shadow);
-
-    let shadow = Paint::box_gradient(x, y, rect_w, rect_h, 12.0, 26.0, Color::rgba(255, 255, 255, 211), Color::rgba(0, 0, 0, 0));
-    canvas.begin_path();
-    canvas.rounded_rect(x - 6.0, y - 6.0, rect_w, rect_h, 12.0);
-    canvas.fill_path(shadow);
-
-    canvas.begin_path();
-    canvas.rounded_rect(x, y, rect_w, rect_h, 12.0);
-    canvas.fill_path(paint);
-    canvas.stroke_path(paint);
-
-    canvas.restore();
-}
-
-fn draw_joins(canvas: &mut Canvas, x: f32, y: f32) {
-    canvas.save();
-    canvas.translate(x, y);
-
-    let w = 50.0;
-
-    canvas.begin_path();
-    canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke_path(Paint::color(Color::hex("#247ba0")));
-
-    canvas.scissor(0.0, 0.0, 80.0, 80.0);
-
-    let mut paint = Paint::color(Color::hex("#70c1b3"));
-    paint.set_stroke_width(10.0);
-    paint.set_line_cap(LineCap::Butt);
-
-    /* TODO: this panics with "attempt to subtract with overflow"
-    canvas.set_line_join(LineJoin::Miter);
-    canvas.begin_path();
-    canvas.move_to(0.0, 40.0);
-    canvas.line_to(w/2.0, 10.0);
-    canvas.move_to(w, 40.0);
-    canvas.stroke();
-    */
-
-    canvas.translate(15.0, 0.0);
-
-    paint.set_line_join(LineJoin::Miter);
-    canvas.begin_path();
-    canvas.move_to(0.0, 40.0);
-    canvas.line_to(w/2.0, 10.0);
-    canvas.line_to(w, 40.0);
-    canvas.stroke_path(paint);
-
-    canvas.translate(0.0, 25.0);
-
-    paint.set_line_join(LineJoin::Bevel);
-    canvas.begin_path();
-    canvas.move_to(0.0, 40.0);
-    canvas.line_to(w/2.0, 10.0);
-    canvas.line_to(w, 40.0);
-    canvas.stroke_path(paint);
-
-    canvas.translate(0.0, 25.0);
-
-    paint.set_line_join(LineJoin::Round);
-    canvas.begin_path();
-    canvas.move_to(0.0, 40.0);
-    canvas.line_to(w/2.0, 10.0);
-    canvas.line_to(w, 40.0);
-    canvas.stroke_path(paint);
-
-    canvas.restore();
-}
-
-fn draw_caps(canvas: &mut Canvas, x: f32, y: f32) {
-    canvas.save();
-    canvas.translate(x, y);
-
-    //let w = 80.0;
-
-    canvas.begin_path();
-    canvas.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke_path(Paint::color(Color::hex("#247ba0")));
-
-    let mut paint = Paint::color(Color::hex("#70c1b3"));
-
-    paint.set_stroke_width(12.0);
-
-    paint.set_line_cap(LineCap::Butt);
-    canvas.begin_path();
-    canvas.move_to(20.0, 15.0);
-    canvas.line_to(60.0, 15.0);
-    canvas.stroke_path(paint);
-
-    paint.set_line_cap(LineCap::Square);
-    canvas.begin_path();
-    canvas.move_to(20.0, 40.0);
-    canvas.line_to(60.0, 40.0);
-    canvas.stroke_path(paint);
-
-    paint.set_line_cap(LineCap::Round);
-    canvas.begin_path();
-    canvas.move_to(20.0, 65.0);
-    canvas.line_to(60.0, 65.0);
-    canvas.stroke_path(paint);
-
-    canvas.restore();
-}
-
-/*
 fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
     canvas.save();
     canvas.translate(x, y);
@@ -685,7 +545,7 @@ fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
 
     canvas.restore();
 }
-*/
+
 fn draw_state_stack(canvas: &mut Canvas) {
     let rect_width = 150.0;
     let rect_height = 75.0;

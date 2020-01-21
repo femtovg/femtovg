@@ -364,7 +364,6 @@ impl Renderer for OpenGl {
         self.check_error("render prepare");
 
         for cmd in commands {
-            // TODO: Blend func
             self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
@@ -667,7 +666,7 @@ pub enum OpenGlError {
 
 impl fmt::Display for OpenGlError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "invalid first item to double")//TODO
+        write!(f, "OpenGl error: {:?}", self)
     }
 }
 

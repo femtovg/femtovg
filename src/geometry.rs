@@ -1,8 +1,6 @@
 
 use std::ops::{Index, IndexMut};
 
-// TODO: Revise visibility of these methods
-// TODO: Refactor transform API so that it's not awkward to use
 // TODO: 3D transform
 
 pub fn quantize(a: f32, d: f32) -> f32 {

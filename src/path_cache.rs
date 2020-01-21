@@ -141,7 +141,7 @@ impl PathCache {
                     self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-                    if let Some(last) = self.last_point() {
+                    if let Some(last) = self.points.last().copied() {
                         self.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
@@ -222,11 +222,6 @@ impl PathCache {
 
     fn last_contour(&mut self) -> Option<&mut Contour> {
         self.contours.last_mut()
-    }
-
-    // TODO: Revise if this needs to return &mut or just Point
-    fn last_point(&mut self) -> Option<Point> {
-        self.points.last_mut().copied()
     }
 
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
