@@ -7,7 +7,20 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 //use glutin::{GlRequest, Api};
 
-use gpucanvas::{Renderer, Canvas, Color, Paint, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::OpenGl};
+use gpucanvas::{
+    Renderer,
+    Canvas,
+    Color,
+    Paint,
+    LineCap,
+    LineJoin,
+    FillRule,
+    Winding,
+    ImageFlags,
+    Align,
+    Baseline,
+    renderer::OpenGl
+};
 
 fn main() {
     let el = EventLoop::new();
@@ -354,14 +367,14 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
     let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 128));
     text_paint.set_font_size(16);
     text_paint.set_font_name("Roboto-Bold");
-	//nvgTextAlign(vg,NVG_ALIGN_CENTER|NVG_ALIGN_MIDDLE); // TODO:
+    text_paint.set_text_align(Align::Center);
     text_paint.set_font_blur(2.0);
-	canvas.fill_text(x + 10.0, y + 19.0 + 1.0, title, text_paint);
+	canvas.fill_text(x + (w / 2.0), y + 19.0 + 1.0, title, text_paint);
 
     text_paint.set_font_blur(0.0);
     text_paint.set_color(Color::rgba(220, 220, 220, 160));
 
-	canvas.fill_text(x + 10.0, y + 19.0, title, text_paint);
+	canvas.fill_text(x + (w / 2.0), y + 19.0, title, text_paint);
 
 	canvas.restore();
 }

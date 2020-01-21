@@ -2,7 +2,7 @@
 // TODO: Start cap and end cap
 
 use crate::geometry::Transform2D;
-use super::{Color, ImageId, LineCap, LineJoin, VAlign, FillRule};
+use super::{Color, ImageId, LineCap, LineJoin, Baseline, FillRule, Align};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {
@@ -84,7 +84,8 @@ pub struct Paint<'a> {
     pub(crate) font_size: u32,
     pub(crate) letter_spacing: i32,
     pub(crate) font_blur: f32,
-    pub(crate) text_valign: VAlign,
+    pub(crate) text_baseline: Baseline,
+    pub(crate) text_align: Align,
     pub(crate) fill_rule: FillRule
 }
 
@@ -92,7 +93,7 @@ impl Default for Paint<'_> {
     fn default() -> Self {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
-            transform: Transform2D::identity(),
+            transform: Default::default(),
             shape_anti_alias: true,
             stencil_strokes: true,
             stroke_width: 1.0,
@@ -103,7 +104,8 @@ impl Default for Paint<'_> {
             font_size: 16,
             letter_spacing: 0,
             font_blur: 0.0,
-            text_valign: VAlign::default(),
+            text_baseline: Default::default(),
+            text_align: Default::default(),
             fill_rule: Default::default(),
         }
     }
@@ -312,15 +314,27 @@ impl<'a> Paint<'a> {
     }
 
     /// Returns the current vertical align
-    pub fn text_valign(&self) -> VAlign {
-        self.text_valign
+    pub fn text_baseline(&self) -> Baseline {
+        self.text_baseline
     }
 
     /// Sets the text vertical alignment for this paint
     ///
     /// Only has effect on canvas text operations
-    pub fn set_text_valign(&mut self, valign: VAlign) {
-        self.text_valign = valign;
+    pub fn set_baseline(&mut self, align: Baseline) {
+        self.text_baseline = align;
+    }
+
+    /// Returns the current horizontal align
+    pub fn text_align(&self) -> Align {
+        self.text_align
+    }
+
+    /// Sets the text horizontal alignment for this paint
+    ///
+    /// Only has effect on canvas text operations
+    pub fn set_text_align(&mut self, align: Align) {
+        self.text_align = align;
     }
 
     /// Retrieves the current fill rule setting for this paint

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use fnv::FnvHashMap;
 use image::{DynamicImage, GrayImage, Luma, GenericImage};
 
-use super::{ImageId, Renderer, ImageFlags};
+use super::{ImageId, Renderer, ImageFlags, Paint, Align, Baseline};
 
 use freetype as ft;
 
@@ -65,43 +65,6 @@ pub struct Quad {
     pub t1: f32
 }
 
-#[derive(Copy, Clone)]
-pub struct FontStyle<'a> {
-    font_name: &'a str,
-    size: u32,
-    blur: f32,
-    letter_spacing: i32,
-    render_style: GlyphRenderStyle
-}
-
-impl<'a> FontStyle<'a> {
-    pub fn new(name: &'a str) -> Self {
-        Self {
-            font_name: name,
-            size: 16,
-            blur: 0.0,
-            letter_spacing: 0,
-            render_style: Default::default()
-        }
-    }
-
-    pub fn set_size(&mut self, size: u32) {
-        self.size = size;
-    }
-
-    pub fn set_blur(&mut self, blur: f32) {
-        self.blur = blur;
-    }
-
-    pub fn set_letter_spacing(&mut self, letter_spacing: i32) {
-        self.letter_spacing = letter_spacing;
-    }
-
-    pub fn set_render_style(&mut self, render_style: GlyphRenderStyle) {
-        self.render_style = render_style;
-    }
-}
-
 #[derive(Hash, Eq, PartialEq)]
 struct GlyphId {
     glyph_index: u32,
@@ -111,12 +74,12 @@ struct GlyphId {
 }
 
 impl GlyphId {
-    pub fn new(index: u32, font_style: FontStyle) -> Self {
+    pub fn new(index: u32, paint: Paint, render_style: GlyphRenderStyle) -> Self {
         Self {
             glyph_index: index,
-            size: font_style.size,
-            blur: (font_style.blur * 1000.0) as u32,
-            render_style: font_style.render_style,
+            size: paint.font_size(),
+            blur: (paint.font_blur() * 1000.0) as u32,
+            render_style: render_style,
         }
     }
 }
@@ -215,26 +178,31 @@ impl FontCache {
         Ok(())
     }
 
-    pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, style: FontStyle, text: &str) -> Result<TextLayout> {
+    pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, paint: Paint, render_style: GlyphRenderStyle,  text: &str) -> Result<TextLayout> {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
-        let mut line_height = style.size as f32;
+        let mut line_height = paint.font_size() as f32;
 
         let mut cmd_map = FnvHashMap::default();
 
         let mut layout = TextLayout {
-            bbox: [x, y - line_height, x, y],
+            bbox: [x, y - line_height, x, line_height],
             cmds: Vec::new()
         };
 
-        let faces = Self::face_character_range(&self.faces, text, style.font_name)?;
+        let mut em_height = 0;
+
+        let faces = Self::face_character_range(&self.faces, text, paint.font_name())?;
 
         for (face_name, str_range) in faces {
             let face = self.faces.get_mut(&face_name).ok_or(FontCacheError::FontNotFound)?;
 
-            face.ft_face.set_pixel_sizes(0, style.size).unwrap();
+            face.ft_face.set_pixel_sizes(0, paint.font_size()).unwrap();
 
-            line_height = line_height.max((face.ft_face.size_metrics().unwrap().height >> 6) as f32);
+            let size_metrics = face.ft_face.size_metrics().unwrap();
+
+            line_height = line_height.max((size_metrics.height >> 6) as f32);
+            em_height = em_height.max(size_metrics.y_ppem);
 
             let itw = 1.0 / TEXTURE_SIZE as f32;
             let ith = 1.0 / TEXTURE_SIZE as f32;
@@ -251,7 +219,7 @@ impl FontCache {
                 let x_offset = position.x_offset;
                 let y_offset = position.y_offset;
 
-                let glyph = Self::glyph(&mut self.textures, face, renderer, &self.stroker, style, gid)?;
+                let glyph = Self::glyph(&mut self.textures, face, renderer, &self.stroker, paint, render_style, gid)?;
 
                 let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
                 let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
@@ -277,7 +245,7 @@ impl FontCache {
 
                 cmd.quads.push(q);
 
-                cursor_x += x_advance + style.letter_spacing;
+                cursor_x += x_advance + paint.letter_spacing();
                 cursor_y += y_advance;
             }
 
@@ -285,19 +253,42 @@ impl FontCache {
 
         layout.bbox[2] = cursor_x as f32;
 
-        layout.cmds = cmd_map.drain().map(|(_, v)| v).collect();
+        let width = layout.bbox[0] - layout.bbox[2];
+
+        let offset_x = match paint.text_align() {
+            Align::Left => 0.0,
+            Align::Right => width as f32,
+            Align::Center => width as f32 / 2.0,
+        };
+
+        let offset_y = match paint.text_baseline() {
+            Baseline::Top => em_height as f32,
+            Baseline::Middle => em_height as f32 / 2.0,
+            Baseline::Alphabetic => 0.0,
+        };
+
+        layout.cmds = cmd_map.drain().map(|(_, mut cmd)| {
+            cmd.quads.iter_mut().for_each(|quad| {
+                quad.x0 += offset_x;
+                quad.y0 += offset_y;
+                quad.x1 += offset_x;
+                quad.y1 += offset_y;
+            });
+
+            cmd
+        }).collect();
 
         Ok(layout)
     }
 
-    fn glyph<T: Renderer>(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut T, stroker: &ft::Stroker, style: FontStyle, glyph_index: u32) -> Result<Glyph> {
-        let glyph_id = GlyphId::new(glyph_index, style);
+    fn glyph<T: Renderer>(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut T, stroker: &ft::Stroker, paint: Paint, render_style: GlyphRenderStyle, glyph_index: u32) -> Result<Glyph> {
+        let glyph_id = GlyphId::new(glyph_index, paint, render_style);
 
         if let Some(glyph) = face.glyphs.get(&glyph_id) {
             return Ok(*glyph);
         }
 
-        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
+        let mut padding = GLYPH_PADDING + paint.font_blur().ceil() as u32;
 
         // Load Freetype glyph slot and fill or stroke
 
@@ -306,7 +297,7 @@ impl FontCache {
         let glyph_slot = face.ft_face.glyph();
         let mut glyph = glyph_slot.get_glyph()?;
 
-        if let GlyphRenderStyle::Stroke { line_width } = style.render_style {
+        if let GlyphRenderStyle::Stroke { line_width } = render_style {
             stroker.set(line_width as i64 * 32, ft::stroker::StrokerLineCap::Round, ft::stroker::StrokerLineJoin::Round, 0);
 
             glyph = glyph.stroke(stroker)?;
@@ -340,8 +331,8 @@ impl FontCache {
             }
         }
 
-        if style.blur > 0.0 {
-            glyph_image = image::imageops::blur(&glyph_image, style.blur);
+        if paint.font_blur() > 0.0 {
+            glyph_image = image::imageops::blur(&glyph_image, paint.font_blur());
         }
 
         //glyph_image.save("/home/ptodorov/glyph_test.png");

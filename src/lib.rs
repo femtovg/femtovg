@@ -21,7 +21,7 @@ use renderer::{
 };
 
 mod font_cache;
-use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
+use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
 
 pub(crate) mod geometry;
 use crate::geometry::*;
@@ -76,16 +76,31 @@ impl Default for FillRule {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum VAlign {
+pub enum Baseline {
+    /// The text baseline is the top of the em square.
     Top,
+    /// The text baseline is the middle of the em square.
     Middle,
-    Bottom,
-    Baseline
+    /// The text baseline is the normal alphabetic baseline. Default value.
+    Alphabetic
 }
 
-impl Default for VAlign {
+impl Default for Baseline {
     fn default() -> Self {
-        Self::Baseline
+        Self::Alphabetic
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+impl Default for Align {
+    fn default() -> Self {
+        Self::Left
     }
 }
 
@@ -848,19 +863,18 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Private
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, paint: Paint, render_style: GlyphRenderStyle) {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: GlyphRenderStyle) {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut style = FontStyle::new(paint.font_name());
-        style.set_size((paint.font_size() as f32 * scale) as u32);
-        style.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
-        style.set_blur(paint.font_blur() * scale);
-        style.set_render_style(render_style);
+        // transform paint
+        paint.set_font_size((paint.font_size() as f32 * scale) as u32);
+        paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
+        paint.set_font_blur(paint.font_blur() * scale);
 
-        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, style, text).unwrap();
+        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, render_style, text).unwrap();
 
         let text_color = if let PaintFlavor::Color(color) = paint.flavor {
             color
