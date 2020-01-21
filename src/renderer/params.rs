@@ -23,7 +23,7 @@ pub struct Params {
 
 impl Params {
 
-    pub fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
+    pub(crate) fn new(backend: &dyn Renderer, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
         let mut gpu_paint = Params::default();
 
         // Scissor

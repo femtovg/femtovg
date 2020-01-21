@@ -10,8 +10,15 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{Vertex, Renderer, Params, Command};
-use renderer::{CommandType, ShaderType, Drawable};
+pub use renderer::Renderer;
+use renderer::{
+    Vertex,
+    Params,
+    Command,
+    CommandType,
+    ShaderType,
+    Drawable
+};
 
 mod font_cache;
 use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
@@ -95,7 +102,7 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct Scissor {
+struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
 }

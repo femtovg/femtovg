@@ -9,7 +9,7 @@ mod opengl;
 pub use opengl::OpenGl;
 
 mod params;
-pub use params::Params;
+pub(crate) use params::Params;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {
