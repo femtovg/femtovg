@@ -201,6 +201,8 @@ impl PathCache {
                 self.bounds.maxy = self.bounds.maxy.max(p0.y);
             }
         }
+
+        self.contours.retain(|c| (c.points.end - c.points.start) > 1);
     }
 
     pub fn clear(&mut self) {

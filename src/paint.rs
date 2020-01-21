@@ -57,9 +57,9 @@ pub(crate) enum PaintFlavor {
 ///
 /// # Example
 /// ```
-/// use rscanvas::{Paint, Color, Canvas, renderer::Void};
+/// use gpucanvas::{Paint, Color, Canvas, renderer::Void};
 ///
-/// let mut canvas = Canvas::new(Void);
+/// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
 ///
 /// let fill_paint = Paint::color(Color::hex("454545"));
 /// let mut stroke_paint = Paint::color(Color::hex("bababa"));
@@ -67,8 +67,8 @@ pub(crate) enum PaintFlavor {
 ///
 /// canvas.begin_path();
 /// canvas.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
-/// canvas.fill_path(&fill_paint);
-/// canvas.stroke_path(&stroke_paint);
+/// canvas.fill_path(fill_paint);
+/// canvas.stroke_path(stroke_paint);
 /// ```
 #[derive(Copy, Clone, Debug)]
 pub struct Paint<'a> {
@@ -127,16 +127,16 @@ impl<'a> Paint<'a> {
     ///
     /// # Example
     /// ```
-    /// use rscanvas::{Paint, Color, Canvas, ImageFlags, renderer::Void};
+    /// use gpucanvas::{Paint, Color, Canvas, ImageFlags, renderer::Void};
     ///
-    /// let mut canvas = Canvas::new(Void);
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
     /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
     ///
     /// canvas.begin_path();
     /// canvas.rect(10.0, 10.0, 85.0, 85.0);
-    /// canvas.fill_path(&fill_paint);
+    /// canvas.fill_path(fill_paint);
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
