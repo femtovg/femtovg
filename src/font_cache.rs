@@ -49,7 +49,7 @@ pub struct DrawCmd {
 }
 
 pub struct TextLayout {
-    pub bbox: [f32; 4],// TODO: make a specialized "Bounds" type instead of using 4 float array here
+    pub bbox: [f32; 4],// TODO: Use the Bounds type here
     pub cmds: Vec<DrawCmd>
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "gpucanvas"
-description = "Antialiased 2d vector drawing library written in rust"
+description = "Antialiased 2D vector drawing library"
 version = "0.1.0"
 license = "MIT"
 readme = "README.md"

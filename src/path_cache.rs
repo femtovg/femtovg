@@ -86,6 +86,38 @@ impl Default for Contour {
     }
 }
 
+impl Contour {
+    fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> {
+        PointPairsIter {
+            curr: 0,
+            points: &points[self.points.clone()]
+        }
+    }
+}
+
+struct PointPairsIter<'a> {
+    curr: usize,
+    points: &'a [Point]
+}
+
+impl<'a> Iterator for PointPairsIter<'a> {
+    type Item = (&'a Point, &'a Point);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let curr = self.points.get(self.curr);
+
+        let prev = if self.curr == 0 {
+            self.points.last()
+        } else {
+            self.points.get(self.curr - 1)
+        };
+
+        self.curr += 1;
+
+        curr.and_then(|some_curr| prev.and_then(|some_prev| Some((some_prev, some_curr))))
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
@@ -105,18 +137,13 @@ impl PathCache {
             match verb {
                 Verb::MoveTo(x, y) => {
                     self.add_contour();
-                    //let (x, y) = transform.transform_point(*x, *y);
                     self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    //let (x, y) = transform.transform_point(*x, *y);
                     self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = self.last_point() {
-                        //let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
-                        //let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
-                        //let (x, y) = transform.transform_point(*x, *y);
                         self.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
@@ -281,22 +308,12 @@ impl PathCache {
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
         for contour in &mut self.contours {
-            let points = &self.points[contour.points.clone()];
-
             contour.stroke.clear();
 
             let woff = 0.5 * aa;
 
             if fringe {
-                for i in 0..points.len() {
-                    let p1 = points[i];
-
-                    let p0 = if i == 0 {
-                        points.last().unwrap()
-                    } else {
-                        points.get(i-1).unwrap()
-                    };
-
+                for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL) {
                         // TODO: why do we need these variables.. just use p0.. and p1 directly down there
                         let dlx0 = p0.dy;
@@ -321,6 +338,8 @@ impl PathCache {
                     }
                 }
             } else {
+                let points = &self.points[contour.points.clone()];
+
                 for point in points {
                     contour.fill.push(Vertex::new(point.x, point.y, 0.5, 1.0));
                 }
@@ -339,15 +358,7 @@ impl PathCache {
                     lu = 0.5;    // Set outline fade at middle.
                 }
 
-                for i in 0..points.len() {
-                    let p1 = points[i];
-
-                    let p0 = if i == 0 {
-                        points.last().unwrap()
-                    } else {
-                        points.get(i-1).unwrap()
-                    };
-
+                for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                         bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, rw, fringe_width);
                     } else {
@@ -383,23 +394,10 @@ impl PathCache {
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
-            let points = &self.points[contour.points.clone()];
-
             contour.stroke.clear();
 
-            // TODO: this is horrible - make a pretty configurable iterator that takes into account if the path is closed or not and gives correct p0 p1
-
             if contour.closed {
-
-                for i in 0..points.len() {
-                    let p1 = points[i];
-
-                    let p0 = if i == 0 {
-                        points[points.len()-1]
-                    } else {
-                        points[i-1]
-                    };
-
+                for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
                             round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
@@ -416,6 +414,7 @@ impl PathCache {
                 contour.stroke.push(Vertex::new(contour.stroke[1].x, contour.stroke[1].y, u1, 1.0));
 
             } else {
+                let points = &self.points[contour.points.clone()];
                 let mut p0 = points[0];
                 let mut p1 = points[1];
 
