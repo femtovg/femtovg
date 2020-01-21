@@ -8,7 +8,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, GpuBackend, CommandFlavor, GpuPaint, TextureType};
+use super::{Command, Renderer, CommandType, GpuPaint, TextureType};
 use crate::{Color, ImageFlags, FillRule};
 use crate::renderer::{Vertex, ImageId};
 
@@ -278,7 +278,7 @@ impl OpenGl {
     }
 }
 
-impl GpuBackend for OpenGl {
+impl Renderer for OpenGl {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             gl::Viewport(x as i32, y as i32, width as i32, height as i32);
@@ -340,12 +340,12 @@ impl GpuBackend for OpenGl {
             // TODO: Blend func
             unsafe { gl::BlendFuncSeparate(gl::ONE, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA); }
 
-            match cmd.flavor {
-                CommandFlavor::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
-                CommandFlavor::ConcaveFill { stencil_paint, fill_paint } => self.concave_fill(cmd, stencil_paint, fill_paint),
-                CommandFlavor::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
-                CommandFlavor::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
-                CommandFlavor::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
+            match cmd.cmd_type {
+                CommandType::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
+                CommandType::ConcaveFill { stencil_paint, fill_paint } => self.concave_fill(cmd, stencil_paint, fill_paint),
+                CommandType::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
+                CommandType::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
+                CommandType::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
             }
         }
 

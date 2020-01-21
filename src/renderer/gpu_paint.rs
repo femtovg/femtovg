@@ -2,28 +2,28 @@
 use crate::{ImageFlags, Scissor};
 use crate::paint::{Paint, PaintFlavor};
 use crate::geometry::Transform2D;
-use super::{ShaderType, TextureType, GpuBackend};
+use super::{ShaderType, TextureType, Renderer};
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct GpuPaint {
-    pub(super) scissor_mat: [f32; 12],
-    pub(super) paint_mat: [f32; 12],
-    pub(super) inner_col: [f32; 4],
-    pub(super) outer_col: [f32; 4],
-    pub(super) scissor_ext: [f32; 2],
-    pub(super) scissor_scale: [f32; 2],
-    pub(super) extent: [f32; 2],
-    pub(super) radius: f32,
-    pub(super) feather: f32,
-    pub(super) stroke_mult: f32,
-    pub(super) stroke_thr: f32,
-    pub(super) shader_type: f32,
-    pub(super) tex_type: f32
+    pub(crate) scissor_mat: [f32; 12],
+    pub(crate) paint_mat: [f32; 12],
+    pub(crate) inner_col: [f32; 4],
+    pub(crate) outer_col: [f32; 4],
+    pub(crate) scissor_ext: [f32; 2],
+    pub(crate) scissor_scale: [f32; 2],
+    pub(crate) extent: [f32; 2],
+    pub(crate) radius: f32,
+    pub(crate) feather: f32,
+    pub(crate) stroke_mult: f32,
+    pub(crate) stroke_thr: f32,
+    pub(crate) shader_type: f32,
+    pub(crate) tex_type: f32
 }
 
 impl GpuPaint {
 
-    pub fn new<T: GpuBackend>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
+    pub fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
         let mut gpu_paint = GpuPaint::default();
 
         // Scissor

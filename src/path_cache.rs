@@ -4,9 +4,9 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Bounds, Transform2D};
+use crate::geometry::{self, Bounds};
 use crate::renderer::Vertex;
-use crate::{Verb, Path, Winding, LineCap, LineJoin};
+use crate::{Verb, Winding, LineCap, LineJoin};
 
 // TODO: We need an iterator for the contour points that loops by chunks of 2
 
@@ -87,48 +87,50 @@ impl Default for Contour {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GpuPath {
+pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: Bounds,
     points: Vec<Point>,
 }
 
-impl GpuPath {
+impl PathCache {
 
-    pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
-        let mut cache = GpuPath::default();
+    pub fn set(&mut self, verbs: &[Verb], tess_tol: f32, dist_tol: f32) {
+        if self.contours.len() > 0 {
+            return;
+        }
 
         // Convert commands to a set of contours
-        for verb in path.verbs() {
+        for verb in verbs {
             match verb {
                 Verb::MoveTo(x, y) => {
-                    cache.add_contour();
-                    let (x, y) = transform.transform_point(*x, *y);
-                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
+                    self.add_contour();
+                    //let (x, y) = transform.transform_point(*x, *y);
+                    self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    let (x, y) = transform.transform_point(*x, *y);
-                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
+                    //let (x, y) = transform.transform_point(*x, *y);
+                    self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-                    if let Some(last) = cache.last_point() {
-                        let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
-                        let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
-                        let (x, y) = transform.transform_point(*x, *y);
-                        cache.tesselate_bezier(last.x, last.y, c1x, c1y, c2x, c2y, x, y, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                    if let Some(last) = self.last_point() {
+                        //let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
+                        //let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
+                        //let (x, y) = transform.transform_point(*x, *y);
+                        self.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Verb::Close => {
-                    cache.last_contour().map(|contour| contour.closed = true);
+                    self.last_contour().map(|contour| contour.closed = true);
                 }
                 Verb::Winding(winding) => {
-                    cache.last_contour().map(|contour| contour.winding = *winding);
+                    self.last_contour().map(|contour| contour.winding = *winding);
                 }
             }
         }
 
-        for contour in &mut cache.contours {
-            let mut points = &mut cache.points[contour.points.clone()];
+        for contour in &mut self.contours {
+            let mut points = &mut self.points[contour.points.clone()];
 
             let p0 = points.last().copied().unwrap();
             let p1 = points.first().copied().unwrap();
@@ -138,7 +140,7 @@ impl GpuPath {
                 contour.points.end -= 1;
                 //p0 = points[path.count-1];
                 contour.closed = true;
-                points = &mut cache.points[contour.points.clone()];
+                points = &mut self.points[contour.points.clone()];
             }
 
             // Enforce winding.
@@ -168,14 +170,18 @@ impl GpuPath {
                 p0.dy = p1.y - p0.y;
                 p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
 
-                cache.bounds.minx = cache.bounds.minx.min(p0.x);
-                cache.bounds.miny = cache.bounds.miny.min(p0.y);
-                cache.bounds.maxx = cache.bounds.maxx.max(p0.x);
-                cache.bounds.maxy = cache.bounds.maxy.max(p0.y);
+                self.bounds.minx = self.bounds.minx.min(p0.x);
+                self.bounds.miny = self.bounds.miny.min(p0.y);
+                self.bounds.maxx = self.bounds.maxx.max(p0.x);
+                self.bounds.maxy = self.bounds.maxy.max(p0.y);
             }
         }
+    }
 
-        cache
+    pub fn clear(&mut self) {
+        self.contours.clear();
+        self.points.clear();
+        self.bounds = Default::default();
     }
 
     fn add_contour(&mut self) {

@@ -1,3 +1,4 @@
+use std::f32::consts::PI;
 
 use std::path::Path as FilePath;
 use std::{error::Error, fmt};
@@ -9,7 +10,8 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{Vertex, Renderer};
+pub use renderer::{Vertex, Renderer, GpuPaint, Command};
+use renderer::{CommandType, ShaderType, Drawable};
 
 mod font_cache;
 use font_cache::{FontCache, FontStyle, FontCacheError, GlyphRenderStyle};
@@ -21,14 +23,38 @@ mod paint;
 pub use paint::Paint;
 use paint::PaintFlavor;
 
-mod path;
-pub use path::{Path, Verb, Winding};
+mod path_cache;
+use path_cache::{PathCache, Convexity};
 
 // TODO: path_contains_point method
 // TODO: Drawing works before the call to begin frame for some reason
 // TODO: rethink image creation and resource creation in general, it's currently blocking,
 //         it would be awesome if its non-blocking and maybe async. Or maybe resource creation
 //         should be a functionality provided by the current renderer implementation, not by the canvas itself.
+
+// Length proportional to radius of a cubic bezier handle for 90deg arcs.
+const KAPPA90: f32 = 0.5522847493;
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum Winding {
+    CCW = 1,
+    CW = 2
+}
+
+impl Default for Winding {
+    fn default() -> Self {
+        Winding::CCW
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Verb {
+    MoveTo(f32, f32),
+    LineTo(f32, f32),
+    BezierTo(f32, f32, f32, f32, f32, f32),
+    Close,
+    Winding(Winding)
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
@@ -135,8 +161,16 @@ pub struct Canvas<T> {
     renderer: T,
     font_cache: FontCache,
     state_stack: Vec<State>,
+    verbs: Vec<Verb>,
+    lastx: f32,
+    lasty: f32,
+    path_cache: PathCache,
+    cmds: Vec<Command>,
+    verts: Vec<Vertex>,
     fringe_width: f32,
     device_px_ratio: f32,
+    tess_tol: f32,
+    dist_tol: f32
 }
 
 impl<T> Canvas<T> where T: Renderer {
@@ -152,8 +186,16 @@ impl<T> Canvas<T> where T: Renderer {
             renderer: renderer,
             font_cache: font_manager,
             state_stack: Default::default(),
+            verbs: Default::default(),
+            lastx: Default::default(),
+            lasty: Default::default(),
+            path_cache: Default::default(),
+            cmds: Default::default(),
+            verts: Default::default(),
             fringe_width: 1.0,
-            device_px_ratio: Default::default(),
+            device_px_ratio: 1.0,
+            tess_tol: 0.25,
+            dist_tol: 0.01
         };
 
         canvas.save();
@@ -166,6 +208,8 @@ impl<T> Canvas<T> where T: Renderer {
         self.width = width as f32;
         self.height = height as f32;
         self.fringe_width = 1.0 / dpi;
+        self.tess_tol = 0.25 / dpi;
+        self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
 
         self.renderer.set_size(width, height, dpi);
@@ -189,13 +233,14 @@ impl<T> Canvas<T> where T: Renderer {
     ///
     /// Call this at the end of rach frame.
     pub fn flush(&mut self) {
-        self.renderer.flush();
-
+        self.renderer.render(&self.verts, &self.cmds);
+        self.cmds.clear();
+        self.verts.clear();
         self.state_stack.clear();
         self.save();
     }
 
-    pub fn screenshot(&mut self) -> Option<DynamicImage> {
+    pub fn screenshot(&mut self) -> DynamicImage {
         self.renderer.screenshot()
     }
 
@@ -384,28 +429,308 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Paths
 
+    /// Starts new path
+    pub fn begin_path(&mut self) {
+        self.verbs.clear();
+        self.path_cache.clear();
+    }
+
+    /// Starts new sub-path with specified point as first point.
+    pub fn move_to(&mut self, x: f32, y: f32) {
+        self.append_verbs(&mut [Verb::MoveTo(x, y)]);
+    }
+
+    /// Adds line segment from the last point in the path to the specified point.
+    pub fn line_to(&mut self, x: f32, y: f32) {
+        self.append_verbs(&mut [Verb::LineTo(x, y)]);
+    }
+
+    /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
+    pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
+        self.append_verbs(&mut [Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+    }
+
+    /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
+    pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let x0 = self.lastx;
+        let y0 = self.lasty;
+
+        self.append_verbs(&mut [
+            Verb::BezierTo(
+                x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0),
+                x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y),
+                x, y
+            )
+        ]);
+    }
+
+    /// Closes current sub-path with a line segment.
+    pub fn close(&mut self) {
+        self.append_verbs(&mut [Verb::Close]);
+    }
+
+    /// Sets the current sub-path winding, see Winding and Solidity
+    pub fn winding(&mut self, winding: Winding) {
+        self.append_verbs(&mut [Verb::Winding(winding)]);
+    }
+
+    /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
+    /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
+    /// Angles are specified in radians.
+    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Winding) {
+        // TODO: Maybe use small stack vec here
+        let mut commands = Vec::new();
+
+        let mut da = a1 - a0;
+
+        if dir == Winding::CW {
+            if da.abs() >= PI * 2.0 {
+                da = PI * 2.0;
+            } else {
+                while da < 0.0 { da += PI * 2.0 }
+            }
+        } else if da.abs() >= PI * 2.0 {
+            da = -PI * 2.0;
+        } else {
+            while da > 0.0 { da -= PI * 2.0 }
+        }
+
+        // Split arc into max 90 degree segments.
+        let ndivs = ((da.abs() / (PI * 0.5) + 0.5) as i32).min(5).max(1);
+        let hda = (da / ndivs as f32) / 2.0;
+        let mut kappa = (4.0 / 3.0 * (1.0 - hda.cos()) / hda.sin()).abs();
+
+        if dir == Winding::CCW {
+            kappa = -kappa;
+        }
+
+        let (mut px, mut py, mut ptanx, mut ptany) = (0f32, 0f32, 0f32, 0f32);
+
+        for i in 0..=ndivs {
+            let a = a0 + da * (i as f32 / ndivs as f32);
+            let dx = a.cos();
+            let dy = a.sin();
+            let x = cx + dx*r;
+            let y = cy + dy*r;
+            let tanx = -dy*r*kappa;
+            let tany = dx*r*kappa;
+
+            if i == 0 {
+                let first_move = if !self.verbs.is_empty() { Verb::LineTo(x, y) } else { Verb::MoveTo(x, y) };
+                commands.push(first_move);
+            } else {
+                commands.push(Verb::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
+            }
+
+            px = x;
+            py = y;
+            ptanx = tanx;
+            ptany = tany;
+        }
+
+        self.append_verbs(&mut commands);
+    }
+
+    /// Adds an arc segment at the corner defined by the last path point, and two specified points.
+    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
+        if self.verbs.is_empty() {
+            return;
+        }
+
+        let (x0, y0) = self.state().transform.inversed().transform_point(self.lastx, self.lasty);
+
+        // Handle degenerate cases.
+        if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
+            geometry::pt_equals(x1, y1, x2, y2, self.dist_tol) ||
+            geometry::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol ||
+            radius < self.dist_tol {
+            self.line_to(x1, y1);
+        }
+
+        let mut dx0 = x0 - x1;
+        let mut dy0 = y0 - y1;
+        let mut dx1 = x2 - x1;
+        let mut dy1 = y2 - y1;
+
+        geometry::normalize(&mut dx0, &mut dy0);
+        geometry::normalize(&mut dx1, &mut dy1);
+
+        let a = (dx0*dx1 + dy0*dy1).acos();
+        let d = radius / (a/2.0).tan();
+
+        if d > 10000.0 {
+            return self.line_to(x1, y1);
+        }
+
+        let (cx, cy, a0, a1, dir);
+
+        if geometry::cross(dx0, dy0, dx1, dy1) > 0.0 {
+            cx = x1 + dx0*d + dy0*radius;
+            cy = y1 + dy0*d + -dx0*radius;
+            a0 = dx0.atan2(-dy0);
+            a1 = -dx1.atan2(dy1);
+            dir = Winding::CW;
+        } else {
+            cx = x1 + dx0*d + -dy0*radius;
+            cy = y1 + dy0*d + dx0*radius;
+            a0 = -dx0.atan2(dy0);
+            a1 = dx1.atan2(-dy1);
+            dir = Winding::CCW;
+        }
+
+        self.arc(cx, cy, radius, a0, a1, dir);
+    }
+
+    /// Creates new rectangle shaped sub-path.
+    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.append_verbs(&mut [
+            Verb::MoveTo(x, y),
+            Verb::LineTo(x, y + h),
+            Verb::LineTo(x + w, y + h),
+            Verb::LineTo(x + w, y),
+            Verb::Close
+        ]);
+    }
+
+    /// Creates new rounded rectangle shaped sub-path.
+    pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        self.rounded_rect_varying(x, y, w, h, r, r, r, r);
+    }
+
+    // TODO: Test this with tiny angles < 0.001
+    /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
+    pub fn rounded_rect_varying(&mut self, x: f32, y: f32, w: f32, h: f32, rad_top_left: f32, rad_top_right: f32, rad_bottom_right: f32, rad_bottom_left: f32) {
+        if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {
+            self.rect(x, y, w, h);
+        } else {
+            let halfw = w.abs()*0.5;
+            let halfh = h.abs()*0.5;
+
+            let rx_bl = rad_bottom_left.min(halfw) * w.signum();
+            let ry_bl = rad_bottom_left.min(halfh) * h.signum();
+
+            let rx_br = rad_bottom_right.min(halfw) * w.signum();
+            let ry_br = rad_bottom_right.min(halfh) * h.signum();
+
+            let rx_tr = rad_top_right.min(halfw) * w.signum();
+            let ry_tr = rad_top_right.min(halfh) * h.signum();
+
+            let rx_tl = rad_top_left.min(halfw) * w.signum();
+            let ry_tl = rad_top_left.min(halfh) * h.signum();
+
+            self.append_verbs(&mut [
+                Verb::MoveTo(x, y + ry_tl),
+                Verb::LineTo(x, y + h - ry_bl),
+                Verb::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
+                Verb::LineTo(x + w - rx_br, y + h),
+                Verb::BezierTo(x + w - rx_br*(1.0 - KAPPA90), y + h, x + w, y + h - ry_br*(1.0 - KAPPA90), x + w, y + h - ry_br),
+                Verb::LineTo(x + w, y + ry_tr),
+                Verb::BezierTo(x + w, y + ry_tr*(1.0 - KAPPA90), x + w - rx_tr*(1.0 - KAPPA90), y, x + w - rx_tr, y),
+                Verb::LineTo(x + rx_tl, y),
+                Verb::BezierTo(x + rx_tl*(1.0 - KAPPA90), y, x, y + ry_tl*(1.0 - KAPPA90), x, y + ry_tl),
+                Verb::Close
+            ]);
+        }
+    }
+
+    /// Creates new ellipse shaped sub-path.
+    pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
+        self.append_verbs(&mut [
+            Verb::MoveTo(cx-rx, cy),
+            Verb::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
+            Verb::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
+            Verb::BezierTo(cx+rx, cy-ry*KAPPA90, cx+rx*KAPPA90, cy-ry, cx, cy-ry),
+            Verb::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
+            Verb::Close
+        ]);
+    }
+
+    /// Creates new circle shaped sub-path.
+    pub fn circle(&mut self, cx: f32, cy: f32, r: f32) {
+        self.ellipse(cx, cy, r, r);
+    }
+
     /// Fills the current path with current fill style.
-    pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
+    pub fn fill_path(&mut self, paint: &Paint) {
+        self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
+
         let transform = self.state().transform;
 
         let mut paint = *paint;
 
         // Transform paint
-        paint.transform = self.state().transform;
+        paint.transform = transform;
 
         // Apply global alpha
         paint.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
 
-        let mut path_transform = path.transform;
-        path_transform.multiply(&transform);
+        if paint.shape_anti_alias() {
+            self.path_cache.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
+        } else {
+            self.path_cache.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
+        }
 
-        self.renderer.fill(&path, &paint, &scissor, &path_transform);
+        let flavor = if self.path_cache.contours.len() == 1 && self.path_cache.contours[0].convexity == Convexity::Convex {
+            let gpu_paint = GpuPaint::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+
+            CommandType::ConvexFill { gpu_paint }
+        } else {
+            let mut stencil_paint = GpuPaint::default();
+            stencil_paint.stroke_thr = -1.0;
+            stencil_paint.shader_type = ShaderType::Stencil.to_f32();
+
+            let fill_paint = GpuPaint::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+
+            CommandType::ConcaveFill { stencil_paint, fill_paint }
+        };
+
+        let mut cmd = Command::new(flavor);
+        cmd.transform = transform;
+        cmd.fill_rule = paint.fill_rule;
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
+
+        let mut offset = self.verts.len();
+
+        for contour in &self.path_cache.contours {
+            let mut drawable = Drawable::default();
+
+            if !contour.fill.is_empty() {
+                drawable.fill_verts = Some((offset, contour.fill.len()));
+                self.verts.extend_from_slice(&contour.fill);
+                offset += contour.fill.len();
+            }
+
+            if !contour.stroke.is_empty() {
+                drawable.stroke_verts = Some((offset, contour.stroke.len()));
+                self.verts.extend_from_slice(&contour.stroke);
+                offset += contour.stroke.len();
+            }
+
+            cmd.drawables.push(drawable);
+        }
+
+        if let CommandType::ConcaveFill {..} = cmd.cmd_type {
+            // Quad
+            self.verts.push(Vertex::new(self.path_cache.bounds.maxx, self.path_cache.bounds.maxy, 0.5, 1.0));
+            self.verts.push(Vertex::new(self.path_cache.bounds.maxx, self.path_cache.bounds.miny, 0.5, 1.0));
+            self.verts.push(Vertex::new(self.path_cache.bounds.minx, self.path_cache.bounds.maxy, 0.5, 1.0));
+            self.verts.push(Vertex::new(self.path_cache.bounds.minx, self.path_cache.bounds.miny, 0.5, 1.0));
+
+            cmd.triangles_verts = Some((offset, 4));
+        }
+
+        self.cmds.push(cmd);
     }
 
     /// Fills the current path with current stroke style.
-    pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
+    pub fn stroke_path(&mut self, paint: &Paint) {
+        self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
+
         let transform = self.state().transform;
         let scale = transform.average_scale();
 
@@ -431,10 +756,46 @@ impl<T> Canvas<T> where T: Renderer {
 
         let scissor = self.state().scissor;
 
-        let mut path_transform = path.transform;
-        path_transform.multiply(&transform);
+        //let mut gpu_path = GpuPath::new(path, &transform, self.tess_tol, self.dist_tol);
 
-        self.renderer.stroke(&path, &paint, &scissor, &path_transform);
+        if paint.shape_anti_alias() {
+            self.path_cache.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
+        } else {
+            self.path_cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
+        }
+
+        let gpu_paint = GpuPaint::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
+
+        let flavor = if paint.stencil_strokes() {
+            let paint2 = GpuPaint::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+
+            CommandType::StencilStroke { paint1: gpu_paint, paint2 }
+        } else {
+            CommandType::Stroke { gpu_paint }
+        };
+
+        let mut cmd = Command::new(flavor);
+        cmd.transform = transform;
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
+
+        let mut offset = self.verts.len();
+
+        for contour in &self.path_cache.contours {
+            let mut drawable = Drawable::default();
+
+            if !contour.stroke.is_empty() {
+                drawable.stroke_verts = Some((offset, contour.stroke.len()));
+                self.verts.extend_from_slice(&contour.stroke);
+                offset += contour.stroke.len();
+            }
+
+            cmd.drawables.push(drawable);
+        }
+
+        self.cmds.push(cmd);
     }
 
     // Text
@@ -532,8 +893,25 @@ impl<T> Canvas<T> where T: Renderer {
             // Apply global alpha
             paint.mul_alpha(self.state().alpha);
 
-            self.renderer.triangles(&verts, &paint, &scissor, &transform);
+            self.render_triangles(&verts, &paint, &scissor, &transform);
         }
+    }
+
+    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
+        let mut gpu_paint = GpuPaint::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
+        gpu_paint.shader_type = ShaderType::Img.to_f32();
+
+        let mut cmd = Command::new(CommandType::Triangles { gpu_paint });
+        cmd.transform = *transform;
+
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
+
+        cmd.triangles_verts = Some((self.verts.len(), verts.len()));
+        self.cmds.push(cmd);
+
+        self.verts.extend_from_slice(verts);
     }
 
     fn font_scale(&self) -> f32 {
@@ -548,6 +926,52 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn state_mut(&mut self) -> &mut State {
         self.state_stack.last_mut().unwrap()
+    }
+
+    /// Appends a slice of verbs to the path
+    fn append_verbs(&mut self, verbs: &mut [Verb]) {
+        let transform = self.state().transform;
+
+        for cmd in verbs.iter_mut() {
+            match cmd {
+                Verb::MoveTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+
+                    let (tx, ty) = transform.transform_point(*x, *y);
+
+                    *x = tx;
+                    *y = ty;
+                }
+                Verb::LineTo(x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+
+                    let (tx, ty) = transform.transform_point(*x, *y);
+
+                    *x = tx;
+                    *y = ty;
+                }
+                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                    self.lastx = *x;
+                    self.lasty = *y;
+
+                    let (tc1x, tc1y) = transform.transform_point(*c1x, *c1y);
+                    let (tc2x, tc2y) = transform.transform_point(*c2x, *c2y);
+                    let (tx, ty) = transform.transform_point(*x, *y);
+
+                    *c1x = tc1x;
+                    *c1y = tc1y;
+                    *c2x = tc2x;
+                    *c2y = tc2y;
+                    *x = tx;
+                    *y = ty;
+                }
+                _ => ()
+            }
+        }
+
+        self.verbs.extend_from_slice(verbs);
     }
 }
 
