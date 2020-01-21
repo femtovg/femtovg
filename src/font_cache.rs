@@ -363,7 +363,7 @@ impl FontCache {
             let mut image = GrayImage::new(TEXTURE_SIZE, TEXTURE_SIZE);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
-            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
+            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty()).unwrap();// TODO: fixme
 
             textures.push(FontTexture { atlas, image_id });
 

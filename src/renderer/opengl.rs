@@ -306,6 +306,8 @@ impl OpenGl {
 }
 
 impl Renderer for OpenGl {
+    type Error = OpenGlError;
+    
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             gl::Viewport(x as i32, y as i32, width as i32, height as i32);
@@ -390,7 +392,7 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, OpenGlError> {
         let size = image.dimensions();
 
         let mut texture = Texture {
@@ -458,7 +460,12 @@ impl Renderer for OpenGl {
 
                 texture.tex_type = TextureType::Rgba;
             },
-            _ => panic!("Unsupported image format")
+            DynamicImage::ImageLumaA8(_) => 
+                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageLumaA8"))),
+            DynamicImage::ImageBgr8(_) => 
+                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgr8"))),
+            DynamicImage::ImageBgra8(_) => 
+                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgra8"))),
         }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
@@ -514,7 +521,7 @@ impl Renderer for OpenGl {
 
         self.textures.insert(ImageId(id), texture);
 
-        ImageId(id)
+        Ok(ImageId(id))
     }
 
     fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
@@ -662,6 +669,7 @@ impl Drop for OpenGl {
 pub enum OpenGlError {
     GeneralError(String),
     ShaderError(ShaderError),
+    UnsuportedImageFromat(String)
 }
 
 impl fmt::Display for OpenGlError {

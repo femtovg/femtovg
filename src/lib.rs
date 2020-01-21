@@ -397,7 +397,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Creates image by loading it from the specified chunk of memory.
     pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
-        self.renderer.create_image(image, flags)
+        self.renderer.create_image(image, flags).unwrap()
     }
 
     /// Updates image data specified by image handle.

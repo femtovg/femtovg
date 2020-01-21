@@ -1,5 +1,7 @@
 //! Module containing renderer implementations
 
+use std::error;
+
 use image::DynamicImage;
 
 use crate::geometry::Transform2D;
@@ -74,12 +76,14 @@ impl Command {
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer {
+    type Error: error::Error;
+    
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color);
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId;
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, Self::Error>;
     fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32);
     fn delete_image(&mut self, id: ImageId);
 
