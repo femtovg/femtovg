@@ -824,17 +824,16 @@ impl<T> Canvas<T> where T: Renderer {
         self.font_cache.add_font_mem(data).expect("cannot add font");
     }
 
-    /*
-    pub fn text_bounds(&mut self, x: f32, y: f32, text: &str) -> [f32; 4] {
+    pub fn text_bounds(&mut self, x: f32, y: f32, text: &str, mut paint: Paint) -> [f32; 4] {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut style = FontStyle::new("NotoSans-Regular");
-        style.set_size((self.state().font_size as f32 * scale) as u32);
-        style.set_letter_spacing(self.state().letter_spacing * scale);
-        style.set_blur(self.state().font_blur * scale);
+        // transform paint
+        paint.set_font_size((paint.font_size() as f32 * scale) as u32);
+        paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
+        paint.set_font_blur(paint.font_blur() * scale);
 
-        let layout = self.font_manager.layout_text(x, y, &mut self.renderer, style, text).unwrap();
+        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
 
         let mut bounds = layout.bbox;
 
@@ -849,7 +848,7 @@ impl<T> Canvas<T> where T: Renderer {
         bounds[3] *= invscale;
 
         bounds
-    }*/
+    }
 
     pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) {
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill);

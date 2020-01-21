@@ -18,7 +18,6 @@ use gpucanvas::{
     Winding,
     ImageFlags,
     Align,
-    Baseline,
     renderer::OpenGl
 };
 
@@ -375,6 +374,12 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
     text_paint.set_color(Color::rgba(220, 220, 220, 160));
 
 	canvas.fill_text(x + (w / 2.0), y + 19.0, title, text_paint);
+
+    // let bounds = canvas.text_bounds(x + (w / 2.0), y + 19.0, title, text_paint);
+    //
+    // canvas.begin_path();
+    // canvas.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
+    // canvas.stroke_path(Paint::color(Color::rgba(0, 0, 0, 255)));
 
 	canvas.restore();
 }

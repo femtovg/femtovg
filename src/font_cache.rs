@@ -181,12 +181,12 @@ impl FontCache {
     pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, paint: Paint, render_style: GlyphRenderStyle,  text: &str) -> Result<TextLayout> {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
-        let mut line_height = paint.font_size() as f32;
+        let mut line_height: f32 = 0.0;
 
         let mut cmd_map = FnvHashMap::default();
 
         let mut layout = TextLayout {
-            bbox: [x, y - line_height, x, line_height],
+            bbox: [0.0, 0.0, 0.0, 0.0],
             cmds: Vec::new()
         };
 
@@ -251,7 +251,10 @@ impl FontCache {
 
         }
 
+        layout.bbox[0] = x;
+        layout.bbox[1] = y - em_height as f32;
         layout.bbox[2] = cursor_x as f32;
+        layout.bbox[3] = y;
 
         let width = layout.bbox[0] - layout.bbox[2];
 
@@ -266,6 +269,11 @@ impl FontCache {
             Baseline::Middle => em_height as f32 / 2.0,
             Baseline::Alphabetic => 0.0,
         };
+
+        layout.bbox[0] += offset_x;
+        layout.bbox[2] += offset_x;
+        layout.bbox[1] += offset_y;
+        layout.bbox[3] += offset_y;
 
         layout.cmds = cmd_map.drain().map(|(_, mut cmd)| {
             cmd.quads.iter_mut().for_each(|quad| {
