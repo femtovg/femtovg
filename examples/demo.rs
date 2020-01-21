@@ -11,10 +11,10 @@ use gpucanvas::{Renderer, Canvas, Color, Paint, LineCap, LineJoin, FillRule, Win
 
 fn main() {
     let el = EventLoop::new();
-    let wb = WindowBuilder::new().with_inner_size((1000.0, 600.0).into()).with_title("gpucanvas demo");
+    let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
-    let windowed_context = ContextBuilder::new().with_vsync(true).build_windowed(wb, &el).unwrap();
-    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (1, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
+    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -33,9 +33,12 @@ fn main() {
     let mut screenshot_image_id = None;
 
     let start = Instant::now();
+    let mut prevt = start;
 
     let mut mousex = 0.0;
     let mut mousey = 0.0;
+
+    let mut perf = PerfGraph::new();
 
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -43,9 +46,8 @@ fn main() {
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
-                WindowEvent::Resized(logical_size) => {
-                    let dpi_factor = windowed_context.window().hidpi_factor();
-                    windowed_context.resize(logical_size.to_physical(dpi_factor));
+                WindowEvent::Resized(physical_size) => {
+                    windowed_context.resize(*physical_size);
                 }
                 WindowEvent::CursorMoved { device_id: _, position, modifiers: _} => {
                     mousex = position.x as f32;
@@ -83,9 +85,14 @@ fn main() {
                 _ => (),
             }
             Event::RedrawRequested(_) => {
-                let cpu_start = Instant::now();
-                let dpi_factor = windowed_context.window().hidpi_factor();
-                let size = windowed_context.window().inner_size().to_physical(dpi_factor);
+                let now = Instant::now();
+                let dt = (now - prevt).as_secs_f32();
+                prevt = now;
+
+                perf.update(dt);
+
+                let dpi_factor = windowed_context.window().scale_factor();
+                let size = windowed_context.window().inner_size();
 
                 let t = start.elapsed().as_secs_f32();
 
@@ -100,6 +107,7 @@ fn main() {
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
 
+                perf.render(&mut canvas, 5.0, 5.0);
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);
@@ -441,6 +449,66 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.fill_path(&nonzero_fill);
 
     canvas.restore();
+}
+
+struct PerfGraph {
+    history_count: usize,
+    values: Vec<f32>,
+    head: usize
+}
+
+impl PerfGraph {
+    fn new() -> Self {
+        Self {
+            history_count: 100,
+            values: vec![0.0; 100],
+            head: Default::default()
+        }
+    }
+
+    fn update(&mut self, frame_time: f32) {
+        self.head = (self.head + 1) % self.history_count;
+        self.values[self.head] = frame_time;
+    }
+
+    fn get_average(&self) -> f32 {
+        self.values.iter().map(|v| *v).sum::<f32>() / self.history_count as f32
+    }
+
+    fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
+        let avg = self.get_average();
+
+        let w = 200.0;
+        let h = 35.0;
+
+        canvas.begin_path();
+        canvas.rect(x, y, w, h);
+        canvas.fill_path(&Paint::color(Color::rgba(0, 0, 0, 128)));
+
+        canvas.begin_path();
+        canvas.move_to(x, y + h);
+
+        for i in 0..self.history_count {
+            let mut v = 1.0 / (0.00001 + self.values[(self.head+i) % self.history_count]);
+			if v > 80.0 { v = 80.0; }
+			let vx = x + (i as f32 / (self.history_count-1) as f32) * w;
+			let vy = y + h - ((v / 80.0) * h);
+			canvas.line_to(vx, vy);
+        }
+
+        canvas.line_to(x+w, y+h);
+        canvas.fill_path(&Paint::color(Color::rgba(255, 192, 0, 128)));
+
+        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
+        text_paint.set_font_size(16);
+        text_paint.set_font_name("Roboto-Regular");
+    	canvas.fill_text(x + 5.0, y + 15.0, &format!("{:.2} FPS", 1.0 / avg), &text_paint);
+
+        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
+        text_paint.set_font_size(14);
+        text_paint.set_font_name("Roboto-Regular");
+    	canvas.fill_text(x + 5.0, y + 30.0, &format!("{:.2} ms", avg * 1000.0), &text_paint);
+    }
 }
 
 /*

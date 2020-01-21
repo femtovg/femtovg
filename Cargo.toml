@@ -21,4 +21,4 @@ unicode-normalization = "0.1.11"
 gl_generator = "0.13"
 
 [dev-dependencies]
-glutin = "0.22.0-alpha4"
+glutin = "0.22.0"
