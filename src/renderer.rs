@@ -8,8 +8,8 @@ use crate::{Color, FillRule, ImageId, ImageFlags};
 mod opengl;
 pub use opengl::OpenGl;
 
-mod gpu_paint;
-pub use gpu_paint::GpuPaint;
+mod params;
+pub use params::Params;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {
@@ -27,21 +27,21 @@ pub struct Drawable {
 #[derive(Debug)]
 pub enum CommandType {
     ConvexFill {
-        gpu_paint: GpuPaint
+        params: Params
     },
     ConcaveFill {
-        stencil_paint: GpuPaint,
-        fill_paint: GpuPaint,
+        stencil_params: Params,
+        fill_params: Params,
     },
     Stroke {
-        gpu_paint: GpuPaint
+        params: Params
     },
     StencilStroke {
-        paint1: GpuPaint,
-        paint2: GpuPaint
+        params1: Params,
+        params2: Params
     },
     Triangles {
-        gpu_paint: GpuPaint
+        params: Params
     },
 }
 

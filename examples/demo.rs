@@ -17,9 +17,8 @@ fn main() {
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (1, 0))).with_vsync(true).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
-    //let backend = Void::new();
-    let backend = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(backend);
+    let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+    let mut canvas = Canvas::new(renderer);
 
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");

@@ -8,7 +8,7 @@ use std::{error::Error, fmt};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, Renderer, CommandType, GpuPaint, TextureType};
+use super::{Command, Renderer, CommandType, Params, TextureType};
 use crate::{Color, ImageFlags, FillRule};
 use crate::renderer::{Vertex, ImageId};
 
@@ -104,7 +104,7 @@ impl OpenGl {
         eprintln!("({}) Error on {} - {}", err, label, message);
     }
 
-    fn convex_fill(&self, cmd: &Command, gpu_paint: GpuPaint) {
+    fn convex_fill(&self, cmd: &Command, gpu_paint: Params) {
         self.set_uniforms(gpu_paint, cmd.image);
 
         for drawable in &cmd.drawables {
@@ -120,7 +120,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, cmd: &Command, stencil_paint: GpuPaint, fill_paint: GpuPaint) {
+    fn concave_fill(&self, cmd: &Command, stencil_paint: Params, fill_paint: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -188,7 +188,7 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, cmd: &Command, paint: GpuPaint) {
+    fn stroke(&self, cmd: &Command, paint: Params) {
         self.set_uniforms(paint, cmd.image);
 
         for drawable in &cmd.drawables {
@@ -200,7 +200,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, cmd: &Command, paint1: GpuPaint, paint2: GpuPaint) {
+    fn stencil_stroke(&self, cmd: &Command, paint1: Params, paint2: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -253,7 +253,7 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, cmd: &Command, paint: GpuPaint) {
+    fn triangles(&self, cmd: &Command, paint: Params) {
         self.set_uniforms(paint, cmd.image);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -263,7 +263,7 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, paint: GpuPaint, image_id: Option<ImageId>) {
+    fn set_uniforms(&self, paint: Params, image_id: Option<ImageId>) {
         let arr = UniformArray::from(paint);
         self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
@@ -341,11 +341,11 @@ impl Renderer for OpenGl {
             unsafe { gl::BlendFuncSeparate(gl::ONE, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA); }
 
             match cmd.cmd_type {
-                CommandType::ConvexFill { gpu_paint } => self.convex_fill(cmd, gpu_paint),
-                CommandType::ConcaveFill { stencil_paint, fill_paint } => self.concave_fill(cmd, stencil_paint, fill_paint),
-                CommandType::Stroke { gpu_paint } => self.stroke(cmd, gpu_paint),
-                CommandType::StencilStroke { paint1, paint2 } => self.stencil_stroke(cmd, paint1, paint2),
-                CommandType::Triangles { gpu_paint } => self.triangles(cmd, gpu_paint),
+                CommandType::ConvexFill { params } => self.convex_fill(cmd, params),
+                CommandType::ConcaveFill { stencil_params, fill_params } => self.concave_fill(cmd, stencil_params, fill_params),
+                CommandType::Stroke { params } => self.stroke(cmd, params),
+                CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(cmd, params1, params2),
+                CommandType::Triangles { params } => self.triangles(cmd, params),
             }
         }
 

@@ -10,7 +10,7 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{Vertex, Renderer, GpuPaint, Command};
+pub use renderer::{Vertex, Renderer, Params, Command};
 use renderer::{CommandType, ShaderType, Drawable};
 
 mod font_cache;
@@ -673,17 +673,17 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         let flavor = if self.path_cache.contours.len() == 1 && self.path_cache.contours[0].convexity == Convexity::Convex {
-            let gpu_paint = GpuPaint::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let params = Params::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            CommandType::ConvexFill { gpu_paint }
+            CommandType::ConvexFill { params }
         } else {
-            let mut stencil_paint = GpuPaint::default();
-            stencil_paint.stroke_thr = -1.0;
-            stencil_paint.shader_type = ShaderType::Stencil.to_f32();
+            let mut stencil_params = Params::default();
+            stencil_params.stroke_thr = -1.0;
+            stencil_params.shader_type = ShaderType::Stencil.to_f32();
 
-            let fill_paint = GpuPaint::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let fill_params = Params::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
 
-            CommandType::ConcaveFill { stencil_paint, fill_paint }
+            CommandType::ConcaveFill { stencil_params, fill_params }
         };
 
         let mut cmd = Command::new(flavor);
@@ -731,6 +731,7 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn stroke_path(&mut self, paint: &Paint) {
         self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
 
+        let scissor = self.state().scissor;
         let transform = self.state().transform;
         let scale = transform.average_scale();
 
@@ -754,24 +755,20 @@ impl<T> Canvas<T> where T: Renderer {
         // Apply global alpha
         paint.mul_alpha(self.state().alpha);
 
-        let scissor = self.state().scissor;
-
-        //let mut gpu_path = GpuPath::new(path, &transform, self.tess_tol, self.dist_tol);
-
         if paint.shape_anti_alias() {
             self.path_cache.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         } else {
             self.path_cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         }
 
-        let gpu_paint = GpuPaint::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let params = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
-            let paint2 = GpuPaint::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let params2 = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
-            CommandType::StencilStroke { paint1: gpu_paint, paint2 }
+            CommandType::StencilStroke { params1: params, params2 }
         } else {
-            CommandType::Stroke { gpu_paint }
+            CommandType::Stroke { params }
         };
 
         let mut cmd = Command::new(flavor);
@@ -898,10 +895,10 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
-        let mut gpu_paint = GpuPaint::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
-        gpu_paint.shader_type = ShaderType::Img.to_f32();
+        let mut params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
+        params.shader_type = ShaderType::Img.to_f32();
 
-        let mut cmd = Command::new(CommandType::Triangles { gpu_paint });
+        let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.transform = *transform;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {

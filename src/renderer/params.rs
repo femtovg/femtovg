@@ -5,7 +5,7 @@ use crate::geometry::Transform2D;
 use super::{ShaderType, TextureType, Renderer};
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct GpuPaint {
+pub struct Params {
     pub(crate) scissor_mat: [f32; 12],
     pub(crate) paint_mat: [f32; 12],
     pub(crate) inner_col: [f32; 4],
@@ -21,10 +21,10 @@ pub struct GpuPaint {
     pub(crate) tex_type: f32
 }
 
-impl GpuPaint {
+impl Params {
 
     pub fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
-        let mut gpu_paint = GpuPaint::default();
+        let mut gpu_paint = Params::default();
 
         // Scissor
         let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
