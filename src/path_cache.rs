@@ -8,8 +8,6 @@ use crate::geometry::{self, Bounds};
 use crate::renderer::Vertex;
 use crate::{Verb, Winding, LineCap, LineJoin};
 
-// TODO: We need an iterator for the contour points that loops by chunks of 2
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Convexity {
     Concave,
