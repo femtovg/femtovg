@@ -116,6 +116,75 @@ bitflags! {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum BlendFactor {
+    Zero,
+    One,
+    SrcColor,
+    OneMinusSrcColor,
+    DstColor,
+    OneMinusDstColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstAlpha,
+    OneMinusDstAlpha,
+    SrcAlphaSaturate
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum CompositeOperation {
+    SourceOver,
+    SourceIn,
+    SourceOut,
+    Atop,
+    DestinationOver,
+    DestinationIn,
+    DestinationOut,
+    DestinationAtop,
+    Lighter,
+    Copy,
+    Xor
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub struct CompositeOperationState {
+    src_rgb: BlendFactor,
+    src_alpha: BlendFactor,
+    dst_rgb: BlendFactor,
+    dst_alpha: BlendFactor,
+}
+
+impl CompositeOperationState {
+    pub fn new(op: CompositeOperation) -> Self {
+        let (sfactor, dfactor) = match op {
+            CompositeOperation::SourceOver => (BlendFactor::One, BlendFactor::OneMinusSrcAlpha),
+            CompositeOperation::SourceIn => (BlendFactor::DstAlpha, BlendFactor::Zero),
+            CompositeOperation::SourceOut => (BlendFactor::OneMinusDstAlpha, BlendFactor::Zero),
+            CompositeOperation::Atop => (BlendFactor::DstAlpha, BlendFactor::OneMinusSrcAlpha),
+            CompositeOperation::DestinationOver => (BlendFactor::OneMinusDstAlpha, BlendFactor::One),
+            CompositeOperation::DestinationIn => (BlendFactor::Zero, BlendFactor::SrcAlpha),
+            CompositeOperation::DestinationOut => (BlendFactor::Zero, BlendFactor::OneMinusSrcAlpha),
+            CompositeOperation::DestinationAtop => (BlendFactor::OneMinusDstAlpha, BlendFactor::SrcAlpha),
+            CompositeOperation::Lighter => (BlendFactor::One, BlendFactor::One),
+            CompositeOperation::Copy => (BlendFactor::One, BlendFactor::Zero),
+            CompositeOperation::Xor => (BlendFactor::OneMinusDstAlpha, BlendFactor::OneMinusSrcAlpha)
+        };
+
+        Self {
+            src_rgb: sfactor,
+            src_alpha: sfactor,
+            dst_rgb: dfactor,
+            dst_alpha: dfactor,
+        }
+    }
+}
+
+impl Default for CompositeOperationState {
+    fn default() -> Self {
+        Self::new(CompositeOperation::SourceOver)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct Scissor {
     transform: Transform2D,
@@ -162,6 +231,7 @@ pub struct ImageId(pub u32);
 
 #[derive(Copy, Clone)]
 struct State {
+    composite_operation: CompositeOperationState,
     transform: Transform2D,
     scissor: Scissor,
     alpha: f32,
@@ -170,6 +240,7 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            composite_operation: Default::default(),
             transform: Transform2D::identity(),
             scissor: Default::default(),
             alpha: 1.0,
@@ -297,6 +368,21 @@ impl<T> Canvas<T> where T: Renderer {
     /// Already transparent paths will get proportionally more transparent as well.
     pub fn set_global_alpha(&mut self, alpha: f32) {
         self.state_mut().alpha = alpha;
+    }
+
+    /// Sets the composite operation.
+    pub fn global_composite_operation(&mut self, op: CompositeOperation) {
+        self.state_mut().composite_operation = CompositeOperationState::new(op);
+    }
+
+    /// Sets the composite operation with custom pixel arithmetic.
+    pub fn global_composite_blend_func(&mut self, src_factor: BlendFactor, dst_factor: BlendFactor) {
+        self.global_composite_blend_func_separate(src_factor, dst_factor, src_factor, dst_factor);
+    }
+
+    /// Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately.
+    pub fn global_composite_blend_func_separate(&mut self, src_rgb: BlendFactor, dst_rgb: BlendFactor, src_alpha: BlendFactor, dst_alpha: BlendFactor) {
+        self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
     }
 
     // Images
@@ -710,6 +796,7 @@ impl<T> Canvas<T> where T: Renderer {
         let mut cmd = Command::new(flavor);
         cmd.transform = transform;
         cmd.fill_rule = paint.fill_rule;
+        cmd.composite_operation = self.state().composite_operation;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
@@ -792,6 +879,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         let mut cmd = Command::new(flavor);
         cmd.transform = transform;
+        cmd.composite_operation = self.state().composite_operation;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
@@ -916,6 +1004,7 @@ impl<T> Canvas<T> where T: Renderer {
         params.shader_type = ShaderType::Img.to_f32();
 
         let mut cmd = Command::new(CommandType::Triangles { params });
+        cmd.composite_operation = self.state().composite_operation;
         cmd.transform = *transform;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {

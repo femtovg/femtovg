@@ -9,7 +9,7 @@ use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
 use super::{Command, Renderer, CommandType, Params, TextureType};
-use crate::{Color, ImageFlags, FillRule};
+use crate::{Color, ImageFlags, FillRule, CompositeOperationState, BlendFactor};
 use crate::renderer::{Vertex, ImageId};
 
 mod shader;
@@ -102,6 +102,33 @@ impl OpenGl {
         };
 
         eprintln!("({}) Error on {} - {}", err, label, message);
+    }
+
+    fn gl_factor(factor: BlendFactor) -> GLenum {
+        match factor {
+            BlendFactor::Zero => gl::ZERO,
+            BlendFactor::One => gl::ONE,
+            BlendFactor::SrcColor => gl::SRC_COLOR,
+            BlendFactor::OneMinusSrcColor => gl::ONE_MINUS_SRC_COLOR,
+            BlendFactor::DstColor => gl::DST_COLOR,
+            BlendFactor::OneMinusDstColor => gl::ONE_MINUS_DST_COLOR,
+            BlendFactor::SrcAlpha => gl::SRC_ALPHA,
+            BlendFactor::OneMinusSrcAlpha => gl::ONE_MINUS_SRC_ALPHA,
+            BlendFactor::DstAlpha => gl::DST_ALPHA,
+            BlendFactor::OneMinusDstAlpha => gl::ONE_MINUS_DST_ALPHA,
+            BlendFactor::SrcAlphaSaturate => gl::SRC_ALPHA_SATURATE,
+        }
+    }
+
+    fn set_composite_operation(&self, blend_state: CompositeOperationState) {
+        unsafe {
+            gl::BlendFuncSeparate(
+                Self::gl_factor(blend_state.src_rgb),
+                Self::gl_factor(blend_state.dst_rgb),
+                Self::gl_factor(blend_state.src_alpha),
+                Self::gl_factor(blend_state.dst_alpha)
+            );
+        }
     }
 
     fn convex_fill(&self, cmd: &Command, gpu_paint: Params) {
@@ -338,7 +365,7 @@ impl Renderer for OpenGl {
 
         for cmd in commands {
             // TODO: Blend func
-            unsafe { gl::BlendFuncSeparate(gl::ONE, gl::ONE_MINUS_SRC_ALPHA, gl::ONE, gl::ONE_MINUS_SRC_ALPHA); }
+            self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
                 CommandType::ConvexFill { params } => self.convex_fill(cmd, params),

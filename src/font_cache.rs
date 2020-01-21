@@ -261,12 +261,12 @@ impl FontCache {
         let offset_x = match paint.text_align() {
             Align::Left => 0.0,
             Align::Right => width as f32,
-            Align::Center => width as f32 / 2.0,
+            Align::Center => (width as f32 / 2.0).floor(),
         };
 
         let offset_y = match paint.text_baseline() {
             Baseline::Top => em_height as f32,
-            Baseline::Middle => em_height as f32 / 2.0,
+            Baseline::Middle => (em_height as f32 / 2.0).floor(),
             Baseline::Alphabetic => 0.0,
         };
 

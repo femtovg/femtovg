@@ -18,6 +18,7 @@ use gpucanvas::{
     Winding,
     ImageFlags,
     Align,
+    //CompositeOperation,
     renderer::OpenGl
 };
 
@@ -338,6 +339,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
     let corner_radius = 3.0;
 
     canvas.save();
+
+    //canvas.global_composite_operation(CompositeOperation::Lighter);
 
 	// Window
 	canvas.begin_path();
