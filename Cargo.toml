@@ -1,11 +1,11 @@
 [package]
-name = "rscanvas"
+name = "gpucanvas"
 description = "Antialiased 2d vector drawing library written in rust"
 version = "0.1.0"
 license = "MIT"
 readme = "README.md"
 authors = ["Peter Todorov <ptodorov@cytec.bg>"]
-keywords = ["graphics", "canvas", "vector", "drawing"]
+keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
 categories = ["graphics"]
 repository = "https://github.com/cytecbg/rscanvas"
 edition = "2018"

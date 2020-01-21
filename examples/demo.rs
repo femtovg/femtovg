@@ -7,7 +7,7 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 //use glutin::{GlRequest, Api};
 
-use rscanvas::{Renderer, Canvas, Color, Paint, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::OpenGl};
+use gpucanvas::{Renderer, Canvas, Color, Paint, LineCap, LineJoin, FillRule, Winding, ImageFlags, renderer::OpenGl};
 
 fn main() {
     let el = EventLoop::new();
