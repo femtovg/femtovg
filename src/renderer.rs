@@ -8,6 +8,9 @@ use crate::{Color, FillRule, ImageId, ImageFlags};
 mod opengl;
 pub use opengl::OpenGl;
 
+mod void;
+pub use void::Void;
+
 mod params;
 pub(crate) use params::Params;
 
@@ -82,7 +85,7 @@ pub trait Renderer {
     fn texture_size(&self, id: ImageId) -> (u32, u32);
     fn texture_type(&self, id: ImageId) -> Option<TextureType>;
 
-    fn screenshot(&mut self) -> DynamicImage;
+    fn screenshot(&mut self) -> Option<DynamicImage>;
 }
 
 /// Vertex struct for specifying triangle geometry

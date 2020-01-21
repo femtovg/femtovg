@@ -603,7 +603,7 @@ impl Renderer for OpenGl {
         Some(tex.tex_type)
     }
 
-    fn screenshot(&mut self) -> DynamicImage {
+    fn screenshot(&mut self) -> Option<DynamicImage> {
         let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
 
         unsafe {
@@ -612,7 +612,7 @@ impl Renderer for OpenGl {
 
         image = image::imageops::flip_vertical(&image);
 
-        DynamicImage::ImageRgba8(image)
+        Some(DynamicImage::ImageRgba8(image))
     }
 }
 

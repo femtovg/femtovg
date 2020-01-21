@@ -248,7 +248,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.save();
     }
 
-    pub fn screenshot(&mut self) -> DynamicImage {
+    pub fn screenshot(&mut self) -> Option<DynamicImage> {
         self.renderer.screenshot()
     }
 
@@ -659,12 +659,10 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Fills the current path with current fill style.
-    pub fn fill_path(&mut self, paint: &Paint) {
+    pub fn fill_path(&mut self, mut paint: Paint) {
         self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
 
         let transform = self.state().transform;
-
-        let mut paint = *paint;
 
         // Transform paint
         paint.transform = transform;
@@ -736,14 +734,12 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Fills the current path with current stroke style.
-    pub fn stroke_path(&mut self, paint: &Paint) {
+    pub fn stroke_path(&mut self, mut paint: Paint) {
         self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
 
         let scissor = self.state().scissor;
         let transform = self.state().transform;
         let scale = transform.average_scale();
-
-        let mut paint = *paint;
 
         // Transform paint
         paint.transform = transform;
@@ -840,11 +836,11 @@ impl<T> Canvas<T> where T: Renderer {
         bounds
     }*/
 
-    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
+    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) {
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill);
     }
 
-    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint) {
+    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) {
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Stroke {
             line_width: paint.stroke_width().ceil() as u32
         });
@@ -852,7 +848,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Private
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, paint: &Paint, render_style: GlyphRenderStyle) {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, paint: Paint, render_style: GlyphRenderStyle) {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
