@@ -77,7 +77,7 @@ fn main() {
     let wb = WindowBuilder::new()
         .with_inner_size(window_size)
         .with_resizable(false)
-        .with_title("gpucanvas Bricks demo");
+        .with_title("Breakout demo");
 
     let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
