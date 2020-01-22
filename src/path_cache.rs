@@ -286,19 +286,16 @@ impl PathCache {
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         // Calculate max vertex usage.
-        /*
-        let mut vertex_count = 0;
-
-        for path in &self.cache.paths {
-            vertex_count += path.count + path.bevel + 1;
+        for contour in &mut self.contours {
+            let point_count = contour.points.end - contour.points.start;
+            let mut vertex_count = point_count  + contour.bevel + 1;
 
             if fringe {
-                vertex_count += (path.count + path.bevel*5 + 1) * 2;// plus one for loop
+                vertex_count += (point_count + contour.bevel*5 + 1) * 2;
             }
-        }*/
 
-        //self.cache.verts.clear();
-        //self.cache.verts.reserve(vertex_count);
+            contour.fill.reserve(vertex_count);
+        }
 
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
