@@ -49,7 +49,6 @@ impl Brick {
         canvas.rect(self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height);
 
         let paint = Paint::color(match self.id {
-            0 => return,
             1 => Color::rgb(220, 100, 0),
             2 => Color::rgb(255, 255, 0),
             3 => Color::rgb(0, 255, 0),
@@ -63,12 +62,14 @@ impl Brick {
 
 fn main() {
     let level = vec![
-        vec![1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        vec![1, 1, 0, 0, 0, 0, 0, 0, 1, 1],
+        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     ];
 
     let window_size = glutin::dpi::PhysicalSize::new(800, 600);
@@ -79,7 +80,6 @@ fn main() {
         .with_title("gpucanvas Bricks demo");
 
     let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
-    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -99,8 +99,11 @@ fn main() {
 
     for row in level {
         for id in row {
-            let rect = Rect::new(brick_loc, brick_size);
-            bricks.push(Brick::new(id, rect));
+            if id > 0 {
+                let rect = Rect::new(brick_loc, brick_size);
+                bricks.push(Brick::new(id, rect));
+            }
+
             brick_loc.x += brick_size.width;
         }
 
@@ -203,7 +206,7 @@ fn main() {
 
                 // Paddle
                 canvas.begin_path();
-                canvas.rect(paddle_rect.origin.x, paddle_rect.origin.y, paddle_rect.size.width, paddle_rect.size.height);
+                canvas.rounded_rect(paddle_rect.origin.x, paddle_rect.origin.y, paddle_rect.size.width, paddle_rect.size.height, paddle_rect.size.height / 2.0);
                 canvas.fill_path(Paint::color(Color::rgb(200, 200, 200)));
 
                 // Ball
