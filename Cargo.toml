@@ -22,3 +22,4 @@ gl_generator = "0.13"
 
 [dev-dependencies]
 glutin = "0.22.0"
+euclid = "0.20.7"
