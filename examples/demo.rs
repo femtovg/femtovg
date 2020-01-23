@@ -27,7 +27,7 @@ fn main() {
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
     //.with_multisampling(16)
-    let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(16).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
@@ -131,6 +131,69 @@ fn main() {
                 */
                 //draw_state_stack(&mut canvas);
 
+                let text = "
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQSADJASLDKJWIUEJFMNKDLNF:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$QWERTYUIkcmlknsdkjfhweiuqhpiuiweucQWERTYUIkcmlknsdkjfhweiuqhpiuiweu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei
+
+";
+                /*
                 let font = ttf_parser::Font::from_data(&font_data, 0).unwrap();
 
                 canvas.save();
@@ -138,30 +201,51 @@ fn main() {
                 let font_size = 12.0;
                 let units_per_em = font.units_per_em().expect("invalid units per em");
                 let scale = font_size / units_per_em as f32;
-                canvas.translate(10.0, 588.0);
+                canvas.translate(10.0, 50.0);
                 canvas.scale(1.0, -1.0);
                 canvas.scale(scale, scale);
+            
+                for line in text.lines() {
+                    let mut width = 0.0;
+                    
+                    for c in line.chars() {
+                        let id = font.glyph_index(c).expect("Glyph not found");
 
-                let text = "æPadscanvas.scale(1.0,-1.0);";
+                        canvas.begin_path();
+                        font.outline_glyph(id, &mut canvas).expect("Cannot outline glyph");
+                        let mut paint = Paint::color(Color::rgb(224, 42, 87));
+                        paint.set_fill_rule(FillRule::EvenOdd);
+                        paint.set_stroke_width(50.0);
+                        paint.set_shape_anti_alias(false);
+                        canvas.fill_path(paint);
+                        //canvas.stroke_path(paint);
 
-                for c in text.chars() {
-                    let id = font.glyph_index(c).expect("Glyph not found");
-
-                    canvas.begin_path();
-                    font.outline_glyph(id, &mut canvas).expect("Cannot outline glyph");
-                    let mut paint = Paint::color(Color::rgb(224, 42, 87));
-                    paint.set_fill_rule(FillRule::EvenOdd);
-                    paint.set_stroke_width(50.0);
-                    paint.set_shape_anti_alias(false);
-                    canvas.fill_path(paint);
-                    //canvas.stroke_path(paint);
-
-                    let xmetrics = font.glyph_hor_metrics(id).unwrap();
-                    canvas.translate(xmetrics.advance as f32, 0.0);
+                        let xmetrics = font.glyph_hor_metrics(id).unwrap();
+                        canvas.translate(xmetrics.advance as f32, 0.0);
+                        width += xmetrics.advance as f32;
+                    }
+                    
+                    canvas.translate(-width, -font.height() as f32);
                 }
+                
 
                 canvas.restore();
-
+                */
+                
+                canvas.save();
+                canvas.translate(0.0, 50.0);
+                
+                for line in text.lines() {
+                    let mut paint = Paint::color(Color::hex("454545"));
+                    paint.set_font_size(12);
+                    paint.set_font_name("Roboto-Regular");
+                    canvas.fill_text(10.0, 0.0, line, paint);
+                    
+                    canvas.translate(0.0, 14.0);
+                }
+                
+                canvas.restore();
+                
                 if false {
 
                     let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
