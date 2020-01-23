@@ -27,7 +27,7 @@ fn main() {
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
     //.with_multisampling(16)
-    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(16).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
@@ -117,7 +117,10 @@ fn main() {
                 //
                 // draw_fills(&mut canvas, width - 200.0, height - 100.0);
 
+                canvas.save();
+                canvas.reset();
                 perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 draw_rects(&mut canvas, 15.0, 15.0);
@@ -135,7 +138,7 @@ fn main() {
                 let font_size = 12.0;
                 let units_per_em = font.units_per_em().expect("invalid units per em");
                 let scale = font_size / units_per_em as f32;
-                canvas.translate(10.0, 400.0);
+                canvas.translate(10.0, 588.0);
                 canvas.scale(1.0, -1.0);
                 canvas.scale(scale, scale);
 
@@ -146,10 +149,10 @@ fn main() {
 
                     canvas.begin_path();
                     font.outline_glyph(id, &mut canvas).expect("Cannot outline glyph");
-                    let mut paint = Paint::color(Color::rgb(0, 0, 0));
+                    let mut paint = Paint::color(Color::rgb(224, 42, 87));
                     paint.set_fill_rule(FillRule::EvenOdd);
                     paint.set_stroke_width(50.0);
-                    //paint.set_shape_anti_alias(false);
+                    paint.set_shape_anti_alias(false);
                     canvas.fill_path(paint);
                     //canvas.stroke_path(paint);
 
