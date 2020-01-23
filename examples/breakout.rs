@@ -1,6 +1,11 @@
 
 use std::time::Instant;
 
+use rand::{
+    prelude::*,
+    distributions::{Distribution, Standard}
+};
+
 use glutin::event::{Event, WindowEvent, DeviceEvent, ElementState, KeyboardInput, VirtualKeyCode, MouseButton};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::{Window, WindowBuilder};
@@ -11,12 +16,9 @@ use gpucanvas::{
     //Canvas,
     Color,
     Paint,
-    LineCap,
-    LineJoin,
-    FillRule,
-    Winding,
     ImageFlags,
     Align,
+    Baseline,
     ImageId,
     //CompositeOperation,
     renderer::OpenGl
@@ -27,12 +29,6 @@ type Point = euclid::default::Point2D<f32>;
 type Vector = euclid::default::Vector2D<f32>;
 type Size = euclid::default::Size2D<f32>;
 type Rect = euclid::default::Rect<f32>;
-
-//const BLUE: Color = Color::rgb(49, 136, 143);
-//const GRAY: Color = Color::rgb(79, 80, 75);
-//const BROWN: Color = Color::rgb(143, 80, 49);
-//const LIGHTBROWN: Color = Color::rgb(185, 155, 117);
-//const DARKBLUE: Color = Color::rgb(2, 49, 55);
 
 #[derive(Copy, Clone)]
 enum Direction {
@@ -69,46 +65,53 @@ impl Ball {
 #[derive(Copy, Clone, PartialEq)]
 enum State {
     TitleScreen,
-    InGame,
-    Paused,
-    End {
+    RoundInfo {
         time: f32
     },
-    Win
+    InGame,
+    Paused,
+    GameOver {
+        time: f32
+    },
+    Win {
+        time: f32
+    },
 }
 
 struct Game {
     state: State,
-    ball: Ball,
+    balls: Vec<Ball>,
     logo_image_id: ImageId,
     paddle_rect: Rect,
     size: Size,
     bricks: Vec<Brick>,
-    levels: Vec<Vec<Vec<u8>>>,
+    levels: Vec<Vec<Vec<Cmd>>>,
+    powerups: Vec<Powerup>,
     current_level: usize,
     lives: u8,
     score: u32
 }
 
 impl Game {
-    fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<u8>>>) -> Self {
+    fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
         let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 
         let mut game = Self {
             state: State::TitleScreen,
-            ball: Ball {
+            balls: vec![Ball {
                 position: Point::new(-100.0, -100.0),
                 velocity: Vector::new(0.0, 0.0),
                 radius: 10.0,
                 on_paddle: true
-            },
+            }],
             logo_image_id: image_id,
             paddle_rect: paddle_rect,
             size: Size::new(canvas.width(), canvas.height()),
             bricks: Vec::new(),
             levels: levels,
+            powerups: Vec::new(),
             current_level: 0,
             lives: 3,
             score: 0
@@ -121,17 +124,26 @@ impl Game {
 
     fn load_level(&mut self) {
         // Bricks
+        let brick_padding = 5.0;
+
         let brick_size = Size::new(self.size.width as f32 / self.levels[self.current_level][0].len() as f32, 30.0);
         let mut brick_loc = Point::new(0.0, 0.0);
 
         for row in &self.levels[self.current_level] {
-            for id in row {
-                if *id > 0 {
-                    let rect = Rect::new(brick_loc, brick_size);
-                    self.bricks.push(Brick::new(*id, rect));
+            for cmd in row {
+                match cmd {
+                    Cmd::Spac => {
+                        brick_loc.x += brick_size.width;
+                    }
+                    Cmd::Hspa => {
+                        brick_loc.x += brick_size.width / 2.0;
+                    }
+                    Cmd::B(id) => {
+                        let rect = Rect::new(brick_loc, brick_size - Size::new(brick_padding, brick_padding));
+                        self.bricks.push(Brick::new(*id, rect));
+                        brick_loc.x += brick_size.width;
+                    }
                 }
-
-                brick_loc.x += brick_size.width;
             }
 
             brick_loc.x = 0.0;
@@ -143,8 +155,11 @@ impl Game {
         if self.state != State::InGame {
             let _ = window.set_cursor_grab(false);
             window.set_cursor_visible(true);
+        } else {
+            let _ = window.set_cursor_grab(true);
+            window.set_cursor_visible(false);
         }
-        
+
         match event {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::Escape), state: ElementState::Pressed, .. }, .. } => {
@@ -152,26 +167,27 @@ impl Game {
                         State::TitleScreen => *control_flow = ControlFlow::Exit,
                         State::InGame => self.state = State::Paused,
                         State::Paused => self.state = State::TitleScreen,
-                        State::Win | State::End { .. } => self.state = State::TitleScreen
+                        State::Win { .. } | State::GameOver { .. } => self.state = State::TitleScreen,
+                        _ => ()
                     }
                 }
                 WindowEvent::MouseInput { button: MouseButton::Left, state: ElementState::Pressed, ..} => {
                     match self.state {
                         State::TitleScreen => {
+                            self.state = State::RoundInfo { time: 3.0 };
+                        }
+                        State::RoundInfo { .. } => {
                             self.state = State::InGame;
 
                             self.paddle_rect.origin.x = self.size.width as f32 / 2.0 - self.paddle_rect.size.width / 2.0;
                             self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
-                            self.ball.on_paddle = true;
+                            self.balls[0].on_paddle = true;
                         }
                         State::Paused => self.state = State::InGame,
                         State::InGame => {
-                            let _ = window.set_cursor_grab(true);
-                            window.set_cursor_visible(false);
-
-                            if self.ball.on_paddle {
-                                self.ball.velocity = Vector::new(100.0, -350.0);
-                                self.ball.on_paddle = false;
+                            if self.balls[0].on_paddle {
+                                self.balls[0].velocity = Vector::new(100.0, -350.0);
+                                self.balls[0].on_paddle = false;
                             }
                         }
                         _ => ()
@@ -200,104 +216,286 @@ impl Game {
     }
 
     fn update(&mut self, dt: f32) {
-        if let State::End { time } = &mut self.state {
+        if let State::Win { time } = &mut self.state {
             *time -= dt;
 
             if *time <= 0.0 {
                 self.state = State::TitleScreen;
                 self.lives = 3;
                 self.score = 0;
+                self.current_level = 0;
+                self.load_level();
             }
+
+            return;
+        }
+
+        if let State::RoundInfo { time } = &mut self.state {
+            *time -= dt;
+
+            if *time <= 0.0 {
+                self.state = State::InGame;
+                self.paddle_rect.origin.x = self.size.width as f32 / 2.0 - self.paddle_rect.size.width / 2.0;
+                self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
+                self.balls[0].on_paddle = true;
+            }
+
+            return;
+        }
+
+        if let State::GameOver { time } = &mut self.state {
+            *time -= dt;
+
+            if *time <= 0.0 {
+                self.state = State::TitleScreen;
+                self.lives = 3;
+                self.score = 0;
+                self.current_level = 0;
+                self.load_level();
+            }
+
+            return;
         }
 
         if self.state != State::InGame { return }
 
-        if self.ball.on_paddle {
-            self.ball.position = (
-                self.paddle_rect.center() - Point::new(0.0, self.paddle_rect.height() / 2.0 + self.ball.radius)
+        if self.balls[0].on_paddle {
+            self.balls[0].position = (
+                self.paddle_rect.center() - Point::new(0.0, self.paddle_rect.height() / 2.0 + self.balls[0].radius)
             ).to_point();
         } else {
-            self.ball.position += self.ball.velocity * dt;
+            let num_balls = self.balls.len();
 
-            // Collision with left and right walls
-            if self.ball.position.x <= self.ball.radius {
-                self.ball.velocity.x = -self.ball.velocity.x;
-                self.ball.position.x = self.ball.radius;
-            } else if self.ball.position.x + self.ball.radius >= self.size.width {
-                self.ball.velocity.x = -self.ball.velocity.x;
-                self.ball.position.x = self.size.width - self.ball.radius;
-            }
+            for ball in &mut self.balls {
+                ball.position += ball.velocity * dt;
 
-            // Collision with ceiling
-            if self.ball.position.y <= self.ball.radius {
-                self.ball.velocity.y = -self.ball.velocity.y;
-                self.ball.position.y = self.ball.radius;
-            }
+                // Collision with left and right walls
+                if ball.position.x <= ball.radius {
+                    ball.velocity.x = -ball.velocity.x;
+                    ball.position.x = ball.radius;
+                } else if ball.position.x + ball.radius >= self.size.width {
+                    ball.velocity.x = -ball.velocity.x;
+                    ball.position.x = self.size.width - ball.radius;
+                }
 
-            if self.ball.position.y > self.size.height {
-                self.lives -= 1;
+                // Collision with ceiling
+                if ball.position.y <= ball.radius {
+                    ball.velocity.y = -ball.velocity.y;
+                    ball.position.y = ball.radius;
+                }
 
-                if self.lives == 0 {
-                    self.state = State::End { time: 5.0 };
-                } else {
-                    self.ball.on_paddle = true;
+                if ball.position.y > self.size.height && num_balls == 1 {
+                    self.lives -= 1;
+
+                    ball.position.y += 1000.0;
+
+                    if self.lives == 0 {
+                        self.state = State::GameOver { time: 5.0 };
+                    } else {
+                        self.state = State::RoundInfo { time: 3.0 };
+                    }
                 }
             }
+
+            if let State::RoundInfo { .. } = self.state {
+                self.balls.truncate(1);
+                self.paddle_rect.size = Size::new(100.0, 20.0);
+            } else {
+                let height = self.size.height;
+                self.balls.retain(|b| b.position.y < height);
+            }
         }
+
+        let mut has_hit = false;
 
         // Collision with bricks
         for brick in &mut self.bricks {
             if brick.destroyed { continue; }
 
-            if let Some((dir, diff_vector)) = self.ball.collides(brick.rect) {
-                brick.destroyed = true;
+            for ball in &mut self.balls {
+                if let Some((dir, diff_vector)) = ball.collides(brick.rect) {
+                    if let BrickType::Multihit(hits) = &mut brick.brick_type {
+                        *hits -= 1;
 
-                self.score += 10;
+                        if *hits == 0 {
+                            brick.destroyed = true;
+                            has_hit = true;
+                            self.score += brick.score();
+                        }
+                    } else if brick.brick_type != BrickType::Invincible {
+                        brick.destroyed = true;
+                        has_hit = true;
+                        self.score += brick.score();
 
-                // Bricks Collision
-                match dir {
-                    Direction::Left => {
-                        self.ball.velocity.x = -self.ball.velocity.x;
-                        self.ball.position.x += self.ball.radius - diff_vector.x.abs();
+                        // drop powerup
+                        let x: u8 = rand::random();
+                        if x < 100 {
+                            self.powerups.push(Powerup {
+                                ty: rand::random(),
+                                rect: brick.rect
+                            });
+                        }
+                    }
+
+                    // velocity upper bound
+                    if ball.velocity.length() < 700.0 {
+                        // increase velocity
+                        ball.velocity += ball.velocity * 0.025;
+                    }
+
+                    // Bricks Collision
+                    match dir {
+                        Direction::Left => {
+                            ball.velocity.x = -ball.velocity.x;
+                            ball.position.x += ball.radius - diff_vector.x.abs();
+                        },
+                        Direction::Right => {
+                            ball.velocity.x = -ball.velocity.x;
+                            ball.position.x -= ball.radius - diff_vector.x.abs();
+                        },
+                        Direction::Up => {
+                            ball.velocity.y = -ball.velocity.y;
+                            ball.position.y -= ball.radius - diff_vector.y.abs();
+                        },
+                        Direction::Down => {
+                            ball.velocity.y = -ball.velocity.y;
+                            ball.position.y += ball.radius - diff_vector.y.abs();
+                        },
+                    }
+                }
+            }
+        }
+
+        // update powerups
+        for powerup in &mut self.powerups {
+            powerup.rect.origin.y += 170.0 * dt;
+
+            if self.paddle_rect.intersects(&powerup.rect) {
+                powerup.rect.origin.y += 10000.0;
+
+                let mut rng = thread_rng();
+
+                let x: f32 = rng.gen_range(150.0, 250.0);
+                let y: f32 = rng.gen_range(-350.0, -250.0);
+
+                match powerup.ty {
+                    PowerupType::Multiply => {
+                        self.balls.push(Ball {
+                            position: self.balls[0].position,
+                            velocity: Vector::new(x, y),
+                            radius: 10.0,
+                            on_paddle: false
+                        });
+
+                        self.balls.push(Ball {
+                            position: self.balls[0].position,
+                            velocity: Vector::new(-x, y),
+                            radius: 10.0,
+                            on_paddle: false
+                        });
                     },
-                    Direction::Right => {
-                        self.ball.velocity.x = -self.ball.velocity.x;
-                        self.ball.position.x -= self.ball.radius - diff_vector.x.abs();
+                    PowerupType::Slow => {
+                        for ball in &mut self.balls {
+                            if ball.velocity.length() > 100.0 {
+                                ball.velocity *= 0.5;
+                            }
+                        }
                     },
-                    Direction::Up => {
-                        self.ball.velocity.y = -self.ball.velocity.y;
-                        self.ball.position.y -= self.ball.radius - diff_vector.y.abs();
-                    },
-                    Direction::Down => {
-                        self.ball.velocity.y = -self.ball.velocity.y;
-                        self.ball.position.y += self.ball.radius - diff_vector.y.abs();
-                    },
+                    PowerupType::Fast => {
+                        for ball in &mut self.balls {
+                            if ball.velocity.length() < 1000.0 {
+                                ball.velocity *= 1.5;
+                            }
+                        }
+                    }
+                    PowerupType::Enlarge => {
+                        if self.paddle_rect.size.width < 101.0 {
+                            self.paddle_rect.origin.x -= 25.0;
+                            self.paddle_rect.size.width += 50.0;
+                        }
+                    }
+                    PowerupType::Shrink => {
+                        if self.paddle_rect.size.width > 51.0 {
+                            self.paddle_rect.origin.x += 25.0;
+                            self.paddle_rect.size.width -= 50.0;
+                        }
+                    }
+                    PowerupType::Live => {
+                        self.lives += 1;
+                    }
+                }
+            }
+        }
+
+        // remove out of bounds powerups
+        let height = self.size.height;
+        self.powerups.retain(|powerup| powerup.rect.origin.y < height);
+
+        // check if all bricks are cleared
+        if has_hit {
+            if self.bricks.iter().all(|b| b.destroyed && b.brick_type != BrickType::Invincible) {
+                // next level or win
+                if self.current_level == self.levels.len() - 1 {
+                    // win
+                    self.state = State::Win { time: 5.0 };
+                } else {
+                    // next level
+                    self.balls.truncate(1);
+                    self.current_level += 1;
+                    self.load_level();
+                    self.powerups.clear();
+                    self.state = State::RoundInfo { time: 3.0 };
+                    self.paddle_rect.size = Size::new(100.0, 20.0);
                 }
             }
         }
 
         // Player-Ball collision
-        if let Some((_dir, _diff_vector)) = self.ball.collides(self.paddle_rect) {
-            // Check where it hit the board, and change velocity based on where it hit the board
-            let paddle_center = self.paddle_rect.center().x;
-            let distance = self.ball.position.x - paddle_center;
-            let percentage = distance / (self.paddle_rect.size.width / 2.0);
-            // Then move accordingly
-            let strength = 2.0;
-            let old_velocity = self.ball.velocity;
-            self.ball.velocity.x = 100.0 * percentage * strength;
-            self.ball.velocity.y = -1.0 * self.ball.velocity.y.abs();
-            self.ball.velocity = self.ball.velocity.normalize() * old_velocity.length();
+        for ball in &mut self.balls {
+            if let Some((_dir, _diff_vector)) = ball.collides(self.paddle_rect) {
+                // Check where it hit the board, and change velocity based on where it hit the board
+                let paddle_center = self.paddle_rect.center().x;
+                let distance = ball.position.x - paddle_center;
+                let percentage = distance / (self.paddle_rect.size.width / 2.0);
+                // Then move accordingly
+                let strength = 4.0;
+                let old_velocity = ball.velocity;
+                ball.velocity.x = 100.0 * percentage * strength;
+                ball.velocity.y = -1.0 * ball.velocity.y.abs();
+                ball.velocity = ball.velocity.normalize() * old_velocity.length();
+            }
         }
+
     }
 
     fn draw(&mut self, canvas: &mut Canvas) {
+        // draw background
+        let step_size_x = canvas.width() / 50.0;
+
+        canvas.begin_path();
+
+        for i in 0..50 {
+            canvas.move_to(i as f32 * step_size_x, 0.0);
+            canvas.line_to(i as f32 * step_size_x, canvas.height());
+        }
+
+        let paint = Paint::radial_gradient(
+            canvas.width() / 2.0,
+            canvas.height() / 2.0,
+            10.0,
+            canvas.height() / 2.0,
+            Color::rgb(90, 90, 90),
+            Color::rgb(30, 30, 30),
+        );
+        canvas.stroke_path(paint);
+
         match self.state {
             State::TitleScreen => self.draw_title_screen(canvas),
+            State::RoundInfo { .. } => self.draw_round_info(canvas),
             State::InGame => self.draw_game(canvas),
             State::Paused => self.draw_paused(canvas),
-            State::End { .. } => self.draw_end(canvas),
-            _ => ()
+            State::GameOver { .. } => self.draw_game_over(canvas),
+            State::Win { .. } => self.draw_win(canvas),
         }
     }
 
@@ -324,7 +522,7 @@ impl Game {
         paint.set_font_size(80);
 
         paint.set_stroke_width(4.0);
-        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) - 1.0, "rsBREAKOUT", paint);
+        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) - 2.0, "rsBREAKOUT", paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
         canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
@@ -340,14 +538,87 @@ impl Game {
 
     fn draw_game(&self, canvas: &mut Canvas) {
         // Paddle
+        let side_size = 15.0;
+
+        let highlight = Paint::linear_gradient(
+            self.paddle_rect.origin.x,
+            self.paddle_rect.origin.y,
+            self.paddle_rect.origin.x,
+            self.paddle_rect.origin.y + 10.0,
+            Color::rgba(255,255,255,100),
+            Color::rgba(255,255,255,40)
+        );
+
         canvas.begin_path();
-        canvas.rounded_rect(self.paddle_rect.origin.x, self.paddle_rect.origin.y, self.paddle_rect.size.width, self.paddle_rect.size.height, self.paddle_rect.size.height / 2.0);
-        canvas.fill_path(Paint::color(Color::rgb(200, 200, 200)));
+        canvas.rounded_rect_varying(
+            self.paddle_rect.origin.x,
+            self.paddle_rect.origin.y,
+            side_size,
+            self.paddle_rect.size.height,
+            self.paddle_rect.size.height / 2.0,
+            0.0, 0.0,
+            self.paddle_rect.size.height / 2.0,
+        );
+        canvas.rounded_rect_varying(
+            self.paddle_rect.origin.x + self.paddle_rect.size.width - side_size,
+            self.paddle_rect.origin.y,
+            side_size,
+            self.paddle_rect.size.height,
+            0.0,
+            self.paddle_rect.size.height / 2.0,
+            self.paddle_rect.size.height / 2.0,
+            0.0
+        );
+        canvas.fill_path(Paint::color(Color::rgb(119,123,126)));
+        canvas.stroke_path(highlight);
+
+        canvas.begin_path();
+        canvas.rect(
+            self.paddle_rect.origin.x + side_size + 3.0,
+            self.paddle_rect.origin.y,
+            self.paddle_rect.size.width - (side_size * 2.0) - 6.0,
+            self.paddle_rect.size.height
+        );
+        canvas.fill_path(Paint::color(Color::rgb(119,123,126)));
+        canvas.stroke_path(highlight);
+
+        canvas.begin_path();
+        canvas.rounded_rect_varying(
+            self.paddle_rect.origin.x,
+            self.paddle_rect.origin.y,
+            self.paddle_rect.size.width,
+            self.paddle_rect.size.height - 10.0,
+            self.paddle_rect.size.height / 2.0,
+            self.paddle_rect.size.height / 2.0,
+            25.0, 25.0
+        );
+
+        canvas.fill_path(highlight);
 
         // Ball
-        canvas.begin_path();
-        canvas.circle(self.ball.position.x, self.ball.position.y, self.ball.radius);
-        canvas.fill_path(Paint::color(Color::rgb(2, 49, 55)));
+        for ball in &self.balls {
+            canvas.begin_path();
+            canvas.circle(ball.position.x, ball.position.y, ball.radius);
+            canvas.fill_path(Paint::color(Color::rgb(183, 65, 14)));
+
+            let bg = Paint::linear_gradient(
+                ball.position.x,
+                ball.position.y - ball.radius,
+                ball.position.x,
+                ball.position.y,
+                Color::rgba(255,255,255,60),
+                Color::rgba(255,255,255,16)
+            );
+
+            canvas.begin_path();
+            canvas.circle(ball.position.x, ball.position.y - ball.radius / 2.0, ball.radius / 2.0);
+            canvas.fill_path(bg);
+        }
+
+        // powerups
+        for powerup in &self.powerups {
+            powerup.draw(canvas);
+        }
 
         self.draw_bricks(canvas);
 
@@ -365,62 +636,26 @@ impl Game {
         canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), paint);
     }
 
-    fn draw_paused(&self, canvas: &mut Canvas) {
-        self.draw_bricks(canvas);
+    fn draw_round_info(&self, canvas: &mut Canvas) {
+        let heading = format!("ROUND {}", self.current_level + 1);
 
-        // curtain
-        canvas.begin_path();
-        canvas.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 180)));
-
-        // title
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Bold");
-        paint.set_font_size(80);
-
-        paint.set_stroke_width(4.0);
-        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) - 1.0, "PAUSE", paint);
-
-        paint.set_color(Color::rgb(143, 80, 49));
-        canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "PAUSE", paint);
-
-        // Info
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Regular");
-        paint.set_font_size(16);
-        let text = "Click anywhere to resume. Press ESC to exit";
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
+        self.draw_generic_info(canvas, &heading, "");
     }
 
-    fn draw_end(&self, canvas: &mut Canvas) {
-        self.draw_bricks(canvas);
+    fn draw_paused(&self, canvas: &mut Canvas) {
+        self.draw_generic_info(canvas, "PAUSE", "Click anywhere to resume. Press ESC to exit");
+    }
 
-        // curtain
-        canvas.begin_path();
-        canvas.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 180)));
+    fn draw_game_over(&self, canvas: &mut Canvas) {
+        let score = format!("Score: {}", self.score);
 
-        // title
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Bold");
-        paint.set_font_size(80);
+        self.draw_generic_info(canvas, "Game Over", &score);
+    }
 
-        paint.set_stroke_width(4.0);
-        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) - 1.0, "NICE RUN!!!", paint);
+    fn draw_win(&self, canvas: &mut Canvas) {
+        let score = format!("Final score: {}", self.score);
 
-        paint.set_color(Color::rgb(143, 80, 49));
-        canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "NICE RUN!!!", paint);
-
-        // Info
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Regular");
-        paint.set_font_size(16);
-        let text = format!("Total score: {}", self.score);
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, &text, paint);
+        self.draw_generic_info(canvas, "All cleared!", &score);
     }
 
     fn draw_bricks(&self, canvas: &mut Canvas) {
@@ -431,20 +666,132 @@ impl Game {
             brick.draw(canvas);
         }
     }
+
+    fn draw_generic_info(&self, canvas: &mut Canvas, heading: &str, subtext: &str) {
+        self.draw_bricks(canvas);
+
+        // curtain
+        canvas.begin_path();
+        canvas.rect(0.0, 0.0, canvas.width(), canvas.height());
+        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 32)));
+
+        // title
+        let mut paint = Paint::color(Color::rgb(240, 240, 240));
+        paint.set_text_align(Align::Center);
+        paint.set_font_name("Roboto-Bold");
+        paint.set_font_size(80);
+
+        let offset = 30.0;
+
+        paint.set_stroke_width(4.0);
+        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+
+        paint.set_color(Color::rgb(143, 80, 49));
+        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset + 2.0, heading, paint);
+
+        // Info
+        let mut paint = Paint::color(Color::rgb(240, 240, 240));
+        paint.set_text_align(Align::Center);
+        paint.set_font_name("Roboto-Regular");
+        paint.set_font_size(16);
+        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset * 2.0, subtext, paint);
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum PowerupType {
+    Enlarge,
+    Shrink,
+    Slow,
+    Multiply,
+    Fast,
+    Live,
+}
+
+impl Distribution<PowerupType> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PowerupType {
+        match rng.gen_range(0, 7) {
+            0 => PowerupType::Enlarge,
+            1 => PowerupType::Shrink,
+            3 => PowerupType::Slow,
+            4 => PowerupType::Multiply,
+            5 => PowerupType::Fast,
+            6 => PowerupType::Live,
+            _ => PowerupType::Multiply,
+        }
+    }
+}
+
+struct Powerup {
+    ty: PowerupType,
+    rect: Rect
+}
+
+impl Powerup {
+    fn draw(&self, canvas: &mut Canvas) {
+        canvas.begin_path();
+        canvas.rounded_rect(
+            self.rect.origin.x,
+            self.rect.origin.y,
+            self.rect.size.width,
+            self.rect.size.height,
+            5.0,
+        );
+
+        canvas.stroke_path(Paint::color(Color::rgb(240, 240, 240)));
+
+        let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
+        text_paint.set_text_align(Align::Center);
+        text_paint.set_baseline(Baseline::Middle);
+        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_size(16);
+        canvas.fill_text(self.rect.center().x, self.rect.center().y - 3.0, &format!("{:?}", self.ty), text_paint);
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum BrickType {
+    Variant0,
+    Variant1,
+    Variant2,
+    Variant3,
+    Invincible,
+    Multihit(u8),
 }
 
 struct Brick {
-    id: u8,
+    brick_type: BrickType,
     destroyed: bool,
     rect: Rect,
 }
 
 impl Brick {
     fn new(id: u8, rect: Rect) -> Self {
+        let brick_type = match id {
+            0 => BrickType::Variant0,
+            1 => BrickType::Variant1,
+            2 => BrickType::Variant2,
+            3 => BrickType::Variant3,
+            4 => BrickType::Invincible,
+            5 => BrickType::Multihit(2),
+            _ => BrickType::Variant0,
+        };
+
         Self {
-            id: id,
+            brick_type: brick_type,
             destroyed: false,
             rect: rect
+        }
+    }
+
+    fn score(&self) -> u32 {
+        match self.brick_type {
+            BrickType::Variant0 => 40,
+            BrickType::Variant1 => 50,
+            BrickType::Variant2 => 60,
+            BrickType::Variant3 => 70,
+            BrickType::Invincible => 0,
+            BrickType::Multihit(_) => 20,
         }
     }
 
@@ -452,43 +799,65 @@ impl Brick {
         if self.destroyed { return }
 
         canvas.begin_path();
-        canvas.rect(self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height);
+        canvas.rounded_rect(self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height, 3.0);
 
-        let paint = Paint::color(match self.id {
-            1 => Color::rgb(220, 100, 0),
-            2 => Color::rgb(255, 255, 0),
-            3 => Color::rgb(0, 255, 0),
-            _ => return
+        let paint = Paint::color(match self.brick_type {
+            BrickType::Variant0 => Color::rgb(49, 136, 143),
+            BrickType::Variant1 => Color::rgb(143, 80, 49),
+            BrickType::Variant2 => Color::rgb(185, 155, 117),
+            BrickType::Variant3 => Color::rgb(211, 211, 211),
+            BrickType::Invincible => Color::rgb(79, 80, 75),
+            BrickType::Multihit(hits) => match hits {
+                2 => Color::rgb(152, 152, 152),
+                _ => Color::rgb(175, 175, 175),
+            }
         });
 
         canvas.fill_path(paint);
-        canvas.stroke_path(Paint::color(Color::black()));
+        canvas.stroke_path(Paint::color(Color::rgb(240, 240, 240)));
+
+        canvas.begin_path();
+        canvas.rounded_rect_varying(
+            self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height / 2.0,
+            3.0, 3.0, 15.0, 15.0
+        );
+        canvas.fill_path(Paint::color(Color::rgba(255, 255, 255, 50)));
     }
+}
+
+// Level commands
+enum Cmd {
+    Spac, // 1 brick space
+    Hspa, // half brick space
+    B(u8) // Brick Id
 }
 
 fn main() {
     let mut levels = Vec::new();
 
     levels.push(vec![
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5)],
+        vec![Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3)],
+        vec![Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2)],
+        vec![Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1)],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0)],
     ]);
 
     levels.push(vec![
-        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        vec![1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-        vec![1, 1, 0, 0, 0, 0, 0, 0, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::Spac],
+        vec![Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5)],
     ]);
 
     let window_size = glutin::dpi::PhysicalSize::new(800, 600);
@@ -536,7 +905,7 @@ fn main() {
                 let dpi_factor = windowed_context.window().scale_factor();
                 let size = windowed_context.window().inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.92));
+                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.15, 0.15, 0.12));
 
                 let now = Instant::now();
                 let dt = (now - prevt).as_secs_f32();
