@@ -431,21 +431,21 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.line_to(98.0, 35.0);
     canvas.line_to(2.0, 35.0);
     canvas.line_to(79.0, 90.0);
-    canvas.close();
+    canvas.close_path();
     canvas.fill_path(evenodd_fill);
 
     canvas.translate(100.0, 0.0);
-    
+
     let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
     nonzero_fill.set_fill_rule(FillRule::NonZero);
-    
+
     canvas.begin_path();
     canvas.move_to(50.0, 0.0);
     canvas.line_to(21.0, 90.0);
     canvas.line_to(98.0, 35.0);
     canvas.line_to(2.0, 35.0);
     canvas.line_to(79.0, 90.0);
-    canvas.close();
+    canvas.close_path();
 
     canvas.fill_path(nonzero_fill);
 

@@ -316,6 +316,16 @@ impl<T> Canvas<T> where T: Renderer {
         self.height
     }
 
+    /// Returns the with of the canvas
+    pub fn lastx(&self) -> f32 {
+        self.lastx
+    }
+
+    /// Returns the height of the canvas
+    pub fn lasty(&self) -> f32 {
+        self.lasty
+    }
+
     /// Tells the renderer to execute all drawing commands and clears the current internal state
     ///
     /// Call this at the end of rach frame.
@@ -568,7 +578,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Closes current sub-path with a line segment.
-    pub fn close(&mut self) {
+    pub fn close_path(&mut self) {
         self.append_verbs(&mut [Verb::Close]);
     }
 
@@ -1137,7 +1147,7 @@ mod tests {
         canvas.line_to(98.0, 35.0);
         canvas.line_to(2.0, 35.0);
         canvas.line_to(79.0, 90.0);
-        canvas.close();
+        canvas.close_path();
         canvas.fill_path(Paint::color(Color::rgb(100, 100, 100)));
 
         assert_eq!(canvas.path_cache.contours[0].convexity, Convexity::Concave);
