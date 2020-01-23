@@ -26,6 +26,7 @@ fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
+    //.with_multisampling(16)
     let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
@@ -49,6 +50,9 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
+    // font experiment
+    let font_data = std::fs::read("examples/assets/Roboto-Regular.ttf").unwrap();
+
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -61,6 +65,15 @@ fn main() {
                 WindowEvent::CursorMoved { device_id: _, position, ..} => {
                     mousex = position.x as f32;
                     mousey = position.y as f32;
+                }
+                WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
+                    glutin::event::MouseScrollDelta::LineDelta(_, y) => {
+                        let pt = canvas.transformed_point(mousex, mousey);
+                        canvas.translate(pt.0, pt.1);
+                        canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
+                        canvas.translate(-pt.0, -pt.1);
+                    },
+                    _ => ()
                 }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::S), state: ElementState::Pressed, .. }, .. } => {
                     if let Some(screenshot_image_id) = screenshot_image_id {
@@ -89,17 +102,20 @@ fn main() {
                 let t = start.elapsed().as_secs_f32();
 
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
+                //canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
+                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.95, 0.95, 0.95));
+
+
 
                 let height = size.height as f32;
                 let width = size.width as f32;
 
-                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
-
-                draw_fills(&mut canvas, width - 200.0, height - 100.0);
+                // draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                // draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                // draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                // draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                //
+                // draw_fills(&mut canvas, width - 200.0, height - 100.0);
 
                 perf.render(&mut canvas, 5.0, 5.0);
                 /*
@@ -111,6 +127,37 @@ fn main() {
                 draw_shadows(&mut canvas);
                 */
                 //draw_state_stack(&mut canvas);
+
+                let font = ttf_parser::Font::from_data(&font_data, 0).unwrap();
+
+                canvas.save();
+
+                let font_size = 12.0;
+                let units_per_em = font.units_per_em().expect("invalid units per em");
+                let scale = font_size / units_per_em as f32;
+                canvas.translate(10.0, 400.0);
+                canvas.scale(1.0, -1.0);
+                canvas.scale(scale, scale);
+
+                let text = "æPadscanvas.scale(1.0,-1.0);";
+
+                for c in text.chars() {
+                    let id = font.glyph_index(c).expect("Glyph not found");
+
+                    canvas.begin_path();
+                    font.outline_glyph(id, &mut canvas).expect("Cannot outline glyph");
+                    let mut paint = Paint::color(Color::rgb(0, 0, 0));
+                    paint.set_fill_rule(FillRule::EvenOdd);
+                    paint.set_stroke_width(50.0);
+                    //paint.set_shape_anti_alias(false);
+                    canvas.fill_path(paint);
+                    //canvas.stroke_path(paint);
+
+                    let xmetrics = font.glyph_hor_metrics(id).unwrap();
+                    canvas.translate(xmetrics.advance as f32, 0.0);
+                }
+
+                canvas.restore();
 
                 if false {
 
@@ -185,6 +232,7 @@ fn main() {
                 windowed_context.swap_buffers().unwrap();
             }
             Event::MainEventsCleared => {
+                //scroll = 1.0;
                 windowed_context.window().request_redraw()
             }
             _ => (),

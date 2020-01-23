@@ -25,6 +25,7 @@ use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
 
 pub(crate) mod geometry;
 use geometry::*;
+pub use geometry::Transform2D;
 
 mod paint;
 pub use paint::Paint;
@@ -333,9 +334,9 @@ impl<T> Canvas<T> where T: Renderer {
         self.renderer.render(&self.verts, &self.cmds);
         self.cmds.clear();
         self.verts.clear();
-        self.state_stack.clear();
+        //self.state_stack.clear();
         self.path_cache.clear();
-        self.save();
+        //self.save();
     }
 
     pub fn screenshot(&mut self) -> Option<DynamicImage> {
@@ -437,6 +438,11 @@ impl<T> Canvas<T> where T: Renderer {
         self.state_mut().transform.premultiply(&transform);
     }
 
+    pub fn set_transform(&mut self, t: Transform2D) {
+        //let transform = Transform2D([a, b, c, d, e, f]);
+        self.state_mut().transform = t;
+    }
+
     /// Translates the current coordinate system.
     pub fn translate(&mut self, x: f32, y: f32) {
         let mut t = Transform2D::identity();
@@ -475,6 +481,10 @@ impl<T> Canvas<T> where T: Renderer {
     /// Returns the current transformation matrix
     pub fn current_transform(&self) -> Transform2D {
         self.state().transform
+    }
+
+    pub fn transformed_point(&self, x: f32, y: f32) -> (f32, f32) {
+        self.state().transform.transform_point(x, y)
     }
 
     // Scissoring
@@ -1079,6 +1089,28 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         self.verbs.extend_from_slice(verbs);
+    }
+}
+
+impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.line_to(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.quad_to(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.bezier_to(x1, y1, x2, y2, x, y);
+    }
+
+    fn close(&mut self) {
+        self.close_path();
     }
 }
 
