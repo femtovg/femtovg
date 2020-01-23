@@ -860,6 +860,19 @@ fn main() {
         vec![Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5)],
     ]);
 
+    levels.push(vec![
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5), Cmd::B(5)],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3), Cmd::B(3)],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2), Cmd::B(2)],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1), Cmd::B(1)],
+        vec![Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac, Cmd::Spac],
+        vec![Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0), Cmd::B(0)],
+    ]);
+
     let window_size = glutin::dpi::PhysicalSize::new(800, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
