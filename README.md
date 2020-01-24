@@ -2,7 +2,7 @@
 Antialiased 2D vector drawing library written in rust.
 Ported from https://github.com/memononen/nanovg
 
-Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more rusty. Rendering is done via one OpenGl (ES) 3.0 + capable backend.
+Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more rusty. Rendering is done via one OpenGl (ES) 3.0+ capable backend.
 
 ## Features
 * [x] Anti-aliasing on the GPU without the use of multisampling

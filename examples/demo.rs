@@ -38,7 +38,7 @@ fn main() {
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
+    //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
 
     let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
