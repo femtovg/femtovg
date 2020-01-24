@@ -11,9 +11,12 @@ use image::{DynamicImage, GrayImage, Luma, GenericImage};
 
 use super::{ImageId, Renderer, ImageFlags, Paint, Align, Baseline};
 
-use freetype as ft;
+use harfbuzz_rs as hb;
+use self::hb::hb as hb_sys;
+use self::hb::{UnicodeBuffer, HarfbuzzObject};
 
-mod shaper;
+mod freetype;
+use self::freetype as ft;
 
 mod atlas;
 use atlas::Atlas;
@@ -27,6 +30,10 @@ const GLYPH_PADDING: u32 = 2;
 type Result<T> = std::result::Result<T, FontCacheError>;
 
 type PostscriptName = String;
+
+extern "C" {
+    pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
+}
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
 pub enum GlyphRenderStyle {
@@ -122,8 +129,8 @@ impl FontFace {
             id: id,
             ft_face: face,
             is_serif: is_serif,
-            is_italic: style_flags.contains(ft::face::StyleFlag::ITALIC),
-            is_bold: style_flags.contains(ft::face::StyleFlag::BOLD),
+            is_italic: style_flags.contains(ft::StyleFlag::ITALIC),
+            is_bold: style_flags.contains(ft::StyleFlag::BOLD),
             glyphs: Default::default()
         }
     }
@@ -196,8 +203,19 @@ impl FontCache {
 
         for (face_name, str_range) in faces {
             let face = self.faces.get_mut(&face_name).ok_or(FontCacheError::FontNotFound)?;
-
             face.ft_face.set_pixel_sizes(0, paint.font_size()).unwrap();
+
+            let hb_font = unsafe {
+                let raw_font = hb_ft_font_create_referenced(face.ft_face.raw_mut());
+                hb_sys::hb_ot_font_set_funcs(raw_font);
+                hb::Font::from_raw(raw_font)
+            };
+
+            let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
+            let output = hb::shape(&hb_font, buffer, &[]);
+
+            let positions = output.get_glyph_positions();
+            let infos = output.get_glyph_infos();
 
             let size_metrics = face.ft_face.size_metrics().unwrap();
 
@@ -207,17 +225,17 @@ impl FontCache {
             let itw = 1.0 / TEXTURE_SIZE as f32;
             let ith = 1.0 / TEXTURE_SIZE as f32;
 
-            let glyph_positions = shaper::shape(&face.ft_face, &text[str_range])?;
+            //let glyph_positions = shaper::shape(&face.ft_face, &text[str_range])?;
 
             // No subpixel positioning / full hinting
 
-            for position in glyph_positions {
-                let gid = position.glyph_index;
+            for (position, info) in positions.iter().zip(infos) {
+                let gid = info.codepoint;
                 //let cluster = info.cluster;
-                let x_advance = position.x_advance;
-                let y_advance = position.y_advance;
-                let x_offset = position.x_offset;
-                let y_offset = position.y_offset;
+                let x_advance = position.x_advance >> 6;
+                let y_advance = position.y_advance >> 6;
+                let x_offset = position.x_offset >> 6;
+                let y_offset = position.y_offset >> 6;
 
                 let glyph = Self::glyph(&mut self.textures, face, renderer, &self.stroker, paint, render_style, gid)?;
 
@@ -300,13 +318,13 @@ impl FontCache {
 
         // Load Freetype glyph slot and fill or stroke
 
-        face.ft_face.load_glyph(glyph_index, ft::face::LoadFlag::DEFAULT | ft::face::LoadFlag::NO_HINTING)?;
+        face.ft_face.load_glyph(glyph_index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
 
         let glyph_slot = face.ft_face.glyph();
         let mut glyph = glyph_slot.get_glyph()?;
 
         if let GlyphRenderStyle::Stroke { line_width } = render_style {
-            stroker.set(line_width as i64 * 32, ft::stroker::StrokerLineCap::Round, ft::stroker::StrokerLineJoin::Round, 0);
+            stroker.set(line_width as i64 * 32, ft::StrokerLineCap::Round, ft::StrokerLineJoin::Round, 0);
 
             glyph = glyph.stroke(stroker)?;
 
@@ -475,7 +493,6 @@ pub enum FontCacheError {
     NoFontsAdded,
     IoError(io::Error),
     FreetypeError(ft::Error),
-    ShaperError(shaper::ShaperError),
     ImageError(image::ImageError)
 }
 
@@ -494,12 +511,6 @@ impl From<io::Error> for FontCacheError {
 impl From<ft::Error> for FontCacheError {
     fn from(error: ft::Error) -> Self {
         Self::FreetypeError(error)
-    }
-}
-
-impl From<shaper::ShaperError> for FontCacheError {
-    fn from(error: shaper::ShaperError) -> Self {
-        Self::ShaperError(error)
     }
 }
 

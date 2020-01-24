@@ -15,4 +15,20 @@ fn main() {
     Registry::new(Api::Gles2, (3, 0), Profile::Core, Fallbacks::All, [])
         .write_bindings(GlobalGenerator, &mut file)
         .unwrap();
+
+    match pkg_config::find_library("freetype2") {
+        Ok(_) => return,
+        Err(_) => {
+            println!("cargo:rustc-link-lib=dylib=freetype");
+        }
+    }
+
+    // println!("cargo:rustc-link-lib=dylib=harfbuzz");
+    //
+    // match pkg_config::find_library("harfbuzz") {
+    //     Ok(_) => return,
+    //     Err(_) => {
+    //         println!("cargo:rustc-link-lib=dylib=harfbuzz");
+    //     }
+    // }
 }

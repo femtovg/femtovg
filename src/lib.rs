@@ -1092,6 +1092,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 }
 
+/*
 impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
     fn move_to(&mut self, x: f32, y: f32) {
         self.move_to(x, y);
@@ -1112,7 +1113,7 @@ impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
     fn close(&mut self) {
         self.close_path();
     }
-}
+}*/
 
 #[derive(Debug)]
 pub enum CanvasError {

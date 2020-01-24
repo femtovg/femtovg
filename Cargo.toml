@@ -14,15 +14,17 @@ edition = "2018"
 fnv = "1.0.6"
 bitflags = "1.2.1"
 image = "0.23.0-preview.0"
-freetype-rs = "0.23.0"
 unicode-normalization = "0.1.11"
-ttf-parser = "0.3.0"
+libc = "0.2.66"
+harfbuzz_rs = "1.0.1"
 
 [build-dependencies]
 gl_generator = "0.13"
+pkg-config = "0.3.11"
 
 [dev-dependencies]
 glutin = "0.22.0"
 euclid = "0.20.7"
 rand = "0.7"
 svg = "0.6.0"
+usvg = "*"
