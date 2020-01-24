@@ -2,7 +2,7 @@
 name = "gpucanvas"
 description = "Antialiased 2D vector drawing library"
 version = "0.1.0"
-license = "MIT"
+license = "MIT/Apache-2.0"
 readme = "README.md"
 authors = ["Peter Todorov <ptodorov@cytec.bg>"]
 keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
