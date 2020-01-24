@@ -4,9 +4,9 @@ use std::f32::consts::PI;
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Bounds};
+use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Verb, Winding, LineCap, LineJoin};
+use crate::{Path, Verb, Winding, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Convexity {
@@ -125,37 +125,40 @@ pub struct PathCache {
 
 impl PathCache {
 
-    pub fn set(&mut self, verbs: &[Verb], tess_tol: f32, dist_tol: f32) {
-        if self.contours.len() > 0 {
-            return;
-        }
+    pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
+        let mut cache = Self::default();
 
         // Convert commands to a set of contours
-        for verb in verbs {
+        for verb in path.verbs() {
             match verb {
                 Verb::MoveTo(x, y) => {
-                    self.add_contour();
-                    self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                    cache.add_contour();
+                    let (x, y) = transform.transform_point(*x, *y);
+                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    self.add_point(*x, *y, PointFlags::CORNER, dist_tol);
+                    let (x, y) = transform.transform_point(*x, *y);
+                    cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-                    if let Some(last) = self.points.last().copied() {
-                        self.tesselate_bezier(last.x, last.y, *c1x, *c1y, *c2x, *c2y, *x, *y, 0, PointFlags::CORNER, tess_tol, dist_tol);
+                    if let Some(last) = cache.points.last().copied() {
+                        let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
+                        let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
+                        let (x, y) = transform.transform_point(*x, *y);
+                        cache.tesselate_bezier(last.x, last.y, c1x, c1y, c2x, c2y, x, y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
                 Verb::Close => {
-                    self.last_contour().map(|contour| contour.closed = true);
+                    cache.last_contour().map(|contour| contour.closed = true);
                 }
                 Verb::Winding(winding) => {
-                    self.last_contour().map(|contour| contour.winding = *winding);
+                    cache.last_contour().map(|contour| contour.winding = *winding);
                 }
             }
         }
 
-        for contour in &mut self.contours {
-            let mut points = &mut self.points[contour.points.clone()];
+        for contour in &mut cache.contours {
+            let mut points = &mut cache.points[contour.points.clone()];
 
             let p0 = points.last().copied().unwrap();
             let p1 = points.first().copied().unwrap();
@@ -165,7 +168,7 @@ impl PathCache {
                 contour.points.end -= 1;
                 //p0 = points[path.count-1];
                 contour.closed = true;
-                points = &mut self.points[contour.points.clone()];
+                points = &mut cache.points[contour.points.clone()];
             }
 
             // Enforce winding.
@@ -195,20 +198,17 @@ impl PathCache {
                 p0.dy = p1.y - p0.y;
                 p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
 
-                self.bounds.minx = self.bounds.minx.min(p0.x);
-                self.bounds.miny = self.bounds.miny.min(p0.y);
-                self.bounds.maxx = self.bounds.maxx.max(p0.x);
-                self.bounds.maxy = self.bounds.maxy.max(p0.y);
+                cache.bounds.minx = cache.bounds.minx.min(p0.x);
+                cache.bounds.miny = cache.bounds.miny.min(p0.y);
+                cache.bounds.maxx = cache.bounds.maxx.max(p0.x);
+                cache.bounds.maxy = cache.bounds.maxy.max(p0.y);
             }
         }
 
-        self.contours.retain(|c| (c.points.end - c.points.start) > 1);
-    }
+        // TODO: maybe this can be done in the path instead
+        cache.contours.retain(|c| (c.points.end - c.points.start) > 1);
 
-    pub fn clear(&mut self) {
-        self.contours.clear();
-        self.points.clear();
-        self.bounds = Default::default();
+        cache
     }
 
     fn add_contour(&mut self) {

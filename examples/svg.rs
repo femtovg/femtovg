@@ -1,13 +1,13 @@
+use std::ops::Deref;
 use std::time::Instant;
 
 use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
-//use glutin::{GlRequest, Api};
 
-use svg::node::element::path::{Command, Data, Position};
-use svg::node::element::tag::{Path, Group, Type};
+use svg::node::element::path::{Command, Data};
+use svg::node::element::tag::{Path};
 use svg::parser::Event as SvgEvent;
 
 use gpucanvas::{
@@ -15,13 +15,8 @@ use gpucanvas::{
     Canvas,
     Color,
     Paint,
-    LineCap,
-    LineJoin,
-    FillRule,
-    Winding,
+    Path,
     ImageFlags,
-    Align,
-    //CompositeOperation,
     renderer::OpenGl
 };
 
@@ -30,7 +25,6 @@ fn main() {
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
     let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
-    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -39,8 +33,6 @@ fn main() {
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
-
-    //let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
     let mut screenshot_image_id = None;
 
@@ -51,6 +43,18 @@ fn main() {
     let mut mousey = 0.0;
 
     let mut perf = PerfGraph::new();
+
+    let tree = usvg::Tree::from_file("examples/assets/Ghostscript_Tiger.svg", &usvg::Options::default()).unwrap();
+
+    let xml_opt = usvg::XmlOptions {
+        use_single_quote: false,
+        indent: usvg::XmlIndent::Spaces(4),
+        attributes_indent: usvg::XmlIndent::Spaces(4),
+    };
+
+    let svg = tree.to_string(xml_opt);
+
+    let mut paths = render_svg(&svg);
 
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -89,145 +93,23 @@ fn main() {
                 let dpi_factor = windowed_context.window().scale_factor();
                 let size = windowed_context.window().inner_size();
 
-                let t = start.elapsed().as_secs_f32();
-
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
-                let height = size.height as f32;
-                let width = size.width as f32;
-
-                let svg = svg::open("examples/assets/Ghostscript_Tiger.svg").unwrap();
-                //let svg = svg::open("examples/assets/test.svg").unwrap();
-
                 canvas.save();
-                canvas.translate(canvas.width() / 2.0, canvas.height() / 2.0);
+                canvas.translate(200.0, 200.0);
 
-                let mut fill_paint = None;
-                let mut stroke_paint = None;
+                for (path, fill, stroke) in &mut paths {
+                    if let Some(fill) = fill {
+                        canvas.fill_path(path, *fill);
+                    }
 
-                for event in svg {
-                    match event {
-                        SvgEvent::Tag(Group, Type::Start, attributes) => {
-                            if let Some(fill) = attributes.get("fill") {
-                                fill_paint = Some(Paint::color(Color::hex(fill)));
-                            } else {
-                                fill_paint = None;
-                            }
-
-                            if let Some(stroke) = attributes.get("fill") {
-                                stroke_paint = Some(Paint::color(Color::hex(stroke)));
-                            } else {
-                                stroke_paint = None;
-                            }
-
-                            if let Some(stroke_width) = attributes.get("stroke-width") {
-                                if let Some(stroke_paint) = stroke_paint.as_mut() {
-                                    stroke_paint.set_stroke_width(stroke_width.parse().unwrap());
-                                }
-                            }
-                        }
-                        SvgEvent::Tag(Group, Type::End, _) => {
-                            //dbg!("asd");
-                            fill_paint = None;
-                            stroke_paint = None;
-                        }
-                        SvgEvent::Tag(Path, _, attributes) => {
-                            let data = attributes.get("d").unwrap();
-                            let data = Data::parse(data).unwrap();
-
-                            //dbg!(attributes);
-
-                            canvas.begin_path();
-
-                            //let mut offset_x = 0.0;
-                            //let mut offset_y = 0.0;
-
-                            let mut prevcx = 0.0;
-                            let mut prevcy = 0.0;
-
-                            for command in data.iter() {
-                                //dbg!(command);
-                                match command {
-                                    Command::Move(pos, par) => {
-                                        match pos {
-                                            Position::Relative => canvas.move_to(par[0], par[1]),
-                                            Position::Absolute => canvas.move_to(par[0], par[1]),
-                                        }
-                                        //offset_x = par[0];
-                                        //offset_y = par[1];
-                                    }
-                                    Command::Line(pos, par) => match pos {
-                                        Position::Relative => canvas.line_to(canvas.lastx() + par[0], canvas.lasty() + par[1]),
-                                        Position::Absolute => canvas.line_to(par[0], par[1]),
-                                    }
-                                    Command::CubicCurve(pos, par) => {
-                                        //dbg!(_pos);
-                                        for points in par.chunks_exact(6) {
-                                            match pos {
-                                                Position::Relative => {
-                                                    canvas.bezier_to(canvas.lastx() + points[0], canvas.lasty() + points[1], canvas.lastx() + points[2], canvas.lasty() + points[3], canvas.lastx() + points[4], canvas.lasty() + points[5]);
-                                                    prevcx = points[2];
-                                                    prevcy = points[3];
-                                                }
-                                                Position::Absolute => {
-                                                    canvas.bezier_to(points[0], points[1], points[2], points[3], points[4], points[5]);
-                                                    prevcx = points[2];
-                                                    prevcy = points[3];
-                                                }
-                                            }
-                                            //canvas.line_to(offset_x + points[4], offset_y + points[5]);
-                                        }
-                                    }
-                                    Command::SmoothCubicCurve(pos, par) => {
-                                        for points in par.chunks_exact(4) {
-                                            let lastx = canvas.lastx();
-                                            let lasty = canvas.lasty();
-
-                                            match pos {
-                                                Position::Relative => {
-                                                    canvas.bezier_to(
-                                                        canvas.lastx() + (2.0*lastx-prevcx),
-                                                        canvas.lasty() + (2.0*lasty-prevcy),
-                                                        canvas.lastx() + points[0],
-                                                        canvas.lasty() + points[1],
-                                                        canvas.lastx() + points[2],
-                                                        canvas.lasty() + points[3]
-                                                    );
-
-                                                    prevcx = points[0];
-                                                    prevcy = points[1];
-                                                }
-                                                Position::Absolute => {
-                                                    canvas.bezier_to(2.0*lastx-prevcx, 2.0*lasty-prevcy, points[0], points[1], points[2], points[3]);
-                                                    prevcx = points[0];
-                                                    prevcy = points[1];
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Command::Close => canvas.close_path(),
-                                    _ => {}
-                                }
-                            }
-
-
-
-                            if let Some(stroke) = stroke_paint {
-                                canvas.stroke_path(stroke);
-                            }
-
-                            if let Some(paint) = fill_paint {
-                                canvas.fill_path(paint);
-                            }
-                        }
-                        _ => {}
+                    if let Some(stroke) = stroke {
+                        canvas.stroke_path(path, *stroke);
                     }
                 }
 
                 canvas.restore();
-
-                //dbg!("asd");
 
                 perf.render(&mut canvas, 5.0, 5.0);
                 canvas.flush();
@@ -239,6 +121,65 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn render_svg(svg: &str) -> Vec<(Path, Option<Paint<'static>>, Option<Paint<'static>>)>{
+    let svg = svg::read(std::io::Cursor::new(&svg)).unwrap();
+
+    let mut paths = Vec::new();
+
+    for event in svg {
+
+        match event {
+            SvgEvent::Tag(Path, _, attributes) => {
+                let data = attributes.get("d").unwrap();
+                let data = Data::parse(data).unwrap();
+
+                let mut path = Path::new();
+
+                for command in data.iter() {
+                    match command {
+                        Command::Move(_pos, par) => path.move_to(par[0], par[1]),
+                        Command::Line(_pos, par) =>  path.line_to(par[0], par[1]),
+                        Command::CubicCurve(_pos, par) => {
+                            for points in par.chunks_exact(6) {
+                                path.bezier_to(points[0], points[1], points[2], points[3], points[4], points[5]);
+                            }
+                        }
+                        Command::Close => path.close(),
+                        _ => {}
+                    }
+                }
+
+                let fill = if let Some(fill) = attributes.get("fill") {
+                    Some(Paint::color(Color::hex(fill)))
+                } else {
+                    None
+                };
+
+                let stroke = if let Some(stroke) = attributes.get("stroke") {
+                    if  "none" != stroke.deref() {
+                        let mut stroke_paint = Paint::color(Color::hex(stroke));
+
+                        if let Some(stroke_width) = attributes.get("stroke-width") {
+                            stroke_paint.set_stroke_width(stroke_width.parse().unwrap());
+                        }
+
+                        Some(stroke_paint)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                paths.push((path, fill, stroke));
+            }
+            _ => {}
+        }
+    }
+
+    paths
 }
 
 struct PerfGraph {
@@ -271,23 +212,23 @@ impl PerfGraph {
         let w = 200.0;
         let h = 35.0;
 
-        canvas.begin_path();
-        canvas.rect(x, y, w, h);
-        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 128)));
+        let mut path = Path::new();
+        path.rect(x, y, w, h);
+        canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 128)));
 
-        canvas.begin_path();
-        canvas.move_to(x, y + h);
+        let mut path = Path::new();
+        path.move_to(x, y + h);
 
         for i in 0..self.history_count {
             let mut v = 1.0 / (0.00001 + self.values[(self.head+i) % self.history_count]);
 			if v > 80.0 { v = 80.0; }
 			let vx = x + (i as f32 / (self.history_count-1) as f32) * w;
 			let vy = y + h - ((v / 80.0) * h);
-			canvas.line_to(vx, vy);
+			path.line_to(vx, vy);
         }
 
-        canvas.line_to(x+w, y+h);
-        canvas.fill_path(Paint::color(Color::rgba(255, 192, 0, 128)));
+        path.line_to(x+w, y+h);
+        canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(16);

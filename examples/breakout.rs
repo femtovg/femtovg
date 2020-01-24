@@ -20,6 +20,7 @@ use gpucanvas::{
     Align,
     Baseline,
     ImageId,
+    Path,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -472,11 +473,11 @@ impl Game {
         // draw background
         let step_size_x = canvas.width() / 50.0;
 
-        canvas.begin_path();
+        let mut path = Path::new();
 
         for i in 0..50 {
-            canvas.move_to(i as f32 * step_size_x, 0.0);
-            canvas.line_to(i as f32 * step_size_x, canvas.height());
+            path.move_to(i as f32 * step_size_x, 0.0);
+            path.line_to(i as f32 * step_size_x, canvas.height());
         }
 
         let paint = Paint::radial_gradient(
@@ -487,7 +488,7 @@ impl Game {
             Color::rgb(90, 90, 90),
             Color::rgb(30, 30, 30),
         );
-        canvas.stroke_path(paint);
+        canvas.stroke_path(&mut path, paint);
 
         match self.state {
             State::TitleScreen => self.draw_title_screen(canvas),
@@ -501,19 +502,19 @@ impl Game {
 
     fn draw_title_screen(&self, canvas: &mut Canvas) {
         // curtain
-        canvas.begin_path();
-        canvas.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 180)));
+        let mut path = Path::new();
+        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 180)));
 
         // rust logo
         let logo_pos = Point::new((canvas.width() / 2.0) - 50.0, (canvas.height() / 2.0) - 180.0);
         let logo_paint = Paint::image(self.logo_image_id, logo_pos.x, logo_pos.y, 100.0, 100.0, 0.0, 1.0);
-        canvas.begin_path();
-        canvas.circle(logo_pos.x + 50.0, logo_pos.y + 50.0, 60.0);
-        //canvas.fill_path(Paint::color(Color::rgba(200, 200, 200, 200)));
-        canvas.begin_path();
-        canvas.rect(logo_pos.x, logo_pos.y, 100.0, 100.0);
-        canvas.fill_path(logo_paint);
+        let mut path = Path::new();
+        path.circle(logo_pos.x + 50.0, logo_pos.y + 50.0, 60.0);
+        //canvas.fill_path(&mut path, Paint::color(Color::rgba(200, 200, 200, 200)));
+        let mut path = Path::new();
+        path.rect(logo_pos.x, logo_pos.y, 100.0, 100.0);
+        canvas.fill_path(&mut path, logo_paint);
 
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -549,8 +550,8 @@ impl Game {
             Color::rgba(255,255,255,40)
         );
 
-        canvas.begin_path();
-        canvas.rounded_rect_varying(
+        let mut path = Path::new();
+        path.rounded_rect_varying(
             self.paddle_rect.origin.x,
             self.paddle_rect.origin.y,
             side_size,
@@ -559,7 +560,7 @@ impl Game {
             0.0, 0.0,
             self.paddle_rect.size.height / 2.0,
         );
-        canvas.rounded_rect_varying(
+        path.rounded_rect_varying(
             self.paddle_rect.origin.x + self.paddle_rect.size.width - side_size,
             self.paddle_rect.origin.y,
             side_size,
@@ -569,21 +570,21 @@ impl Game {
             self.paddle_rect.size.height / 2.0,
             0.0
         );
-        canvas.fill_path(Paint::color(Color::rgb(119,123,126)));
-        canvas.stroke_path(highlight);
+        canvas.fill_path(&mut path, Paint::color(Color::rgb(119,123,126)));
+        canvas.stroke_path(&mut path, highlight);
 
-        canvas.begin_path();
-        canvas.rect(
+        let mut path = Path::new();
+        path.rect(
             self.paddle_rect.origin.x + side_size + 3.0,
             self.paddle_rect.origin.y,
             self.paddle_rect.size.width - (side_size * 2.0) - 6.0,
             self.paddle_rect.size.height
         );
-        canvas.fill_path(Paint::color(Color::rgb(119,123,126)));
-        canvas.stroke_path(highlight);
+        canvas.fill_path(&mut path, Paint::color(Color::rgb(119,123,126)));
+        canvas.stroke_path(&mut path, highlight);
 
-        canvas.begin_path();
-        canvas.rounded_rect_varying(
+        let mut path = Path::new();
+        path.rounded_rect_varying(
             self.paddle_rect.origin.x,
             self.paddle_rect.origin.y,
             self.paddle_rect.size.width,
@@ -593,13 +594,13 @@ impl Game {
             25.0, 25.0
         );
 
-        canvas.fill_path(highlight);
+        canvas.fill_path(&mut path, highlight);
 
         // Ball
         for ball in &self.balls {
-            canvas.begin_path();
-            canvas.circle(ball.position.x, ball.position.y, ball.radius);
-            canvas.fill_path(Paint::color(Color::rgb(183, 65, 14)));
+            let mut path = Path::new();
+            path.circle(ball.position.x, ball.position.y, ball.radius);
+            canvas.fill_path(&mut path, Paint::color(Color::rgb(183, 65, 14)));
 
             let bg = Paint::linear_gradient(
                 ball.position.x,
@@ -610,9 +611,9 @@ impl Game {
                 Color::rgba(255,255,255,16)
             );
 
-            canvas.begin_path();
-            canvas.circle(ball.position.x, ball.position.y - ball.radius / 2.0, ball.radius / 2.0);
-            canvas.fill_path(bg);
+            let mut path = Path::new();
+            path.circle(ball.position.x, ball.position.y - ball.radius / 2.0, ball.radius / 2.0);
+            canvas.fill_path(&mut path, bg);
         }
 
         // powerups
@@ -671,9 +672,9 @@ impl Game {
         self.draw_bricks(canvas);
 
         // curtain
-        canvas.begin_path();
-        canvas.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(Paint::color(Color::rgba(0, 0, 0, 32)));
+        let mut path = Path::new();
+        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 32)));
 
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -729,8 +730,8 @@ struct Powerup {
 
 impl Powerup {
     fn draw(&self, canvas: &mut Canvas) {
-        canvas.begin_path();
-        canvas.rounded_rect(
+        let mut path = Path::new();
+        path.rounded_rect(
             self.rect.origin.x,
             self.rect.origin.y,
             self.rect.size.width,
@@ -738,7 +739,7 @@ impl Powerup {
             5.0,
         );
 
-        canvas.stroke_path(Paint::color(Color::rgb(240, 240, 240)));
+        canvas.stroke_path(&mut path, Paint::color(Color::rgb(240, 240, 240)));
 
         let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
         text_paint.set_text_align(Align::Center);
@@ -798,8 +799,8 @@ impl Brick {
     fn draw(&self, canvas: &mut Canvas) {
         if self.destroyed { return }
 
-        canvas.begin_path();
-        canvas.rounded_rect(self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height, 3.0);
+        let mut path = Path::new();
+        path.rounded_rect(self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height, 3.0);
 
         let paint = Paint::color(match self.brick_type {
             BrickType::Variant0 => Color::rgb(49, 136, 143),
@@ -813,15 +814,15 @@ impl Brick {
             }
         });
 
-        canvas.fill_path(paint);
-        canvas.stroke_path(Paint::color(Color::rgb(240, 240, 240)));
+        canvas.fill_path(&mut path, paint);
+        canvas.stroke_path(&mut path, Paint::color(Color::rgb(240, 240, 240)));
 
-        canvas.begin_path();
-        canvas.rounded_rect_varying(
+        let mut path = Path::new();
+        path.rounded_rect_varying(
             self.rect.origin.x, self.rect.origin.y, self.rect.size.width, self.rect.size.height / 2.0,
             3.0, 3.0, 15.0, 15.0
         );
-        canvas.fill_path(Paint::color(Color::rgba(255, 255, 255, 50)));
+        canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 50)));
     }
 }
 
