@@ -186,7 +186,7 @@ impl PathCache {
 
             // TODO: this is doggy and fishy.
             for i in 0..(contour.points.end - contour.points.start) {
-                let p1 = points[i];
+                let p1 = points.get(i).copied().unwrap();
 
                 let p0 = if i == 0 {
                     points.last_mut().unwrap()
@@ -476,12 +476,12 @@ impl PathCache {
             for i in 0..points.len() {
 
                 let p0 = if i == 0 {
-                    points.get(points.len()-1).cloned().unwrap()
+                    points.get(points.len()-1).copied().unwrap()
                 } else {
-                    points.get(i-1).cloned().unwrap()
+                    points.get(i-1).copied().unwrap()
                 };
 
-                let p1 = &mut points[i];
+                let p1 = points.get_mut(i).unwrap();
 
                 let dlx0 = p0.dy;
                 let dly0 = -p0.dx;

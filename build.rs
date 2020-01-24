@@ -16,19 +16,14 @@ fn main() {
         .write_bindings(GlobalGenerator, &mut file)
         .unwrap();
 
-    match pkg_config::find_library("freetype2") {
+    let ft_probe = pkg_config::Config::new()
+        .statik(true)
+        .probe("freetype2");
+
+    match ft_probe {
         Ok(_) => return,
         Err(_) => {
-            println!("cargo:rustc-link-lib=dylib=freetype");
+            println!("cargo:rustc-link-lib=static=freetype");
         }
     }
-
-    // println!("cargo:rustc-link-lib=dylib=harfbuzz");
-    //
-    // match pkg_config::find_library("harfbuzz") {
-    //     Ok(_) => return,
-    //     Err(_) => {
-    //         println!("cargo:rustc-link-lib=dylib=harfbuzz");
-    //     }
-    // }
 }
