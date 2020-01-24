@@ -36,8 +36,6 @@ pub use path::{Path, Winding, Verb};
 mod path_cache;
 use path_cache::{PathCache, Convexity};
 
-// TODO: path_contains_point method
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
     EvenOdd,

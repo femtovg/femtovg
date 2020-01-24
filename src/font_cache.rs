@@ -21,9 +21,6 @@ use self::freetype as ft;
 mod atlas;
 use atlas::Atlas;
 
-// TODO: Color fonts
-// TODO: Vertical Text Align
-
 const TEXTURE_SIZE: u32 = 512;
 const GLYPH_PADDING: u32 = 2;
 
