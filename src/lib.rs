@@ -227,7 +227,7 @@ pub struct Canvas<T> {
     renderer: T,
     font_cache: FontCache,
     state_stack: Vec<State>,
-    cmds: Vec<Command>,
+    commands: Vec<Command>,
     verts: Vec<Vertex>,
     fringe_width: f32,
     device_px_ratio: f32,
@@ -246,7 +246,7 @@ impl<T> Canvas<T> where T: Renderer {
             renderer: renderer,
             font_cache: font_manager,
             state_stack: Default::default(),
-            cmds: Default::default(),
+            commands: Default::default(),
             verts: Default::default(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
@@ -272,7 +272,11 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
-        self.renderer.clear_rect(x, y, width, height, color);
+        let cmd = Command::new(CommandType::ClearRect {
+            x, y, width, height, color
+        });
+
+        self.commands.push(cmd);
     }
 
     /// Returns the with of the canvas
@@ -289,8 +293,8 @@ impl<T> Canvas<T> where T: Renderer {
     ///
     /// Call this at the end of rach frame.
     pub fn flush(&mut self) {
-        self.renderer.render(&self.verts, &self.cmds);
-        self.cmds.clear();
+        self.renderer.render(&self.verts, &self.commands);
+        self.commands.clear();
         self.verts.clear();
         //self.state_stack.clear();
         //self.save();
@@ -583,7 +587,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.triangles_verts = Some((offset, 4));
         }
 
-        self.cmds.push(cmd);
+        self.commands.push(cmd);
     }
 
     /// Fills the current path with current stroke style.
@@ -650,7 +654,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.drawables.push(drawable);
         }
 
-        self.cmds.push(cmd);
+        self.commands.push(cmd);
     }
 
     // Text
@@ -717,8 +721,12 @@ impl<T> Canvas<T> where T: Renderer {
         let text_color = if let PaintFlavor::Color(color) = paint.flavor {
             color
         } else {
-            Color::black()
+            Color::white()
         };
+
+        if text == "Search" {
+            //dbg!("search");
+        }
 
         for cmd in &layout.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
@@ -763,7 +771,7 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
-        self.cmds.push(cmd);
+        self.commands.push(cmd);
 
         self.verts.extend_from_slice(verts);
     }

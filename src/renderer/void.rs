@@ -11,8 +11,7 @@ use super::{
     Command,
     ImageFlags,
     Vertex,
-    ImageId,
-    Color
+    ImageId
 };
 
 /// Void renderer used for testing
@@ -20,8 +19,7 @@ pub struct Void;
 
 impl Renderer for Void {
     type Error = VoidError;
-    
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {}
+
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]) {}

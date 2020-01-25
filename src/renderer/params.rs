@@ -67,6 +67,8 @@ impl Params {
                 gpu_paint.extent[0] = width;
                 gpu_paint.extent[1] = height;
 
+                //dbg!(tint.premultiplied().to_array());
+
                 gpu_paint.inner_col = tint.premultiplied().to_array();
                 gpu_paint.outer_col = tint.premultiplied().to_array();
 

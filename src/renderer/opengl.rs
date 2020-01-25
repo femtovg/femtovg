@@ -303,19 +303,20 @@ impl OpenGl {
 
         self.check_error("set_uniforms texture");
     }
+
+    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
+        unsafe {
+            gl::Enable(gl::SCISSOR_TEST);
+            gl::Scissor(x as i32, self.view[1] as i32 - (height as i32 + y as i32), width as i32, height as i32);
+            gl::ClearColor(color.r, color.g, color.b, color.a);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+            gl::Disable(gl::SCISSOR_TEST);
+        }
+    }
 }
 
 impl Renderer for OpenGl {
     type Error = OpenGlError;
-    
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
-        unsafe {
-            gl::Viewport(x as i32, y as i32, width as i32, height as i32);
-            gl::ClearColor(color.r, color.g, color.b, color.a);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
-            gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
-        }
-    }
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -374,6 +375,9 @@ impl Renderer for OpenGl {
                 CommandType::Stroke { params } => self.stroke(cmd, params),
                 CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(cmd, params1, params2),
                 CommandType::Triangles { params } => self.triangles(cmd, params),
+                CommandType::ClearRect { x, y, width, height, color } => {
+                    self.clear_rect(x, y, width, height, color);
+                }
             }
         }
 
@@ -460,11 +464,11 @@ impl Renderer for OpenGl {
 
                 texture.tex_type = TextureType::Rgba;
             },
-            DynamicImage::ImageLumaA8(_) => 
+            DynamicImage::ImageLumaA8(_) =>
                 return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageLumaA8"))),
-            DynamicImage::ImageBgr8(_) => 
+            DynamicImage::ImageBgr8(_) =>
                 return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgr8"))),
-            DynamicImage::ImageBgra8(_) => 
+            DynamicImage::ImageBgra8(_) =>
                 return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgra8"))),
         }
 

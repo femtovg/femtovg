@@ -339,6 +339,17 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     canvas.fill_text(x + h * 0.55, y + h * 0.18, "\u{1F50D}", text_paint);
+
+    let mut path = Path::new();
+    path.rect(x, y, w, h / 3.0);
+    //canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 255)));
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
+    text_paint.set_font_size(20);
+    text_paint.set_font_name("Roboto-Regular");
+    //text_paint.set_color(Color::rgba(255, 255, 255, 40));
+    text_paint.set_text_align(Align::Left);
+    canvas.fill_text(x + h * 1.5, y + h * 0.5, title, text_paint);
 }
 
 fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {

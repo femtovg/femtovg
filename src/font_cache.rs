@@ -495,7 +495,7 @@ pub enum FontCacheError {
 
 impl fmt::Display for FontCacheError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "font manager error")
+        write!(f, "font cache error")
     }
 }
 

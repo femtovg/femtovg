@@ -31,6 +31,13 @@ pub struct Drawable {
 
 #[derive(Debug)]
 pub enum CommandType {
+    ClearRect {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        color: Color
+    },
     ConvexFill {
         params: Params
     },
@@ -78,7 +85,6 @@ impl Command {
 pub trait Renderer {
     type Error: error::Error;
     
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color);
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
