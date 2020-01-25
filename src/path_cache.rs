@@ -784,3 +784,28 @@ fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         verts.push(Vertex::new(rx1, ry1, ru, 1.0));
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn self_intersecting_polygon_is_concave() {
+        // star
+        let mut path = Path::new();
+        path.move_to(50.0, 0.0);
+        path.line_to(21.0, 90.0);
+        path.line_to(98.0, 35.0);
+        path.line_to(2.0, 35.0);
+        path.line_to(79.0, 90.0);
+        path.close();
+
+        let transform = Transform2D::identity();
+
+        let mut path_cache = PathCache::new(&path, &transform, 0.25, 0.01);
+        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, 1.0);
+
+        assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
+    }
+}

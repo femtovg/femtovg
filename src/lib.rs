@@ -724,10 +724,6 @@ impl<T> Canvas<T> where T: Renderer {
             Color::white()
         };
 
-        if text == "Search" {
-            //dbg!("search");
-        }
-
         for cmd in &layout.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
@@ -840,50 +836,3 @@ impl From<FontCacheError> for CanvasError {
 }
 
 impl Error for CanvasError {}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use super::renderer::*;
-
-    #[test]
-    fn path_with_one_move_to_does_not_panic() {
-        let mut canvas = Canvas::new(Void).unwrap();
-
-        let mut path = Path::new();
-        path.move_to(10.0, 10.0);
-        canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-        canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    }
-
-    #[test]
-    fn path_with_two_lines_to_does_not_panic() {
-        let mut canvas = Canvas::new(Void).unwrap();
-
-        let mut path = Path::new();
-        path.line_to(10.0, 10.0);
-        path.line_to(10.0, 10.0);
-        canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-        canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    }
-
-    #[test]
-    fn self_intersecting_polygon_is_concave() {
-        // star
-        let mut path = Path::new();
-        path.move_to(50.0, 0.0);
-        path.line_to(21.0, 90.0);
-        path.line_to(98.0, 35.0);
-        path.line_to(2.0, 35.0);
-        path.line_to(79.0, 90.0);
-        path.close();
-
-        let transform = Transform2D::identity();
-
-        let mut path_cache = PathCache::new(&path, &transform, 0.25, 0.01);
-        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, 1.0);
-
-        assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
-    }
-}

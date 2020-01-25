@@ -344,7 +344,8 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
     path.rect(x, y, w, h / 3.0);
     //canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 255)));
 
-    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
+    // TODO: This color looks black, but it must be lighter
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 40));
     text_paint.set_font_size(20);
     text_paint.set_font_name("Roboto-Regular");
     //text_paint.set_color(Color::rgba(255, 255, 255, 40));

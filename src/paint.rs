@@ -14,7 +14,6 @@ pub(crate) enum PaintFlavor {
         width: f32,
         height: f32,
         angle: f32,
-        alpha: f32,
         tint: Color
     },
     LinearGradient {
@@ -142,7 +141,7 @@ impl<'a> Paint<'a> {
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
-        new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, alpha, tint: Color::white() };
+        new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, tint: Color::rgbaf(1.0, 1.0, 1.0, alpha) };
         new
     }
 
@@ -354,8 +353,8 @@ impl<'a> Paint<'a> {
             PaintFlavor::Color(color) => {
                 color.a *= a;
             }
-            PaintFlavor::Image { alpha, ..} => {
-                *alpha *= a;
+            PaintFlavor::Image { tint, ..} => {
+                tint.a *= a;
             }
             PaintFlavor::LinearGradient { start_color, end_color, ..} => {
                 start_color.a *= a;
