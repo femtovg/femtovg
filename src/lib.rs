@@ -513,6 +513,14 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Paths
 
+    pub fn contains_point(&mut self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
+        let transform = self.state().transform;
+
+        let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+
+        path_cache.contains_point(x, y, fill_rule)
+    }
+
     /// Fills the current path with current fill style.
     pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
         //self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);

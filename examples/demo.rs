@@ -115,7 +115,7 @@ fn main() {
                 draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
 
                 draw_widths(&mut canvas, 10.0, 50.0, 30.0);
-                draw_fills(&mut canvas, width - 200.0, height - 100.0);
+                draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
                 draw_caps(&mut canvas, 10.0, 300.0, 30.0);
 
                 draw_scissor(&mut canvas, 50.0, height - 80.0, t);
@@ -406,7 +406,7 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
     canvas.restore();
 }
 
-fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, mousey: f32) {
     canvas.save();
     canvas.translate(x, y);
 
@@ -424,7 +424,7 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
     canvas.translate(100.0, 0.0);
 
-    let mut nonzero_fill = Paint::color(Color::rgb(220, 220, 220));
+    let mut nonzero_fill = Paint::color(Color::rgba(220, 220, 220, 120));
     nonzero_fill.set_fill_rule(FillRule::NonZero);
 
     let mut path = Path::new();
@@ -434,6 +434,10 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     path.line_to(2.0, 35.0);
     path.line_to(79.0, 90.0);
     path.close();
+
+    if canvas.contains_point(&mut path, mousex, mousey, FillRule::NonZero) {
+        nonzero_fill.set_color(Color::rgb(220, 220, 220));
+    }
 
     canvas.fill_path(&mut path, nonzero_fill);
 

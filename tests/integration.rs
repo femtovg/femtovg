@@ -4,11 +4,12 @@ use gpucanvas::{
     Path,
     Paint,
     Color,
+    Winding,
     renderer::Void
 };
 
 #[test]
-fn path_with_one_move_to_does_not_panic() {
+fn path_with_single_move_to() {
     let mut canvas = Canvas::new(Void).unwrap();
 
     let mut path = Path::new();
@@ -18,7 +19,7 @@ fn path_with_one_move_to_does_not_panic() {
 }
 
 #[test]
-fn path_with_two_lines_to_does_not_panic() {
+fn path_with_two_lines() {
     let mut canvas = Canvas::new(Void).unwrap();
 
     let mut path = Path::new();
@@ -79,6 +80,41 @@ fn path_with_points_around_zero() {
     );
 
     path.close();
+
+    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+}
+
+#[test]
+fn degenerate_stroke() {
+    let mut canvas = Canvas::new(Void).unwrap();
+
+    let mut path = Path::new();
+    path.move_to(0.5, 0.5);
+    path.line_to(2., 2.);
+    path.line_to(2., 2.);
+    path.line_to(4., 2.);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+}
+
+#[test]
+fn degenerate_arc_to() {
+    let mut canvas = Canvas::new(Void).unwrap();
+
+    let mut path = Path::new();
+    path.move_to(10.0, 10.0);
+    path.arc_to(10.0, 10.0001, 10.0, 10.0001, 2.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+}
+
+#[test]
+fn degenerate_arc() {
+    let mut canvas = Canvas::new(Void).unwrap();
+
+    let mut path = Path::new();
+    path.move_to(10.0, 10.0);
+    path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Winding::CW);
 
     canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
     canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));

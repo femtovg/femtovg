@@ -6,7 +6,7 @@ use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Path, Verb, Winding, LineCap, LineJoin};
+use crate::{Path, Verb, Winding, LineCap, LineJoin, FillRule};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Convexity {
@@ -245,6 +245,31 @@ impl PathCache {
 
         self.points.push(point);
         point_range.end += 1;
+    }
+
+    pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
+        // Early out if point is outside the bounding rectangle
+        // TODO: Make this a method on Bounds
+        if x < self.bounds.minx || x > self.bounds.maxx || y < self.bounds.miny || y > self.bounds.maxy {
+            return false;
+        }
+
+        let mut c = false;
+
+        // TODO: EvenOdd - holes are not handled
+
+        // EvenOdd
+        for contour in &self.contours {
+            for (p0, p1) in contour.point_pairs(&self.points) {
+                if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
+                    c = !c;
+                }
+            }
+        }
+
+        // TODO: NonZero
+
+        c
     }
 
     fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: PointFlags, tess_tol: f32, dist_tol: f32) {
