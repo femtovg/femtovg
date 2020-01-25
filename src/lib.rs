@@ -55,7 +55,7 @@ pub enum Baseline {
     /// The text baseline is the middle of the em square.
     Middle,
     /// The text baseline is the normal alphabetic baseline. Default value.
-    Alphabetic
+    Alphabetic,
 }
 
 impl Default for Baseline {

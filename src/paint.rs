@@ -321,7 +321,7 @@ impl<'a> Paint<'a> {
     /// Sets the text vertical alignment for this paint
     ///
     /// Only has effect on canvas text operations
-    pub fn set_baseline(&mut self, align: Baseline) {
+    pub fn set_text_baseline(&mut self, align: Baseline) {
         self.text_baseline = align;
     }
 

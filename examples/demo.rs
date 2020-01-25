@@ -19,6 +19,7 @@ use gpucanvas::{
     Winding,
     ImageFlags,
     Align,
+    Baseline,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -38,6 +39,7 @@ fn main() {
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    canvas.add_font("examples/assets/entypo.ttf");
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
 
     let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
@@ -102,9 +104,6 @@ fn main() {
 
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
-                //canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.95, 0.95, 0.95));
-
-
 
                 let height = size.height as f32;
                 let width = size.width as f32;
@@ -113,8 +112,13 @@ fn main() {
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
 
+                draw_widths(&mut canvas, 10.0, 50.0, 30.0);
                 draw_fills(&mut canvas, width - 200.0, height - 100.0);
+                draw_caps(&mut canvas, 10.0, 300.0, 30.0);
+
+                draw_scissor(&mut canvas, 50.0, height - 80.0, t);
 
                 canvas.save();
                 canvas.reset();
@@ -122,54 +126,7 @@ fn main() {
                 canvas.restore();
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
-                draw_rects(&mut canvas, 15.0, 15.0);
-                draw_caps(&mut canvas, 15.0, 110.0);
-                draw_joins(&mut canvas, 110.0, 110.0);
-                draw_lines(&mut canvas, 205.0, 110.0);
-                draw_shadows(&mut canvas);
                 */
-                //draw_state_stack(&mut canvas);
-
-                let text = "
-æPadscanvas.scale(1.0,-1.0);AAQQQQQQQQQQQu:OWQIPQWERTYUIkcmlknsdkjfhweiuqhpi15646546/#$OWQIPQWERTYUIkcmlknsdkjfhwei Cursive Joining: اللغة العربي
-";
-                canvas.save();
-                canvas.translate(0.0, 50.0);
-
-                for line in text.lines() {
-                    let mut paint = Paint::color(Color::hex("454545"));
-                    paint.set_font_size(12);
-                    paint.set_font_name("Roboto-Regular");
-                    canvas.fill_text(10.0, 0.0, line, paint);
-
-                    canvas.translate(0.0, 14.0);
-                }
-
-                canvas.restore();
-
-                if false {
-
-                    let combination_marks = format!("Comb. marks: {}{} {}{}", '\u{0061}', '\u{0300}', '\u{0061}', '\u{0328}');
-                    let cursive_joining = format!("Cursive Joining: اللغة العربية");
-                    let text = format!("Latin text. Ligatures æ fi ﬁ. Kerning VA Wavy. ZWJ? {} {}", combination_marks, cursive_joining);
-                    //let text = format!("Morbi tincidunt pretium dolor, eu mollis augue tristique quis. Nunc tristique vulputate sem a laoreet. Etiris diam felis, laoreet sit amet nisi eu, pulvinar facilisis massa. ");
-
-                    //let bounds = canvas.text_bounds(15.0, 300.0, text);
-
-                    let mut paint = Paint::color(Color::hex("454545"));
-
-                    let font_size = 16;
-
-                    paint.set_stroke_width(1.0);
-                    paint.set_font_size(font_size);
-                    //paint.set_letter_spacing(3);
-                    //paint.set_font_blur(1.0);
-                    //paint.set_font_name("BitstreamVeraSerif-Roman".to_string());
-                    paint.set_font_name("NotoSans-Regular");
-
-                    canvas.fill_text(15.0, 220.0, &text, paint);
-                    //canvas.stroke_text(15.0 + x, y + 10.0 + font_size as f32, &line, &paint);
-                }
 
                 if let Some(image_id) = screenshot_image_id {
                     let x = size.width as f32 - 512.0;
@@ -182,39 +139,6 @@ fn main() {
                     canvas.fill_path(&mut path, paint);
                     canvas.stroke_path(&mut path, Paint::color(Color::hex("454545")));
                 }
-
-                // Image
-                if false {
-                    canvas.save();
-                    canvas.translate(490.0, 110.0);
-
-                    let paint = Paint::image(image_id, 0.0, 0.0, 80.0, 80.0, 0.0, 1.0);
-
-                    let mut path = Path::new();
-                    path.rect(10.0, 10.0, 512.0, 512.0);
-                    canvas.fill_path(&mut path, paint);
-
-                    canvas.restore();
-                }
-
-                /*
-                let elapsed = cpu_start.elapsed().as_secs_f32();
-
-                canvas.fill_text(15.0, size.height as f32 - 45.0, &format!("CPU Time: {}", elapsed), &Paint::color(Color::hex("454545")));
-
-                let mut path = Path::new();
-                path.rect(15.0, size.height as f32 - 40.0, 200.0*(elapsed / 0.016), 3.0);
-                canvas.fill_path(&mut path, Paint::color(Color::hex("000000")));
-                let mut path = Path::new();
-                path.rect(15.0, size.height as f32 - 40.0, 200.0, 3.0);
-                canvas.stroke_path(&mut path, Paint::color(Color::hex("bababa")));
-
-                let gpu_time = Instant::now();
-
-                canvas.end_frame();
-
-                canvas.fill_text(15.0, size.height as f32 - 20.0, &format!("GPU Time: {:?}", gpu_time.elapsed()), &Paint::color(Color::hex("454545")));
-                */
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
@@ -401,6 +325,22 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	canvas.restore();
 }
 
+fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+    let corner_radius = (h / 2.0) - 1.0;
+
+    let bg = Paint::box_gradient(x, y + 1.5, w, h, h / 2.0, 5.0, Color::rgba(0, 0, 0, 16), Color::rgba(0, 0, 0, 92));
+    let mut path = Path::new();
+	path.rounded_rect(x, y, w, h, corner_radius);
+	canvas.fill_path(&mut path, bg);
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
+    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_name("Entypo");
+    text_paint.set_text_align(Align::Center);
+    text_paint.set_text_baseline(Baseline::Middle);
+    canvas.fill_text(x + h * 0.55, y + h * 0.18, "\u{1F50D}", text_paint);
+}
+
 fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {
     canvas.save();
 
@@ -488,6 +428,85 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.restore();
 }
 
+fn draw_widths<T: Renderer>(canvas: &mut Canvas<T>, x: f32, mut y: f32, width: f32) {
+    canvas.save();
+
+    let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
+
+    for i in 0..20 {
+        let w = (i as f32 + 0.5) * 0.1;
+        paint.set_stroke_width(w);
+        let mut path = Path::new();
+        path.move_to(x, y);
+        path.line_to(x + width, y + width * 0.3);
+        canvas.stroke_path(&mut path, paint);
+        y += 10.0;
+    }
+
+    canvas.restore();
+}
+
+fn draw_caps<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32) {
+    let caps = [LineCap::Butt, LineCap::Round, LineCap::Square];
+    let line_width = 8.0;
+
+    canvas.save();
+
+    let mut path = Path::new();
+    path.rect(x - line_width / 2.0, y, width + line_width, 40.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 32)));
+
+    let mut path = Path::new();
+    path.rect(x, y, width, 40.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 32)));
+
+    let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
+    paint.set_stroke_width(line_width);
+
+    for (i, cap) in caps.iter().enumerate() {
+        paint.set_line_cap(*cap);
+        let mut path = Path::new();
+        path.move_to(x, y + i as f32 * 10.0 + 5.0);
+        path.line_to(x + width, y + i as f32 * 10.0 + 5.0);
+        canvas.stroke_path(&mut path, paint);
+    }
+
+    canvas.restore();
+}
+
+fn draw_scissor<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, t: f32) {
+    canvas.save();
+
+    // Draw first rect and set scissor to it's area.
+    canvas.translate(x, y);
+    canvas.rotate(5.0f32.to_radians());
+
+    let mut path = Path::new();
+    path.rect(-20.0, -20.0, 60.0, 40.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 0, 0, 255)));
+
+    canvas.scissor(-20.0, -20.0, 60.0, 40.0);
+
+    // Draw second rectangle with offset and rotation.
+    canvas.translate(40.0, 0.0);
+    canvas.rotate(t);
+
+    // Draw the intended second rectangle without any scissoring.
+    canvas.save();
+    canvas.reset_scissor();
+    let mut path = Path::new();
+    path.rect(-20.0, -10.0, 60.0, 30.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 128, 0, 64)));
+    canvas.restore();
+
+    // Draw second rectangle with scissoring.
+    //canvas.intersect_scissor(-20.0, -10.0, 60.0, 30.0);
+    path.rect(-20.0, -10.0, 60.0, 30.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 128, 0, 255)));
+
+    canvas.restore();
+}
+
 struct PerfGraph {
     history_count: usize,
     values: Vec<f32>,
@@ -537,197 +556,27 @@ impl PerfGraph {
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(16);
-        text_paint.set_font_name("Roboto-Regular");
-    	canvas.fill_text(x + 5.0, y + 15.0, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+        text_paint.set_font_size(12);
+        text_paint.set_font_name("Roboto-Light");
+    	canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
-        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
+        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14);
         text_paint.set_font_name("Roboto-Regular");
-    	canvas.fill_text(x + 5.0, y + 30.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
+        text_paint.set_text_align(Align::Right);
+        text_paint.set_text_baseline(Baseline::Top);
+    	canvas.fill_text(x + w - 5.0, y - 2.0, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+
+        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
+        text_paint.set_font_size(12);
+        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_text_align(Align::Right);
+        text_paint.set_text_baseline(Baseline::Alphabetic);
+    	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
     }
 }
 
-/*
-fn draw_lines(canvas: &mut Canvas, x: f32, y: f32) {
-    canvas.save();
-    canvas.translate(x, y);
-
-    let mut paint = Paint::color(Color::hex("#247ba0"));
-
-    let w = 80.0;
-
-    for i in 0..8 {
-        paint.set_stroke_width(i as f32);
-
-        let mut path = Path::new();
-        path.move_to(0.0, i as f32 * 10.0);
-        path.line_to(w, 10.0 + i as f32 * 10.0);
-        canvas.stroke_path(&mut path, paint);
-    }
-
-    paint.set_shape_anti_alias(false);
-
-    canvas.translate(95.0, 0.0);
-
-    for i in 0..8 {
-        paint.set_stroke_width(i as f32);
-
-        let mut path = Path::new();
-        path.move_to(0.0, i as f32 * 10.0);
-        path.line_to(w, 10.0 + i as f32 * 10.0);
-        canvas.stroke_path(&mut path, paint);
-    }
-
-    canvas.restore();
-}
-
-fn draw_state_stack(canvas: &mut Canvas) {
-    let rect_width = 150.0;
-    let rect_height = 75.0;
-
-    canvas.save();
-    // save state 1
-    canvas.translate(canvas.width / 2.0, canvas.height / 2.0);
-
-    canvas.save();
-    // save state 2
-    canvas.rotate(std::f32::consts::PI / 4.0);
-
-    canvas.save();
-    // save state 3
-    canvas.scale(2.0, 2.0);
-
-    let mut path = Path::new();
-    path.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&mut path, Paint::color(Color::hex("#0000FF")));
-
-    canvas.restore();
-    // restore state 3
-    let mut path = Path::new();
-    path.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&mut path, Paint::color(Color::hex("#FF0000")));
-
-    canvas.restore();
-    // restore state 2
-    let mut path = Path::new();
-    path.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&mut path, Paint::color(Color::hex("#FFFF00")));
-
-    canvas.restore();
-    // restore state 1
-    let mut path = Path::new();
-    path.rect(rect_width / -2.0, rect_height / -2.0, rect_width, rect_height);
-    canvas.fill_path(&mut path, Paint::color(Color::hex("#00FF00")));
-}
-
-fn draw_rects(canvas: &mut Canvas, x: f32, y: f32) {
-
-    let fill_paint = Paint::color(Color::hex("#70c1b3"));
-    let mut stroke_paint = Paint::color(Color::hex("#247ba0"));
-    stroke_paint.set_stroke_width(2.0);
-
-    canvas.save();
-    canvas.translate(x, y);
-
-    let mut path = Path::new();
-    path.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.fill_path(&mut path, fill_paint);
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    path.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke_path(&mut path, stroke_paint);
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    canvas.rounded_rect(0.0, 0.0, 80.0, 80.0, 10.0);
-    canvas.fill_path(&mut path, fill_paint);
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    canvas.rounded_rect(0.0, 0.0, 80.0, 80.0, 10.0);
-    canvas.stroke_path(&mut path, stroke_paint);
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    canvas.rounded_rect_varying(0.0, 0.0, 80.0, 80.0, 20.0, 20.0, 5.0, 5.0);
-    canvas.fill_path(&mut path, fill_paint);
-    canvas.stroke_path(&mut path, stroke_paint);
-
-    // TODO: Instead of save/restore pairs try doing something with scopes or closures
-    // Or use temp var and use drop to restore state
-    canvas.translate(95.0, 0.0);
-
-    canvas.save();
-    canvas.translate(40.0, 0.0);
-    canvas.rotate(45.0f32.to_radians());
-
-    let mut path = Path::new();
-    canvas.rounded_rect(0.0, 0.0, 55.0, 55.0, 5.0);
-    canvas.stroke_path(&mut path, stroke_paint);
-    canvas.restore();
-
-    canvas.translate(95.0, 0.0);
-    canvas.save();
-    canvas.skew_x(-10.0f32.to_radians());
-
-    let mut path = Path::new();
-    path.rect(0.0, 0.0, 80.0, 80.0);
-    canvas.stroke_path(&mut path, stroke_paint);
-    canvas.restore();
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    path.circle(40.0, 40.0, 40.0);
-    canvas.fill_path(&mut path, fill_paint);
-    canvas.stroke_path(&mut path, stroke_paint);
-
-    canvas.translate(95.0, 0.0);
-
-    let mut path = Path::new();
-    path.ellipse(40.0, 40.0, 30.0, 40.0);
-    canvas.fill_path(&mut path, fill_paint);
-    canvas.stroke_path(&mut path, stroke_paint);
-
-    canvas.translate(95.0, 0.0);
-    draw_star(canvas, 0.0, 0.0, 80.0);
-
-    canvas.restore();
-}
-
-fn draw_star(canvas: &mut Canvas, cx: f32, cy: f32, scale: f32) {
-    canvas.save();
-
-    let paint = Paint::color(Color::hex("#247ba0"));
-
-    let r = 0.45 * scale;
-    let tau = 6.2831853;
-
-    canvas.translate(cx + scale*0.5, cy + scale*0.5);
-
-    let mut path = Path::new();
-    path.move_to(r, 0.0);
-
-    for i in 0..7 {
-        let theta = 3.0 * i as f32 * tau / 7.0;
-        path.line_to(theta.cos() * r, theta.sin() * r);
-    }
-
-    //canvas.translate(scale * 0.5, scale * 0.5);
-    canvas.close();
-    //canvas.fill(&path, &paint); // TODO: Why is this not filling ok
-    canvas.stroke_path(&mut path, paint);
-
-    canvas.restore();
-}
-
-fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
+fn draw_spinner<T: Renderer>(canvas: &mut Canvas<T>, cx: f32, cy: f32, r: f32, t: f32) {
     let a0 = 0.0 + t * 6.0;
     let a1 = std::f32::consts::PI + t * 6.0;
     let r0 = r;
@@ -736,9 +585,9 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
     canvas.save();
 
     let mut path = Path::new();
-    canvas.arc(cx, cy, r0, a0, a1, Winding::CW);
-    canvas.arc(cx, cy, r1, a1, a0, Winding::CCW);
-    canvas.close();
+    path.arc(cx, cy, r0, a0, a1, Winding::CW);
+    path.arc(cx, cy, r1, a1, a0, Winding::CCW);
+    path.close();
 
     let ax = cx + a0.cos() * (r0+r1)*0.5;
     let ay = cy + a0.sin() * (r0+r1)*0.5;
@@ -750,4 +599,3 @@ fn draw_spinner(canvas: &mut Canvas, cx: f32, cy: f32, r: f32, t: f32) {
 
     canvas.restore();
 }
-*/

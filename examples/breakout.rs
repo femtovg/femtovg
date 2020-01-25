@@ -743,7 +743,7 @@ impl Powerup {
 
         let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
         text_paint.set_text_align(Align::Center);
-        text_paint.set_baseline(Baseline::Middle);
+        text_paint.set_text_baseline(Baseline::Middle);
         text_paint.set_font_name("Roboto-Light");
         text_paint.set_font_size(16);
         canvas.fill_text(self.rect.center().x, self.rect.center().y - 3.0, &format!("{:?}", self.ty), text_paint);
