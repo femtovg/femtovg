@@ -666,6 +666,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.font_cache.add_font_mem(data).expect("cannot add font");
     }
 
+    // TODO: Return Bounds struct from here
     pub fn text_bounds(&mut self, x: f32, y: f32, text: &str, mut paint: Paint) -> [f32; 4] {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
@@ -675,7 +676,8 @@ impl<T> Canvas<T> where T: Renderer {
         paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
         paint.set_font_blur(paint.font_blur() * scale);
 
-        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
+        //let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
+        let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
 
         let mut bounds = layout.bbox;
 
@@ -692,19 +694,20 @@ impl<T> Canvas<T> where T: Renderer {
         bounds
     }
 
-    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) {
-        self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill);
+    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) -> [f32; 4] {
+        self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill)
     }
 
-    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) {
+    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) -> [f32; 4] {
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Stroke {
             line_width: paint.stroke_width().ceil() as u32
-        });
+        })
     }
 
     // Private
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: GlyphRenderStyle) {
+    // TODO: Return Bounds struct from here
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: GlyphRenderStyle) -> [f32; 4] {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
@@ -751,6 +754,15 @@ impl<T> Canvas<T> where T: Renderer {
 
             self.render_triangles(&verts, &paint, &scissor, &transform);
         }
+        
+        let mut bounds = layout.bbox;
+        
+        bounds[0] *= invscale;
+        bounds[1] *= invscale;
+        bounds[2] *= invscale;
+        bounds[3] *= invscale;
+
+        bounds
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
