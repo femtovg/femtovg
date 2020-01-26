@@ -196,12 +196,12 @@ impl<'a> Paint<'a> {
     }
 
     /// Returns boolean if the shapes drawn with this paint will be antialiased.
-    pub fn shape_anti_alias(&self) -> bool {
+    pub fn anti_alias(&self) -> bool {
         self.shape_anti_alias
     }
 
     /// Sets whether shapes drawn with this paint will be anti aliased. Enabled by default.
-    pub fn set_shape_anti_alias(&mut self, value: bool) {
+    pub fn set_anti_alias(&mut self, value: bool) {
         self.shape_anti_alias = value;
     }
 

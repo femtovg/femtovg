@@ -536,7 +536,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         let scissor = self.state().scissor;
 
-        if paint.shape_anti_alias() {
+        if paint.anti_alias() {
             path_cache.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
         } else {
             path_cache.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
@@ -624,7 +624,7 @@ impl<T> Canvas<T> where T: Renderer {
         // Apply global alpha
         paint.mul_alpha(self.state().alpha);
 
-        if paint.shape_anti_alias() {
+        if paint.anti_alias() {
             path_cache.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
         } else {
             path_cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);

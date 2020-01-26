@@ -17,6 +17,7 @@ use gpucanvas::{
     Paint,
     Path,
     ImageFlags,
+    FillRule,
     renderer::OpenGl
 };
 
@@ -101,11 +102,19 @@ fn main() {
 
                 for (path, fill, stroke) in &mut paths {
                     if let Some(fill) = fill {
+                        fill.set_anti_alias(true);
                         canvas.fill_path(path, *fill);
                     }
 
                     if let Some(stroke) = stroke {
+                        stroke.set_anti_alias(true);
                         canvas.stroke_path(path, *stroke);
+                    }
+                    
+                    if canvas.contains_point(path, mousex, mousey, FillRule::NonZero) {
+                        let mut paint = Paint::color(Color::rgb(32, 240, 32));
+                        paint.set_stroke_width(2.0);
+                        canvas.stroke_path(path, paint);
                     }
                 }
 
