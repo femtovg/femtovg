@@ -70,6 +70,15 @@ fn main() {
                     mousex = position.x as f32;
                     mousey = position.y as f32;
                 }
+                WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
+                    glutin::event::MouseScrollDelta::LineDelta(_, y) => {
+                        let pt = canvas.transform().inversed().transform_point(mousex, mousey);
+                        canvas.translate(pt.0, pt.1);
+                        canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
+                        canvas.translate(-pt.0, -pt.1);
+                    },
+                    _ => ()
+                }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::S), state: ElementState::Pressed, .. }, .. } => {
                     if let Some(screenshot_image_id) = screenshot_image_id {
                         canvas.delete_image(screenshot_image_id);

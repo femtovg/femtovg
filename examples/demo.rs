@@ -69,7 +69,7 @@ fn main() {
                 }
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
-                        let pt = canvas.transformed_point(mousex, mousey);
+                        let pt = canvas.transform().inversed().transform_point(mousex, mousey);
                         canvas.translate(pt.0, pt.1);
                         canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
                         canvas.translate(-pt.0, -pt.1);

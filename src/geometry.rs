@@ -1,8 +1,6 @@
 
 use std::ops::{Index, IndexMut};
 
-// TODO: 3D transform
-
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
 }

@@ -24,6 +24,10 @@ impl Atlas {
             }],
         }
     }
+    
+    pub fn size(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
 
     pub fn expand(&mut self, width: usize, height: usize) {
         // Insert node for empty space

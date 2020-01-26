@@ -260,22 +260,26 @@ impl PathCache {
 
         match fill_rule {
             FillRule::EvenOdd => {
-                let mut crossing = false;
-                
                 for contour in &self.contours {
+                    let mut crossing = false;
+                    
                     for (p0, p1) in contour.point_pairs(&self.points) {
                         if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
                             crossing = !crossing;
                         }
                     }
+                    
+                    if crossing {
+                        return true;
+                    }
                 }
                 
-                crossing
+                false
             }
             FillRule::NonZero => {
-                let mut winding_number: i32 = 0;
-                
                 for contour in &self.contours {
+                    let mut winding_number: i32 = 0;
+                    
                     for (p0, p1) in contour.point_pairs(&self.points) {
                         if p0.y <= y {
                             if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
@@ -285,9 +289,13 @@ impl PathCache {
                             winding_number = winding_number.wrapping_sub(1);
                         }
                     }
+                    
+                    if winding_number != 0 {
+                        return true;
+                    }
                 }
                 
-                winding_number != 0
+                false
             }
         }
     }

@@ -21,7 +21,8 @@ use self::freetype as ft;
 mod atlas;
 use atlas::Atlas;
 
-const TEXTURE_SIZE: u32 = 512;
+const TEXTURE_SIZE: usize = 512;
+const MAX_TEXTURE_SIZE: usize = 4096;
 const GLYPH_PADDING: u32 = 2;
 
 type Result<T> = std::result::Result<T, FontCacheError>;
@@ -219,11 +220,6 @@ impl FontCache {
             line_height = line_height.max((size_metrics.height >> 6) as f32);
             em_height = em_height.max(size_metrics.y_ppem);
 
-            let itw = 1.0 / TEXTURE_SIZE as f32;
-            let ith = 1.0 / TEXTURE_SIZE as f32;
-
-            //let glyph_positions = shaper::shape(&face.ft_face, &text[str_range])?;
-
             // No subpixel positioning / full hinting
 
             for (position, info) in positions.iter().zip(infos) {
@@ -239,26 +235,31 @@ impl FontCache {
                 let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
                 let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
 
-                let image_id = self.textures[glyph.texture_index].image_id;
+                if let Some(texture) = self.textures.get(glyph.texture_index) {
+                    let image_id = texture.image_id;
+                    let size = texture.atlas.size();
+                    let itw = 1.0 / size.0 as f32;
+                    let ith = 1.0 / size.1 as f32;
+                    
+                    let cmd = cmd_map.entry(glyph.texture_index).or_insert_with(|| DrawCmd {
+                        image_id: image_id,
+                        quads: Vec::new()
+                    });
 
-                let cmd = cmd_map.entry(glyph.texture_index).or_insert_with(|| DrawCmd {
-                    image_id: image_id,
-                    quads: Vec::new()
-                });
+                    let mut q = Quad::default();
 
-                let mut q = Quad::default();
+                    q.x0 = xpos as f32;
+                    q.y0 = ypos as f32;
+                    q.x1 = (xpos + glyph.width as i32) as f32;
+                    q.y1 = (ypos + glyph.height as i32) as f32;
 
-                q.x0 = xpos as f32;
-                q.y0 = ypos as f32;
-                q.x1 = (xpos + glyph.width as i32) as f32;
-                q.y1 = (ypos + glyph.height as i32) as f32;
+                    q.s0 = glyph.atlas_x as f32 * itw;
+                    q.t0 = glyph.atlas_y as f32 * ith;
+                    q.s1 = (glyph.atlas_x + glyph.width) as f32 * itw;
+                    q.t1 = (glyph.atlas_y + glyph.height) as f32 * ith;
 
-                q.s0 = glyph.atlas_x as f32 * itw;
-                q.t0 = glyph.atlas_y as f32 * ith;
-                q.s1 = (glyph.atlas_x + glyph.width) as f32 * itw;
-                q.t1 = (glyph.atlas_y + glyph.height) as f32 * ith;
-
-                cmd.quads.push(q);
+                    cmd.quads.push(q);
+                }
 
                 cursor_x += x_advance + paint.letter_spacing();
                 cursor_y += y_advance;
@@ -372,13 +373,31 @@ impl FontCache {
             (tex_index, (atlas_x, atlas_y))
         } else {
             // All atlases are exausted and a new one must be created
-            let mut atlas = Atlas::new(TEXTURE_SIZE as usize, TEXTURE_SIZE as usize);
-            let loc = atlas.add_rect(width as usize, height as usize).unwrap();
-
-            let mut image = GrayImage::new(TEXTURE_SIZE, TEXTURE_SIZE);
+            let mut atlas_size = TEXTURE_SIZE;
+            
+            // Try incrementally larger atlasses until a large enough one
+            // is found or the MAX_TEXTURE_SIZE limit is reached
+            let (atlas, loc) = loop {
+                let mut test_atlas = Atlas::new(atlas_size, atlas_size);
+                
+                if let Some(loc) = test_atlas.add_rect(width as usize, height as usize) {
+                    break (test_atlas, Some(loc));
+                }
+                
+                if atlas_size >= MAX_TEXTURE_SIZE {
+                    break (test_atlas, None);
+                }
+                
+                atlas_size *= 2;
+            };
+            
+            let loc = loc.ok_or(FontCacheError::FontSizeTooLargeForAtlas)?;
+            
+            let mut image = GrayImage::new(atlas.size().0 as u32, atlas.size().1 as u32);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
-            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty()).unwrap();// TODO: fixme
+            let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
+            let image_id = image_res.or_else(|e| Err(FontCacheError::GeneralError(format!("{}", e))))?;
 
             textures.push(FontTexture { atlas, image_id });
 
@@ -488,6 +507,7 @@ pub enum FontCacheError {
     GeneralError(String),
     FontNotFound,
     NoFontsAdded,
+    FontSizeTooLargeForAtlas,
     IoError(io::Error),
     FreetypeError(ft::Error),
     ImageError(image::ImageError)

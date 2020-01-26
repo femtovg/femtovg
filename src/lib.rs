@@ -394,14 +394,9 @@ impl<T> Canvas<T> where T: Renderer {
     ///   [a c e]
     ///   [b d f]
     ///   [0 0 1]
-    pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+    pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
         let transform = Transform2D([a, b, c, d, e, f]);
         self.state_mut().transform.premultiply(&transform);
-    }
-
-    pub fn set_transform(&mut self, t: Transform2D) {
-        //let transform = Transform2D([a, b, c, d, e, f]);
-        self.state_mut().transform = t;
     }
 
     /// Translates the current coordinate system.
@@ -440,12 +435,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Returns the current transformation matrix
-    pub fn current_transform(&self) -> Transform2D {
+    pub fn transform(&self) -> Transform2D {
         self.state().transform
-    }
-
-    pub fn transformed_point(&self, x: f32, y: f32) -> (f32, f32) {
-        self.state().transform.transform_point(x, y)
     }
 
     // Scissoring
@@ -460,7 +451,7 @@ impl<T> Canvas<T> where T: Renderer {
         let h = h.max(0.0);
 
         let mut transform = Transform2D::new_translation(x + w * 0.5, y + h * 0.5);
-        transform.premultiply(&state.transform);
+        transform.multiply(&state.transform);
         state.scissor.transform = transform;
 
         state.scissor.extent = Some([w * 0.5, h * 0.5]);
@@ -724,7 +715,7 @@ impl<T> Canvas<T> where T: Renderer {
         paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
         paint.set_font_blur(paint.font_blur() * scale);
 
-        let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, render_style, text).unwrap();
+        let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
 
         let text_color = if let PaintFlavor::Color(color) = paint.flavor {
             color
@@ -740,7 +731,7 @@ impl<T> Canvas<T> where T: Renderer {
                 let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
                 let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
                 let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
-
+                
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
                 verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
@@ -782,8 +773,8 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
-
-        geometry::quantize(avg_scale, 0.01).min(4.0)
+        
+        geometry::quantize(avg_scale, 0.01).min(7.0)
     }
 
     fn state(&self) -> &State {
