@@ -57,6 +57,10 @@ impl Point {
 
         area * 0.5
     }
+    
+    pub fn is_left(p0: &Self, p1: &Self, x: f32, y: f32) -> f32 {
+        (p1.x - p0.x) * (y - p0.y) - (x -  p0.x) * (p1.y - p0.y)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -254,22 +258,38 @@ impl PathCache {
             return false;
         }
 
-        let mut c = false;
-
-        // TODO: EvenOdd - holes are not handled
-
-        // EvenOdd
-        for contour in &self.contours {
-            for (p0, p1) in contour.point_pairs(&self.points) {
-                if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
-                    c = !c;
+        match fill_rule {
+            FillRule::EvenOdd => {
+                let mut crossing = false;
+                
+                for contour in &self.contours {
+                    for (p0, p1) in contour.point_pairs(&self.points) {
+                        if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
+                            crossing = !crossing;
+                        }
+                    }
                 }
+                
+                crossing
+            }
+            FillRule::NonZero => {
+                let mut winding_number: i32 = 0;
+                
+                for contour in &self.contours {
+                    for (p0, p1) in contour.point_pairs(&self.points) {
+                        if p0.y <= y {
+                            if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                                winding_number = winding_number.wrapping_add(1);
+                            }
+                        } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                            winding_number = winding_number.wrapping_sub(1);
+                        }
+                    }
+                }
+                
+                winding_number != 0
             }
         }
-
-        // TODO: NonZero
-
-        c
     }
 
     fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: PointFlags, tess_tol: f32, dist_tol: f32) {

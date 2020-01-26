@@ -5,6 +5,7 @@ use gpucanvas::{
     Paint,
     Color,
     Winding,
+    FillRule,
     renderer::Void
 };
 
@@ -118,4 +119,26 @@ fn degenerate_arc() {
 
     canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
     canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+}
+
+#[test]
+fn path_contains_point() {
+    let mut canvas = Canvas::new(Void).unwrap();
+    
+    // Star - cancave & self crossing
+    let mut path = Path::new();
+    path.move_to(50.0, 0.0);
+    path.line_to(21.0, 90.0);
+    path.line_to(98.0, 35.0);
+    path.line_to(2.0, 35.0);
+    path.line_to(79.0, 90.0);
+    path.close();
+    
+    // Center of the star should be hollow for even-odd rule
+    assert!(!canvas.contains_point(&mut path, 50.0, 45.0, FillRule::EvenOdd));
+    assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::EvenOdd));
+    
+    // Center of the star should be fill for NonZero rule
+    assert!(canvas.contains_point(&mut path, 50.0, 45.0, FillRule::NonZero));
+    assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::NonZero));
 }

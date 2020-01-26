@@ -20,10 +20,10 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Text shaping (via harfbuzz)
 * [x] Text alignment: (left center right), (top, baseline, bottom)
 * [x] Nearest font matching
+* [x] Path hit testing
 
 ## Not supported
 * [ ] Stroke dashing
-* [ ] Path hit testing
 * [ ] Path culling
 * [ ] Custom shaders
 * [ ] 3D transforms

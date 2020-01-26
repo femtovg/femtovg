@@ -410,7 +410,7 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     canvas.save();
     canvas.translate(x, y);
 
-    let mut evenodd_fill = Paint::color(Color::rgb(220, 220, 220));
+    let mut evenodd_fill = Paint::color(Color::rgba(220, 220, 220, 120));
     evenodd_fill.set_fill_rule(FillRule::EvenOdd);
 
     let mut path = Path::new();
@@ -420,6 +420,11 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     path.line_to(2.0, 35.0);
     path.line_to(79.0, 90.0);
     path.close();
+    
+    if canvas.contains_point(&mut path, mousex, mousey, FillRule::EvenOdd) {
+        evenodd_fill.set_color(Color::rgb(220, 220, 220));
+    }
+    
     canvas.fill_path(&mut path, evenodd_fill);
 
     canvas.translate(100.0, 0.0);
