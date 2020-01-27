@@ -108,22 +108,31 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
-                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
-                draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
+                let mut paint = Paint::color(Color::rgb(255, 255, 255));
+                paint.set_stroke_width(30.0);
 
-                draw_widths(&mut canvas, 10.0, 50.0, 30.0);
-                draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
-                draw_caps(&mut canvas, 10.0, 300.0, 30.0);
+                let mut path = Path::new();
+                path.move_to(150.0, 200.5);
+                path.line_to(350.0, 200.5);
+                path.line_to(450.0, 200.0 + t.sin() * 100.0);
+                canvas.stroke_path(&mut path, paint);
 
-                draw_scissor(&mut canvas, 50.0, height - 80.0, t);
-
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
+                // draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                // draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                // draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                // draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                // draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
+                //
+                // draw_widths(&mut canvas, 10.0, 50.0, 30.0);
+                // draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
+                // draw_caps(&mut canvas, 10.0, 300.0, 30.0);
+                //
+                // draw_scissor(&mut canvas, 50.0, height - 80.0, t);
+                //
+                // canvas.save();
+                // canvas.reset();
+                // perf.render(&mut canvas, 5.0, 5.0);
+                // canvas.restore();
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 */

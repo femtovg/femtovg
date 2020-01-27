@@ -84,7 +84,7 @@ impl Command {
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer {
     type Error: error::Error;
-    
+
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
@@ -107,17 +107,23 @@ pub struct Vertex {
     pub x: f32,
     pub y: f32,
     pub u: f32,
-    pub v: f32
+    pub v: f32,
+    pub l: f32
 }
 
 impl Vertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
-        Self { x, y, u, v }
+        Self { x, y, u, v, l: 0.0 }
+    }
+
+    pub fn newl(x: f32, y: f32, u: f32, v: f32, l: f32) -> Self {
+        Self { x, y, u, v, l }
     }
 
     pub fn set(&mut self, x: f32, y: f32, u: f32, v: f32) {
-        *self = Self { x, y, u, v };
+        *self = Self { x, y, u, v, l: 0.0 };
     }
+
 }
 
 // TODO: Rename those to make more sense - why do we have FillImage and Img?
