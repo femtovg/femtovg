@@ -31,10 +31,7 @@ pub use paint::Paint;
 use paint::PaintFlavor;
 
 mod path;
-pub use path::{Path, Winding, Verb};
-
-mod path_cache;
-use path_cache::{PathCache, Convexity};
+pub use path::{Path, Winding, Verb, PathCache, Convexity};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
@@ -734,7 +731,7 @@ impl<T> Canvas<T> where T: Renderer {
                 let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
                 let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
                 let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
-                
+
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
                 verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
@@ -754,9 +751,9 @@ impl<T> Canvas<T> where T: Renderer {
 
             self.render_triangles(&verts, &paint, &scissor, &transform);
         }
-        
+
         let mut bounds = layout.bbox;
-        
+
         bounds[0] *= invscale;
         bounds[1] *= invscale;
         bounds[2] *= invscale;
@@ -785,7 +782,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
-        
+
         geometry::quantize(avg_scale, 0.01).min(7.0)
     }
 

@@ -119,10 +119,10 @@ fn main() {
                         stroke.set_anti_alias(true);
                         canvas.stroke_path(path, *stroke);
                     }
-                    
+
                     if canvas.contains_point(path, mousex, mousey, FillRule::NonZero) {
                         let mut paint = Paint::color(Color::rgb(32, 240, 32));
-                        paint.set_stroke_width(2.0);
+                        paint.set_stroke_width(1.0);
                         canvas.stroke_path(path, paint);
                     }
                 }

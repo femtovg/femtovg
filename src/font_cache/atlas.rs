@@ -24,7 +24,7 @@ impl Atlas {
             }],
         }
     }
-    
+
     pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
@@ -66,9 +66,7 @@ impl Atlas {
             }
         }
 
-        if besti.is_none() {
-            return None;
-        }
+        besti?;
 
         // Perform the actual packing.
         self.add_skyline_level(besti.unwrap(), bestx, besty, rect_width, rect_height);

@@ -44,28 +44,27 @@ struct Point {
 }
 
 impl Point {
-    pub fn poly_area(points: &[Point]) -> f32 {
-        let mut area = 0.0;
-
-        for i in 2..points.len() {
-            let p0 = points[0];
-            let p1 = points[i-1];
-            let p2 = points[i];
-
-            area += geometry::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+    pub fn new(x: f32, y: f32, flags: PointFlags) -> Self {
+        Self {
+            x, y, flags, ..Default::default()
         }
-
-        area * 0.5
     }
-    
+
     pub fn is_left(p0: &Self, p1: &Self, x: f32, y: f32) -> f32 {
         (p1.x - p0.x) * (y - p0.y) - (x -  p0.x) * (p1.y - p0.y)
+    }
+
+    pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
+        let dx = other.x - self.x;
+        let dy = other.y - self.y;
+
+        dx*dx + dy*dy < tolerance*tolerance
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct Contour {
-    points: Range<usize>,
+    point_range: Range<usize>,
     closed: bool,
     bevel: usize,
     pub(crate) fill: Vec<Vertex>,
@@ -77,7 +76,7 @@ pub struct Contour {
 impl Default for Contour {
     fn default() -> Self {
         Self {
-            points: 0..0,
+            point_range: 0..0,
             closed: Default::default(),
             bevel: Default::default(),
             fill: Default::default(),
@@ -92,8 +91,26 @@ impl Contour {
     fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> {
         PointPairsIter {
             curr: 0,
-            points: &points[self.points.clone()]
+            points: &points[self.point_range.clone()]
         }
+    }
+
+    fn polygon_area(points: &[Point]) -> f32 {
+        let mut area = 0.0;
+
+        for window in points.windows(3) {
+            let p0 = window[0];
+            let p1 = window[1];
+            let p2 = window[2];
+
+            area += geometry::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+        }
+
+        area * 0.5
+    }
+
+    fn point_count(&self) -> usize {
+        self.point_range.end - self.point_range.start
     }
 }
 
@@ -116,7 +133,9 @@ impl<'a> Iterator for PointPairsIter<'a> {
 
         self.curr += 1;
 
-        curr.and_then(|some_curr| prev.and_then(|some_prev| Some((some_prev, some_curr))))
+        curr.and_then(|some_curr|
+            prev.map(|some_prev| (some_prev, some_curr))
+        )
     }
 }
 
@@ -132,7 +151,7 @@ impl PathCache {
     pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = Self::default();
 
-        // Convert commands to a set of contours
+        // Convert path verbs to a set of contours
         for verb in path.verbs() {
             match verb {
                 Verb::MoveTo(x, y) => {
@@ -152,44 +171,40 @@ impl PathCache {
                         cache.tesselate_bezier(last.x, last.y, c1x, c1y, c2x, c2y, x, y, 0, PointFlags::CORNER, tess_tol, dist_tol);
                     }
                 }
-                Verb::Close => {
-                    cache.last_contour().map(|contour| contour.closed = true);
+                Verb::Close => if let Some(contour) = cache.contours.last_mut() {
+                    contour.closed = true;
                 }
-                Verb::Winding(winding) => {
-                    cache.last_contour().map(|contour| contour.winding = *winding);
+                Verb::Winding(winding) => if let Some(contour) = cache.contours.last_mut() {
+                    contour.winding = *winding;
                 }
             }
         }
 
         for contour in &mut cache.contours {
-            let mut points = &mut cache.points[contour.points.clone()];
+            let mut points = &mut cache.points[contour.point_range.clone()];
 
-            let p0 = points.last().copied().unwrap();
-            let p1 = points.first().copied().unwrap();
-
-            // If the first and last points are the same, remove the last, mark as closed path.
-            if geometry::pt_equals(p0.x, p0.y, p1.x, p1.y, dist_tol) {
-                contour.points.end -= 1;
-                //p0 = points[path.count-1];
-                contour.closed = true;
-                points = &mut cache.points[contour.points.clone()];
+            // If the first and last points are the same, remove the last, mark as closed contour.
+            if let (Some(p0), Some(p1)) = (points.last(), points.first()) {
+                if p0.approx_eq(&p1, dist_tol) {
+                    contour.point_range.end -= 1;
+                    contour.closed = true;
+                    points = &mut cache.points[contour.point_range.clone()];
+                }
             }
 
             // Enforce winding.
-            if contour.points.end - contour.points.start > 2 {
-                let area = Point::poly_area(points);
+            let area = Contour::polygon_area(points);
 
-                if contour.winding == Winding::CCW && area < 0.0 {
-                    points.reverse();
-                }
+            if contour.winding == Winding::CCW && area < 0.0 {
+                points.reverse();
+            }
 
-                if contour.winding == Winding::CW && area > 0.0 {
-                    points.reverse();
-                }
+            if contour.winding == Winding::CW && area > 0.0 {
+                points.reverse();
             }
 
             // TODO: this is doggy and fishy.
-            for i in 0..(contour.points.end - contour.points.start) {
+            for i in 0..contour.point_count() {
                 let p1 = points.get(i).copied().unwrap();
 
                 let p0 = if i == 0 {
@@ -210,7 +225,7 @@ impl PathCache {
         }
 
         // TODO: maybe this can be done in the path instead
-        cache.contours.retain(|c| (c.points.end - c.points.start) > 1);
+        cache.contours.retain(|c| c.point_count() > 1);
 
         cache
     }
@@ -218,85 +233,27 @@ impl PathCache {
     fn add_contour(&mut self) {
         let mut contour = Contour::default();
 
-        contour.points.start = self.points.len();
-        contour.points.end = self.points.len();
+        contour.point_range.start = self.points.len();
+        contour.point_range.end = self.points.len();
 
         self.contours.push(contour);
     }
 
-    fn last_contour(&mut self) -> Option<&mut Contour> {
-        self.contours.last_mut()
-    }
-
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
-        if self.contours.is_empty() { return }
+        if let Some(contour) = self.contours.last_mut() {
 
-        let point_range = &mut self.contours.last_mut().unwrap().points;
+            let new_point = Point::new(x, y, flags);
 
-        if point_range.end - point_range.start > 0 {
-            if let Some(point) = self.points.last_mut() {
-                if geometry::pt_equals(point.x, point.y, x, y, dist_tol) {
-                    point.flags |= flags;
+            // If last point equals this new point just OR the flags and ignore the new point
+            if let Some(last_point) = self.points.get_mut(contour.point_range.end) {
+                if last_point.approx_eq(&new_point, dist_tol) {
+                    last_point.flags |= new_point.flags;
                     return;
                 }
             }
-        }
 
-        let mut point = Point::default();
-        point.x = x;
-        point.y = y;
-        point.flags = flags;
-
-        self.points.push(point);
-        point_range.end += 1;
-    }
-
-    pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
-        // Early out if point is outside the bounding rectangle
-        // TODO: Make this a method on Bounds
-        if x < self.bounds.minx || x > self.bounds.maxx || y < self.bounds.miny || y > self.bounds.maxy {
-            return false;
-        }
-
-        match fill_rule {
-            FillRule::EvenOdd => {
-                for contour in &self.contours {
-                    let mut crossing = false;
-                    
-                    for (p0, p1) in contour.point_pairs(&self.points) {
-                        if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
-                            crossing = !crossing;
-                        }
-                    }
-                    
-                    if crossing {
-                        return true;
-                    }
-                }
-                
-                false
-            }
-            FillRule::NonZero => {
-                for contour in &self.contours {
-                    let mut winding_number: i32 = 0;
-                    
-                    for (p0, p1) in contour.point_pairs(&self.points) {
-                        if p0.y <= y {
-                            if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
-                                winding_number = winding_number.wrapping_add(1);
-                            }
-                        } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
-                            winding_number = winding_number.wrapping_sub(1);
-                        }
-                    }
-                    
-                    if winding_number != 0 {
-                        return true;
-                    }
-                }
-                
-                false
-            }
+            self.points.push(new_point);
+            contour.point_range.end += 1;
         }
     }
 
@@ -331,8 +288,56 @@ impl PathCache {
         self.tesselate_bezier(x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, atype, tess_tol, dist_tol);
     }
 
-    pub(crate) fn expand_fill(&mut self, stroke_width: f32, line_join: LineJoin, miter_limit: f32, fringe_width: f32) {
+    pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
+        // Early out if point is outside the bounding rectangle
+        // TODO: Make this a method on Bounds
+        if x < self.bounds.minx || x > self.bounds.maxx || y < self.bounds.miny || y > self.bounds.maxy {
+            return false;
+        }
 
+        match fill_rule {
+            FillRule::EvenOdd => {
+                for contour in &self.contours {
+                    let mut crossing = false;
+
+                    for (p0, p1) in contour.point_pairs(&self.points) {
+                        if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
+                            crossing = !crossing;
+                        }
+                    }
+
+                    if crossing {
+                        return true;
+                    }
+                }
+
+                false
+            }
+            FillRule::NonZero => {
+                for contour in &self.contours {
+                    let mut winding_number: i32 = 0;
+
+                    for (p0, p1) in contour.point_pairs(&self.points) {
+                        if p0.y <= y {
+                            if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                                winding_number = winding_number.wrapping_add(1);
+                            }
+                        } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                            winding_number = winding_number.wrapping_sub(1);
+                        }
+                    }
+
+                    if winding_number != 0 {
+                        return true;
+                    }
+                }
+
+                false
+            }
+        }
+    }
+
+    pub(crate) fn expand_fill(&mut self, stroke_width: f32, line_join: LineJoin, miter_limit: f32, fringe_width: f32) {
         let fringe = stroke_width > 0.0;
         let aa = fringe_width;
 
@@ -340,7 +345,7 @@ impl PathCache {
 
         // Calculate max vertex usage.
         for contour in &mut self.contours {
-            let point_count = contour.points.end - contour.points.start;
+            let point_count = contour.point_count();
             let mut vertex_count = point_count  + contour.bevel + 1;
 
             if fringe {
@@ -360,7 +365,6 @@ impl PathCache {
             if fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL) {
-                        // TODO: why do we need these variables.. just use p0.. and p1 directly down there
                         let dlx0 = p0.dy;
                         let dly0 = -p0.dx;
                         let dlx1 = p1.dy;
@@ -383,7 +387,7 @@ impl PathCache {
                     }
                 }
             } else {
-                let points = &self.points[contour.points.clone()];
+                let points = &self.points[contour.point_range.clone()];
 
                 for point in points {
                     contour.fill.push(Vertex::new(point.x, point.y, 0.5, 1.0));
@@ -439,73 +443,44 @@ impl PathCache {
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
-            contour.stroke.clear();
+            //contour.stroke.clear();
+
+            for (i, (p0, p1)) in contour.point_pairs(&self.points).enumerate() {
+                // Add start cap
+                if !contour.closed && i == 1 {
+                    match line_cap {
+                        LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, -aa*0.5, aa, u0, u1),
+                        LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, stroke_width-aa, aa, u0, u1),
+                        LineCap::Round => round_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, ncap as usize, aa, u0, u1),
+                    }
+                }
+
+                if (i > 0 && i < contour.point_count() - 1) || contour.closed {
+                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
+                        if line_join == LineJoin::Round {
+                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
+                        } else {
+                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
+                        }
+                    } else {
+                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
+                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
+                    }
+                }
+
+                // Add end cap
+                if !contour.closed && i == contour.point_count() - 1 {
+                    match line_cap {
+                        LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, -aa*0.5, aa, u0, u1),
+                        LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, stroke_width-aa, aa, u0, u1),
+                        LineCap::Round => round_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, ncap as usize, aa, u0, u1),
+                    }
+                }
+            }
 
             if contour.closed {
-                for (p0, p1) in contour.point_pairs(&self.points) {
-                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
-                        if line_join == LineJoin::Round {
-                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
-                        } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
-                        }
-                    } else {
-                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
-                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
-                    }
-                }
-
                 contour.stroke.push(Vertex::new(contour.stroke[0].x, contour.stroke[0].y, u0, 1.0));
                 contour.stroke.push(Vertex::new(contour.stroke[1].x, contour.stroke[1].y, u1, 1.0));
-
-            } else {
-                let points = &self.points[contour.points.clone()];
-                let mut p0 = points[0];
-                let mut p1 = points[1];
-
-                // Add cap
-                let mut dx = p1.x - p0.x;
-                let mut dy = p1.y - p0.y;
-
-                geometry::normalize(&mut dx, &mut dy);
-
-                match line_cap {
-                    LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, -aa*0.5, aa, u0, u1),
-                    LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, stroke_width-aa, aa, u0, u1),
-                    LineCap::Round => round_cap_start(&mut contour.stroke, &p0, dx, dy, stroke_width, ncap as usize, aa, u0, u1),
-                }
-
-                // loop
-                for i in 1..(points.len() - 1) {
-                    p1 = points[i];
-                    p0 = points[i-1];
-
-                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
-                        if line_join == LineJoin::Round {
-                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
-                        } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
-                        }
-                    } else {
-                        contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
-                        contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
-                    }
-                }
-
-                // Add cap
-                p0 = points[points.len() - 2];
-                p1 = points[points.len() - 1];
-
-                let mut dx = p1.x - p0.x;
-                let mut dy = p1.y - p0.y;
-
-                geometry::normalize(&mut dx, &mut dy);
-
-                match line_cap {
-                    LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, -aa*0.5, aa, u0, u1),
-                    LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, stroke_width-aa, aa, u0, u1),
-                    LineCap::Round => round_cap_end(&mut contour.stroke, &p1, dx, dy, stroke_width, ncap as usize, aa, u0, u1),
-                }
             }
         }
     }
@@ -514,7 +489,7 @@ impl PathCache {
         let inv_stroke_width = if stroke_width > 0.0 { 1.0 / stroke_width } else { 0.0 };
 
         for contour in &mut self.contours {
-            let points = &mut self.points[contour.points.clone()];
+            let points = &mut self.points[contour.point_range.clone()];
             let mut nleft = 0;
 
             contour.bevel = 0;
@@ -637,42 +612,42 @@ fn curve_divisions(radius: f32, arc: f32, tol: f32) -> u32 {
     ((arc / da).ceil() as u32).max(2)
 }
 
-fn butt_cap_start(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
-    let px = point.x - dx*d;
-    let py = point.y - dy*d;
-    let dlx = dy;
-    let dly = -dx;
+fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
+    let px = p0.x - p1.dx*d;
+    let py = p0.y - p1.dy*d;
+    let dlx = p1.dy;
+    let dly = -p1.dx;
 
-    verts.push(Vertex::new(px + dlx*w - dx*aa, py + dly*w - dy*aa, u0, 0.0));
-    verts.push(Vertex::new(px - dlx*w - dx*aa, py - dly*w - dy*aa, u1, 0.0));
+    verts.push(Vertex::new(px + dlx*w - p1.dx*aa, py + dly*w - p1.dy*aa, u0, 0.0));
+    verts.push(Vertex::new(px - dlx*w - p1.dx*aa, py - dly*w - p1.dy*aa, u1, 0.0));
     verts.push(Vertex::new(px + dlx*w, py + dly*w, u0, 1.0));
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));
 }
 
-fn butt_cap_end(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
-    let px = point.x + dx*d;
-    let py = point.y + dy*d;
-    let dlx = dy;
-    let dly = -dx;
+fn butt_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
+    let px = p0.x + p1.dx*d;
+    let py = p0.y + p1.dy*d;
+    let dlx = p1.dy;
+    let dly = -p1.dx;
 
     verts.push(Vertex::new(px + dlx*w, py + dly*w, u0, 1.0));
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));
-    verts.push(Vertex::new(px + dlx*w + dx*aa, py + dly*w + dy*aa, u0, 0.0));
-    verts.push(Vertex::new(px - dlx*w + dx*aa, py - dly*w + dy*aa, u1, 0.0));
+    verts.push(Vertex::new(px + dlx*w + p1.dx*aa, py + dly*w + p1.dy*aa, u0, 0.0));
+    verts.push(Vertex::new(px - dlx*w + p1.dx*aa, py - dly*w + p1.dy*aa, u1, 0.0));
 }
 
-fn round_cap_start(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
-    let px = point.x;
-    let py = point.y;
-    let dlx = dy;
-    let dly = -dx;
+fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
+    let px = p0.x;
+    let py = p0.y;
+    let dlx = p1.dy;
+    let dly = -p1.dx;
 
     for i in 0..ncap {
         let a = i as f32/(ncap as f32 - 1.0)*PI;
         let ax = a.cos() * w;
         let ay = a.sin() * w;
 
-        verts.push(Vertex::new(px - dlx*ax - dx*ay, py - dly*ax - dy*ay, u0, 1.0));
+        verts.push(Vertex::new(px - dlx*ax - p1.dx*ay, py - dly*ax - p1.dy*ay, u0, 1.0));
         verts.push(Vertex::new(px, py, 0.5, 1.0));
     }
 
@@ -680,11 +655,11 @@ fn round_cap_start(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: 
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));
 }
 
-fn round_cap_end(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
-    let px = point.x;
-    let py = point.y;
-    let dlx = dy;
-    let dly = -dx;
+fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
+    let px = p0.x;
+    let py = p0.y;
+    let dlx = p1.dy;
+    let dly = -p1.dx;
 
     verts.push(Vertex::new(px + dlx*w, py + dly*w, u0, 1.0));
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));
@@ -695,7 +670,7 @@ fn round_cap_end(verts: &mut Vec<Vertex>, point: &Point, dx: f32, dy: f32, w: f3
         let ay = a.sin() * w;
 
         verts.push(Vertex::new(px, py, 0.5, 1.0));
-        verts.push(Vertex::new(px - dlx*ax + dx*ay, py - dly*ax + dy*ay, u0, 1.0));
+        verts.push(Vertex::new(px - dlx*ax + p1.dx*ay, py - dly*ax + p1.dy*ay, u0, 1.0));
     }
 }
 
@@ -716,7 +691,6 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     let a0;
     let mut a1;
 
-    // TODO: this if else arms are almost identical, maybe they can be combined
     if p1.flags.contains(PointFlags::LEFT) {
         let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
         a0 = (-dly0).atan2(-dlx0);
@@ -778,7 +752,6 @@ fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     let dlx1 = p1.dy;
     let dly1 = -p1.dx;
 
-    // TODO: this if else arms are almost identical, maybe they can be combined
     if p1.flags.contains(PointFlags::LEFT) {
         let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
 
