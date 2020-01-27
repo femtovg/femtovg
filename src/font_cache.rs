@@ -205,8 +205,8 @@ impl FontCache {
 
             let hb_font = unsafe {
                 let raw_font = hb_ft_font_create_referenced(face.ft_face.raw_mut());
-                hb_sys::hb_ot_font_set_funcs(raw_font);
-                hb::Font::from_raw(raw_font)
+                //hb_sys::hb_ot_font_set_funcs(raw_font);
+                hb::Owned::from_raw(raw_font)
             };
 
             let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
@@ -240,7 +240,7 @@ impl FontCache {
                     let size = texture.atlas.size();
                     let itw = 1.0 / size.0 as f32;
                     let ith = 1.0 / size.1 as f32;
-                    
+
                     let cmd = cmd_map.entry(glyph.texture_index).or_insert_with(|| DrawCmd {
                         image_id: image_id,
                         quads: Vec::new()
@@ -374,25 +374,25 @@ impl FontCache {
         } else {
             // All atlases are exausted and a new one must be created
             let mut atlas_size = TEXTURE_SIZE;
-            
+
             // Try incrementally larger atlasses until a large enough one
             // is found or the MAX_TEXTURE_SIZE limit is reached
             let (atlas, loc) = loop {
                 let mut test_atlas = Atlas::new(atlas_size, atlas_size);
-                
+
                 if let Some(loc) = test_atlas.add_rect(width as usize, height as usize) {
                     break (test_atlas, Some(loc));
                 }
-                
+
                 if atlas_size >= MAX_TEXTURE_SIZE {
                     break (test_atlas, None);
                 }
-                
+
                 atlas_size *= 2;
             };
-            
+
             let loc = loc.ok_or(FontCacheError::FontSizeTooLargeForAtlas)?;
-            
+
             let mut image = GrayImage::new(atlas.size().0 as u32, atlas.size().1 as u32);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
