@@ -13,7 +13,7 @@ use super::{ImageId, Renderer, ImageFlags, Paint, Align, Baseline};
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
-use self::hb::{UnicodeBuffer, HarfbuzzObject};
+use self::hb::UnicodeBuffer;
 
 mod freetype;
 use self::freetype as ft;
@@ -91,7 +91,6 @@ impl GlyphId {
 
 #[derive(Copy, Clone)]
 struct Glyph {
-    index: u32,
     width: u32,
     height: u32,
     atlas_x: u32,
@@ -406,7 +405,6 @@ impl FontCache {
         };
 
         let glyph = Glyph {
-            index: glyph_index,
             width: width,
             height: height,
             atlas_x: atlas_x as u32,

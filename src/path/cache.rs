@@ -1,5 +1,6 @@
 
 use std::ops::Range;
+use std::cmp::Ordering;
 use std::f32::consts::PI;
 
 use bitflags::bitflags;
@@ -409,7 +410,7 @@ impl PathCache {
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
-                        bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, rw, fringe_width);
+                        bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, rw);
                     } else {
                         contour.stroke.push(Vertex::new(p1.x + (p1.dmx * lw), p1.y + (p1.dmy * lw), lu, 1.0));
                         contour.stroke.push(Vertex::new(p1.x - (p1.dmx * rw), p1.y - (p1.dmy * rw), ru, 1.0));
@@ -458,9 +459,9 @@ impl PathCache {
                 if (i > 0 && i < contour.point_count() - 1) || contour.closed {
                     if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
                         if line_join == LineJoin::Round {
-                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize, aa);
+                            round_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, ncap as usize);
                         } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1, aa);
+                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1);
                         }
                     } else {
                         contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
@@ -540,36 +541,48 @@ impl PathCache {
                 }
 
                 // Determine sign for convexity
-                if p1.dx > 0.0 {
-                    if x_sign == 0 {
-                        x_first_sign = 1;
-                    } else if x_sign < 0 {
-                        x_flips += 1;
-                    }
-                    x_sign = 1;
-                } else if p1.dx < 0.0 {
-                    if x_sign == 0 {
-                        x_first_sign = -1;
-                    } else if x_sign > 0 {
-                        x_flips += 1;
-                    }
-                    x_sign = -1;
+                match p1.dx.partial_cmp(&0.0) {
+                    Some(Ordering::Greater) => {
+                        match x_sign.cmp(&0) {
+                            Ordering::Equal => x_first_sign = 1,
+                            Ordering::Less => x_flips += 1,
+                            _ => ()
+                        }
+
+                        x_sign = 1;
+                    },
+                    Some(Ordering::Less) => {
+                        match x_sign.cmp(&0) {
+                            Ordering::Equal => x_first_sign = -1,
+                            Ordering::Greater => x_flips += 1,
+                            _ => ()
+                        }
+
+                        x_sign = -1;
+                    },
+                    _ => ()
                 }
 
-                if p1.dy > 0.0 {
-                    if y_sign == 0 {
-                        y_first_sign = 1;
-                    } else if y_sign < 0 {
-                        y_flips += 1;
+                match p1.dy.partial_cmp(&0.0) {
+                    Some(Ordering::Greater) => {
+                        match y_sign.cmp(&0) {
+                            Ordering::Equal => y_first_sign = 1,
+                            Ordering::Less => y_flips += 1,
+                            _ => ()
+                        }
+
+                        y_sign = 1;
                     }
-                    y_sign = 1;
-                } else if p1.dy < 0.0 {
-                    if y_sign == 0 {
-                        y_first_sign = -1;
-                    } else if y_sign > 0 {
-                        y_flips += 1;
+                    Some(Ordering::Less) => {
+                        match y_sign.cmp(&0) {
+                            Ordering::Equal => y_first_sign = -1,
+                            Ordering::Greater => y_flips += 1,
+                            _ => ()
+                        }
+
+                        y_sign = -1;
                     }
-                    y_sign = -1;
+                    _ => ()
                 }
 
                 // Calculate if we should use bevel or miter for inner join.
@@ -682,7 +695,7 @@ fn choose_bevel(bevel: bool, p0: &Point, p1: &Point, w: f32) -> (f32, f32, f32, 
     }
 }
 
-fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32, ncap: usize, _fringe: f32) {
+fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32, ncap: usize) {
     let dlx0 = p0.dy;
     let dly0 = -p0.dx;
     let dlx1 = p1.dy;
@@ -746,7 +759,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     }
 }
 
-fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32, _fringe: f32) {
+fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32) {
     let dlx0 = p0.dy;
     let dly0 = -p0.dx;
     let dlx1 = p1.dy;

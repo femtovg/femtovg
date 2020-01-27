@@ -77,7 +77,7 @@ impl Default for Align {
 // Image flags
 bitflags! {
     pub struct ImageFlags: u32 {
-        const GENERATE_MIPMAPS = 1 << 0;// Generate mipmaps during creation of the image.
+        const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
         const REPEAT_X = 1 << 1;        // Repeat image in X direction.
         const REPEAT_Y = 1 << 2;        // Repeat image in Y direction.
         const FLIP_Y = 1 << 3;          // Flips (inverses) image in Y direction when rendered.

@@ -124,7 +124,7 @@ fn degenerate_arc() {
 #[test]
 fn path_contains_point() {
     let mut canvas = Canvas::new(Void).unwrap();
-    
+
     // Star - cancave & self crossing
     let mut path = Path::new();
     path.move_to(50.0, 0.0);
@@ -133,11 +133,11 @@ fn path_contains_point() {
     path.line_to(2.0, 35.0);
     path.line_to(79.0, 90.0);
     path.close();
-    
+
     // Center of the star should be hollow for even-odd rule
     assert!(!canvas.contains_point(&mut path, 50.0, 45.0, FillRule::EvenOdd));
     assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::EvenOdd));
-    
+
     // Center of the star should be fill for NonZero rule
     assert!(canvas.contains_point(&mut path, 50.0, 45.0, FillRule::NonZero));
     assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::NonZero));
@@ -146,16 +146,16 @@ fn path_contains_point() {
 #[test]
 fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
-    
+
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    
-    let mut paint = Paint::color(Color::black());
+
+    let paint = Paint::color(Color::black());
     canvas.scale(5.0, 5.0);
 
     let bounds = canvas.text_bounds(100.0, 100.0, "Hello", paint);
     assert_eq!(bounds[0], 100.0);
     assert_eq!(bounds[1], 84.0);
-    
+
     let bounds = canvas.fill_text(100.0, 100.0, "Hello", paint);
     assert_eq!(bounds[0], 100.0);
     assert_eq!(bounds[1], 84.0);
