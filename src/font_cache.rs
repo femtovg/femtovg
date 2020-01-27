@@ -203,9 +203,11 @@ impl FontCache {
             let face = self.faces.get_mut(&face_name).ok_or(FontCacheError::FontNotFound)?;
             face.ft_face.set_pixel_sizes(0, paint.font_size()).unwrap();
 
+            // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
+            // And I didn't want to read the file a second time and keep it in memory just to give
+            // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
             let hb_font = unsafe {
                 let raw_font = hb_ft_font_create_referenced(face.ft_face.raw_mut());
-                //hb_sys::hb_ot_font_set_funcs(raw_font);
                 hb::Owned::from_raw(raw_font)
             };
 
@@ -264,7 +266,6 @@ impl FontCache {
                 cursor_x += x_advance + paint.letter_spacing();
                 cursor_y += y_advance;
             }
-
         }
 
         layout.bbox[0] = x;
