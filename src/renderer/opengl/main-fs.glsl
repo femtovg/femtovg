@@ -24,7 +24,6 @@ uniform vec2 viewSize;
 
 varying vec2 ftcoord;
 varying vec2 fpos;
-varying float dist;
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -50,12 +49,6 @@ float strokeMask() {
 #endif
 
 void main(void) {
-
-    // float u_dashSize = 5.0;
-    // float u_gapSize = 5.0;
-    // if (fract(dist / (u_dashSize + u_gapSize)) > u_dashSize/(u_dashSize + u_gapSize))
-    //     discard;
-
     vec4 result;
 
     float scissor = scissorMask(fpos);

@@ -108,22 +108,16 @@ pub struct Vertex {
     pub y: f32,
     pub u: f32,
     pub v: f32,
-    pub l: f32
 }
 
 impl Vertex {
     pub fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
-        Self { x, y, u, v, l: 0.0 }
-    }
-
-    pub fn newl(x: f32, y: f32, u: f32, v: f32, l: f32) -> Self {
-        Self { x, y, u, v, l }
+        Self { x, y, u, v }
     }
 
     pub fn set(&mut self, x: f32, y: f32, u: f32, v: f32) {
-        *self = Self { x, y, u, v, l: 0.0 };
+        *self = Self { x, y, u, v };
     }
-
 }
 
 // TODO: Rename those to make more sense - why do we have FillImage and Img?

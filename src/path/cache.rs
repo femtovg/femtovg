@@ -41,7 +41,6 @@ struct Point {
     len: f32,
     dmx: f32,
     dmy: f32,
-    dist: f32,
     flags: PointFlags
 }
 
@@ -205,8 +204,6 @@ impl PathCache {
                 points.reverse();
             }
 
-            let mut dist = 0.0;
-
             // TODO: this is doggy and fishy.
             for i in 0..contour.point_count() {
                 let p1 = points.get(i).copied().unwrap();
@@ -220,9 +217,6 @@ impl PathCache {
                 p0.dx = p1.x - p0.x;
                 p0.dy = p1.y - p0.y;
                 p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
-                p0.dist = dist;
-
-                dist += p0.len;
 
                 cache.bounds.minx = cache.bounds.minx.min(p0.x);
                 cache.bounds.miny = cache.bounds.miny.min(p0.y);
@@ -470,16 +464,6 @@ impl PathCache {
                             bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1);
                         }
                     } else {
-                        let a = stroke_width;
-                        let edge_x = p1.dmx * stroke_width;
-                        let edge_y = p1.dmy * stroke_width;
-                        //let h = edge_x.hypot(edge_y);
-                        //let h = (edge_x*edge_x + edge_y*edge_y).sqrt();
-                        let h = (edge_x*edge_x + edge_y*edge_y).sqrt();
-                        let dist = (h*h - a*a).sqrt();
-
-                        //contour.stroke.push(Vertex::newl(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0, p1.dist - dist));
-                        //contour.stroke.push(Vertex::newl(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0, p1.dist + dist));
                         contour.stroke.push(Vertex::new(p1.x + (p1.dmx * stroke_width), p1.y + (p1.dmy * stroke_width), u0, 1.0));
                         contour.stroke.push(Vertex::new(p1.x - (p1.dmx * stroke_width), p1.y - (p1.dmy * stroke_width), u1, 1.0));
                     }
@@ -647,11 +631,6 @@ fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f3
     let dlx = p1.dy;
     let dly = -p1.dx;
 
-    // verts.push(Vertex::newl(px + dlx*w - p1.dx*aa, py + dly*w - p1.dy*aa, u0, 0.0, p0.dist));
-    // verts.push(Vertex::newl(px - dlx*w - p1.dx*aa, py - dly*w - p1.dy*aa, u1, 0.0, p0.dist));
-    // verts.push(Vertex::newl(px + dlx*w, py + dly*w, u0, 1.0, p0.dist));
-    // verts.push(Vertex::newl(px - dlx*w, py - dly*w, u1, 1.0, p0.dist));
-
     verts.push(Vertex::new(px + dlx*w - p1.dx*aa, py + dly*w - p1.dy*aa, u0, 0.0));
     verts.push(Vertex::new(px - dlx*w - p1.dx*aa, py - dly*w - p1.dy*aa, u1, 0.0));
     verts.push(Vertex::new(px + dlx*w, py + dly*w, u0, 1.0));
@@ -663,11 +642,6 @@ fn butt_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32,
     let py = p0.y + p1.dy*d;
     let dlx = p1.dy;
     let dly = -p1.dx;
-
-    // verts.push(Vertex::newl(px + dlx*w, py + dly*w, u0, 1.0, p0.dist));
-    // verts.push(Vertex::newl(px - dlx*w, py - dly*w, u1, 1.0, p0.dist));
-    // verts.push(Vertex::newl(px + dlx*w + p1.dx*aa, py + dly*w + p1.dy*aa, u0, 0.0, p0.dist));
-    // verts.push(Vertex::newl(px - dlx*w + p1.dx*aa, py - dly*w + p1.dy*aa, u1, 0.0, p0.dist));
 
     verts.push(Vertex::new(px + dlx*w, py + dly*w, u0, 1.0));
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));

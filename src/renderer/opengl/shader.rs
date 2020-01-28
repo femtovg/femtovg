@@ -49,7 +49,6 @@ impl Shader {
 
             gl::BindAttribLocation(shader.prog, 0, CString::new("vertex")?.as_ptr());
             gl::BindAttribLocation(shader.prog, 1, CString::new("tcoord")?.as_ptr());
-            gl::BindAttribLocation(shader.prog, 2, CString::new("length")?.as_ptr());
 
             gl::LinkProgram(shader.prog);
 

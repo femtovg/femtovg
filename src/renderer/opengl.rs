@@ -355,11 +355,9 @@ impl Renderer for OpenGl {
 
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
-            gl::EnableVertexAttribArray(2);
 
             gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, ptr::null::<c_void>());
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
-            gl::VertexAttribPointer(2, 1, gl::FLOAT, gl::FALSE, vertex_size as i32, (4 * mem::size_of::<f32>()) as *const c_void);
         }
 
         // Set view and texture just once per frame.
