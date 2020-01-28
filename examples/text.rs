@@ -114,7 +114,7 @@ fn main() {
 }
 
 fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
-    let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic];
+    let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
     paint.set_font_name("Roboto-Regular");
@@ -129,7 +129,11 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
 
         paint.set_text_baseline(*baseline);
-        canvas.fill_text(10.0, y, format!("Abcdefghijklmnop ({:?})", baseline), paint);
+        let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF baseline ({:?})", baseline), paint);
+
+        let mut path = Path::new();
+        path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
+        canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
     }
 }
 
@@ -191,7 +195,7 @@ impl PerfGraph {
         text_paint.set_font_name("Roboto-Regular");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	canvas.fill_text(x + w - 5.0, y - 2.0, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+    	canvas.fill_text(x + w - 5.0, y + 2., &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12);

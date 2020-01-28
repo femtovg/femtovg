@@ -586,7 +586,7 @@ impl PerfGraph {
         text_paint.set_font_name("Roboto-Regular");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	canvas.fill_text(x + w - 5.0, y - 2.0, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+    	canvas.fill_text(x + w - 5.0, y + 2., &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12);

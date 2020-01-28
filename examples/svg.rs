@@ -18,6 +18,8 @@ use gpucanvas::{
     Path,
     ImageFlags,
     FillRule,
+    Align,
+    Baseline,
     renderer::OpenGl
 };
 
@@ -249,13 +251,22 @@ impl PerfGraph {
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
+        text_paint.set_font_size(12);
+        text_paint.set_font_name("Roboto-Light");
+    	canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
+
+        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(16);
         text_paint.set_font_name("Roboto-Regular");
-    	canvas.fill_text(x + 5.0, y + 15.0, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+        text_paint.set_text_align(Align::Right);
+        text_paint.set_text_baseline(Baseline::Top);
+    	canvas.fill_text(x + w - 5.0, y + 2., &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
-        text_paint.set_font_size(14);
-        text_paint.set_font_name("Roboto-Regular");
-    	canvas.fill_text(x + 5.0, y + 30.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
+        text_paint.set_font_size(12);
+        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_text_align(Align::Right);
+        text_paint.set_text_baseline(Baseline::Alphabetic);
+    	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
     }
 }

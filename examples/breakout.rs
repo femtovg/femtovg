@@ -746,7 +746,7 @@ impl Powerup {
         text_paint.set_text_baseline(Baseline::Middle);
         text_paint.set_font_name("Roboto-Light");
         text_paint.set_font_size(16);
-        canvas.fill_text(self.rect.center().x, self.rect.center().y - 3.0, &format!("{:?}", self.ty), text_paint);
+        canvas.fill_text(self.rect.center().x, self.rect.center().y, &format!("{:?}", self.ty), text_paint);
     }
 }
 

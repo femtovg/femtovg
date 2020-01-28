@@ -196,7 +196,7 @@ impl FontCache {
 
         let mut em_height = 0;
 
-        let mut max_descender = 0.0f32;
+        let mut min_descender = 0.0f32;
         let mut max_ascender = 0.0f32;
 
         let faces = Self::face_character_range(&self.faces, text, paint.font_name())?;
@@ -223,7 +223,7 @@ impl FontCache {
 
             line_height = line_height.max((size_metrics.height >> 6) as f32);
             em_height = em_height.max(size_metrics.y_ppem);
-            max_descender = max_descender.max((size_metrics.descender >> 6) as f32);
+            min_descender = min_descender.min((size_metrics.descender >> 6) as f32);
             max_ascender = max_ascender.max((size_metrics.ascender >> 6) as f32);
 
             // No subpixel positioning / full hinting
@@ -273,9 +273,9 @@ impl FontCache {
         }
 
         layout.bbox[0] = x;
-        layout.bbox[1] = y - line_height as f32;
+        layout.bbox[1] = y - (min_descender + max_ascender);
         layout.bbox[2] = cursor_x as f32;
-        layout.bbox[3] = y;
+        layout.bbox[3] = y - min_descender;
 
         let width = layout.bbox[0] - layout.bbox[2];
 
@@ -285,14 +285,11 @@ impl FontCache {
             Align::Center => (width as f32 / 2.0).floor(),
         };
 
-        //dbg!(max_descender, max_ascender);
-
         let offset_y = match paint.text_baseline() {
-            Baseline::Top => em_height as f32,
-            //Baseline::Middle => (max_descender + max_ascender / 2.0).floor(), <- hanging
-            //Baseline::Middle => (max_ascender / 2.0).floor(), <- hanging
-            Baseline::Middle => (paint.font_size() as f32 / 2.0).floor(),
+            Baseline::Top => min_descender + max_ascender,
+            Baseline::Middle => -(min_descender).round(),
             Baseline::Alphabetic => 0.0,
+            Baseline::Bottom => min_descender,
         };
 
         layout.bbox[0] += offset_x;

@@ -55,6 +55,8 @@ pub enum Baseline {
     Middle,
     /// The text baseline is the normal alphabetic baseline. Default value.
     Alphabetic,
+    // The text baseline is the bottom of the bounding box.
+    Bottom
 }
 
 impl Default for Baseline {
