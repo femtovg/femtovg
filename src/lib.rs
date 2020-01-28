@@ -5,6 +5,8 @@ use std::{error::Error, fmt};
 use image::DynamicImage;
 use bitflags::bitflags;
 
+mod utils;
+
 mod color;
 pub use color::Color;
 
@@ -664,7 +666,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     // TODO: Return Bounds struct from here
-    pub fn text_bounds(&mut self, x: f32, y: f32, text: &str, mut paint: Paint) -> [f32; 4] {
+    pub fn text_bounds<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> [f32; 4] {
+        let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
@@ -691,11 +694,13 @@ impl<T> Canvas<T> where T: Renderer {
         bounds
     }
 
-    pub fn fill_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) -> [f32; 4] {
+    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
+        let text = text.as_ref();
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill)
     }
 
-    pub fn stroke_text(&mut self, x: f32, y: f32, text: &str, paint: Paint) -> [f32; 4] {
+    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
+        let text = text.as_ref();
         self.draw_text(x, y, text, paint, GlyphRenderStyle::Stroke {
             line_width: paint.stroke_width().ceil() as u32
         })

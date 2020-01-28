@@ -2,10 +2,10 @@
 Antialiased 2D vector drawing library written in rust.
 Ported from https://github.com/memononen/nanovg
 
-Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more rusty. Rendering is done via one OpenGl (ES) 3.0+ capable backend.
+Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more rusty. Rendering is done via one OpenGl (ES) 3.0+ backend.
 
 ## Features
-* [x] Anti-aliasing on the GPU without the use of multisampling
+* [x] Anti-aliasing
 * [x] Bézier paths (including self-intersecting) filling and stroking
 * [x] Solid color and image pattern fills and strokes
 * [x] Gradients - box (for easy box shadows), linear (2 points only) and radial
@@ -18,13 +18,14 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Global alpha
 * [x] Text filling and stroking (freetype + atlas textures on the GPU)
 * [x] Text shaping (via harfbuzz)
-* [x] Text alignment: (left center right), (top, baseline, bottom)
+* [x] Text alignment: (left center right), (top, middle, alphabetic)
 * [x] Nearest font matching
 * [x] Path hit testing
 
 ## Not supported
 * [ ] Stroke dashing
 * [ ] Path culling
+* [ ] Path clipping
 * [ ] Custom shaders
 * [ ] 3D transforms
 * [ ] OpenGl ES2 backend

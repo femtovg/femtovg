@@ -8,6 +8,7 @@ use bitflags::bitflags;
 use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
 use crate::{Path, Verb, Winding, LineCap, LineJoin, FillRule};
+use crate::utils::VecRetainMut;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Convexity {
@@ -181,16 +182,23 @@ impl PathCache {
             }
         }
 
-        for contour in &mut cache.contours {
-            let mut points = &mut cache.points[contour.point_range.clone()];
+        let all_points = &mut cache.points;
+        let bounds = &mut cache.bounds;
+
+        cache.contours.retain_mut(|contour| {
+            let mut points = &mut all_points[contour.point_range.clone()];
 
             // If the first and last points are the same, remove the last, mark as closed contour.
             if let (Some(p0), Some(p1)) = (points.last(), points.first()) {
                 if p0.approx_eq(&p1, dist_tol) {
                     contour.point_range.end -= 1;
                     contour.closed = true;
-                    points = &mut cache.points[contour.point_range.clone()];
+                    points = &mut all_points[contour.point_range.clone()];
                 }
+            }
+
+            if points.len() < 2 {
+                return false;
             }
 
             // Enforce winding.
@@ -218,15 +226,14 @@ impl PathCache {
                 p0.dy = p1.y - p0.y;
                 p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
 
-                cache.bounds.minx = cache.bounds.minx.min(p0.x);
-                cache.bounds.miny = cache.bounds.miny.min(p0.y);
-                cache.bounds.maxx = cache.bounds.maxx.max(p0.x);
-                cache.bounds.maxy = cache.bounds.maxy.max(p0.y);
+                bounds.minx = bounds.minx.min(p0.x);
+                bounds.miny = bounds.miny.min(p0.y);
+                bounds.maxx = bounds.maxx.max(p0.x);
+                bounds.maxy = bounds.maxy.max(p0.y);
             }
-        }
 
-        // TODO: maybe this can be done in the path instead
-        cache.contours.retain(|c| c.point_count() > 1);
+            true
+        });
 
         cache
     }
