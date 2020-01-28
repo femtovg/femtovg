@@ -1,5 +1,6 @@
 
 use std::io;
+use std::f32;
 use std::fmt;
 use std::path::Path;
 use std::ops::Range;
@@ -250,7 +251,7 @@ impl FontCache {
             cmds: Vec::new()
         };
 
-        let mut min_descender = 0.0f32;
+        let mut min_descender = f32::MIN;
         let mut max_ascender = 0.0f32;
 
         let faces = Self::face_character_range(&self.faces, text, paint.font_name())?;
@@ -260,7 +261,7 @@ impl FontCache {
             face.ft_face.set_pixel_sizes(0, paint.font_size()).unwrap();
 
             let output;
-            let shaping_id = ShapingId::new(paint.font_size(), text);
+            let shaping_id = ShapingId::new(paint.font_size(), &text[str_range.clone()]);
 
             if let Some(cached_output) = face.shaping_cache.get(&shaping_id) {
                 output = cached_output;
@@ -284,7 +285,7 @@ impl FontCache {
             let infos = output.get_glyph_infos();
 
             let size_metrics = face.ft_face.size_metrics().unwrap();
-            min_descender = min_descender.min(size_metrics.descender as f32 / 64.0);
+            min_descender = min_descender.max(size_metrics.descender as f32 / 64.0);
             max_ascender = max_ascender.max(size_metrics.ascender as f32 / 64.0);
 
             // Subpixel positioning / no hinting

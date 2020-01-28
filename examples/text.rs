@@ -39,6 +39,7 @@ fn main() {
     canvas.add_font("examples/assets/Roboto-Bold.ttf");
     canvas.add_font("examples/assets/Roboto-Light.ttf");
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    canvas.add_font("examples/assets/amiri-regular.ttf");
 
     let start = Instant::now();
     let mut prevt = start;
@@ -83,7 +84,7 @@ fn main() {
                 draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
                 draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
                 draw_inc_size(&mut canvas, 270.0, 30.0);
-
+                draw_arabic(&mut canvas, 270.0, 340.0, font_size as u32);
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
@@ -125,6 +126,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
 
         paint.set_text_baseline(*baseline);
         let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
+        //let bbox = canvas.fill_text(x, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
         let mut path = Path::new();
         path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
@@ -199,6 +201,14 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
     paint.set_color(Color::white());
     canvas.fill_text(x, y, "RUST", paint);
+}
+
+fn draw_arabic<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+    let mut paint = Paint::color(Color::black());
+    paint.set_font_name("Roboto-Regular");
+    paint.set_font_size(font_size);
+    
+    canvas.fill_text(x, y, "Mixed latin and النص العربي جميل جدا Some more latin. Малко кирилица.", paint);
 }
 
 struct PerfGraph {
