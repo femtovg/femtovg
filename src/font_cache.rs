@@ -241,7 +241,7 @@ impl FontCache {
 
     pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, paint: Paint, render_style: GlyphRenderStyle,  text: &str) -> Result<TextLayout> {
         let mut cursor_x = x;
-        let mut cursor_y = y as i32;
+        let mut cursor_y = y;
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -287,15 +287,15 @@ impl FontCache {
             min_descender = min_descender.min((size_metrics.descender >> 6) as f32);
             max_ascender = max_ascender.max((size_metrics.ascender >> 6) as f32);
 
-            // No subpixel positioning / full hinting
+            // Subpixel positioning / no hinting
 
             for (position, info) in positions.iter().zip(infos) {
                 let gid = info.codepoint;
                 //let cluster = info.cluster;
                 let x_advance = position.x_advance as f32 / 64.0;
-                let y_advance = position.y_advance >> 6;
+                let y_advance = position.y_advance as f32 / 64.0;
                 let x_offset = position.x_offset as f32 / 64.0;
-                let y_offset = position.y_offset >> 6;
+                let y_offset = position.y_offset as f32 / 64.0;
 
                 let glyph_id = GlyphId::new(gid, paint, render_style);
 
@@ -308,7 +308,7 @@ impl FontCache {
                 };
 
                 let xpos = cursor_x + x_offset + glyph.bearing_x as f32 - (glyph.padding / 2) as f32;
-                let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
+                let ypos = cursor_y + y_offset - glyph.bearing_y as f32 - (glyph.padding / 2) as f32;
 
                 if let Some(texture) = self.textures.get(glyph.texture_index) {
                     let image_id = texture.image_id;
@@ -324,9 +324,9 @@ impl FontCache {
                     let mut q = Quad::default();
 
                     q.x0 = xpos.floor();
-                    q.y0 = ypos as f32;
-                    q.x1 = (xpos + glyph.width as f32).floor();
-                    q.y1 = (ypos + glyph.height as i32) as f32;
+                    q.y0 = ypos.floor();
+                    q.x1 = xpos.floor() + glyph.width as f32;
+                    q.y1 = ypos.floor() + glyph.height as f32;
 
                     q.s0 = glyph.atlas_x as f32 * itw;
                     q.t0 = glyph.atlas_y as f32 * ith;
@@ -343,15 +343,15 @@ impl FontCache {
 
         layout.bbox[0] = x;
         layout.bbox[1] = y - (min_descender + max_ascender);
-        layout.bbox[2] = cursor_x as f32;
+        layout.bbox[2] = cursor_x;
         layout.bbox[3] = y - min_descender;
 
         let width = layout.bbox[0] - layout.bbox[2];
 
         let offset_x = match paint.text_align() {
             Align::Left => 0.0,
-            Align::Right => width as f32,
-            Align::Center => (width as f32 / 2.0).floor(),
+            Align::Right => width,
+            Align::Center => (width / 2.0).floor(),
         };
 
         let offset_y = match paint.text_baseline() {
