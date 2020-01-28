@@ -4,7 +4,6 @@ use std::error;
 
 use image::DynamicImage;
 
-use crate::geometry::Transform2D;
 use crate::{Color, FillRule, ImageId, ImageFlags, CompositeOperationState};
 
 mod opengl;
@@ -63,7 +62,6 @@ pub struct Command {
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
     pub(crate) fill_rule: FillRule,
-    pub(crate) transform: Transform2D,
     pub(crate) composite_operation: CompositeOperationState
 }
 
@@ -75,7 +73,6 @@ impl Command {
             triangles_verts: Default::default(),
             image: Default::default(),
             fill_rule: Default::default(),
-            transform: Default::default(),
             composite_operation: Default::default()
         }
     }

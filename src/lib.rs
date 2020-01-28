@@ -519,7 +519,6 @@ impl<T> Canvas<T> where T: Renderer {
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.transform = transform;
         cmd.fill_rule = paint.fill_rule;
         cmd.composite_operation = self.state().composite_operation;
 
@@ -603,7 +602,6 @@ impl<T> Canvas<T> where T: Renderer {
         };
 
         let mut cmd = Command::new(flavor);
-        cmd.transform = transform;
         cmd.composite_operation = self.state().composite_operation;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
@@ -726,7 +724,7 @@ impl<T> Canvas<T> where T: Renderer {
             // Apply global alpha
             paint.mul_alpha(self.state().alpha);
 
-            self.render_triangles(&verts, &paint, &scissor, &transform);
+            self.render_triangles(&verts, &paint, &scissor);
         }
 
         let mut bounds = layout.bbox;
@@ -739,13 +737,12 @@ impl<T> Canvas<T> where T: Renderer {
         bounds
     }
 
-    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor, transform: &Transform2D) {
+    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
         let mut params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
         params.shader_type = ShaderType::Img.to_f32();
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.transform = *transform;
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
