@@ -6,6 +6,7 @@ use gpucanvas::{
     Color,
     Winding,
     FillRule,
+    Baseline,
     renderer::Void
 };
 
@@ -149,14 +150,15 @@ fn text_location_respects_scale() {
 
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
 
-    let paint = Paint::color(Color::black());
+    let mut paint = Paint::color(Color::black());
+    paint.set_text_baseline(Baseline::Top);
     canvas.scale(5.0, 5.0);
 
     let bounds = canvas.text_bounds(100.0, 100.0, "Hello", paint);
     assert_eq!(bounds[0], 100.0);
-    assert_eq!(bounds[1], 84.0);
+    assert_eq!(bounds[1], 100.0);
 
     let bounds = canvas.fill_text(100.0, 100.0, "Hello", paint);
     assert_eq!(bounds[0], 100.0);
-    assert_eq!(bounds[1], 84.0);
+    assert_eq!(bounds[1], 100.0);
 }

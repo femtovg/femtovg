@@ -6,7 +6,7 @@ Most of the implementation is the same as the original C code with some bug fixe
 
 ## Features
 * [x] Anti-aliasing
-* [x] Bézier paths (including self-intersecting) filling and stroking
+* [x] Bézier paths filling and stroking
 * [x] Solid color and image pattern fills and strokes
 * [x] Gradients - box (for easy box shadows), linear (2 points only) and radial
 * [x] Stroke width and miterlimit
@@ -16,16 +16,16 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Rectangle scissoring
 * [x] Composition modes (clear, darken, lighten, multiply, etc..)
 * [x] Global alpha
-* [x] Text filling and stroking (freetype + atlas textures on the GPU)
-* [x] Text shaping (via harfbuzz)
-* [x] Text alignment: (left center right), (top, middle, alphabetic)
+* [x] Text filling and stroking
+* [x] Text shaping
+* [x] Text alignment: (left center right), (top, middle, alphabetic, bottom)
 * [x] Nearest font matching
 * [x] Path hit testing
 
 ## Not supported
 * [ ] Stroke dashing
 * [ ] Path culling
-* [ ] Path clipping
+* [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
 * [ ] OpenGl ES2 backend
