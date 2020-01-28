@@ -23,19 +23,19 @@ pub struct Params {
 
 impl Params {
 
-    pub(crate) fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, width: f32, fringe: f32, stroke_thr: f32) -> Self {
-        let mut gpu_paint = Params::default();
+    pub(crate) fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
+        let mut params = Params::default();
 
         // Scissor
         let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
             if ext[0] < -0.5 || ext[1] < -0.5 {
                 ([1.0, 1.0], [1.0, 1.0])
             } else {
-                gpu_paint.scissor_mat = scissor.transform.inversed().to_mat3x4();
+                params.scissor_mat = scissor.transform.inversed().to_mat3x4();
 
                 let scissor_scale = [
-                    (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe,
-                    (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe
+                    (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe_width,
+                    (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe_width
                 ];
 
                 (ext, scissor_scale)
@@ -44,11 +44,11 @@ impl Params {
             ([1.0, 1.0], [1.0, 1.0])
         };
 
-        gpu_paint.scissor_ext = scissor_ext;
-        gpu_paint.scissor_scale = scissor_scale;
+        params.scissor_ext = scissor_ext;
+        params.scissor_scale = scissor_scale;
 
-        gpu_paint.stroke_mult = (width*0.5 + fringe*0.5) / fringe;
-        gpu_paint.stroke_thr = stroke_thr;
+        params.stroke_mult = (stroke_width*0.5 + fringe_width*0.5) / fringe_width;
+        params.stroke_thr = stroke_thr;
 
         // Paint flavor
         let inv_transform;
@@ -56,22 +56,19 @@ impl Params {
         match paint.flavor {
             PaintFlavor::Color(color) => {
                 let color = color.premultiplied().to_array();
-                gpu_paint.inner_col = color;
-                gpu_paint.outer_col = color;
-                gpu_paint.shader_type = ShaderType::FillGradient.to_f32();
+                params.inner_col = color;
+                params.outer_col = color;
+                params.shader_type = ShaderType::FillGradient.to_f32();
                 inv_transform = paint.transform.inversed();
             },
             PaintFlavor::Image { id, cx, cy, width, height, angle, tint } => {
                 let texture_flags = backend.texture_flags(id);
 
-                gpu_paint.extent[0] = width;
-                gpu_paint.extent[1] = height;
+                params.extent[0] = width;
+                params.extent[1] = height;
 
-                gpu_paint.inner_col = tint.premultiplied().to_array();
-                gpu_paint.outer_col = tint.premultiplied().to_array();
-
-                //gpu_paint.inner_col[3] = alpha;
-                //gpu_paint.outer_col[3] = alpha;
+                params.inner_col = tint.premultiplied().to_array();
+                params.outer_col = tint.premultiplied().to_array();
 
                 let mut transform = Transform2D::identity();
                 transform.rotate(angle);
@@ -95,9 +92,9 @@ impl Params {
                     inv_transform = transform.inversed();
                 }
 
-                gpu_paint.shader_type = ShaderType::FillImage.to_f32();
+                params.shader_type = ShaderType::FillImage.to_f32();
 
-                gpu_paint.tex_type = match backend.texture_type(id) {
+                params.tex_type = match backend.texture_type(id) {
                     Some(TextureType::Rgba) => if texture_flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
                     Some(TextureType::Alpha) => 2.0,
                     _ => 0.0
@@ -127,26 +124,26 @@ impl Params {
 
                 inv_transform = transform.inversed();
 
-                gpu_paint.extent[0] = large;
-                gpu_paint.extent[1] = large + d*0.5;
-                gpu_paint.feather = 1.0f32.max(d);
+                params.extent[0] = large;
+                params.extent[1] = large + d*0.5;
+                params.feather = 1.0f32.max(d);
 
-                gpu_paint.inner_col = start_color.premultiplied().to_array();
-                gpu_paint.outer_col = end_color.premultiplied().to_array();
-                gpu_paint.shader_type = ShaderType::FillGradient.to_f32();
+                params.inner_col = start_color.premultiplied().to_array();
+                params.outer_col = end_color.premultiplied().to_array();
+                params.shader_type = ShaderType::FillGradient.to_f32();
             }
             PaintFlavor::BoxGradient { x, y, width, height, radius, feather, inner_color, outer_color } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform.multiply(&paint.transform);
                 inv_transform = transform.inversed();
 
-                gpu_paint.extent[0] = width * 0.5;
-                gpu_paint.extent[1] = height * 0.5;
-                gpu_paint.radius = radius;
-                gpu_paint.feather = feather;
-                gpu_paint.inner_col = inner_color.premultiplied().to_array();
-                gpu_paint.outer_col = outer_color.premultiplied().to_array();
-                gpu_paint.shader_type = ShaderType::FillGradient.to_f32();
+                params.extent[0] = width * 0.5;
+                params.extent[1] = height * 0.5;
+                params.radius = radius;
+                params.feather = feather;
+                params.inner_col = inner_color.premultiplied().to_array();
+                params.outer_col = outer_color.premultiplied().to_array();
+                params.shader_type = ShaderType::FillGradient.to_f32();
             }
             PaintFlavor::RadialGradient { cx, cy, in_radius, out_radius, inner_color, outer_color } => {
                 let r = (in_radius + out_radius) * 0.5;
@@ -156,19 +153,19 @@ impl Params {
                 transform.multiply(&paint.transform);
                 inv_transform = transform.inversed();
 
-                gpu_paint.extent[0] = r;
-                gpu_paint.extent[1] = r;
-                gpu_paint.radius = r;
-                gpu_paint.feather = 1.0f32.max(f);
-                gpu_paint.inner_col = inner_color.premultiplied().to_array();
-                gpu_paint.outer_col = outer_color.premultiplied().to_array();
-                gpu_paint.shader_type = ShaderType::FillGradient.to_f32();
+                params.extent[0] = r;
+                params.extent[1] = r;
+                params.radius = r;
+                params.feather = 1.0f32.max(f);
+                params.inner_col = inner_color.premultiplied().to_array();
+                params.outer_col = outer_color.premultiplied().to_array();
+                params.shader_type = ShaderType::FillGradient.to_f32();
             }
         }
 
-        gpu_paint.paint_mat = inv_transform.to_mat3x4();
+        params.paint_mat = inv_transform.to_mat3x4();
 
-        gpu_paint
+        params
     }
 
 }

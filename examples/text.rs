@@ -1,9 +1,9 @@
 
 use std::time::Instant;
 
-use glutin::event::{Event, WindowEvent, DeviceEvent, ElementState, KeyboardInput, VirtualKeyCode, MouseButton};
+use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::{ControlFlow, EventLoop};
-use glutin::window::{Window, WindowBuilder};
+use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 
 use gpucanvas::{
@@ -11,12 +11,9 @@ use gpucanvas::{
     Canvas,
     Color,
     Paint,
-    ImageFlags,
     Align,
     Baseline,
-    ImageId,
     Path,
-    //CompositeOperation,
     renderer::OpenGl
 };
 
