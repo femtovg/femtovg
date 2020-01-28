@@ -240,7 +240,7 @@ impl FontCache {
     }
 
     pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, paint: Paint, render_style: GlyphRenderStyle,  text: &str) -> Result<TextLayout> {
-        let mut cursor_x = x as i32;
+        let mut cursor_x = x;
         let mut cursor_y = y as i32;
 
         let mut cmd_map = FnvHashMap::default();
@@ -292,9 +292,9 @@ impl FontCache {
             for (position, info) in positions.iter().zip(infos) {
                 let gid = info.codepoint;
                 //let cluster = info.cluster;
-                let x_advance = position.x_advance >> 6;
+                let x_advance = position.x_advance as f32 / 64.0;
                 let y_advance = position.y_advance >> 6;
-                let x_offset = position.x_offset >> 6;
+                let x_offset = position.x_offset as f32 / 64.0;
                 let y_offset = position.y_offset >> 6;
 
                 let glyph_id = GlyphId::new(gid, paint, render_style);
@@ -307,7 +307,7 @@ impl FontCache {
                     glyph
                 };
 
-                let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
+                let xpos = cursor_x + x_offset + glyph.bearing_x as f32 - (glyph.padding / 2) as f32;
                 let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
 
                 if let Some(texture) = self.textures.get(glyph.texture_index) {
@@ -323,9 +323,9 @@ impl FontCache {
 
                     let mut q = Quad::default();
 
-                    q.x0 = xpos as f32;
+                    q.x0 = xpos.floor();
                     q.y0 = ypos as f32;
-                    q.x1 = (xpos + glyph.width as i32) as f32;
+                    q.x1 = (xpos + glyph.width as f32).floor();
                     q.y1 = (ypos + glyph.height as i32) as f32;
 
                     q.s0 = glyph.atlas_x as f32 * itw;
@@ -336,7 +336,7 @@ impl FontCache {
                     cmd.quads.push(q);
                 }
 
-                cursor_x += x_advance + paint.letter_spacing();
+                cursor_x += x_advance;// + paint.letter_spacing();
                 cursor_y += y_advance;
             }
         }
