@@ -185,7 +185,6 @@ impl FontCache {
     pub fn layout_text<T: Renderer>(&mut self, x: f32, y: f32, renderer: &mut T, paint: Paint, render_style: GlyphRenderStyle,  text: &str) -> Result<TextLayout> {
         let mut cursor_x = x as i32;
         let mut cursor_y = y as i32;
-        let mut line_height: f32 = 0.0;
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -193,8 +192,6 @@ impl FontCache {
             bbox: [0.0, 0.0, 0.0, 0.0],
             cmds: Vec::new()
         };
-
-        let mut em_height = 0;
 
         let mut min_descender = 0.0f32;
         let mut max_ascender = 0.0f32;
@@ -220,9 +217,6 @@ impl FontCache {
             let infos = output.get_glyph_infos();
 
             let size_metrics = face.ft_face.size_metrics().unwrap();
-
-            line_height = line_height.max((size_metrics.height >> 6) as f32);
-            em_height = em_height.max(size_metrics.y_ppem);
             min_descender = min_descender.min((size_metrics.descender >> 6) as f32);
             max_ascender = max_ascender.max((size_metrics.ascender >> 6) as f32);
 
@@ -287,7 +281,7 @@ impl FontCache {
 
         let offset_y = match paint.text_baseline() {
             Baseline::Top => min_descender + max_ascender,
-            Baseline::Middle => -(min_descender).round(),
+            Baseline::Middle => -min_descender,
             Baseline::Alphabetic => 0.0,
             Baseline::Bottom => min_descender,
         };

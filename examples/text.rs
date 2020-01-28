@@ -96,6 +96,7 @@ fn main() {
                 // canvas.fill_text(120.0, y, "Alphabetic", paint);
 
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
+                draw_alignments(&mut canvas, 120.0, 250.0, font_size as u32);
 
                 canvas.save();
                 canvas.reset();
@@ -129,11 +130,33 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
 
         paint.set_text_baseline(*baseline);
-        let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF baseline ({:?})", baseline), paint);
+        let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
 
         let mut path = Path::new();
         path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
-        canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
+        canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+    }
+}
+
+fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+    let alignments = [Align::Left, Align::Center, Align::Right];
+
+    let mut path = Path::new();
+    path.move_to(x + 0.5, y - 20.);
+    path.line_to(x + 0.5, y + 120.);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
+
+    let mut paint = Paint::color(Color::black());
+    paint.set_font_name("Roboto-Regular");
+    paint.set_font_size(font_size);
+
+    for (i, alignment) in alignments.iter().enumerate() {
+        paint.set_text_align(*alignment);
+        let bbox = canvas.fill_text(x, y + i as f32 * 50.0, format!("Align::{:?}", alignment), paint);
+
+        let mut path = Path::new();
+        path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
+        canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
     }
 }
 
