@@ -22,7 +22,7 @@ use gpucanvas::{
 
 fn main() {
 
-    let window_size = glutin::dpi::PhysicalSize::new(800, 600);
+    let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
         .with_inner_size(window_size)
@@ -80,7 +80,7 @@ fn main() {
                 perf.update(dt);
 
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
-                draw_alignments(&mut canvas, 120.0, 250.0, font_size as u32);
+                draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
                 draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
                 draw_inc_size(&mut canvas, 270.0, 30.0);
 
@@ -116,7 +116,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     paint.set_font_size(font_size);
 
     for (i, baseline) in baselines.iter().enumerate() {
-        let y = y + i as f32 * 50.0;
+        let y = y + i as f32 * 40.0;
 
         let mut path = Path::new();
         path.move_to(x, y + 0.5);
@@ -137,7 +137,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 
     let mut path = Path::new();
     path.move_to(x + 0.5, y - 20.);
-    path.line_to(x + 0.5, y + 120.);
+    path.line_to(x + 0.5, y + 80.);
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
@@ -146,7 +146,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 
     for (i, alignment) in alignments.iter().enumerate() {
         paint.set_text_align(*alignment);
-        let bbox = canvas.fill_text(x, y + i as f32 * 50.0, format!("Align::{:?}", alignment), paint);
+        let bbox = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint);
 
         let mut path = Path::new();
         path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
@@ -190,8 +190,8 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
     paint.set_font_blur(0.0);
     paint.set_color(Color::black());
-    paint.set_stroke_width(12.0);
-    canvas.stroke_text(x - 6.0, y - 6.0, "RUST", paint);
+    paint.set_stroke_width(10.0);
+    canvas.stroke_text(x - 5.0, y - 5.0, "RUST", paint);
 
     paint.set_stroke_width(6.0);
     paint.set_color(Color::hex("#B7410E"));

@@ -284,8 +284,8 @@ impl FontCache {
             let infos = output.get_glyph_infos();
 
             let size_metrics = face.ft_face.size_metrics().unwrap();
-            min_descender = min_descender.min((size_metrics.descender >> 6) as f32);
-            max_ascender = max_ascender.max((size_metrics.ascender >> 6) as f32);
+            min_descender = min_descender.min(size_metrics.descender as f32 / 64.0);
+            max_ascender = max_ascender.max(size_metrics.ascender as f32 / 64.0);
 
             // Subpixel positioning / no hinting
 
@@ -350,7 +350,7 @@ impl FontCache {
 
         let offset_x = match paint.text_align() {
             Align::Left => 0.0,
-            Align::Right => width,
+            Align::Right => width.floor(),
             Align::Center => (width / 2.0).floor(),
         };
 
