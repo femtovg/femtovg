@@ -32,6 +32,8 @@ type Result<T> = std::result::Result<T, FontCacheError>;
 
 type PostscriptName = String;
 
+// harfbuzz-sys doesn't add this symbol for mac builds.
+// And we need it since we're using freetype on OSX.
 extern "C" {
     pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
 }
@@ -224,7 +226,6 @@ impl FontCache {
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<()> {
-
         let face = self.library.new_memory_face(data, 0)?;
 
         let postscript_name = face.postscript_name().ok_or_else(|| {
