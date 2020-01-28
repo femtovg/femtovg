@@ -336,7 +336,7 @@ impl FontCache {
                     cmd.quads.push(q);
                 }
 
-                cursor_x += x_advance;// + paint.letter_spacing();
+                cursor_x += x_advance + paint.letter_spacing();
                 cursor_y += y_advance;
             }
         }

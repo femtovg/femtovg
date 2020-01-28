@@ -81,7 +81,7 @@ pub struct Paint<'a> {
     pub(crate) line_join: LineJoin,
     pub(crate) font_name: &'a str,
     pub(crate) font_size: u32,
-    pub(crate) letter_spacing: i32,
+    pub(crate) letter_spacing: f32,
     pub(crate) font_blur: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
@@ -101,7 +101,7 @@ impl Default for Paint<'_> {
             line_join: Default::default(),
             font_name: "NotoSans-Regular",
             font_size: 16,
-            letter_spacing: 0,
+            letter_spacing: 0.0,
             font_blur: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
@@ -289,14 +289,14 @@ impl<'a> Paint<'a> {
     }
 
     /// Returns the current letter spacing
-    pub fn letter_spacing(&self) -> i32 {
+    pub fn letter_spacing(&self) -> f32 {
         self.letter_spacing
     }
 
     /// Sets the letter spacing for this paint
     ///
     /// Only has effect on canvas text operations
-    pub fn set_letter_spacing(&mut self, spacing: i32) {
+    pub fn set_letter_spacing(&mut self, spacing: f32) {
         self.letter_spacing = spacing;
     }
 

@@ -645,7 +645,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // transform paint
         paint.set_font_size((paint.font_size() as f32 * scale) as u32);
-        paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
+        paint.set_letter_spacing(paint.letter_spacing() * scale);
         paint.set_font_blur(paint.font_blur() * scale);
 
         //let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
@@ -689,7 +689,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // transform paint
         paint.set_font_size((paint.font_size() as f32 * scale) as u32);
-        paint.set_letter_spacing((paint.letter_spacing() as f32 * scale) as i32);
+        paint.set_letter_spacing(paint.letter_spacing() * scale);
         paint.set_font_blur(paint.font_blur() * scale);
 
         let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
