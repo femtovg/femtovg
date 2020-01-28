@@ -37,3 +37,8 @@ Licensed under either of
  * Apache License, Version 2.0 ([LICENSE-APACHE](docs/LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
  * MIT license ([LICENSE-MIT](docs/LICENSE-MIT) or http://opensource.org/licenses/MIT)
 at your option.
+
+Fonts used in examples:
+- Roboto licensed under [Apache license](http://www.apache.org/licenses/LICENSE-2.0)
+- Entypo licensed under CC BY-SA 4.0.
+- Amiri licensed under [SIL Open Font License, Version 1.1](http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=OFL)
