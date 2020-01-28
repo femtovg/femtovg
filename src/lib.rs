@@ -23,6 +23,7 @@ use renderer::{
 
 mod font_cache;
 use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
+pub use font_cache::{Align, Baseline};
 
 pub(crate) mod geometry;
 use geometry::*;
@@ -44,37 +45,6 @@ pub enum FillRule {
 impl Default for FillRule {
     fn default() -> Self {
         Self::NonZero
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Baseline {
-    /// The text baseline is the top of the em square.
-    Top,
-    /// The text baseline is the middle of the em square.
-    Middle,
-    /// The text baseline is the normal alphabetic baseline. Default value.
-    Alphabetic,
-    // The text baseline is the bottom of the bounding box.
-    Bottom
-}
-
-impl Default for Baseline {
-    fn default() -> Self {
-        Self::Alphabetic
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Align {
-    Left,
-    Center,
-    Right,
-}
-
-impl Default for Align {
-    fn default() -> Self {
-        Self::Left
     }
 }
 

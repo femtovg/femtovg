@@ -79,24 +79,16 @@ fn main() {
 
                 perf.update(dt);
 
-                // let y = 100.5;
-                // let mut path = Path::new();
-                // path.move_to(10.0, y);
-                // path.line_to(310.0, y);
-                // canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
-                //
-                // let mut paint = Paint::color(Color::black());
-                // paint.set_font_name("Roboto-Regular");
-                // paint.set_font_size(18);
-                // paint.set_text_baseline(Baseline::Top);
-                // canvas.fill_text(10.0, y, "Top", paint);
-                // paint.set_text_baseline(Baseline::Middle);
-                // canvas.fill_text(50.0, y, "Middle", paint);
-                // paint.set_text_baseline(Baseline::Alphabetic);
-                // canvas.fill_text(120.0, y, "Alphabetic", paint);
-
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
                 draw_alignments(&mut canvas, 120.0, 250.0, font_size as u32);
+                draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
+                draw_inc_size(&mut canvas, 270.0, 30.0);
+
+                let mut paint = Paint::color(Color::hex("B7410E"));
+                paint.set_font_name("Roboto-Bold");
+                paint.set_text_baseline(Baseline::Top);
+                paint.set_text_align(Align::Right);
+                canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
 
                 canvas.save();
                 canvas.reset();
@@ -127,7 +119,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         let mut path = Path::new();
         path.move_to(x, y + 0.5);
         path.line_to(x + 250., y + 0.5);
-        canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
+        canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
         paint.set_text_baseline(*baseline);
         let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
@@ -144,7 +136,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     let mut path = Path::new();
     path.move_to(x + 0.5, y - 20.);
     path.line_to(x + 0.5, y + 120.);
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(255, 32, 32)));
+    canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
     paint.set_font_name("Roboto-Regular");
@@ -157,6 +149,32 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
         let mut path = Path::new();
         path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+    }
+}
+
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32, text: &str) {
+
+    let mut paint = Paint::color(Color::black());
+    paint.set_font_name("Roboto-Light");
+    paint.set_font_size(font_size);
+
+    let mut cursor_y = y;
+
+    for line in text.lines() {
+        let bbox = canvas.fill_text(x, cursor_y, line, paint);
+        cursor_y += bbox[3] - bbox[1];
+    }
+}
+
+fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+    let mut cursor_y = y;
+
+    for i in 4..24 {
+        let mut paint = Paint::color(Color::black());
+        paint.set_font_name("Roboto-Regular");
+        paint.set_font_size(i);
+        let bbox = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint);
+        cursor_y += bbox[3] - bbox[1];
     }
 }
 
@@ -199,10 +217,10 @@ impl PerfGraph {
 
         for i in 0..self.history_count {
             let mut v = 1.0 / (0.00001 + self.values[(self.head+i) % self.history_count]);
-			if v > 80.0 { v = 80.0; }
-			let vx = x + (i as f32 / (self.history_count-1) as f32) * w;
-			let vy = y + h - ((v / 80.0) * h);
-			path.line_to(vx, vy);
+            if v > 80.0 { v = 80.0; }
+            let vx = x + (i as f32 / (self.history_count-1) as f32) * w;
+            let vy = y + h - ((v / 80.0) * h);
+            path.line_to(vx, vy);
         }
 
         path.line_to(x+w, y+h);
@@ -228,3 +246,27 @@ impl PerfGraph {
     	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
     }
 }
+
+const LOREM_TEXT: &str = r#"
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
+suscipit nec ac augue. Duis elit nisi, porttitor porta est sed, blandit ultricies odio. Morbi faucibus sagittis justo in accumsan. Proin quis felis hendrerit, egestas ligula ut, pellentesque nibh.
+Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
+Etiam non malesuada felis, nec fringilla quam.
+
+Donec vitae dignissim tellus. Morbi lobortis finibus purus non porttitor. In mi enim, lacinia et condimentum ut, venenatis nec magna. Sed id ex in metus vulputate facilisis sit amet in arcu.
+Fusce tempus, mauris non porta ultricies, velit nulla blandit diam, vel maximus metus mi sed erat. Nam hendrerit enim sit amet nisl dictum gravida. Mauris faucibus feugiat neque ac interdum.
+In dignissim orci id diam suscipit, id interdum nunc aliquam. Nam auctor, neque sit amet molestie euismod, dolor nibh pulvinar ligula, at sagittis nisi dolor a nisl. Praesent placerat ut enim
+tincidunt rhoncus. Cras vel feugiat leo. Donec arcu metus, placerat non est eget, laoreet dapibus odio. In ac massa et lectus tempus imperdiet.
+
+Phasellus lobortis gravida turpis non auctor. Nam euismod consectetur imperdiet. Nunc egestas ultricies bibendum. Donec consequat purus quis tempus aliquam. Suspendisse mauris nunc, dignissim placerat
+accumsan at, cursus sit amet mi. In faucibus ac neque non hendrerit. Maecenas in sollicitudin nibh.
+
+In hac habitasse platea dictumst. Pellentesque at libero quis diam interdum elementum vel sed tortor. Etiam eget urna pretium, euismod orci vel, convallis arcu. Curabitur a ipsum in neque molestie finibus.
+Phasellus mollis volutpat massa non gravida. Duis vel libero mollis, mollis eros vitae, ornare dolor. Morbi interdum, tellus et pulvinar pharetra, justo ante accumsan neque, quis venenatis augue ipsum sed
+odio. Mauris sit amet lectus et nisl faucibus interdum. Nunc dapibus quis odio ac dictum. In iaculis nibh est, sit amet malesuada mi eleifend ut. Nunc dignissim tempor sollicitudin. Nulla facilisi.
+Nullam dictum, tortor in elementum malesuada, purus lectus placerat ipsum, vitae pellentesque risus ante sed turpis.
+
+In ac dictum metus. Phasellus fermentum ac tortor id gravida. Quisque vitae dui velit. Vestibulum rutrum bibendum aliquam. Sed vitae pretium nisi, quis mattis justo. Ut dolor massa, suscipit sed
+condimentum vitae, finibus in nisi. Aliquam posuere nulla leo, sit amet rhoncus lorem vulputate id. Phasellus imperdiet ultricies est a aliquet. Curabitur vehicula porta posuere. Duis eget purus
+condimentum, elementum odio sit amet, convallis tellus.
+"#;

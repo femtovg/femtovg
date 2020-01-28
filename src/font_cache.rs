@@ -4,12 +4,14 @@ use std::fmt;
 use std::path::Path;
 use std::ops::Range;
 use std::error::Error;
-use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
-use fnv::FnvHashMap;
+use fnv::{FnvHasher, FnvHashMap, FnvBuildHasher};
 use image::{DynamicImage, GrayImage, Luma, GenericImage};
 
-use super::{ImageId, Renderer, ImageFlags, Paint, Align, Baseline};
+use super::{ImageId, Renderer, ImageFlags, Paint};
+
+use lru::LruCache;
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
@@ -24,6 +26,7 @@ use atlas::Atlas;
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
 const GLYPH_PADDING: u32 = 2;
+const LRU_CACHE_CAPACITY: usize = 100;
 
 type Result<T> = std::result::Result<T, FontCacheError>;
 
@@ -31,6 +34,40 @@ type PostscriptName = String;
 
 extern "C" {
     pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Baseline {
+    /// The text baseline is the top of the em square.
+    Top,
+    /// The text baseline is the middle of the em square.
+    Middle,
+    /// The text baseline is the normal alphabetic baseline. Default value.
+    Alphabetic,
+    // The text baseline is the bottom of the bounding box.
+    Bottom
+}
+
+impl Default for Baseline {
+    fn default() -> Self {
+        Self::Alphabetic
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Align {
+    /// The text is left-aligned.
+    Left,
+    /// The text is centered.
+    Center,
+    /// The text is right-aligned.
+    Right,
+}
+
+impl Default for Align {
+    fn default() -> Self {
+        Self::Left
+    }
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq)]
@@ -89,6 +126,24 @@ impl GlyphId {
     }
 }
 
+#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+struct ShapingId {
+    text_hash: u64,
+    size: u32
+}
+
+impl ShapingId {
+    pub fn new(size: u32, text: &str) -> Self {
+        let mut hasher = FnvHasher::default();
+        text.hash(&mut hasher);
+
+        ShapingId {
+            text_hash: hasher.finish(),
+            size
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 struct Glyph {
     width: u32,
@@ -101,14 +156,14 @@ struct Glyph {
     texture_index: usize,
 }
 
-// TODO: move this struct to it's own module and implement ShaperSource on it with caching
 struct FontFace {
     id: usize,
     ft_face: ft::Face,
     is_serif: bool,
     is_italic: bool,
     is_bold: bool,
-    glyphs: HashMap<GlyphId, Glyph>
+    glyphs: FnvHashMap<GlyphId, Glyph>,
+    shaping_cache: LruCache<ShapingId, hb::GlyphBuffer, FnvBuildHasher>
 }
 
 impl FontFace {
@@ -128,7 +183,8 @@ impl FontFace {
             is_serif: is_serif,
             is_italic: style_flags.contains(ft::StyleFlag::ITALIC),
             is_bold: style_flags.contains(ft::StyleFlag::BOLD),
-            glyphs: Default::default()
+            glyphs: Default::default(),
+            shaping_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, FnvBuildHasher::default())
         }
     }
 }
@@ -141,7 +197,7 @@ pub struct FontTexture {
 pub struct FontCache {
     library: ft::Library,
     stroker: ft::Stroker,
-    faces: HashMap<PostscriptName, FontFace>,
+    faces: FnvHashMap<PostscriptName, FontFace>,
     textures: Vec<FontTexture>,
     last_face_id: usize,
 }
@@ -202,16 +258,26 @@ impl FontCache {
             let face = self.faces.get_mut(&face_name).ok_or(FontCacheError::FontNotFound)?;
             face.ft_face.set_pixel_sizes(0, paint.font_size()).unwrap();
 
-            // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
-            // And I didn't want to read the file a second time and keep it in memory just to give
-            // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
-            let hb_font = unsafe {
-                let raw_font = hb_ft_font_create_referenced(face.ft_face.raw_mut());
-                hb::Owned::from_raw(raw_font)
-            };
+            let output;
+            let shaping_id = ShapingId::new(paint.font_size(), text);
 
-            let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
-            let output = hb::shape(&hb_font, buffer, &[]);
+            if let Some(cached_output) = face.shaping_cache.get(&shaping_id) {
+                output = cached_output;
+            } else {
+                // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
+                // And I didn't want to read the file a second time and keep it in memory just to give
+                // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
+                let hb_font = unsafe {
+                    let raw_font = hb_ft_font_create_referenced(face.ft_face.raw_mut());
+                    hb::Owned::from_raw(raw_font)
+                };
+
+                let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
+
+                face.shaping_cache.put(shaping_id, hb::shape(&hb_font, buffer, &[]));
+
+                output = face.shaping_cache.get(&shaping_id).unwrap();
+            }
 
             let positions = output.get_glyph_positions();
             let infos = output.get_glyph_infos();
@@ -230,7 +296,15 @@ impl FontCache {
                 let x_offset = position.x_offset >> 6;
                 let y_offset = position.y_offset >> 6;
 
-                let glyph = Self::glyph(&mut self.textures, face, renderer, &self.stroker, paint, render_style, gid)?;
+                let glyph_id = GlyphId::new(gid, paint, render_style);
+
+                let glyph = if let Some(glyph) = face.glyphs.get(&glyph_id) {
+                    *glyph
+                } else {
+                    let glyph = Self::glyph(&mut self.textures, &face.ft_face, renderer, &self.stroker, paint, render_style, gid)?;
+                    face.glyphs.insert(glyph_id, glyph);
+                    glyph
+                };
 
                 let xpos = cursor_x + x_offset + glyph.bearing_x - (glyph.padding / 2) as i32;
                 let ypos = cursor_y + y_offset - glyph.bearing_y - (glyph.padding / 2) as i32;
@@ -305,20 +379,14 @@ impl FontCache {
         Ok(layout)
     }
 
-    fn glyph<T: Renderer>(textures: &mut Vec<FontTexture>, face: &mut FontFace, renderer: &mut T, stroker: &ft::Stroker, paint: Paint, render_style: GlyphRenderStyle, glyph_index: u32) -> Result<Glyph> {
-        let glyph_id = GlyphId::new(glyph_index, paint, render_style);
-
-        if let Some(glyph) = face.glyphs.get(&glyph_id) {
-            return Ok(*glyph);
-        }
-
+    fn glyph<T: Renderer>(textures: &mut Vec<FontTexture>, ft_face: &ft::Face, renderer: &mut T, stroker: &ft::Stroker, paint: Paint, render_style: GlyphRenderStyle, glyph_index: u32) -> Result<Glyph> {
         let mut padding = GLYPH_PADDING + paint.font_blur().ceil() as u32;
 
         // Load Freetype glyph slot and fill or stroke
 
-        face.ft_face.load_glyph(glyph_index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
+        ft_face.load_glyph(glyph_index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
 
-        let glyph_slot = face.ft_face.glyph();
+        let glyph_slot = ft_face.glyph();
         let mut glyph = glyph_slot.get_glyph()?;
 
         if let GlyphRenderStyle::Stroke { line_width } = render_style {
@@ -404,7 +472,7 @@ impl FontCache {
             (textures.len() - 1, loc)
         };
 
-        let glyph = Glyph {
+        Ok(Glyph {
             width: width,
             height: height,
             atlas_x: atlas_x as u32,
@@ -413,14 +481,10 @@ impl FontCache {
             bearing_y: bitmap_top,
             padding: padding,
             texture_index: tex_index,
-        };
-
-        face.glyphs.insert(glyph_id, glyph);
-
-        Ok(glyph)
+        })
     }
 
-    fn face_character_range(faces: &HashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
+    fn face_character_range(faces: &FnvHashMap<PostscriptName, FontFace>, text: &str, preferred_face: &str) -> Result<Vec<(PostscriptName, Range<usize>)>> {
         if faces.is_empty() {
             return Err(FontCacheError::NoFontsAdded);
         }
@@ -467,7 +531,7 @@ impl FontCache {
         Ok(res)
     }
 
-    fn find_fallback_face<'a>(faces: &'a HashMap<PostscriptName, FontFace>, preffered_face: &'a FontFace, c: char) -> Option<&'a FontFace> {
+    fn find_fallback_face<'a>(faces: &'a FnvHashMap<PostscriptName, FontFace>, preffered_face: &'a FontFace, c: char) -> Option<&'a FontFace> {
 
         let mut face = faces.values().find(|face| {
             face.is_serif == preffered_face.is_serif &&
