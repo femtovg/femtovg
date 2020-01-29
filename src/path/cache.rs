@@ -7,25 +7,13 @@ use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Verb, Winding, LineCap, LineJoin, FillRule};
+use crate::{Winding, LineJoin, LineCap, FillRule};
 use crate::utils::VecRetainMut;
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Convexity {
-    Concave,
-    Convex,
-    Unknown
-}
-
-impl Default for Convexity {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
+use super::Verb;
 
 bitflags! {
     #[derive(Default)]
-    struct PointFlags: u8 {
+    pub struct PointFlags: u8 {
         const CORNER        = 0x01;
         const LEFT          = 0x02;
         const BEVEL         = 0x04;
@@ -34,7 +22,7 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-struct Point {
+pub struct Point {
     x: f32,
     y: f32,
     dx: f32,
@@ -64,14 +52,27 @@ impl Point {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum Convexity {
+    Concave,
+    Convex,
+    Unknown
+}
+
+impl Default for Convexity {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Contour {
     point_range: Range<usize>,
     closed: bool,
     bevel: usize,
+    winding: Winding,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
-    winding: Winding,
     pub(crate) convexity: Convexity
 }
 
@@ -81,9 +82,9 @@ impl Default for Contour {
             point_range: 0..0,
             closed: Default::default(),
             bevel: Default::default(),
+            winding: Default::default(),
             fill: Default::default(),
             stroke: Default::default(),
-            winding: Default::default(),
             convexity: Default::default()
         }
     }
@@ -212,7 +213,6 @@ impl PathCache {
                 points.reverse();
             }
 
-            // TODO: this is doggy and fishy.
             for i in 0..contour.point_count() {
                 let p1 = points.get(i).copied().unwrap();
 
@@ -435,33 +435,30 @@ impl PathCache {
     }
 
     // TODO: instead of passing 3 paint values here we can just pass the paint struct as a parameter
-    pub(crate) fn expand_stroke(&mut self, stroke_width: f32, fringe: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
-        let aa = fringe;
-        let mut u0 = 0.0;
-        let mut u1 = 1.0;
+    pub(crate) fn expand_stroke(&mut self, stroke_width: f32, fringe_width: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
         let ncap = curve_divisions(stroke_width, PI, tess_tol);
 
-        let stroke_width = stroke_width + (aa * 0.5);
+        let stroke_width = stroke_width + (fringe_width * 0.5);
 
-        // Disable the gradient used for antialiasing when antialiasing is not used.
-        if aa == 0.0 {
-            u0 = 0.5;
-            u1 = 0.5;
-        }
+        // Disable the gradient used for antialiasing when antialiasing is not enabled.
+        let (u0, u1) = if fringe_width == 0.0 {
+            (0.5, 0.5)
+        } else {
+            (0.0, 1.0)
+        };
 
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
             contour.stroke.clear();
-            contour.fill.clear();
 
             for (i, (p0, p1)) in contour.point_pairs(&self.points).enumerate() {
                 // Add start cap
                 if !contour.closed && i == 1 {
                     match line_cap {
-                        LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, -aa*0.5, aa, u0, u1),
-                        LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, stroke_width-aa, aa, u0, u1),
-                        LineCap::Round => round_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, ncap as usize, aa, u0, u1),
+                        LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, -fringe_width*0.5, fringe_width, u0, u1),
+                        LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, stroke_width-fringe_width, fringe_width, u0, u1),
+                        LineCap::Round => round_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, ncap as usize, u0, u1),
                     }
                 }
 
@@ -481,9 +478,9 @@ impl PathCache {
                 // Add end cap
                 if !contour.closed && i == contour.point_count() - 1 {
                     match line_cap {
-                        LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, -aa*0.5, aa, u0, u1),
-                        LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, stroke_width-aa, aa, u0, u1),
-                        LineCap::Round => round_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, ncap as usize, aa, u0, u1),
+                        LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, -fringe_width*0.5, fringe_width, u0, u1),
+                        LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, stroke_width-fringe_width, fringe_width, u0, u1),
+                        LineCap::Round => round_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, ncap as usize, u0, u1),
                     }
                 }
             }
@@ -658,7 +655,7 @@ fn butt_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32,
     verts.push(Vertex::new(px - dlx*w + p1.dx*aa, py - dly*w + p1.dy*aa, u1, 0.0));
 }
 
-fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
+fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, u0: f32, u1: f32) {
     let px = p0.x;
     let py = p0.y;
     let dlx = p1.dy;
@@ -677,7 +674,7 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
     verts.push(Vertex::new(px - dlx*w, py - dly*w, u1, 1.0));
 }
 
-fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, _aa: f32, u0: f32, u1: f32) {
+fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, u0: f32, u1: f32) {
     let px = p0.x;
     let py = p0.y;
     let dlx = p1.dy;
@@ -838,7 +835,7 @@ mod tests {
 
     use super::*;
     use crate::Path;
-    
+
     #[test]
     fn self_intersecting_polygon_is_concave() {
         // star

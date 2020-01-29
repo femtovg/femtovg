@@ -2,7 +2,7 @@
 // TODO: Start cap and end cap
 
 use crate::geometry::Transform2D;
-use super::{Color, ImageId, LineCap, LineJoin, Baseline, FillRule, Align};
+use crate::{Color, ImageId, LineCap, LineJoin, Baseline, FillRule, Align};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {

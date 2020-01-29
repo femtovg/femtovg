@@ -34,7 +34,11 @@ pub use paint::Paint;
 use paint::PaintFlavor;
 
 mod path;
-pub use path::{Path, Winding, Verb, PathCache, Convexity};
+use path::Convexity;
+pub use path::{
+    Path,
+    Winding
+};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
