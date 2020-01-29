@@ -504,8 +504,9 @@ impl<T> Canvas<T> where T: Renderer {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
-        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
+        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
+        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
+        // and if it's producing the correct cache keys under different float edge cases.
         let path_cache = if let Some(cache) = path.cache(&transform) {
             cache
         } else {
@@ -529,12 +530,12 @@ impl<T> Canvas<T> where T: Renderer {
 
         let scissor = self.state().scissor;
 
-        if paint.anti_alias() {
-            path_cache.expand_fill(self.fringe_width, LineJoin::Miter, 2.4, self.fringe_width);
-        } else {
-            path_cache.expand_fill(0.0, LineJoin::Miter, 2.4, self.fringe_width);
-        }
+        // Calculate fill vertices.
+        // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
+        let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4, self.fringe_width);
 
+        // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
             let params = Params::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
 
@@ -549,6 +550,7 @@ impl<T> Canvas<T> where T: Renderer {
             CommandType::ConcaveFill { stencil_params, fill_params }
         };
 
+        // GPU command
         let mut cmd = Command::new(flavor);
         cmd.fill_rule = paint.fill_rule;
         cmd.composite_operation = self.state().composite_operation;
@@ -557,10 +559,15 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.image = Some(id);
         }
 
+        // All verts from all shapes are kept in a single buffer here in the canvas.
+        // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
         for contour in &path_cache.contours {
             let mut drawable = Drawable::default();
+
+            // Fill commands can have both fill and stroke vertices. Fill vertices are used to fill
+            // the body of the shape while stroke vertices are used to prodice antialiased edges
 
             if !contour.fill.is_empty() {
                 drawable.fill_verts = Some((offset, contour.fill.len()));
@@ -578,7 +585,9 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         if let CommandType::ConcaveFill {..} = cmd.cmd_type {
-            // Quad
+            // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
+            // over the shape area with stencil test enabled to produce the final fill. These are
+            // the verts needed for the covering quad
             self.verts.push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.maxy, 0.5, 1.0));
             self.verts.push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.miny, 0.5, 1.0));
             self.verts.push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.maxy, 0.5, 1.0));
@@ -595,8 +604,9 @@ impl<T> Canvas<T> where T: Renderer {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
-        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
+        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
+        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
+        // and if it's producing the correct cache keys under different float edge cases.
         let path_cache = if let Some(cache) = path.cache(&transform) {
             cache
         } else {
@@ -613,13 +623,16 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         let scissor = self.state().scissor;
-        let scale = transform.average_scale();
 
         // Transform paint
         paint.transform = transform;
 
-        // Scale stroke width by current transform scale
-        paint.set_stroke_width((paint.stroke_width() * scale).max(0.0).min(200.0));
+        // Scale stroke width by current transform scale.
+        // Note: I don't know why the original author clamped the max stroke width to 200, but it didn'
+        // look correct when zooming in. There was probably a good reson for doing so and I may have
+        // introduced a bug by removing the upper bound.
+        //paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0).min(200.0));
+        paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0));
 
         if paint.stroke_width() < self.fringe_width {
             // If the stroke width is less than pixel size, use alpha to emulate coverage.
@@ -633,12 +646,12 @@ impl<T> Canvas<T> where T: Renderer {
         // Apply global alpha
         paint.mul_alpha(self.state().alpha);
 
-        if paint.anti_alias() {
-            path_cache.expand_stroke(paint.stroke_width() * 0.5, self.fringe_width, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
-        } else {
-            path_cache.expand_stroke(paint.stroke_width() * 0.5, 0.0, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
-        }
+        // Calculate stroke vertices.
+        // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
+        let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        path_cache.expand_stroke(paint.stroke_width() * 0.5, fringe_with, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
 
+        // GPU uniforms
         let params = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
@@ -649,6 +662,7 @@ impl<T> Canvas<T> where T: Renderer {
             CommandType::Stroke { params }
         };
 
+        // GPU command
         let mut cmd = Command::new(flavor);
         cmd.composite_operation = self.state().composite_operation;
 
@@ -656,6 +670,8 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.image = Some(id);
         }
 
+        // All verts from all shapes are kept in a single buffer here in the canvas.
+        // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
         for contour in &path_cache.contours {
@@ -812,6 +828,9 @@ impl<T> Canvas<T> where T: Renderer {
 }
 
 /*
+ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like
+glyphs. I very much wanted to render glyps on the GPU using the same code path as other shapes and
+without using freetype, but the qulity was horrendous.
 impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
     fn move_to(&mut self, x: f32, y: f32) {
         self.move_to(x, y);
