@@ -1,5 +1,8 @@
 
+use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
+
+use fnv::FnvHasher;
 
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
@@ -171,6 +174,16 @@ impl Transform2D {
             self[2], self[3], 0.0, 0.0,
             self[4], self[5], 1.0, 0.0,
         ]
+    }
+
+    pub fn cache_key(&self) -> u64 {
+        let mut hasher = FnvHasher::default();
+
+        for i in 0..6 {
+            self.0[i].to_bits().hash(&mut hasher);
+        }
+
+        hasher.finish()
     }
 }
 

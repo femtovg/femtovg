@@ -367,6 +367,7 @@ impl PathCache {
 
         for contour in &mut self.contours {
             contour.stroke.clear();
+            contour.fill.clear();
 
             let woff = 0.5 * aa;
 
@@ -451,7 +452,8 @@ impl PathCache {
         self.calculate_joins(stroke_width, line_join, miter_limit);
 
         for contour in &mut self.contours {
-            //contour.stroke.clear();
+            contour.stroke.clear();
+            contour.fill.clear();
 
             for (i, (p0, p1)) in contour.point_pairs(&self.points).enumerate() {
                 // Add start cap

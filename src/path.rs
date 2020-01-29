@@ -33,11 +33,11 @@ pub enum Verb {
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
 #[derive(Default, Clone)]
 pub struct Path {
-    pub(crate) transform: Transform2D,
     verbs: Vec<Verb>,
     lastx: f32,
     lasty: f32,
     dist_tol: f32,
+    pub(crate) cache: Option<(u64, PathCache)>,
 }
 
 impl Path {
@@ -60,28 +60,16 @@ impl Path {
         self.verbs.iter_mut()
     }
 
-    // Transforms
+    pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D) -> Option<&'a mut PathCache> {
+        if let Some((transform_cache_key, cache)) = &mut self.cache {
+            let key = transform.cache_key();
 
-    /// Resets current transform to a identity matrix.
-    pub fn reset_transform(&mut self) {
-        self.transform = Transform2D::identity();
-    }
+            if key == *transform_cache_key {
+                return Some(cache);
+            }
+        }
 
-    /// Premultiplies current coordinate system by specified matrix.
-    /// The parameters are interpreted as matrix as follows:
-    ///   [a c e]
-    ///   [b d f]
-    ///   [0 0 1]
-    pub fn transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
-        let transform = Transform2D([a, b, c, d, e, f]);
-        self.transform.premultiply(&transform);
-    }
-
-    /// Translates the current coordinate system.
-    pub fn translate(&mut self, x: f32, y: f32) {
-        let mut t = Transform2D::identity();
-        t.translate(x, y);
-        self.transform.premultiply(&t);
+        None
     }
 
     // Path funcs
@@ -188,7 +176,8 @@ impl Path {
             return;
         }
 
-        let (x0, y0) = self.transform.inversed().transform_point(self.lastx, self.lasty);
+        let x0 = self.lastx;
+        let y0 = self.lasty;
 
         // Handle degenerate cases.
         if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol) ||

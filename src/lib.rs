@@ -485,10 +485,18 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Fills the current path with current fill style.
     pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
-        //self.path_cache.set(&self.verbs, self.tess_tol, self.dist_tol);
+
         let transform = self.state().transform;
 
-        let mut path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+        let path_cache = if let Some(cache) = path.cache(&transform) {
+            cache
+        } else {
+            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+
+            path.cache = Some((transform.cache_key(), path_cache));
+
+            &mut path.cache.as_mut().unwrap().1
+        };
 
         // Transform paint
         paint.transform = transform;
@@ -565,7 +573,15 @@ impl<T> Canvas<T> where T: Renderer {
         let transform = self.state().transform;
         let scale = transform.average_scale();
 
-        let mut path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+        let path_cache = if let Some(cache) = path.cache(&transform) {
+            cache
+        } else {
+            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+
+            path.cache = Some((transform.cache_key(), path_cache));
+
+            &mut path.cache.as_mut().unwrap().1
+        };
 
         // Transform paint
         paint.transform = transform;

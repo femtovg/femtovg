@@ -1,7 +1,7 @@
 
 use std::time::Instant;
 
-use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode};
+use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode, MouseButton};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
@@ -24,6 +24,10 @@ use gpucanvas::{
     renderer::OpenGl
 };
 
+pub fn quantize(a: f32, d: f32) -> f32 {
+    (a / d + 0.5).trunc() * d
+}
+
 fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
@@ -42,7 +46,7 @@ fn main() {
     canvas.add_font("examples/assets/entypo.ttf");
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
 
-    let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
+    //let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
     let mut screenshot_image_id = None;
 
@@ -51,6 +55,7 @@ fn main() {
 
     let mut mousex = 0.0;
     let mut mousey = 0.0;
+    let mut dragging = false;
 
     let mut perf = PerfGraph::new();
 
@@ -64,6 +69,16 @@ fn main() {
                     windowed_context.resize(*physical_size);
                 }
                 WindowEvent::CursorMoved { device_id: _, position, ..} => {
+                    if dragging {
+                        let p0 = canvas.transform().inversed().transform_point(mousex, mousey);
+                        let p1 = canvas.transform().inversed().transform_point(position.x as f32, position.y as f32);
+
+                        canvas.translate(
+                            p1.0 - p0.0,
+                            p1.1 - p0.1,
+                        );
+                    }
+
                     mousex = position.x as f32;
                     mousey = position.y as f32;
                 }
@@ -75,6 +90,12 @@ fn main() {
                         canvas.translate(-pt.0, -pt.1);
                     },
                     _ => ()
+                }
+                WindowEvent::MouseInput { button: MouseButton::Left, state, .. } => {
+                    match state {
+                        ElementState::Pressed => dragging = true,
+                        ElementState::Released => dragging = false,
+                    }
                 }
                 WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(VirtualKeyCode::S), state: ElementState::Pressed, .. }, .. } => {
                     if let Some(screenshot_image_id) = screenshot_image_id {

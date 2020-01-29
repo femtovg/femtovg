@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::time::Instant;
 
-use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode};
+use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode, MouseButton};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
@@ -44,6 +44,7 @@ fn main() {
 
     let mut mousex = 0.0;
     let mut mousey = 0.0;
+    let mut dragging = false;
 
     let mut perf = PerfGraph::new();
 
@@ -68,7 +69,23 @@ fn main() {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
+                WindowEvent::MouseInput { button: MouseButton::Left, state, .. } => {
+                    match state {
+                        ElementState::Pressed => dragging = true,
+                        ElementState::Released => dragging = false,
+                    }
+                }
                 WindowEvent::CursorMoved { device_id: _, position, ..} => {
+                    if dragging {
+                        let p0 = canvas.transform().inversed().transform_point(mousex, mousey);
+                        let p1 = canvas.transform().inversed().transform_point(position.x as f32, position.y as f32);
+
+                        canvas.translate(
+                            p1.0 - p0.0,
+                            p1.1 - p0.1,
+                        );
+                    }
+
                     mousex = position.x as f32;
                     mousey = position.y as f32;
                 }
@@ -131,7 +148,11 @@ fn main() {
 
                 canvas.restore();
 
+                canvas.save();
+                canvas.reset();
                 perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
+
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
             }
