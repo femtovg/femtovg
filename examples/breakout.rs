@@ -136,9 +136,6 @@ impl Game {
                     Cmd::Spac => {
                         brick_loc.x += brick_size.width;
                     }
-                    Cmd::Hspa => {
-                        brick_loc.x += brick_size.width / 2.0;
-                    }
                     Cmd::B(id) => {
                         let rect = Rect::new(brick_loc, brick_size - Size::new(brick_padding, brick_padding));
                         self.bricks.push(Brick::new(*id, rect));
@@ -829,7 +826,6 @@ impl Brick {
 // Level commands
 enum Cmd {
     Spac, // 1 brick space
-    Hspa, // half brick space
     B(u8) // Brick Id
 }
 

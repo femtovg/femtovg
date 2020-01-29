@@ -60,16 +60,20 @@ impl Path {
         self.verbs.iter_mut()
     }
 
-    pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D) -> Option<&'a mut PathCache> {
-        if let Some((transform_cache_key, cache)) = &mut self.cache {
-            let key = transform.cache_key();
+    pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> &'a mut PathCache {
+        let key = transform.cache_key();
+        let mut needs_rebuild = true;
 
-            if key == *transform_cache_key {
-                return Some(cache);
-            }
+        if let Some((transform_cache_key, _cache)) = self.cache.as_ref() {
+            needs_rebuild = key != *transform_cache_key;
         }
 
-        None
+        if needs_rebuild {
+            let path_cache = PathCache::new(&self.verbs, &transform, tess_tol, dist_tol);
+            self.cache = Some((key, path_cache));
+        }
+
+        &mut self.cache.as_mut().unwrap().1
     }
 
     // Path funcs

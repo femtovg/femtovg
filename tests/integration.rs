@@ -125,6 +125,8 @@ fn degenerate_arc() {
 #[test]
 fn path_contains_point() {
     let mut canvas = Canvas::new(Void).unwrap();
+    // without setting size contains_point will early out on the bounds check and report false
+    canvas.set_size(100, 100, 1.0);
 
     // Star - cancave & self crossing
     let mut path = Path::new();

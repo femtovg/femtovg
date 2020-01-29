@@ -479,16 +479,10 @@ impl<T> Canvas<T> where T: Renderer {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
-        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
-        let path_cache = if let Some(cache) = path.cache(&transform) {
-            cache
-        } else {
-            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
-            path.cache = Some((transform.cache_key(), path_cache));
-
-            &mut path.cache.as_mut().unwrap().1
-        };
+        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
+        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
+        // and if it's producing the correct cache keys under different float edge cases.
+        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
@@ -507,14 +501,7 @@ impl<T> Canvas<T> where T: Renderer {
         // fill_path repeatedly with the same Path under the same transform circumstances then it will be
         // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
         // and if it's producing the correct cache keys under different float edge cases.
-        let path_cache = if let Some(cache) = path.cache(&transform) {
-            cache
-        } else {
-            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
-            path.cache = Some((transform.cache_key(), path_cache));
-
-            &mut path.cache.as_mut().unwrap().1
-        };
+        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
@@ -607,14 +594,7 @@ impl<T> Canvas<T> where T: Renderer {
         // fill_path repeatedly with the same Path under the same transform circumstances then it will be
         // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
         // and if it's producing the correct cache keys under different float edge cases.
-        let path_cache = if let Some(cache) = path.cache(&transform) {
-            cache
-        } else {
-            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
-            path.cache = Some((transform.cache_key(), path_cache));
-
-            &mut path.cache.as_mut().unwrap().1
-        };
+        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||

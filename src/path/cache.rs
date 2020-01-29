@@ -7,7 +7,7 @@ use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Path, Verb, Winding, LineCap, LineJoin, FillRule};
+use crate::{Verb, Winding, LineCap, LineJoin, FillRule};
 use crate::utils::VecRetainMut;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -150,11 +150,11 @@ pub struct PathCache {
 
 impl PathCache {
 
-    pub fn new(path: &Path, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
+    pub fn new(verbs: &[Verb], transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = Self::default();
 
         // Convert path verbs to a set of contours
-        for verb in path.verbs() {
+        for verb in verbs {
             match verb {
                 Verb::MoveTo(x, y) => {
                     cache.add_contour();
@@ -837,7 +837,8 @@ fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
 mod tests {
 
     use super::*;
-
+    use crate::Path;
+    
     #[test]
     fn self_intersecting_polygon_is_concave() {
         // star
@@ -851,7 +852,7 @@ mod tests {
 
         let transform = Transform2D::identity();
 
-        let mut path_cache = PathCache::new(&path, &transform, 0.25, 0.01);
+        let mut path_cache = PathCache::new(&path.verbs, &transform, 0.25, 0.01);
         path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, 1.0);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
