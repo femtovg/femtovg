@@ -478,25 +478,48 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn contains_point(&mut self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
         let transform = self.state().transform;
 
-        let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+        // The path cache saves a flattened and transformed version of the path. If client code calls
+        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
+        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
+        let path_cache = if let Some(cache) = path.cache(&transform) {
+            cache
+        } else {
+            let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
+            path.cache = Some((transform.cache_key(), path_cache));
+
+            &mut path.cache.as_mut().unwrap().1
+        };
+
+        // Early out if path is outside the canvas bounds
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+            return false;
+        }
 
         path_cache.contains_point(x, y, fill_rule)
     }
 
     /// Fills the current path with current fill style.
     pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
-
         let transform = self.state().transform;
 
+        // The path cache saves a flattened and transformed version of the path. If client code calls
+        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
+        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
         let path_cache = if let Some(cache) = path.cache(&transform) {
             cache
         } else {
             let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
-
             path.cache = Some((transform.cache_key(), path_cache));
 
             &mut path.cache.as_mut().unwrap().1
         };
+
+        // Early out if path is outside the canvas bounds
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+            return;
+        }
 
         // Transform paint
         paint.transform = transform;
@@ -569,19 +592,28 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Fills the current path with current stroke style.
     pub fn stroke_path(&mut self, path: &mut Path, mut paint: Paint) {
-        let scissor = self.state().scissor;
         let transform = self.state().transform;
-        let scale = transform.average_scale();
 
+        // The path cache saves a flattened and transformed version of the path. If client code calls
+        // fill_path repeatedly with the same Path under the same transform circumstances then we'll be
+        // able to save some time. I'm not sure if transform.cache_key() is actually good enough for this
         let path_cache = if let Some(cache) = path.cache(&transform) {
             cache
         } else {
             let path_cache = PathCache::new(path, &transform, self.tess_tol, self.dist_tol);
-
             path.cache = Some((transform.cache_key(), path_cache));
 
             &mut path.cache.as_mut().unwrap().1
         };
+
+        // Early out if path is outside the canvas bounds
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+            return;
+        }
+
+        let scissor = self.state().scissor;
+        let scale = transform.average_scale();
 
         // Transform paint
         paint.transform = transform;
@@ -662,15 +694,9 @@ impl<T> Canvas<T> where T: Renderer {
         paint.set_letter_spacing(paint.letter_spacing() * scale);
         paint.set_font_blur(paint.font_blur() * scale);
 
-        //let layout = self.font_cache.layout_text(x, y, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
         let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
 
         let mut bounds = layout.bbox;
-
-        // Use line bounds for height.
-        //let (ymin, ymax) = self.font_stash.line_bounds(y * scale);
-        //bounds[1] = ymin;
-        //bounds[3] = ymax;
 
         bounds[0] *= invscale;
         bounds[1] *= invscale;

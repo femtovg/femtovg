@@ -7,12 +7,12 @@ use std::ops::Range;
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 
-use fnv::{FnvHasher, FnvHashMap, FnvBuildHasher};
+use fnv::{FnvHasher, FnvHashMap};
 use image::{DynamicImage, GrayImage, Luma, GenericImage};
 
 use super::{ImageId, Renderer, ImageFlags, Paint};
 
-use lru::LruCache;
+use lru_time_cache::LruCache;
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
@@ -129,7 +129,7 @@ impl GlyphId {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct ShapingId {
     text_hash: u64,
     size: u32
@@ -166,7 +166,7 @@ struct FontFace {
     is_italic: bool,
     is_bold: bool,
     glyphs: FnvHashMap<GlyphId, Glyph>,
-    shaping_cache: LruCache<ShapingId, hb::GlyphBuffer, FnvBuildHasher>
+    shaping_cache: LruCache<ShapingId, hb::GlyphBuffer>
 }
 
 impl FontFace {
@@ -187,7 +187,8 @@ impl FontFace {
             is_italic: style_flags.contains(ft::StyleFlag::ITALIC),
             is_bold: style_flags.contains(ft::StyleFlag::BOLD),
             glyphs: Default::default(),
-            shaping_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, FnvBuildHasher::default())
+            shaping_cache: LruCache::with_capacity(LRU_CACHE_CAPACITY)
+            //shaping_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, FnvBuildHasher::default())
         }
     }
 }
@@ -276,7 +277,7 @@ impl FontCache {
 
                 let buffer = UnicodeBuffer::new().add_str(&text[str_range]);
 
-                face.shaping_cache.put(shaping_id, hb::shape(&hb_font, buffer, &[]));
+                face.shaping_cache.insert(shaping_id, hb::shape(&hb_font, buffer, &[]));
 
                 output = face.shaping_cache.get(&shaping_id).unwrap();
             }

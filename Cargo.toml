@@ -15,12 +15,12 @@ debug = true
 
 [dependencies]
 fnv = "1.0.6"
-lru = "0.4.3"
 bitflags = "1.2.1"
 image = "0.23.0-preview.0"
 unicode-normalization = "0.1.11"
 libc = "0.2.66"
 harfbuzz_rs = "1.0.1"
+lru_time_cache = "0.9.0"
 
 [build-dependencies]
 gl_generator = "0.13"

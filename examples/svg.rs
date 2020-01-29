@@ -255,7 +255,7 @@ impl PerfGraph {
 
         let mut path = Path::new();
         path.rect(x, y, w, h);
-        canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 128)));
+        //canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 128)));
 
         let mut path = Path::new();
         path.move_to(x, y + h);
@@ -269,7 +269,7 @@ impl PerfGraph {
         }
 
         path.line_to(x+w, y+h);
-        canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
+        //canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12);
