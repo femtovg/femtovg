@@ -188,7 +188,6 @@ impl FontFace {
             is_bold: style_flags.contains(ft::StyleFlag::BOLD),
             glyphs: Default::default(),
             shaping_cache: LruCache::with_capacity(LRU_CACHE_CAPACITY)
-            //shaping_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, FnvBuildHasher::default())
         }
     }
 }
@@ -252,7 +251,7 @@ impl FontCache {
             cmds: Vec::new()
         };
 
-        let mut min_descender = f32::MIN;
+        let mut max_descender = f32::MIN;
         let mut max_ascender = 0.0f32;
 
         let faces = Self::face_character_range(&self.faces, text, paint.font_name())?;
@@ -286,7 +285,7 @@ impl FontCache {
             let infos = output.get_glyph_infos();
 
             let size_metrics = face.ft_face.size_metrics().unwrap();
-            min_descender = min_descender.max(size_metrics.descender as f32 / 64.0);
+            max_descender = max_descender.max(size_metrics.descender as f32 / 64.0);
             max_ascender = max_ascender.max(size_metrics.ascender as f32 / 64.0);
 
             // Subpixel positioning / no hinting
@@ -344,9 +343,9 @@ impl FontCache {
         }
 
         layout.bbox[0] = x;
-        layout.bbox[1] = y - (min_descender + max_ascender);
+        layout.bbox[1] = y - (max_descender + max_ascender);
         layout.bbox[2] = cursor_x;
-        layout.bbox[3] = y - min_descender;
+        layout.bbox[3] = y - max_descender;
 
         let width = layout.bbox[0] - layout.bbox[2];
 
@@ -357,10 +356,10 @@ impl FontCache {
         };
 
         let offset_y = match paint.text_baseline() {
-            Baseline::Top => min_descender + max_ascender,
-            Baseline::Middle => -min_descender,
+            Baseline::Top => max_descender + max_ascender,
+            Baseline::Middle => -max_descender,
             Baseline::Alphabetic => 0.0,
-            Baseline::Bottom => min_descender,
+            Baseline::Bottom => max_descender,
         };
 
         layout.bbox[0] += offset_x;

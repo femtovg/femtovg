@@ -478,10 +478,7 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn contains_point(&mut self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
         let transform = self.state().transform;
 
-        // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
-        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
-        // and if it's producing the correct cache keys under different float edge cases.
+        // The path cache saves a flattened and transformed version of the path.
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
@@ -497,10 +494,7 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
         let transform = self.state().transform;
 
-        // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
-        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
-        // and if it's producing the correct cache keys under different float edge cases.
+        // The path cache saves a flattened and transformed version of the path.
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
@@ -590,10 +584,7 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn stroke_path(&mut self, path: &mut Path, mut paint: Paint) {
         let transform = self.state().transform;
 
-        // The path cache saves a flattened and transformed version of the path. If client code calls
-        // fill_path repeatedly with the same Path under the same transform circumstances then it will be
-        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
-        // and if it's producing the correct cache keys under different float edge cases.
+        // The path cache saves a flattened and transformed version of the path.
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds

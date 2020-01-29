@@ -61,7 +61,14 @@ impl Path {
     }
 
     pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> &'a mut PathCache {
+        // The path cache saves a flattened and transformed version of the path. If client code calls
+        // (fill|stroke)_path repeatedly with the same Path under the same transform circumstances then it will be
+        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
+        // and if it will produce the correct cache keys under different float edge cases.
+
         let key = transform.cache_key();
+
+        // this shouldn't need a bool once non lexic lifetimes are stable
         let mut needs_rebuild = true;
 
         if let Some((transform_cache_key, _cache)) = self.cache.as_ref() {
@@ -121,9 +128,6 @@ impl Path {
     /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
     /// Angles are specified in radians.
     pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Winding) {
-        // TODO: Maybe use small stack vec here
-        let mut commands = Vec::new();
-
         let mut da = a1 - a0;
 
         if dir == Winding::CW {
@@ -142,6 +146,9 @@ impl Path {
         let ndivs = ((da.abs() / (PI * 0.5) + 0.5) as i32).min(5).max(1);
         let hda = (da / ndivs as f32) / 2.0;
         let mut kappa = (4.0 / 3.0 * (1.0 - hda.cos()) / hda.sin()).abs();
+
+        // TODO: Maybe use small stack vec here
+        let mut commands = Vec::with_capacity(ndivs as usize);
 
         if dir == Winding::CCW {
             kappa = -kappa;
