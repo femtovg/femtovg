@@ -24,7 +24,6 @@ Most of the implementation is the same as the original C code with some bug fixe
 
 ## Not supported
 * [ ] Stroke dashing
-* [ ] Path culling
 * [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
