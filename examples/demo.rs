@@ -133,6 +133,7 @@ fn main() {
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
                 draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
+                draw_drop_down(&mut canvas, "Effects", 60.0, 135.0, 280.0, 28.0);
 
                 draw_widths(&mut canvas, 10.0, 50.0, 30.0);
                 draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
@@ -358,19 +359,48 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
     text_paint.set_font_name("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
-    canvas.fill_text(x + h * 0.55, y + h * 0.18, "\u{1F50D}", text_paint);
+    canvas.fill_text(x + h * 0.55, y + h * 0.45, "\u{1F50D}", text_paint);
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
+    text_paint.set_font_size(16);
+    text_paint.set_font_name("Roboto-Regular");
+    text_paint.set_text_align(Align::Left);
+    text_paint.set_text_baseline(Baseline::Middle);
+    canvas.fill_text(x + h, y + h * 0.55, title, text_paint);
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
+    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_name("Entypo");
+    text_paint.set_text_align(Align::Center);
+    text_paint.set_text_baseline(Baseline::Middle);
+    canvas.fill_text(x + w - h * 0.55, y + h * 0.45, "\u{2716}", text_paint);
+}
+
+fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+    let corner_radius = 4.0;
+
+    let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255,255,255,16), Color::rgba(0,0,0,16));
+    let mut path = Path::new();
+    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, corner_radius);
+    canvas.fill_path(&mut path, bg);
 
     let mut path = Path::new();
-    path.rect(x, y, w, h / 3.0);
-    //canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 255)));
+    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, corner_radius - 0.5);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 48)));
 
-    // TODO: This color looks black, but it must be lighter
-    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 40));
-    text_paint.set_font_size(20);
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 160));
+    text_paint.set_font_size(16);
     text_paint.set_font_name("Roboto-Regular");
-    //text_paint.set_color(Color::rgba(255, 255, 255, 40));
     text_paint.set_text_align(Align::Left);
-    canvas.fill_text(x + h * 1.5, y + h * 0.5, title, text_paint);
+    text_paint.set_text_baseline(Baseline::Middle);
+    canvas.fill_text(x + h * 0.3, y + h * 0.5, title, text_paint);
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
+    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_name("Entypo");
+    text_paint.set_text_align(Align::Center);
+    text_paint.set_text_baseline(Baseline::Middle);
+    canvas.fill_text(x + w - h * 0.5, y + h * 0.45, "\u{E75E}", text_paint);
 }
 
 fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {
