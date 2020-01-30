@@ -265,7 +265,7 @@ impl PathCache {
         }
     }
 
-    fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, atype: PointFlags, tess_tol: f32, dist_tol: f32) {
+    fn tesselate_bezier(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, x4: f32, y4: f32, level: usize, flags: PointFlags, tess_tol: f32, dist_tol: f32) {
         if level > 10 { return; }
 
         let x12 = (x1+x2)*0.5;
@@ -283,7 +283,7 @@ impl PathCache {
         let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
 
         if (d2 + d3)*(d2 + d3) < tess_tol * (dx*dx + dy*dy) {
-            self.add_point(x4, y4, atype, dist_tol);
+            self.add_point(x4, y4, flags, dist_tol);
             return;
         }
 
@@ -292,8 +292,8 @@ impl PathCache {
         let x1234 = (x123+x234)*0.5;
         let y1234 = (y123+y234)*0.5;
 
-        self.tesselate_bezier(x1,y1, x12,y12, x123,y123, x1234,y1234, level+1, PointFlags::empty(), tess_tol, dist_tol);
-        self.tesselate_bezier(x1234,y1234, x234,y234, x34,y34, x4,y4, level+1, atype, tess_tol, dist_tol);
+        self.tesselate_bezier(x1, y1, x12, y12, x123, y123, x1234, y1234, level+1, PointFlags::empty(), tess_tol, dist_tol);
+        self.tesselate_bezier(x1234, y1234, x234, y234, x34, y34, x4, y4, level+1, flags, tess_tol, dist_tol);
     }
 
     pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
@@ -303,60 +303,56 @@ impl PathCache {
             return false;
         }
 
-        match fill_rule {
-            FillRule::EvenOdd => {
-                for contour in &self.contours {
-                    let mut crossing = false;
+        if fill_rule == FillRule::EvenOdd {
+            for contour in &self.contours {
+                let mut crossing = false;
 
-                    for (p0, p1) in contour.point_pairs(&self.points) {
-                        if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
-                            crossing = !crossing;
-                        }
-                    }
-
-                    if crossing {
-                        return true;
+                for (p0, p1) in contour.point_pairs(&self.points) {
+                    if (p1.y > y) != (p0.y > y) && (x < (p0.x-p1.x) * (y-p1.y) / (p0.y-p1.y) + p1.x) {
+                        crossing = !crossing;
                     }
                 }
 
-                false
+                if crossing {
+                    return true;
+                }
             }
-            FillRule::NonZero => {
-                for contour in &self.contours {
-                    let mut winding_number: i32 = 0;
 
-                    for (p0, p1) in contour.point_pairs(&self.points) {
-                        if p0.y <= y {
-                            if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
-                                winding_number = winding_number.wrapping_add(1);
-                            }
-                        } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
-                            winding_number = winding_number.wrapping_sub(1);
+            false
+        } else { // NonZero
+            for contour in &self.contours {
+                let mut winding_number: i32 = 0;
+
+                for (p0, p1) in contour.point_pairs(&self.points) {
+                    if p0.y <= y {
+                        if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                            winding_number = winding_number.wrapping_add(1);
                         }
-                    }
-
-                    if winding_number != 0 {
-                        return true;
+                    } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                        winding_number = winding_number.wrapping_sub(1);
                     }
                 }
 
-                false
+                if winding_number != 0 {
+                    return true;
+                }
             }
+
+            false
         }
     }
 
-    pub(crate) fn expand_fill(&mut self, stroke_width: f32, line_join: LineJoin, miter_limit: f32, fringe_width: f32) {
-        let fringe = stroke_width > 0.0;
-        let aa = fringe_width;
+    pub(crate) fn expand_fill(&mut self, fringe_width: f32, line_join: LineJoin, miter_limit: f32) {
+        let has_fringe = fringe_width > 0.0;
 
-        self.calculate_joins(stroke_width, line_join, miter_limit);
+        self.calculate_joins(fringe_width, line_join, miter_limit);
 
         // Calculate max vertex usage.
         for contour in &mut self.contours {
             let point_count = contour.point_count();
             let mut vertex_count = point_count  + contour.bevel + 1;
 
-            if fringe {
+            if has_fringe {
                 vertex_count += (point_count + contour.bevel*5 + 1) * 2;
             }
 
@@ -369,30 +365,27 @@ impl PathCache {
             contour.stroke.clear();
             contour.fill.clear();
 
-            let woff = 0.5 * aa;
+            let woff = 0.5 * fringe_width;
 
-            if fringe {
+            if has_fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL) {
-                        let dlx0 = p0.dy;
-                        let dly0 = -p0.dx;
-                        let dlx1 = p1.dy;
-                        let dly1 = -p1.dx;
-
                         if p1.flags.contains(PointFlags::LEFT) {
                             let lx = p1.x + p1.dmx * woff;
                             let ly = p1.y + p1.dmy * woff;
                             contour.fill.push(Vertex::new(lx, ly, 0.5, 1.0));
                         } else {
-                            let lx0 = p1.x + dlx0 * woff;
-                            let ly0 = p1.y + dly0 * woff;
-                            let lx1 = p1.x + dlx1 * woff;
-                            let ly1 = p1.y + dly1 * woff;
+                            let lx0 = p1.x + p0.dy * woff;
+                            let ly0 = p1.y - p0.dx * woff;
+                            let lx1 = p1.x + p1.dy * woff;
+                            let ly1 = p1.y - p1.dx * woff;
                             contour.fill.push(Vertex::new(lx0, ly0, 0.5, 1.0));
                             contour.fill.push(Vertex::new(lx1, ly1, 0.5, 1.0));
                         }
                     } else {
-                        contour.fill.push(Vertex::new(p1.x + (p1.dmx * woff), p1.y + (p1.dmy * woff), 0.5, 1.0));
+                        contour.fill.push(
+                            Vertex::new(p1.x + (p1.dmx * woff), p1.y + (p1.dmy * woff), 0.5, 1.0)
+                        );
                     }
                 }
             } else {
@@ -403,18 +396,17 @@ impl PathCache {
                 }
             }
 
-            if fringe {
-                let mut lw = stroke_width + woff;
-                let rw = stroke_width - woff;
-                let mut lu = 0.0;
+            if has_fringe {
+                let rw = fringe_width - woff;
                 let ru = 1.0;
 
-                // Create only half a fringe for convex shapes so that
-                // the shape can be rendered without stenciling.
-                if convex {
-                    lw = woff;    // This should generate the same vertex as fill inset above.
-                    lu = 0.5;    // Set outline fade at middle.
-                }
+                let (lw, lu) = if convex {
+                    // Create only half a fringe for convex shapes so that
+                    // the shape can be rendered without stenciling.
+                    (woff, 0.5)
+                } else {
+                    (fringe_width + woff, 0.0)
+                };
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
@@ -850,8 +842,57 @@ mod tests {
         let transform = Transform2D::identity();
 
         let mut path_cache = PathCache::new(&path.verbs, &transform, 0.25, 0.01);
-        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, 1.0);
+        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
     }
 }
+
+/*
+pub struct MutStridedChunks<'a, T: 'a> {
+    buffer: &'a mut [T],
+    rotated: bool,
+    pos: usize,
+}
+
+impl<'a, T: 'a> MutStridedChunks<'a, T> {
+    pub fn new(buffer: &'a mut [T]) -> Self {
+        buffer.rotate_right(1);
+        Self {
+            buffer: buffer,
+            rotated: false,
+            pos: 0
+        }
+    }
+
+    fn next(&mut self) -> Option<&mut [T]> {
+        if self.pos == self.buffer.len() - 1 && !self.rotated {
+            self.buffer.rotate_left(1);
+            self.rotated = true;
+            self.pos -= 1;
+        }
+
+        let len = self.buffer.len() - self.pos;
+
+        if 2 <= len {
+            let (start, end) = (self.pos, self.pos + 2);
+            let subslice = &mut self.buffer[start..end];
+
+            self.pos += 1;
+            Some(subslice)
+        } else {
+            None
+        }
+    }
+}
+
+fn main() {
+    let mut my_array = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19];
+
+    let mut iter = MutStridedChunks::new(&mut my_array);
+
+    while let Some(subslice) = iter.next() {
+        println!("{:?}", subslice);
+    }
+}
+*/

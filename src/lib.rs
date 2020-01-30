@@ -518,7 +518,7 @@ impl<T> Canvas<T> where T: Renderer {
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4, self.fringe_width);
+        path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4);
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {

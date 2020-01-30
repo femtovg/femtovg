@@ -120,6 +120,7 @@ impl Path {
     }
 
     /// Sets the current sub-path winding, see Winding and Solidity
+    // TODO: Change this to solidity. Make a Solidity enum
     pub fn winding(&mut self, winding: Winding) {
         self.append(&[Verb::Winding(winding)]);
     }
