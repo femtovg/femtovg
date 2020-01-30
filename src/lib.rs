@@ -666,6 +666,16 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Text
 
+    /*
+        Required api methods for editing/selecting text:
+        - Measuring text - text_bounds?
+        - Computing bounding boxes - text_bounds?
+        - Mapping from coordinates to character indices
+        - Mapping from character index to coordinates
+
+        See: https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/platform/fonts/README.md
+    */
+
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) {
         self.font_cache.add_font_file(file_path).expect("cannot add font");
     }
