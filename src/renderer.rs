@@ -61,6 +61,7 @@ pub struct Command {
     pub(crate) drawables: Vec<Drawable>,
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
+    pub(crate) alpha_mask: Option<ImageId>,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState
 }
@@ -72,6 +73,7 @@ impl Command {
             drawables: Default::default(),
             triangles_verts: Default::default(),
             image: Default::default(),
+            alpha_mask: Default::default(),
             fill_rule: Default::default(),
             composite_operation: Default::default()
         }

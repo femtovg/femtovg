@@ -14,6 +14,8 @@ use gpucanvas::{
     Align,
     Baseline,
     Path,
+    ImageId,
+    ImageFlags,
     renderer::OpenGl
 };
 
@@ -38,6 +40,9 @@ fn main() {
     canvas.add_font("examples/assets/Roboto-Regular.ttf");
     canvas.add_font("examples/assets/amiri-regular.ttf");
 
+    let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
+    let image_id = canvas.create_image_file("examples/assets/pattern.jpg", flags).expect("Cannot create image");
+
     let start = Instant::now();
     let mut prevt = start;
 
@@ -60,6 +65,7 @@ fn main() {
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
                         font_size += *y as i32;
+                        font_size = font_size.max(2);
                     },
                     _ => ()
                 }
@@ -71,6 +77,7 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
 
+                let elapsed = start.elapsed().as_secs_f32();
                 let now = Instant::now();
                 let dt = (now - prevt).as_secs_f32();
                 prevt = now;
@@ -83,6 +90,9 @@ fn main() {
                 draw_inc_size(&mut canvas, 270.0, 30.0);
                 draw_arabic(&mut canvas, 270.0, 340.0, font_size as u32);
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
+                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
                 paint.set_font_name("Roboto-Bold");
@@ -200,11 +210,48 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     canvas.fill_text(x, y, "RUST", paint);
 }
 
+fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+    let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
+    paint.set_font_name("Roboto-Bold");
+    paint.set_stroke_width(6.0);
+    paint.set_font_size(72);
+    canvas.stroke_text(x - 3.0, y - 3.0, "RUST", paint);
+
+    let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
+    paint.set_font_name("Roboto-Bold");
+    paint.set_font_size(72);
+    canvas.fill_text(x, y, "RUST", paint);
+}
+
+fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
+
+    let mut paint = Paint::color(Color::hex("7300AB"));
+    paint.set_stroke_width(3.0);
+    let mut path = Path::new();
+    path.move_to(x, y - 2.0);
+    path.line_to(x + 180.0, y - 2.0);
+    canvas.stroke_path(&mut path, paint);
+
+    let text = "RUST";
+
+    let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
+    paint.set_font_name("Roboto-Bold");
+    paint.set_stroke_width(4.0);
+    paint.set_font_size(72);
+    canvas.stroke_text(x - 2.0, y - 2.0, text, paint);
+
+    //let mut paint = Paint::image(image_id, x, y, 120.0, 120.0, t/10.0, 0.50);
+    let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
+    paint.set_font_name("Roboto-Bold");
+    paint.set_font_size(72);
+    canvas.fill_text(x, y, text, paint);
+}
+
 fn draw_arabic<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
     let mut paint = Paint::color(Color::black());
     paint.set_font_name("Roboto-Regular");
     paint.set_font_size(font_size);
-    
+
     canvas.fill_text(x, y, "Mixed latin and النص العربي جميل جدا Some more latin. Малко кирилица.", paint);
 }
 

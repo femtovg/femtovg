@@ -1,7 +1,7 @@
 
 precision mediump float;
 
-#define UNIFORMARRAY_SIZE 11
+#define UNIFORMARRAY_SIZE 12
 
 uniform vec4 frag[UNIFORMARRAY_SIZE];
 
@@ -18,8 +18,10 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define strokeThr frag[10].y
 #define texType int(frag[10].z)
 #define shaderType int(frag[10].w)
+#define hasMask int(frag[11].x)
 
 uniform sampler2D tex;
+uniform sampler2D masktex;
 uniform vec2 viewSize;
 
 varying vec2 ftcoord;
@@ -71,7 +73,7 @@ void main(void) {
         vec4 color = mix(innerCol,outerCol,d);
 
         // Combine alpha
-        color *= strokeAlpha * scissor;
+        //color *= strokeAlpha * scissor;
         result = color;
     } else if (shaderType == 1) {
         // Image
@@ -88,21 +90,27 @@ void main(void) {
         color *= innerCol;
 
         // Combine alpha
-        color *= strokeAlpha * scissor;
+        //color *= strokeAlpha * scissor;
 
         result = color;
     } else if (shaderType == 2) {
         // Stencil fill
         result = vec4(1,1,1,1);
-    } else if (shaderType == 3) {
+    }
+
+    if (hasMask == 1) {
         // Textured tris
-        vec4 color = texture2D(tex, ftcoord);
+        vec4 mask = texture2D(masktex, ftcoord);
+        mask = vec4(mask.x);
 
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
+        //if (texType == 1) mask_color = vec4(mask_color.xyz * mask_color.w, mask_color.w);
+        //if (texType == 2) mask_color = vec4(mask_color.x);
 
-        color *= scissor;
-        result = color * innerCol;
+        mask *= scissor;
+        result *= mask;
+    } else if (shaderType != 2) { // Not stencil fill
+        // Combine alpha
+        result *= strokeAlpha * scissor;
     }
 
     gl_FragColor = result;

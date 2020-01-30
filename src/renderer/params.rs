@@ -1,5 +1,5 @@
 
-use crate::{ImageFlags, Scissor};
+use crate::{ImageFlags, Scissor, Color};
 use crate::paint::{Paint, PaintFlavor};
 use crate::geometry::Transform2D;
 use super::{ShaderType, TextureType, Renderer};
@@ -17,8 +17,9 @@ pub struct Params {
     pub(crate) feather: f32,
     pub(crate) stroke_mult: f32,
     pub(crate) stroke_thr: f32,
+    pub(crate) tex_type: f32,
     pub(crate) shader_type: f32,
-    pub(crate) tex_type: f32
+    pub(crate) has_mask: f32,
 }
 
 impl Params {
@@ -50,6 +51,8 @@ impl Params {
         params.stroke_mult = (stroke_width*0.5 + fringe_width*0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
 
+        params.has_mask = if paint.alpha_mask().is_some() { 1.0 } else { 0.0 };
+
         // Paint flavor
         let inv_transform;
 
@@ -61,14 +64,16 @@ impl Params {
                 params.shader_type = ShaderType::FillGradient.to_f32();
                 inv_transform = paint.transform.inversed();
             },
-            PaintFlavor::Image { id, cx, cy, width, height, angle, tint } => {
+            PaintFlavor::Image { id, cx, cy, width, height, angle, alpha } => {
                 let texture_flags = backend.texture_flags(id);
 
                 params.extent[0] = width;
                 params.extent[1] = height;
 
-                params.inner_col = tint.premultiplied().to_array();
-                params.outer_col = tint.premultiplied().to_array();
+                let color = Color::rgbaf(1.0, 1.0, 1.0, alpha);
+
+                params.inner_col = color.premultiplied().to_array();
+                params.outer_col = color.premultiplied().to_array();
 
                 let mut transform = Transform2D::identity();
                 transform.rotate(angle);

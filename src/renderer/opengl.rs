@@ -132,7 +132,7 @@ impl OpenGl {
     }
 
     fn convex_fill(&self, cmd: &Command, gpu_paint: Params) {
-        self.set_uniforms(gpu_paint, cmd.image);
+        self.set_uniforms(gpu_paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
@@ -156,7 +156,7 @@ impl OpenGl {
             //gl::DepthMask(gl::FALSE);
         }
 
-        self.set_uniforms(stencil_paint, None);
+        self.set_uniforms(stencil_paint, None, None);
 
         unsafe {
             gl::StencilOpSeparate(gl::FRONT, gl::KEEP, gl::KEEP, gl::INCR_WRAP);
@@ -177,7 +177,7 @@ impl OpenGl {
             //gl::DepthMask(gl::TRUE);
         }
 
-        self.set_uniforms(fill_paint, cmd.image);
+        self.set_uniforms(fill_paint, cmd.image, cmd.alpha_mask);
 
         if self.antialias {
             unsafe {
@@ -216,7 +216,7 @@ impl OpenGl {
     }
 
     fn stroke(&self, cmd: &Command, paint: Params) {
-        self.set_uniforms(paint, cmd.image);
+        self.set_uniforms(paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -237,7 +237,7 @@ impl OpenGl {
             gl::StencilOp(gl::KEEP, gl::KEEP, gl::INCR);
         }
 
-        self.set_uniforms(paint2, cmd.image);
+        self.set_uniforms(paint2, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -246,7 +246,7 @@ impl OpenGl {
         }
 
         // Draw anti-aliased pixels.
-        self.set_uniforms(paint1, cmd.image);
+        self.set_uniforms(paint1, cmd.image, cmd.alpha_mask);
 
         unsafe {
             gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
@@ -281,7 +281,7 @@ impl OpenGl {
     }
 
     fn triangles(&self, cmd: &Command, paint: Params) {
-        self.set_uniforms(paint, cmd.image);
+        self.set_uniforms(paint, cmd.image, cmd.alpha_mask);
 
         if let Some((start, count)) = cmd.triangles_verts {
             unsafe { gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32); }
@@ -290,7 +290,7 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, paint: Params, image_id: Option<ImageId>) {
+    fn set_uniforms(&self, paint: Params, image_id: Option<ImageId>, alpha_mask: Option<ImageId>) {
         let arr = UniformArray::from(paint);
         self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
@@ -298,7 +298,15 @@ impl OpenGl {
         let tex = image_id.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
 
         unsafe {
+            gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, tex);
+        }
+
+        let masktex = alpha_mask.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
+
+        unsafe {
+            gl::ActiveTexture(gl::TEXTURE0 + 1);
+            gl::BindTexture(gl::TEXTURE_2D, masktex);
         }
 
         self.check_error("set_uniforms texture");
@@ -360,8 +368,10 @@ impl Renderer for OpenGl {
             gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
         }
 
-        // Set view and texture just once per frame.
+        // Bind the two uniform samplers to texture units
         self.shader.set_tex(0);
+        self.shader.set_masktex(1);
+        // Set uniforms
         self.shader.set_view(self.view);
 
         self.check_error("render prepare");

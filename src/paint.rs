@@ -14,7 +14,7 @@ pub(crate) enum PaintFlavor {
         width: f32,
         height: f32,
         angle: f32,
-        tint: Color
+        alpha: f32
     },
     LinearGradient {
         start_x: f32,
@@ -73,6 +73,7 @@ pub(crate) enum PaintFlavor {
 pub struct Paint<'a> {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
+    pub(crate) alpha_mask: Option<ImageId>,
     pub(crate) stroke_width: f32,
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
@@ -93,6 +94,7 @@ impl Default for Paint<'_> {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
             transform: Default::default(),
+            alpha_mask: Default::default(),
             shape_anti_alias: true,
             stencil_strokes: true,
             stroke_width: 1.0,
@@ -141,7 +143,7 @@ impl<'a> Paint<'a> {
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
-        new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, tint: Color::rgbaf(1.0, 1.0, 1.0, alpha) };
+        new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, alpha };
         new
     }
 
@@ -193,6 +195,14 @@ impl<'a> Paint<'a> {
     /// Creates a new solid color paint
     pub fn set_color(&mut self, color: Color) {
         self.flavor = PaintFlavor::Color(color);
+    }
+
+    pub fn alpha_mask(&self) -> Option<ImageId> {
+        self.alpha_mask
+    }
+
+    pub fn set_alpha_mask(&mut self, image_id: Option<ImageId>) {
+        self.alpha_mask = image_id;
     }
 
     /// Returns boolean if the shapes drawn with this paint will be antialiased.
@@ -353,8 +363,8 @@ impl<'a> Paint<'a> {
             PaintFlavor::Color(color) => {
                 color.a *= a;
             }
-            PaintFlavor::Image { tint, ..} => {
-                tint.a *= a;
+            PaintFlavor::Image { alpha, ..} => {
+                *alpha *= a;
             }
             PaintFlavor::LinearGradient { start_color, end_color, ..} => {
                 start_color.a *= a;

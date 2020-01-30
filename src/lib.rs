@@ -725,11 +725,11 @@ impl<T> Canvas<T> where T: Renderer {
 
         let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
 
-        let text_color = if let PaintFlavor::Color(color) = paint.flavor {
-            color
-        } else {
-            Color::white()
-        };
+        // let text_color = if let PaintFlavor::Color(color) = paint.flavor {
+        //     color
+        // } else {
+        //     Color::white()
+        // };
 
         for cmd in &layout.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
@@ -748,11 +748,13 @@ impl<T> Canvas<T> where T: Renderer {
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
             }
 
-            let mut paint = Paint::image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            // let mut paint = Paint::image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            //
+            // if let PaintFlavor::Image { tint, .. } = &mut paint.flavor {
+            //     *tint = text_color;
+            // }
 
-            if let PaintFlavor::Image { tint, .. } = &mut paint.flavor {
-                *tint = text_color;
-            }
+            paint.set_alpha_mask(Some(cmd.image_id));
 
             // Apply global alpha
             paint.mul_alpha(self.state().alpha);
@@ -771,11 +773,12 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
-        let mut params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
-        params.shader_type = ShaderType::Img.to_f32();
+        let params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
+        //params.shader_type = ShaderType::Img.to_f32();// TODO this shouldn't be needed
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
+        cmd.alpha_mask = paint.alpha_mask();
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);

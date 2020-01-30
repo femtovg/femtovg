@@ -13,6 +13,7 @@ pub(crate) struct Shader {
     frag: GLuint,
     loc_viewsize: GLint,
     loc_tex: GLint,
+    loc_masktex: GLint,
     loc_frag: GLint,
 }
 
@@ -30,6 +31,7 @@ impl Shader {
                 frag: gl::CreateShader(gl::FRAGMENT_SHADER),
                 loc_viewsize: Default::default(),
                 loc_tex: Default::default(),
+                loc_masktex: Default::default(),
                 loc_frag: Default::default(),
             }
         };
@@ -75,6 +77,7 @@ impl Shader {
         unsafe {
             shader.loc_viewsize = gl::GetUniformLocation(shader.prog, CString::new("viewSize")?.as_ptr());
             shader.loc_tex = gl::GetUniformLocation(shader.prog, CString::new("tex")?.as_ptr());
+            shader.loc_masktex = gl::GetUniformLocation(shader.prog, CString::new("masktex")?.as_ptr());
             shader.loc_frag = gl::GetUniformLocation(shader.prog, CString::new("frag")?.as_ptr());
         }
 
@@ -119,6 +122,10 @@ impl Shader {
 
     pub(crate) fn set_tex(&self, tex: GLint) {
         unsafe { gl::Uniform1i(self.loc_tex, tex); }
+    }
+
+    pub(crate) fn set_masktex(&self, tex: GLint) {
+        unsafe { gl::Uniform1i(self.loc_masktex, tex); }
     }
 
     pub(crate) fn set_view(&self, view: [f32; 2]) {

@@ -1,7 +1,7 @@
 
 use super::Params;
 
-const UNIFORMARRAY_SIZE: usize = 11;
+const UNIFORMARRAY_SIZE: usize = 12;
 
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
 
@@ -12,6 +12,7 @@ impl Default for UniformArray {
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0,
         ])
     }
 }
@@ -76,6 +77,10 @@ impl UniformArray {
     pub fn set_shader_type(&mut self, shader_type: f32) {
         self.0[43] = shader_type;
     }
+
+    pub fn set_has_mask(&mut self, has_mask: f32) {
+        self.0[44] = has_mask;
+    }
 }
 
 impl From<Params> for UniformArray {
@@ -95,6 +100,7 @@ impl From<Params> for UniformArray {
         arr.set_stroke_thr(params.stroke_thr);
         arr.set_shader_type(params.shader_type);
         arr.set_tex_type(params.tex_type);
+        arr.set_has_mask(params.has_mask);
 
         arr
     }

@@ -81,8 +81,8 @@ impl Transform2D {
     }
 
     pub fn translate(&mut self, tx: f32, ty: f32) {
-        self[0] = 1.0; self[1] = 0.0;
-        self[2] = 0.0; self[3] = 1.0;
+        // self[0] = 1.0; self[1] = 0.0;
+        // self[2] = 0.0; self[3] = 1.0;
         self[4] = tx; self[5] = ty;
     }
 
