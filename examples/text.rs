@@ -195,16 +195,16 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_stroke_width(12.0);
     paint.set_font_size(72);
     paint.set_font_blur(2.0);
-    canvas.stroke_text(x, y, "RUST", paint);
+    canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
 
     paint.set_font_blur(0.0);
     paint.set_color(Color::black());
     paint.set_stroke_width(10.0);
-    canvas.stroke_text(x - 5.0, y - 5.0, "RUST", paint);
+    canvas.stroke_text(x, y, "RUST", paint);
 
     paint.set_stroke_width(6.0);
     paint.set_color(Color::hex("#B7410E"));
-    canvas.stroke_text(x - 3.0, y - 3.0, "RUST", paint);
+    canvas.stroke_text(x, y, "RUST", paint);
 
     paint.set_color(Color::white());
     canvas.fill_text(x, y, "RUST", paint);
@@ -215,7 +215,7 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_font_name("Roboto-Bold");
     paint.set_stroke_width(6.0);
     paint.set_font_size(72);
-    canvas.stroke_text(x - 3.0, y - 3.0, "RUST", paint);
+    canvas.stroke_text(x, y, "RUST", paint);
 
     let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
     paint.set_font_name("Roboto-Bold");
@@ -238,7 +238,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     paint.set_font_name("Roboto-Bold");
     paint.set_stroke_width(4.0);
     paint.set_font_size(72);
-    canvas.stroke_text(x - 2.0, y - 2.0, text, paint);
+    canvas.stroke_text(x, y, text, paint);
 
     //let mut paint = Paint::image(image_id, x, y, 120.0, 120.0, t/10.0, 0.50);
     let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);

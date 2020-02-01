@@ -71,6 +71,7 @@ pub struct RenderedGlyph {
     height: u32,
     atlas_x: u32,
     atlas_y: u32,
+    padding: u32,
 }
 
 pub struct RenderResult {
@@ -120,11 +121,20 @@ impl TextRenderer {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
+        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
+
+        let line_width = if let RenderStyle::Stroke { width } = style.render_style {
+            padding += width as u32;
+            width
+        } else {
+            0
+        };
+
         // TODO: Alignment
 
         for glyph in shaped {
-            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x;
-            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y;
+            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
+            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
             res.push(PositionedGlyph {
                 shaped: glyph,
@@ -303,6 +313,7 @@ impl TextRenderer {
             atlas_x: atlas_x as u32,
             atlas_y: atlas_y as u32,
             texture_index: tex_index,
+            padding: padding,
         })
     }
 }
