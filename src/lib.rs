@@ -7,6 +7,17 @@ use bitflags::bitflags;
 
 mod utils;
 
+mod text;
+pub use text::{Weight, WidthClass, FontStyle, Baseline, Align};
+use text::{
+    FontDb,
+    Shaper,
+    TextRenderer,
+    TextStyle,
+    RenderStyle,
+};
+
+
 mod color;
 pub use color::Color;
 
@@ -23,7 +34,7 @@ use renderer::{
 
 mod font_cache;
 use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
-pub use font_cache::{Align, Baseline};
+//pub use font_cache::{Align, Baseline};
 
 pub(crate) mod geometry;
 use geometry::*;
@@ -200,6 +211,9 @@ pub struct Canvas<T> {
     width: f32,
     height: f32,
     renderer: T,
+    fontdb: FontDb,
+    shaper: Shaper,
+    text_renderer: TextRenderer,
     font_cache: FontCache,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -215,10 +229,17 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn new(renderer: T) -> Result<Self, CanvasError> {
         let font_manager = FontCache::new()?;
 
+        let fontdb = FontDb::new().expect("Cannot init fontdb");
+        let shaper = Shaper::new();
+        let text_renderer = TextRenderer::new();
+
         let mut canvas = Self {
             width: Default::default(),
             height: Default::default(),
             renderer: renderer,
+            fontdb: fontdb,
+            shaper: shaper,
+            text_renderer: text_renderer,
             font_cache: font_manager,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -709,31 +730,51 @@ impl<T> Canvas<T> where T: Renderer {
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
         let text = text.as_ref();
-        self.draw_text(x, y, text, paint, GlyphRenderStyle::Fill)
+        self.draw_text(x, y, text, paint, RenderStyle::Fill)
     }
 
     pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
         let text = text.as_ref();
-        self.draw_text(x, y, text, paint, GlyphRenderStyle::Stroke {
-            line_width: paint.stroke_width().ceil() as u32
+        self.draw_text(x, y, text, paint, RenderStyle::Stroke {
+            width: paint.stroke_width().ceil() as u16// TODO: this is fushy
         })
     }
 
     // Private
 
     // TODO: Return Bounds struct from here
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: GlyphRenderStyle) -> [f32; 4] {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> [f32; 4] {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        // transform paint
-        paint.set_font_size((paint.font_size() as f32 * scale) as u32);
-        paint.set_letter_spacing(paint.letter_spacing() * scale);
-        paint.set_font_blur(paint.font_blur() * scale);
+        let style = TextStyle {
+            //family_name: "Noto Sans Arabic",
+            family_name: paint.font_name,
+            //family_name: "",
+            size: (paint.font_size() as f32 * scale) as u16,
+            weight: Weight::Normal,
+            width_class: WidthClass::Normal,
+            font_style: FontStyle::Normal,
+            letter_spacing: paint.letter_spacing() * scale,
+            baseline: Baseline::default(),
+            align: Align::default(),
+            blur: paint.font_blur() * scale,
+            render_style: render_style
+        };
 
-        let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
+        let res = self.shaper.shape(&mut self.fontdb, style, text);
+        let res = self.text_renderer.layout(x, y, res, &style);
+        let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, res, &style).unwrap();
+
+
+        // transform paint
+        // paint.set_font_size((paint.font_size() as f32 * scale) as u32);
+        // paint.set_letter_spacing(paint.letter_spacing() * scale);
+        // paint.set_font_blur(paint.font_blur() * scale);
+        //
+        // let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
 
         // let text_color = if let PaintFlavor::Color(color) = paint.flavor {
         //     color
@@ -741,7 +782,7 @@ impl<T> Canvas<T> where T: Renderer {
         //     Color::white()
         // };
 
-        for cmd in &layout.cmds {
+        for cmd in &res.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
             for quad in &cmd.quads {
@@ -772,7 +813,7 @@ impl<T> Canvas<T> where T: Renderer {
             self.render_triangles(&verts, &paint, &scissor);
         }
 
-        let mut bounds = layout.bbox;
+        let mut bounds = res.bbox;
 
         bounds[0] *= invscale;
         bounds[1] *= invscale;

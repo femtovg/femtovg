@@ -349,30 +349,30 @@ impl FontCache {
 
         let width = layout.bbox[0] - layout.bbox[2];
 
-        let offset_x = match paint.text_align() {
-            Align::Left => 0.0,
-            Align::Right => width.floor(),
-            Align::Center => (width / 2.0).floor(),
-        };
+        // let offset_x = match paint.text_align() {
+        //     Align::Left => 0.0,
+        //     Align::Right => width.floor(),
+        //     Align::Center => (width / 2.0).floor(),
+        // };
+        //
+        // let offset_y = match paint.text_baseline() {
+        //     Baseline::Top => max_descender + max_ascender,
+        //     Baseline::Middle => -max_descender,
+        //     Baseline::Alphabetic => 0.0,
+        //     Baseline::Bottom => max_descender,
+        // };
 
-        let offset_y = match paint.text_baseline() {
-            Baseline::Top => max_descender + max_ascender,
-            Baseline::Middle => -max_descender,
-            Baseline::Alphabetic => 0.0,
-            Baseline::Bottom => max_descender,
-        };
-
-        layout.bbox[0] += offset_x;
-        layout.bbox[2] += offset_x;
-        layout.bbox[1] += offset_y;
-        layout.bbox[3] += offset_y;
+        // layout.bbox[0] += offset_x;
+        // layout.bbox[2] += offset_x;
+        // layout.bbox[1] += offset_y;
+        // layout.bbox[3] += offset_y;
 
         layout.cmds = cmd_map.drain().map(|(_, mut cmd)| {
             cmd.quads.iter_mut().for_each(|quad| {
-                quad.x0 += offset_x;
-                quad.y0 += offset_y;
-                quad.x1 += offset_x;
-                quad.y1 += offset_y;
+                // quad.x0 += offset_x;
+                // quad.y0 += offset_y;
+                // quad.x1 += offset_x;
+                // quad.y1 += offset_y;
             });
 
             cmd
