@@ -8,7 +8,16 @@ use bitflags::bitflags;
 mod utils;
 
 mod text;
-pub use text::{Weight, WidthClass, FontStyle, Baseline, Align};
+
+pub use text::{
+    Weight, 
+    WidthClass, 
+    FontStyle, 
+    Baseline, 
+    Align, 
+    TextLayout
+};
+
 use text::{
     FontDb,
     Shaper,
@@ -728,12 +737,12 @@ impl<T> Canvas<T> where T: Renderer {
         bounds
     }
 
-    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
+    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
         let text = text.as_ref();
         self.draw_text(x, y, text, paint, RenderStyle::Fill)
     }
 
-    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> [f32; 4] {
+    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
         let text = text.as_ref();
         self.draw_text(x, y, text, paint, RenderStyle::Stroke {
             width: paint.stroke_width().ceil() as u16// TODO: this is fushy
@@ -743,7 +752,7 @@ impl<T> Canvas<T> where T: Renderer {
     // Private
 
     // TODO: Return Bounds struct from here
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> [f32; 4] {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> TextLayout {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
@@ -764,9 +773,8 @@ impl<T> Canvas<T> where T: Renderer {
             render_style: render_style
         };
 
-        let res = self.shaper.shape(x, y, &mut self.fontdb, &style, text);
-        let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, res, &style).unwrap();
-
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text);
+        let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
 
         // transform paint
         // paint.set_font_size((paint.font_size() as f32 * scale) as u32);
@@ -812,14 +820,7 @@ impl<T> Canvas<T> where T: Renderer {
             self.render_triangles(&verts, &paint, &scissor);
         }
 
-        let mut bounds = res.bbox;
-
-        bounds[0] *= invscale;
-        bounds[1] *= invscale;
-        bounds[2] *= invscale;
-        bounds[3] *= invscale;
-
-        bounds
+        layout
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {

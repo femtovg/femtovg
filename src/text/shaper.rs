@@ -12,6 +12,7 @@ use super::{
     TextStyle,
     freetype as ft,
     RenderStyle,
+    TextLayout,
     GLYPH_PADDING
 };
 
@@ -56,11 +57,6 @@ pub enum RunResult {
     Fail(usize, Segment)
 }
 
-pub struct ShapingResult {
-    pub advance_x: f32, 
-    pub glyphs: Vec<ShapedGlyph>
-}
-
 pub struct Shaper {
 }
 
@@ -70,7 +66,7 @@ impl Shaper {
         }
     }
     
-    pub fn layout(&mut self, x: f32, y: f32, res: &mut ShapingResult, style: &TextStyle<'_>) {
+    pub fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -84,23 +80,49 @@ impl Shaper {
         };
         
         match style.align {
-            Align::Center => cursor_x -= res.advance_x / 2.0,
-            Align::Right => cursor_x -= res.advance_x,
+            Align::Center => cursor_x -= res.width / 2.0,
+            Align::Right => cursor_x -= res.width,
             _ => ()
         }
+        
+        res.x = cursor_x;
 
-        // TODO: Alignment
+        // TODO: Error handling
+        
+        let mut height = 0.0f32;
+        let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
+            let font = fontdb.get_mut(glyph.font_id).unwrap();
+            font.set_size(style.size);
+            
             let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
-            glyph.x = xpos;
-            glyph.y = ypos;
+            // Baseline alignment
+            let size_metrics = font.face.size_metrics().unwrap();
+            let ascender = size_metrics.ascender as f32 / 64.0;
+            let descender = size_metrics.descender as f32 / 64.0;
+            
+            let offset_y = match style.baseline {
+                Baseline::Top => ascender,
+                Baseline::Middle => (ascender + descender) / 2.0,
+                Baseline::Alphabetic => 0.0,
+                Baseline::Bottom => descender,
+            };
+            
+            height = height.max(ascender - descender);
+            y = y.min(ypos + offset_y);
 
+            glyph.x = xpos;
+            glyph.y = ypos + offset_y;
+            
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;
         }
+        
+        res.y = y;
+        res.height = height;
     }
 
     fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
@@ -114,9 +136,12 @@ impl Shaper {
         }
     }
 
-    pub fn shape<'a>(&mut self, x: f32, y: f32, fontdb: &'a mut FontDb, style: &TextStyle, text: &str) -> ShapingResult {
-        let mut result = ShapingResult {
-            advance_x: 0.0,
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
+        let mut result = TextLayout {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
             glyphs: Vec::new()
         };
 
@@ -165,7 +190,7 @@ impl Shaper {
                     
                     let advance_x = position.x_advance as f32 / 64.0;
                     
-                    result.advance_x += advance_x;
+                    result.width += advance_x;
 
                     result.glyphs.push(ShapedGlyph {
                         x: 0.0,
@@ -187,7 +212,7 @@ impl Shaper {
             }
         }
         
-        self.layout(x, y, &mut result, &style);
+        self.layout(x, y, fontdb, &mut result, &style);
 
         result
     }

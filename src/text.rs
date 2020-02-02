@@ -5,8 +5,7 @@ pub use text_renderer::TextRenderer;
 mod shaper;
 pub use shaper::{
     Shaper,
-    ShapedGlyph,
-    ShapingResult
+    ShapedGlyph
 };
 
 mod font;
@@ -31,6 +30,15 @@ pub struct TextStyle<'a> {
     pub align: Align,
     pub blur: f32,
     pub render_style: RenderStyle
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct TextLayout {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub(crate) glyphs: Vec<ShapedGlyph>
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

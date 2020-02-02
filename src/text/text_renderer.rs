@@ -23,7 +23,7 @@ use super::{
     FontId,
     TextStyle,
     RenderStyle,
-    ShapingResult,
+    TextLayout,
     ShapedGlyph,
     freetype as ft,
     GLYPH_PADDING
@@ -113,7 +113,7 @@ impl TextRenderer {
         &mut self,
         renderer: &mut T,
         fontdb: &mut FontDb,
-        shaping_result: ShapingResult,
+        text_layout: &TextLayout,
         style: &TextStyle<'_>
     ) -> Result<RenderResult> {
 
@@ -121,7 +121,7 @@ impl TextRenderer {
 
         let textures = &mut self.textures;
 
-        for glyph in &shaping_result.glyphs {
+        for glyph in &text_layout.glyphs {
             let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
             if !self.glyph_cache.contains_key(&id) {

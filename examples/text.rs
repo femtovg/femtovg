@@ -88,11 +88,10 @@ fn main() {
                 draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
                 draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
                 draw_inc_size(&mut canvas, 270.0, 30.0);
-                draw_arabic(&mut canvas, 270.0, 340.0, font_size as u32);
+                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
                 draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
-
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
                 paint.set_font_name("Roboto-Bold");
@@ -132,11 +131,11 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
         paint.set_text_baseline(*baseline);
-        let bbox = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
+        let res = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
         //let bbox = canvas.fill_text(x, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
         let mut path = Path::new();
-        path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
+        path.rect(res.x, res.y, res.width, res.height);
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
     }
 }
@@ -155,10 +154,10 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 
     for (i, alignment) in alignments.iter().enumerate() {
         paint.set_text_align(*alignment);
-        let bbox = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint);
+        let res = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint);
 
         let mut path = Path::new();
-        path.rect(bbox[0]+0.5, bbox[1]+0.5, bbox[2]+0.5 - bbox[0]+0.5, bbox[3]+0.5 - bbox[1]+0.5);
+        path.rect(res.x, res.y, res.width, res.height);
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
     }
 }
@@ -170,22 +169,24 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     paint.set_font_size(font_size);
 
     let mut cursor_y = y;
+    
+    let linegap = 3.0;
 
     for line in text.lines() {
-        let bbox = canvas.fill_text(x, cursor_y, line, paint);
-        cursor_y += bbox[3] - bbox[1];
+        let res = canvas.fill_text(x, cursor_y, line, paint);
+        cursor_y += res.height + linegap;
     }
 }
 
 fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     let mut cursor_y = y;
 
-    for i in 4..24 {
+    for i in 4..23 {
         let mut paint = Paint::color(Color::black());
         paint.set_font_name("Roboto-Regular");
         paint.set_font_size(i);
-        let bbox = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint);
-        cursor_y += bbox[3] - bbox[1];
+        let res = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint);
+        cursor_y += res.height;
     }
 }
 
@@ -247,12 +248,12 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     canvas.fill_text(x, y, text, paint);
 }
 
-fn draw_arabic<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
     let mut paint = Paint::color(Color::black());
     paint.set_font_name("Roboto-Regular");
     paint.set_font_size(font_size);
 
-    canvas.fill_text(x, y, "Mixed latin and النص العربي جميل جدا Some more latin. Малко кирилица.", paint);
+    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,.  Кирилица. 한국어/韓國語 日本語 官话 עִבְרִית", paint);
 }
 
 struct PerfGraph {
