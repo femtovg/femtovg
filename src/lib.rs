@@ -758,8 +758,8 @@ impl<T> Canvas<T> where T: Renderer {
             width_class: WidthClass::Normal,
             font_style: FontStyle::Normal,
             letter_spacing: paint.letter_spacing() * scale,
-            baseline: Baseline::default(),
-            align: Align::default(),
+            baseline: paint.text_baseline(),
+            align: paint.text_align(),
             blur: paint.font_blur() * scale,
             render_style: render_style
         };

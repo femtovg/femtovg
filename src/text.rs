@@ -5,7 +5,8 @@ pub use text_renderer::TextRenderer;
 mod shaper;
 pub use shaper::{
     Shaper,
-    ShapedGlyph
+    ShapedGlyph,
+    ShapingResult
 };
 
 mod font;

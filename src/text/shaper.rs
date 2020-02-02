@@ -4,6 +4,8 @@ use self::hb::hb as hb_sys;
 use self::hb::UnicodeBuffer;
 
 use super::{
+    Align,
+    Baseline,
     Font,
     FontDb,
     FontId,
@@ -49,9 +51,14 @@ pub struct ShapedGlyph {
 }
 
 #[derive(Clone, Debug)]
-pub enum ShapingResult {
+pub enum RunResult {
     Success(FontId, Vec<(usize, char, hb::GlyphInfo, hb::GlyphPosition)>),
     Fail(usize, Segment)
+}
+
+pub struct ShapingResult {
+    pub advance_x: f32, 
+    pub glyphs: Vec<ShapedGlyph>
 }
 
 pub struct Shaper {
@@ -63,7 +70,7 @@ impl Shaper {
         }
     }
     
-    pub fn layout(&mut self, x: f32, y: f32, shaped: &mut [ShapedGlyph], style: &TextStyle<'_>) {
+    pub fn layout(&mut self, x: f32, y: f32, res: &mut ShapingResult, style: &TextStyle<'_>) {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -75,10 +82,16 @@ impl Shaper {
         } else {
             0
         };
+        
+        match style.align {
+            Align::Center => cursor_x -= res.advance_x / 2.0,
+            Align::Right => cursor_x -= res.advance_x,
+            _ => ()
+        }
 
         // TODO: Alignment
 
-        for glyph in shaped {
+        for glyph in &mut res.glyphs {
             let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
@@ -101,15 +114,18 @@ impl Shaper {
         }
     }
 
-    pub fn shape<'a>(&mut self, x: f32, y: f32, fontdb: &'a mut FontDb, style: &TextStyle, text: &str) -> Vec<ShapedGlyph> {
-        let mut result = Vec::new();
+    pub fn shape<'a>(&mut self, x: f32, y: f32, fontdb: &'a mut FontDb, style: &TextStyle, text: &str) -> ShapingResult {
+        let mut result = ShapingResult {
+            advance_x: 0.0,
+            glyphs: Vec::new()
+        };
 
         // Layout text for the requested font in style
         let mut shaping_results = self.shape_requested_font(fontdb, style, text);
 
         // for each of the failed runs of text find a fallback font that will render them
         for res in &mut shaping_results {
-            if let ShapingResult::Fail(start_index, segment) = res {
+            if let RunResult::Fail(start_index, segment) = res {
                 let font = match fontdb.fallback(&style, &segment.text) {
                     Ok(font) => font,
                     Err(_) => {
@@ -135,10 +151,10 @@ impl Shaper {
                     glyphs.push((*start_index + idx, c, *info, *position));
                 }
 
-                *res = ShapingResult::Success(font_id, glyphs);
+                *res = RunResult::Success(font_id, glyphs);
             }
 
-            if let ShapingResult::Success(font_id, glyph_infos) = res {
+            if let RunResult::Success(font_id, glyph_infos) = res {
                 for (index, c, info, position) in glyph_infos {
                     let font = fontdb.get_mut(*font_id).unwrap();
                     font.set_size(style.size);
@@ -146,8 +162,12 @@ impl Shaper {
                     // TODO: Error handling
                     let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
                     let metrics = font.face.glyph().metrics();
+                    
+                    let advance_x = position.x_advance as f32 / 64.0;
+                    
+                    result.advance_x += advance_x;
 
-                    result.push(ShapedGlyph {
+                    result.glyphs.push(ShapedGlyph {
                         x: 0.0,
                         y: 0.0,
                         c: *c,
@@ -156,7 +176,7 @@ impl Shaper {
                         codepoint: info.codepoint,
                         width: metrics.width as f32 / 64.0,
                         height: metrics.height as f32 / 64.0,
-                        advance_x: position.x_advance as f32 / 64.0,
+                        advance_x: advance_x,
                         advance_y: position.y_advance as f32 / 64.0,
                         offset_x: position.x_offset as f32 / 64.0,
                         offset_y: position.y_offset as f32 / 64.0,
@@ -172,7 +192,7 @@ impl Shaper {
         result
     }
 
-    fn shape_requested_font(&mut self, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Vec<ShapingResult> {
+    fn shape_requested_font(&mut self, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Vec<RunResult> {
         let mut result = Vec::new();
 
         // requested font
@@ -231,36 +251,36 @@ impl Shaper {
                 // determine first result
                 let mut current_res = if has_missing {
                     let start_index = items.iter().nth(0).unwrap().0;
-                    ShapingResult::Fail(start_index, Segment {
+                    RunResult::Fail(start_index, Segment {
                         text: items.iter().map(|(_, c, _, _)| c).collect(),
                         ..segment
                     })
                 } else {
-                    ShapingResult::Success(font_id, items)
+                    RunResult::Success(font_id, items)
                 };
 
                 // collect the rest of the clusters in results
                 for (has_missing, mut items) in clusters {
-                    if let ShapingResult::Success(id, mut infos) = current_res {
+                    if let RunResult::Success(id, mut infos) = current_res {
                         if has_missing {
-                            result.push(ShapingResult::Success(id, infos));
+                            result.push(RunResult::Success(id, infos));
                             let start_index = items.iter().nth(0).unwrap().0;
-                            current_res = ShapingResult::Fail(start_index, Segment {
+                            current_res = RunResult::Fail(start_index, Segment {
                                 text: items.iter().map(|(_, c, _, _)| c).collect(),
                                 ..segment
                             });
                         } else {
                             infos.append(&mut items);
-                            current_res = ShapingResult::Success(font_id, infos);
+                            current_res = RunResult::Success(font_id, infos);
                         }
                     } else {
-                        if let ShapingResult::Fail(start_index, mut segment) = current_res {
+                        if let RunResult::Fail(start_index, mut segment) = current_res {
                             if has_missing {
                                 items.iter().for_each(|(_, c, _, _)| segment.text.push(*c));
-                                current_res = ShapingResult::Fail(start_index, segment);
+                                current_res = RunResult::Fail(start_index, segment);
                             } else {
-                                result.push(ShapingResult::Fail(start_index, segment));
-                                current_res = ShapingResult::Success(font_id, items);
+                                result.push(RunResult::Fail(start_index, segment));
+                                current_res = RunResult::Success(font_id, items);
                             }
                         }
                     }
