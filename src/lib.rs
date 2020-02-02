@@ -764,8 +764,7 @@ impl<T> Canvas<T> where T: Renderer {
             render_style: render_style
         };
 
-        let res = self.shaper.shape(&mut self.fontdb, style, text);
-        let res = self.text_renderer.layout(x, y, res, &style);
+        let res = self.shaper.shape(x, y, &mut self.fontdb, &style, text);
         let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, res, &style).unwrap();
 
 

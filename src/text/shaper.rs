@@ -8,7 +8,9 @@ use super::{
     FontDb,
     FontId,
     TextStyle,
-    freetype as ft
+    freetype as ft,
+    RenderStyle,
+    GLYPH_PADDING
 };
 
 mod run_segmentation;
@@ -30,6 +32,8 @@ pub enum Direction {
 
 #[derive(Copy, Clone, Debug)]
 pub struct ShapedGlyph {
+    pub x: f32,
+    pub y: f32,
     pub c: char,
     pub index: usize,
     pub font_id: FontId,
@@ -58,6 +62,33 @@ impl Shaper {
         Self {
         }
     }
+    
+    pub fn layout(&mut self, x: f32, y: f32, shaped: &mut [ShapedGlyph], style: &TextStyle<'_>) {
+        let mut cursor_x = x;
+        let mut cursor_y = y;
+
+        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
+
+        let line_width = if let RenderStyle::Stroke { width } = style.render_style {
+            padding += width as u32;
+            width
+        } else {
+            0
+        };
+
+        // TODO: Alignment
+
+        for glyph in shaped {
+            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
+            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+
+            glyph.x = xpos;
+            glyph.y = ypos;
+
+            cursor_x += glyph.advance_x + style.letter_spacing;
+            cursor_y += glyph.advance_y;
+        }
+    }
 
     fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
         // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
@@ -70,7 +101,7 @@ impl Shaper {
         }
     }
 
-    pub fn shape<'a>(&mut self, fontdb: &'a mut FontDb, style: TextStyle, text: &str) -> Vec<ShapedGlyph> {
+    pub fn shape<'a>(&mut self, x: f32, y: f32, fontdb: &'a mut FontDb, style: &TextStyle, text: &str) -> Vec<ShapedGlyph> {
         let mut result = Vec::new();
 
         // Layout text for the requested font in style
@@ -117,6 +148,8 @@ impl Shaper {
                     let metrics = font.face.glyph().metrics();
 
                     result.push(ShapedGlyph {
+                        x: 0.0,
+                        y: 0.0,
                         c: *c,
                         index: *index,
                         font_id: *font_id,
@@ -133,11 +166,13 @@ impl Shaper {
                 }
             }
         }
+        
+        self.layout(x, y, &mut result, &style);
 
         result
     }
 
-    fn shape_requested_font(&mut self, fontdb: &mut FontDb, style: TextStyle, text: &str) -> Vec<ShapingResult> {
+    fn shape_requested_font(&mut self, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Vec<ShapingResult> {
         let mut result = Vec::new();
 
         // requested font

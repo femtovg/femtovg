@@ -25,6 +25,7 @@ use super::{
     ShapedGlyph,
     RenderStyle,
     freetype as ft,
+    GLYPH_PADDING
 };
 
 mod atlas;
@@ -32,16 +33,8 @@ use atlas::Atlas;
 
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
-const GLYPH_PADDING: u32 = 2;
 
 type Result<T> = std::result::Result<T, TextRendererError>;
-
-#[derive(Copy, Clone, Debug)]
-pub struct PositionedGlyph {
-    x: f32,
-    y: f32,
-    shaped: ShapedGlyph,
-}
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct RenderedGlyphId {
@@ -115,45 +108,11 @@ impl TextRenderer {
         }
     }
 
-    pub fn layout(&mut self, x: f32, y: f32, shaped: Vec<ShapedGlyph>, style: &TextStyle<'_>) -> Vec<PositionedGlyph> {
-        let mut res = Vec::new();
-
-        let mut cursor_x = x;
-        let mut cursor_y = y;
-
-        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
-
-        let line_width = if let RenderStyle::Stroke { width } = style.render_style {
-            padding += width as u32;
-            width
-        } else {
-            0
-        };
-
-        // TODO: Alignment
-
-        for glyph in shaped {
-            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
-            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
-
-            res.push(PositionedGlyph {
-                shaped: glyph,
-                x: xpos,
-                y: ypos
-            });
-
-            cursor_x += glyph.advance_x + style.letter_spacing;
-            cursor_y += glyph.advance_y;
-        }
-
-        res
-    }
-
     pub fn render<T: Renderer>(
         &mut self,
         renderer: &mut T,
         fontdb: &mut FontDb,
-        glyphs: Vec<PositionedGlyph>,
+        glyphs: Vec<ShapedGlyph>,
         style: &TextStyle<'_>
     ) -> Result<RenderResult> {
 
@@ -162,7 +121,7 @@ impl TextRenderer {
         let textures = &mut self.textures;
 
         for glyph in glyphs {
-            let id = RenderedGlyphId::new(glyph.shaped.codepoint, glyph.shaped.font_id, style);
+            let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
             if !self.glyph_cache.contains_key(&id) {
                 let glyph = Self::render_glyph(renderer, textures, fontdb, style, &glyph)?;
@@ -209,17 +168,17 @@ impl TextRenderer {
         textures: &mut Vec<FontTexture>,
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,
-        glyph: &PositionedGlyph
+        glyph: &ShapedGlyph
     ) -> Result<RenderedGlyph> {
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
 
-        let font = fontdb.get_mut(glyph.shaped.font_id).ok_or(TextRendererError::FontNotFound)?;
+        let font = fontdb.get_mut(glyph.font_id).ok_or(TextRendererError::FontNotFound)?;
 
         // Load Freetype glyph slot and fill or stroke
 
-        font.face.load_glyph(glyph.shaped.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
+        font.face.load_glyph(glyph.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
 
         let glyph_slot = font.face.glyph();
         let mut glyph = glyph_slot.get_glyph()?;
