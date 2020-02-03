@@ -213,6 +213,8 @@ impl FontDb {
         self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound)
     }
 
+    // TODO: This is slow as hell when there's no font installed on the system that can handle the text
+    // Must cache failed attempts as well
     pub fn fallback(&mut self, style: &TextStyle, text: &str) -> Result<&mut Font> {
         // Find a font that has all the codepoints in text
         if let Some(id) = self.fallbacks.get(text) {
