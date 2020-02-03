@@ -1,7 +1,7 @@
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
-use self::hb::UnicodeBuffer;
+use unicode_bidi::BidiInfo;
 
 use super::{
     Align,
@@ -65,7 +65,7 @@ impl Shaper {
         Self {
         }
     }
-    
+
     pub fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) {
         let mut cursor_x = x;
         let mut cursor_y = y;
@@ -78,24 +78,24 @@ impl Shaper {
         } else {
             0
         };
-        
+
         match style.align {
             Align::Center => cursor_x -= res.width / 2.0,
             Align::Right => cursor_x -= res.width,
             _ => ()
         }
-        
+
         res.x = cursor_x;
 
         // TODO: Error handling
-        
+
         let mut height = 0.0f32;
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
             let font = fontdb.get_mut(glyph.font_id).unwrap();
             font.set_size(style.size);
-            
+
             let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
@@ -103,24 +103,24 @@ impl Shaper {
             let size_metrics = font.face.size_metrics().unwrap();
             let ascender = size_metrics.ascender as f32 / 64.0;
             let descender = size_metrics.descender as f32 / 64.0;
-            
+
             let offset_y = match style.baseline {
                 Baseline::Top => ascender,
                 Baseline::Middle => (ascender + descender) / 2.0,
                 Baseline::Alphabetic => 0.0,
                 Baseline::Bottom => descender,
             };
-            
+
             height = height.max(ascender - descender);
             y = y.min(ypos + offset_y);
 
             glyph.x = xpos;
             glyph.y = ypos + offset_y;
-            
+
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;
         }
-        
+
         res.y = y;
         res.height = height;
     }
@@ -187,9 +187,9 @@ impl Shaper {
                     // TODO: Error handling
                     let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
                     let metrics = font.face.glyph().metrics();
-                    
+
                     let advance_x = position.x_advance as f32 / 64.0;
-                    
+
                     result.width += advance_x;
 
                     result.glyphs.push(ShapedGlyph {
@@ -211,7 +211,7 @@ impl Shaper {
                 }
             }
         }
-        
+
         self.layout(x, y, fontdb, &mut result, &style);
 
         result
@@ -234,85 +234,35 @@ impl Shaper {
 
         let mut index = 0;
 
+        // Reorder characters?
+        //let bidi_info = BidiInfo::new(text, None);
+        //let para = &bidi_info.paragraphs[0];
+        //let line = para.range.clone();
+        //segment.text = String::from(bidi_info.reorder_line(para, line));
+
         // segment the text in runs of the same direction and script
-        for segment in text.segments() {
+        'segments: for segment in text.segments() {
             let buffer = segment.hb_buffer();
 
             let output = hb::shape(&hb_font, buffer, &[]);
             let positions = output.get_glyph_positions();
             let infos = output.get_glyph_infos();
 
-            // Separate the result into clusters and mark which one of them has missing glyphs
-            let mut clusters = Vec::new();
-            let mut current_cluster = Vec::new();
-            let mut current_cluster_index = -1;
-            let mut current_cluster_has_missing = false;
+            let mut items = Vec::new();
 
             for (position, (info, c)) in positions.iter().zip(infos.iter().zip(segment.text.chars())) {
-                if current_cluster_index != info.cluster as i32 {
-                    let cluster = std::mem::replace(&mut current_cluster, Vec::new());
-                    if !cluster.is_empty() {
-                        clusters.push((current_cluster_has_missing, cluster));
-                    }
-                    current_cluster_has_missing = false;
-                    current_cluster_index = info.cluster as i32;
-                }
-
-                current_cluster.push((index, c, *info, *position));
-
+                items.push((index, c, *info, *position));
                 index += c.len_utf8();
 
                 if info.codepoint == 0 {
-                    current_cluster_has_missing = true;
+                    // missing glyphs from font - mark this segment for fallback
+                    let start_index = items.iter().nth(0).map(|item| item.0).unwrap_or(0);
+                    result.push(RunResult::Fail(start_index, segment.clone()));
+                    continue 'segments;
                 }
             }
 
-            clusters.push((current_cluster_has_missing, current_cluster));
-
-            // Combine the clusters into runs of successful and unsuccsesful shaping resutls
-            if !clusters.is_empty() {
-                let (has_missing, items) = clusters.remove(0);
-
-                // determine first result
-                let mut current_res = if has_missing {
-                    let start_index = items.iter().nth(0).unwrap().0;
-                    RunResult::Fail(start_index, Segment {
-                        text: items.iter().map(|(_, c, _, _)| c).collect(),
-                        ..segment
-                    })
-                } else {
-                    RunResult::Success(font_id, items)
-                };
-
-                // collect the rest of the clusters in results
-                for (has_missing, mut items) in clusters {
-                    if let RunResult::Success(id, mut infos) = current_res {
-                        if has_missing {
-                            result.push(RunResult::Success(id, infos));
-                            let start_index = items.iter().nth(0).unwrap().0;
-                            current_res = RunResult::Fail(start_index, Segment {
-                                text: items.iter().map(|(_, c, _, _)| c).collect(),
-                                ..segment
-                            });
-                        } else {
-                            infos.append(&mut items);
-                            current_res = RunResult::Success(font_id, infos);
-                        }
-                    } else {
-                        if let RunResult::Fail(start_index, mut segment) = current_res {
-                            if has_missing {
-                                items.iter().for_each(|(_, c, _, _)| segment.text.push(*c));
-                                current_res = RunResult::Fail(start_index, segment);
-                            } else {
-                                result.push(RunResult::Fail(start_index, segment));
-                                current_res = RunResult::Success(font_id, items);
-                            }
-                        }
-                    }
-                }
-
-                result.push(current_res);
-            }
+            result.push(RunResult::Success(font_id, items));
         }
 
         result

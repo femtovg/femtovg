@@ -80,7 +80,7 @@ impl<I: Iterator<Item = char>> Iterator for SegmentsIterator<I> {
             text.push(first);
 
             while let Some(next) = self.iter.peek() {
-                let next_dir = Direction::from(bidi_class(*next));
+                //let next_dir = Direction::from(bidi_class(*next));
                 let next_script = next.script();
 
                 let next_script = match next_script {
@@ -95,7 +95,7 @@ impl<I: Iterator<Item = char>> Iterator for SegmentsIterator<I> {
                     _ => script
                 };
 
-                if next_script == script && next_dir == direction {
+                if next_script == script/* && next_dir == direction*/ {
                     text.push(self.iter.next().unwrap());
                 } else {
                     break;
