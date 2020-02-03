@@ -88,7 +88,10 @@ fn main() {
                 // draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
                 // draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
                 // draw_inc_size(&mut canvas, 270.0, 30.0);
-                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
+
+                //draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
+                draw_complex(&mut canvas, 20.0, 340.0, font_size as u32);
+
                 // draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 // draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
                 // draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
@@ -254,7 +257,9 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_size(font_size);
 
     //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,.  Кирилица. 한국어/韓國語 日本語 官话xְרִית", paint);
-    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица. עִבְרִית ", paint);
+    //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица. עִבְרִית ", paint);
+
+    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi text तथा कई विदेशी,. Кирилица здрасти. מעמד שעוגן בשנת", paint);
 }
 
 struct PerfGraph {
@@ -328,9 +333,13 @@ impl PerfGraph {
 
 const LOREM_TEXT: &str = r#"
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
-suscipit nec ac augue. Duis elit nisi, porttitor porta est sed, blandit ultricies odio. Morbi faucibus sagittis justo in accumsan. Proin quis felis hendrerit, egestas ligula ut, pellentesque nibh.
+עִבְרִית היא שפה שמית, ממשפחת השפות האפרו-אסיאתיות, הידועה כשפתם של היהודים ושל השומרונים, אשר ניב מודרני שלה
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
 Etiam non malesuada felis, nec fringilla quam.
+
+हिन्दी विश्व की एक प्रमुख भाषा है एवं भारत की राजभाषा है। केन्द्रीय स्तर पर भारत में दूसरी आधिकारिक भाषा अंग्रेजी है। यह हिंदुस्तानी भाषा की एक मानकीकृत रूप है जिसमें संस्कृत के तत्सम तथा तद्भव शब्दों का प्रयोग अधिक है और अरबी-फ़ारसी शब्द कम हैं। हिंदी
+
+سنسکرت کی طرف بہت زیادہ
 
 Donec vitae dignissim tellus. Morbi lobortis finibus purus non porttitor. In mi enim, lacinia et condimentum ut, venenatis nec magna. Sed id ex in metus vulputate facilisis sit amet in arcu.
 Fusce tempus, mauris non porta ultricies, velit nulla blandit diam, vel maximus metus mi sed erat. Nam hendrerit enim sit amet nisl dictum gravida. Mauris faucibus feugiat neque ac interdum.

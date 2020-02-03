@@ -19,7 +19,8 @@ use super::{
 mod run_segmentation;
 use run_segmentation::{
     Segment,
-    Segmentable
+    Segmentable,
+    UnicodeScripts
 };
 
 // harfbuzz-sys doesn't add this symbol for mac builds.
@@ -239,6 +240,27 @@ impl Shaper {
         //let para = &bidi_info.paragraphs[0];
         //let line = para.range.clone();
         //segment.text = String::from(bidi_info.reorder_line(para, line));
+
+        use unicode_segmentation::UnicodeSegmentation;
+
+        // for (script, direction, text) in text.unicode_scripts() {
+        //
+        //     dbg!((script, direction, &text));
+        //
+        //     let split_iter = if direction == Direction::Rtl {
+        //         text.split(" ").rev().peekable()
+        //     } else {
+        //         text.split(" ").peekable()
+        //     };
+        //
+        //     for word in split_iter {
+        //         print!("({})", word);
+        //     }
+        //
+        //     println!();
+        // }
+        //
+        // println!("==================================================");
 
         // segment the text in runs of the same direction and script
         'segments: for segment in text.segments() {
