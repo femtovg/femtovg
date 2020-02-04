@@ -178,7 +178,7 @@ impl TextRenderer {
         let font = fontdb.get_mut(glyph.font_id).ok_or(TextRendererError::FontNotFound)?;
 
         // Load Freetype glyph slot and fill or stroke
-
+        //let index = font.face.get_char_index(glyph.codepoint as u32);
         font.face.load_glyph(glyph.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING)?;
 
         let glyph_slot = font.face.glyph();

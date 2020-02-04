@@ -709,11 +709,13 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) {
         //self.font_cache.add_font_file(file_path).expect("cannot add font");
         self.fontdb.add_font_file(file_path).expect("cannot add font");
+        // TODO: clear shaping cache
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) {
         //self.font_cache.add_font_mem(data).expect("cannot add font");
         self.fontdb.add_font_mem(data).expect("cannot add font");
+        // TODO: clear shaping cache
     }
 
     // TODO: Return Bounds struct from here

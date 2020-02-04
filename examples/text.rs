@@ -256,10 +256,10 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_name("Roboto-Regular");
     paint.set_font_size(font_size);
 
-    //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,.  Кирилица. 한국어/韓國語 日本語 官话xְרִית", paint);
+    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,.  Кирилица. 한국어/韓國語 日本語 官话xְרִית", paint);
     //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица. עִבְרִית ", paint);
 
-    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi text तथा कई विदेशी,. Кирилица здрасти. מעמד שעוגן בשנת", paint);
+    //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi text तथा कई विदेशी,. Кирилица здрасти. מעמד שעוגן בשנת", paint);
     //canvas.fill_text(x, y, "Latin ", paint);
 }
 

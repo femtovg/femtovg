@@ -122,7 +122,7 @@ pub struct FontDb {
     pub library: ft::Library,
     fonts: Vec<Font>,
     font_descr: HashMap<FontDescription, FontId>,
-    fallbacks: HashMap<String, FontId>
+    fallbacks: HashMap<String, Option<FontId>>
 }
 
 impl FontDb {
@@ -190,12 +190,21 @@ impl FontDb {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn fonts_for<'a>(&'a mut self, text: &'a str, style: &'a TextStyle) -> impl Iterator<Item = &'a mut Font> {
-        self.fonts.iter_mut()
-        // FontsIterator {
-        //     text,
-        //     style,
-        // }
+    pub fn find_font<F, T>(&mut self, text: &str, style: &TextStyle, callback: F) -> Result<T> where F: Fn(&mut Font) -> (bool, T) {
+        if let Ok(font) = self.find(style) {
+            let (has_missing, mut res) = callback(font);
+
+            if has_missing {
+                if let Ok(font) = self.fallback(text, style) {
+                    let (_, fallback_res) = callback(font);
+                    res = fallback_res;
+                }
+            }
+
+            return Ok(res);
+        }
+
+        return Err(FontDbError::NoFontFound);
     }
 
     pub fn find(&mut self, style: &TextStyle) -> Result<&mut Font> {
@@ -227,10 +236,14 @@ impl FontDb {
 
     // TODO: This is slow as hell when there's no font installed on the system that can handle the text
     // Must cache failed attempts as well
-    pub fn fallback(&mut self, style: &TextStyle, text: &str) -> Result<&mut Font> {
+    pub fn fallback(&mut self, text: &str, style: &TextStyle) -> Result<&mut Font> {
         // Find a font that has all the codepoints in text
-        if let Some(id) = self.fallbacks.get(text) {
-            return self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound);
+        if let Some(maybe_id) = self.fallbacks.get(text) {
+            if let Some(id) = maybe_id {
+                return self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound);
+            } else {
+                return Err(FontDbError::NoFontFound);
+            }
         }
 
         let id;
@@ -250,23 +263,25 @@ impl FontDb {
             let sysfonts = system_fonts::query_specific(&mut property);
 
             for string in &sysfonts {
-
                 let property = system_fonts::FontPropertyBuilder::new().family(string).build();
 
                 if let Some((font_data, _)) = system_fonts::get(&property) {
+                    //println!("9 - {}", text);
                     let ttf_font = ttf::Font::from_data(&font_data, 0)?;
                     let has_all = text.chars().all(|c| ttf_font.glyph_index(c).is_ok());
 
                     if has_all {
                         id = self.add_font_mem(font_data)?;
                         self.font_descr.insert(description, id);
-                        self.fallbacks.insert(text.to_string(), id);
+                        self.fallbacks.insert(text.to_string(), Some(id));
                         break 'outer;
                     }
                 }
             }
 
             if !description.degrade() {
+                dbg!("12");
+                self.fallbacks.insert(text.to_string(), None);
                 return Err(FontDbError::NoFontFound);
             }
         }

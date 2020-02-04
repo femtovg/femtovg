@@ -73,6 +73,9 @@ impl Shaper {
             0
         };
 
+        // calculate total advance
+        res.width = res.glyphs.iter().fold(0.0, |width, glyph| width + glyph.advance_x + style.letter_spacing);
+
         match style.align {
             Align::Center => cursor_x -= res.width / 2.0,
             Align::Right => cursor_x -= res.width,
@@ -128,21 +131,33 @@ impl Shaper {
             glyphs: Vec::new()
         };
 
-        let space_glyph = Self::space_glyph(fontdb, style);
-
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
             let mut words: Vec<&str> = subtext.split(" ").collect();
 
+            // reverse the words in right-to-left scripts bit not the trailing whitespace
             if direction == Direction::Rtl {
-                words.reverse();
+                let mut rev_range = words.len();
+
+                for (i, word) in words.iter().enumerate().rev() {
+                    if word.is_empty() {
+                        rev_range = i;
+                    } else {
+                        break;
+                    }
+                }
+
+                words[0..rev_range].reverse();
             }
 
             let mut words_glyphs = Vec::new();
 
+            let mut space_glyph = None;
+
             for word in words {
-                'fonts: for font in fontdb.fonts_for(&word, style) {
+                //'fonts: for font in fontdb.fonts_for(&word, style) {
+                let result = fontdb.find_font(&word, style, |font| {
                     font.set_size(style.size);
 
                     let output = {
@@ -156,17 +171,15 @@ impl Shaper {
 
                     let mut items = Vec::new();
 
+                    let  mut has_missing = false;
+
                     for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
                         if info.codepoint == 0 {
-                            continue 'fonts;
+                            has_missing = true;
                         }
 
                         let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
                         let metrics = font.face.glyph().metrics();
-
-                        let advance_x = position.x_advance as f32 / 64.0;
-
-                        result.width += advance_x;
 
                         items.push(ShapedGlyph {
                             x: 0.0,
@@ -177,7 +190,7 @@ impl Shaper {
                             codepoint: info.codepoint,
                             width: metrics.width as f32 / 64.0,
                             height: metrics.height as f32 / 64.0,
-                            advance_x: advance_x,
+                            advance_x: position.x_advance as f32 / 64.0,
                             advance_y: position.y_advance as f32 / 64.0,
                             offset_x: position.x_offset as f32 / 64.0,
                             offset_y: position.y_offset as f32 / 64.0,
@@ -186,13 +199,23 @@ impl Shaper {
                         });
                     }
 
-                    words_glyphs.push(items);
+                    let space_glyph = Self::space_glyph(font, style);
 
-                    break;
+                    (has_missing, (space_glyph, items))
+                });
+
+                if let Ok((aspace_glyph, items)) = result {
+                    words_glyphs.push(items);
+                    space_glyph = Some(aspace_glyph);
                 }
             }
 
-            result.glyphs.append(&mut words_glyphs.join(&space_glyph));
+            if let Some(space_glyph) = space_glyph {
+                result.glyphs.append(&mut words_glyphs.join(&space_glyph));
+            } else {
+                let mut flat = words_glyphs.into_iter().flatten().collect();
+                result.glyphs.append(&mut flat);
+            }
         }
 
         self.layout(x, y, fontdb, &mut result, &style);
@@ -200,21 +223,19 @@ impl Shaper {
         result
     }
 
-    fn space_glyph(fontdb: &mut FontDb, style: &TextStyle) -> ShapedGlyph {
+    fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {
         let mut glyph = ShapedGlyph::default();
 
-        for font in fontdb.fonts_for(" ", style) {
-            font.set_size(style.size);
+        font.set_size(style.size);
 
-            let index = font.face.get_char_index(' ' as u32);
-            let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
-            let metrics = font.face.glyph().metrics();
+        let index = font.face.get_char_index(' ' as u32);
+        let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+        let metrics = font.face.glyph().metrics();
 
-            glyph.font_id = font.id;
-            glyph.c = ' ';
-            glyph.codepoint = index;
-            glyph.advance_x = metrics.horiAdvance as f32 / 64.0;
-        }
+        glyph.font_id = font.id;
+        glyph.c = ' ';
+        glyph.codepoint = index;
+        glyph.advance_x = metrics.horiAdvance as f32 / 64.0;
 
         glyph
     }
