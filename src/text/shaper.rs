@@ -3,7 +3,6 @@ use unicode_script::Script;
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
-use unicode_bidi::BidiInfo;
 
 use super::{
     Align,
@@ -20,8 +19,6 @@ use super::{
 
 mod run_segmentation;
 use run_segmentation::{
-    Segment,
-    Segmentable,
     UnicodeScripts,
 };
 
@@ -133,7 +130,9 @@ impl Shaper {
 
         let space_glyph = Self::space_glyph(fontdb, style);
 
+        // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
+            // separate words in run
             let mut words: Vec<&str> = subtext.split(" ").collect();
 
             if direction == Direction::Rtl {
