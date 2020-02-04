@@ -1,4 +1,6 @@
 
+use unicode_script::Script;
+
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
 use unicode_bidi::BidiInfo;
@@ -20,7 +22,7 @@ mod run_segmentation;
 use run_segmentation::{
     Segment,
     Segmentable,
-    UnicodeScripts
+    UnicodeScripts,
 };
 
 // harfbuzz-sys doesn't add this symbol for mac builds.
@@ -34,7 +36,7 @@ pub enum Direction {
     Ltr, Rtl
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct ShapedGlyph {
     pub x: f32,
     pub y: f32,
@@ -50,12 +52,6 @@ pub struct ShapedGlyph {
     pub offset_y: f32,
     pub bearing_x: f32,
     pub bearing_y: f32
-}
-
-#[derive(Clone, Debug)]
-pub enum RunResult {
-    Success(FontId, Vec<(usize, char, hb::GlyphInfo, hb::GlyphPosition)>),
-    Fail(usize, Segment)
 }
 
 pub struct Shaper {
@@ -126,6 +122,104 @@ impl Shaper {
         res.height = height;
     }
 
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
+        let mut result = TextLayout {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            glyphs: Vec::new()
+        };
+
+        let space_glyph = Self::space_glyph(fontdb, style);
+
+        for (script, direction, subtext) in text.unicode_scripts() {
+            let mut words: Vec<&str> = subtext.split(" ").collect();
+
+            if direction == Direction::Rtl {
+                words.reverse();
+            }
+
+            let mut words_glyphs = Vec::new();
+
+            for word in words {
+                'fonts: for font in fontdb.fonts_for(&word, style) {
+                    font.set_size(style.size);
+
+                    let output = {
+                        let hb_font = Self::hb_font(font);
+                        let buffer = Self::hb_buffer(&word, &direction, &script);
+                        hb::shape(&hb_font, buffer, &[])
+                    };
+
+                    let positions = output.get_glyph_positions();
+                    let infos = output.get_glyph_infos();
+
+                    let mut items = Vec::new();
+
+                    for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
+                        if info.codepoint == 0 {
+                            continue 'fonts;
+                        }
+
+                        let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+                        let metrics = font.face.glyph().metrics();
+
+                        let advance_x = position.x_advance as f32 / 64.0;
+
+                        result.width += advance_x;
+
+                        items.push(ShapedGlyph {
+                            x: 0.0,
+                            y: 0.0,
+                            c: c,
+                            index: 0,
+                            font_id: font.id,
+                            codepoint: info.codepoint,
+                            width: metrics.width as f32 / 64.0,
+                            height: metrics.height as f32 / 64.0,
+                            advance_x: advance_x,
+                            advance_y: position.y_advance as f32 / 64.0,
+                            offset_x: position.x_offset as f32 / 64.0,
+                            offset_y: position.y_offset as f32 / 64.0,
+                            bearing_x: metrics.horiBearingX as f32 / 64.0,
+                            bearing_y: metrics.horiBearingY as f32 / 64.0,
+                        });
+                    }
+
+                    words_glyphs.push(items);
+
+                    break;
+                }
+            }
+
+            result.glyphs.append(&mut words_glyphs.join(&space_glyph));
+        }
+
+        self.layout(x, y, fontdb, &mut result, &style);
+
+        result
+    }
+
+    fn space_glyph(fontdb: &mut FontDb, style: &TextStyle) -> ShapedGlyph {
+        let mut glyph = ShapedGlyph::default();
+
+        for font in fontdb.fonts_for(" ", style) {
+            font.set_size(style.size);
+
+            let index = font.face.get_char_index(' ' as u32);
+            let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+            let metrics = font.face.glyph().metrics();
+
+            glyph.font_id = font.id;
+            glyph.c = ' ';
+            glyph.codepoint = index;
+            glyph.advance_x = metrics.horiAdvance as f32 / 64.0;
+        }
+
+        glyph
+    }
+
     fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
         // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
         // And I didn't want to read the file a second time and keep it in memory just to give
@@ -137,156 +231,21 @@ impl Shaper {
         }
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
-        let mut result = TextLayout {
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
-            height: 0.0,
-            glyphs: Vec::new()
-        };
+    fn hb_buffer(text: &str, direction: &Direction, script: &Script) -> hb::UnicodeBuffer {
+        let mut buffer = hb::UnicodeBuffer::new()
+            .add_str(text)
+            .set_direction(match direction {
+                Direction::Ltr => hb::Direction::Ltr,
+                Direction::Rtl => hb::Direction::Rtl,
+            });
 
-        // Layout text for the requested font in style
-        let mut shaping_results = self.shape_requested_font(fontdb, style, text);
+        let script_name = script.short_name();
 
-        // for each of the failed runs of text find a fallback font that will render them
-        for res in &mut shaping_results {
-            if let RunResult::Fail(start_index, segment) = res {
-                let font = match fontdb.fallback(&style, &segment.text) {
-                    Ok(font) => font,
-                    Err(_) => {
-                        println!("Could not find font");
-                        continue;
-                    }
-                };
-
-                font.set_size(style.size);
-
-                let font_id = font.id;
-
-                let hb_font = Self::hb_font(font);
-                let buffer = segment.hb_buffer();
-
-                let output = hb::shape(&hb_font, buffer, &[]);
-                let positions = output.get_glyph_positions();
-                let infos = output.get_glyph_infos();
-
-                let mut glyphs = Vec::new();
-
-                for (position, (info, (idx, c))) in positions.iter().zip(infos.iter().zip(segment.text.char_indices())) {
-                    glyphs.push((*start_index + idx, c, *info, *position));
-                }
-
-                *res = RunResult::Success(font_id, glyphs);
-            }
-
-            if let RunResult::Success(font_id, glyph_infos) = res {
-                for (index, c, info, position) in glyph_infos {
-                    let font = fontdb.get_mut(*font_id).unwrap();
-                    font.set_size(style.size);
-
-                    // TODO: Error handling
-                    let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
-                    let metrics = font.face.glyph().metrics();
-
-                    let advance_x = position.x_advance as f32 / 64.0;
-
-                    result.width += advance_x;
-
-                    result.glyphs.push(ShapedGlyph {
-                        x: 0.0,
-                        y: 0.0,
-                        c: *c,
-                        index: *index,
-                        font_id: *font_id,
-                        codepoint: info.codepoint,
-                        width: metrics.width as f32 / 64.0,
-                        height: metrics.height as f32 / 64.0,
-                        advance_x: advance_x,
-                        advance_y: position.y_advance as f32 / 64.0,
-                        offset_x: position.x_offset as f32 / 64.0,
-                        offset_y: position.y_offset as f32 / 64.0,
-                        bearing_x: metrics.horiBearingX as f32 / 64.0,
-                        bearing_y: metrics.horiBearingY as f32 / 64.0,
-                    });
-                }
-            }
+        if script_name.len() == 4 {
+            let script: Vec<char> = script_name.chars().collect();
+            buffer = buffer.set_script(hb::Tag::new(script[0], script[1], script[2], script[3]));
         }
 
-        self.layout(x, y, fontdb, &mut result, &style);
-
-        result
-    }
-
-    fn shape_requested_font(&mut self, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Vec<RunResult> {
-        let mut result = Vec::new();
-
-        // requested font
-        let font = match fontdb.find(&style) {
-            Ok(font) => font,
-            Err(_) => return result,
-        };
-
-        font.set_size(style.size);
-
-        let font_id = font.id;
-
-        let hb_font = Self::hb_font(font);
-
-        let mut index = 0;
-
-        // Reorder characters?
-        //let bidi_info = BidiInfo::new(text, None);
-        //let para = &bidi_info.paragraphs[0];
-        //let line = para.range.clone();
-        //segment.text = String::from(bidi_info.reorder_line(para, line));
-
-        use unicode_segmentation::UnicodeSegmentation;
-
-        // for (script, direction, text) in text.unicode_scripts() {
-        //
-        //     dbg!((script, direction, &text));
-        //
-        //     let split_iter = if direction == Direction::Rtl {
-        //         text.split(" ").rev().peekable()
-        //     } else {
-        //         text.split(" ").peekable()
-        //     };
-        //
-        //     for word in split_iter {
-        //         print!("({})", word);
-        //     }
-        //
-        //     println!();
-        // }
-        //
-        // println!("==================================================");
-
-        // segment the text in runs of the same direction and script
-        'segments: for segment in text.segments() {
-            let buffer = segment.hb_buffer();
-
-            let output = hb::shape(&hb_font, buffer, &[]);
-            let positions = output.get_glyph_positions();
-            let infos = output.get_glyph_infos();
-
-            let mut items = Vec::new();
-
-            for (position, (info, c)) in positions.iter().zip(infos.iter().zip(segment.text.chars())) {
-                items.push((index, c, *info, *position));
-                index += c.len_utf8();
-
-                if info.codepoint == 0 {
-                    // missing glyphs from font - mark this segment for fallback
-                    let start_index = items.iter().nth(0).map(|item| item.0).unwrap_or(0);
-                    result.push(RunResult::Fail(start_index, segment.clone()));
-                    continue 'segments;
-                }
-            }
-
-            result.push(RunResult::Success(font_id, items));
-        }
-
-        result
+        buffer
     }
 }

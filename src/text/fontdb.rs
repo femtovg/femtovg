@@ -22,7 +22,7 @@ use super::{
 
 type Result<T> = std::result::Result<T, FontDbError>;
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
 pub struct FontId(usize);
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -114,6 +114,10 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
     }
 }
 
+pub trait FontDbBackend {
+
+}
+
 pub struct FontDb {
     pub library: ft::Library,
     fonts: Vec<Font>,
@@ -184,6 +188,14 @@ impl FontDb {
 
     pub fn get_mut(&mut self, id: FontId) -> Option<&mut Font> {
         self.fonts.get_mut(id.0)
+    }
+
+    pub fn fonts_for<'a>(&'a mut self, text: &'a str, style: &'a TextStyle) -> impl Iterator<Item = &'a mut Font> {
+        self.fonts.iter_mut()
+        // FontsIterator {
+        //     text,
+        //     style,
+        // }
     }
 
     pub fn find(&mut self, style: &TextStyle) -> Result<&mut Font> {
@@ -260,6 +272,33 @@ impl FontDb {
         }
 
         self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound)
+    }
+}
+
+pub struct FontsIterator<'a> {
+    text: &'a str,
+    style: &'a TextStyle<'a>
+}
+
+impl<'a> FontsIterator<'a> {
+
+}
+
+impl<'a> Iterator for FontsIterator<'a> {
+    type Item = &'a mut Font;
+
+    fn next(&mut self) -> Option<&'a mut Font> {
+        // if !self.tried_default {
+        //
+        //
+        //     self.tried_default = true;
+        // }
+        //
+        // if self.tried_default {
+        //
+        // }
+
+        None
     }
 }
 

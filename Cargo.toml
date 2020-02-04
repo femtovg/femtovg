@@ -24,7 +24,6 @@ unicode-script = "0.5"
 unicode-bidi = "0.3"
 harfbuzz_rs = "1.0.1"
 lru_time_cache = "0.9.0"
-unicode-segmentation = "1.6.0"
 
 [build-dependencies]
 gl_generator = "0.13"

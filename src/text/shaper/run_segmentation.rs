@@ -131,6 +131,7 @@ impl<I: Iterator<Item=char>> Segmentable<I> for I {
 
 /////////////////////
 
+// TODO: Make this borrow a &str instead of allocating a String every time
 pub struct UnicodeScriptIterator<I: Iterator<Item = char>> {
     iter: Peekable<I>
 }
