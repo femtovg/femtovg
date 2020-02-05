@@ -66,11 +66,6 @@ pub struct RenderedGlyph {
     padding: u32,
 }
 
-pub struct RenderResult {
-    pub bbox: [f32; 4],// TODO: Use the Bounds type here
-    pub cmds: Vec<DrawCmd>
-}
-
 #[derive(Clone)]
 pub struct DrawCmd {
     pub image_id: ImageId,
@@ -113,7 +108,7 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
-    ) -> Result<RenderResult> {
+    ) -> Result<Vec<DrawCmd>> {
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -156,10 +151,7 @@ impl TextRenderer {
             }
         }
 
-        Ok(RenderResult {
-            bbox: [0.0, 0.0, 0.0, 0.0],
-            cmds: cmd_map.drain().map(|(_, cmd)| cmd).collect()
-        })
+        Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
     }
 
     fn render_glyph<T: Renderer>(

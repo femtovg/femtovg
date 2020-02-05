@@ -766,9 +766,9 @@ impl<T> Canvas<T> where T: Renderer {
         style.render_style = render_style;
 
         let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text);
-        let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
+        let cmds = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
 
-        for cmd in &res.cmds {
+        for cmd in &cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
             for quad in &cmd.quads {

@@ -341,24 +341,16 @@ impl PerfGraph {
 }
 
 const LOREM_TEXT: &str = r#"
+Traditionally, text is composed to create a readable, coherent, and visually satisfying typeface
+that works invisibly, without the awareness of the reader. Even distribution of typeset material,
+with a minimum of distractions and anomalies, is aimed at producing clarity and transparency.
+Choice of typeface(s) is the primary aspect of text typography—prose fiction, non-fiction,
+editorial, educational, religious, scientific, spiritual, and commercial writing all have differing
+characteristics and requirements of appropriate typefaces and their fonts or styles.
+
+سنسکرت کی طرف بہت زیادہ
+
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
 Etiam non malesuada felis, nec fringilla quam.
-سنسکرت کی طرف بہت زیادہ
-Donec vitae dignissim tellus. Morbi lobortis finibus purus non porttitor. In mi enim, lacinia et condimentum ut, venenatis nec magna. Sed id ex in metus vulputate facilisis sit amet in arcu.
-Fusce tempus, mauris non porta ultricies, velit nulla blandit diam, vel maximus metus mi sed erat. Nam hendrerit enim sit amet nisl dictum gravida. Mauris faucibus feugiat neque ac interdum.
-In dignissim orci id diam suscipit, id interdum nunc aliquam. Nam auctor, neque sit amet molestie euismod, dolor nibh pulvinar ligula, at sagittis nisi dolor a nisl. Praesent placerat ut enim
-tincidunt rhoncus. Cras vel feugiat leo. Donec arcu metus, placerat non est eget, laoreet dapibus odio. In ac massa et lectus tempus imperdiet.
-
-Phasellus lobortis gravida turpis non auctor. Nam euismod consectetur imperdiet. Nunc egestas ultricies bibendum. Donec consequat purus quis tempus aliquam. Suspendisse mauris nunc, dignissim placerat
-accumsan at, cursus sit amet mi. In faucibus ac neque non hendrerit. Maecenas in sollicitudin nibh.
-
-In hac habitasse platea dictumst. Pellentesque at libero quis diam interdum elementum vel sed tortor. Etiam eget urna pretium, euismod orci vel, convallis arcu. Curabitur a ipsum in neque molestie finibus.
-Phasellus mollis volutpat massa non gravida. Duis vel libero mollis, mollis eros vitae, ornare dolor. Morbi interdum, tellus et pulvinar pharetra, justo ante accumsan neque, quis venenatis augue ipsum sed
-odio. Mauris sit amet lectus et nisl faucibus interdum. Nunc dapibus quis odio ac dictum. In iaculis nibh est, sit amet malesuada mi eleifend ut. Nunc dignissim tempor sollicitudin. Nulla facilisi.
-Nullam dictum, tortor in elementum malesuada, purus lectus placerat ipsum, vitae pellentesque risus ante sed turpis.
-
-In ac dictum metus. Phasellus fermentum ac tortor id gravida. Quisque vitae dui velit. Vestibulum rutrum bibendum aliquam. Sed vitae pretium nisi, quis mattis justo. Ut dolor massa, suscipit sed
-condimentum vitae, finibus in nisi. Aliquam posuere nulla leo, sit amet rhoncus lorem vulputate id. Phasellus imperdiet ultricies est a aliquet. Curabitur vehicula porta posuere. Duis eget purus
-condimentum, elementum odio sit amet, convallis tellus.
 "#;
