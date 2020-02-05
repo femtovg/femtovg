@@ -36,7 +36,14 @@ impl FontDescription {
     fn degrade(&mut self) -> bool {
         if !self.family_name.is_empty() {
             // if family_name is "Roboto Regular" or "Roboto-Regular" try to find font by only "Roboto"
-            self.family_name = self.family_name.split(|c| c == ' ' || c == '-').take(1).collect();
+            let split: Vec<&str> = self.family_name.split(|c| c == ' ' || c == '-').collect();
+
+            if split.len() > 1 {
+                self.family_name = split[0].to_owned();
+            } else {
+                self.family_name.clear();
+            }
+
             true
         } else if self.weight != Weight::Normal {
             self.weight = Weight::Normal;

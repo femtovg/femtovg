@@ -85,17 +85,17 @@ fn main() {
 
                 perf.update(dt);
 
-                draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
-                draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
-                draw_inc_size(&mut canvas, 270.0, 10.0);
+                // draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
+                // draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
+                // draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
+                // draw_inc_size(&mut canvas, 270.0, 10.0);
 
-                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
-                //draw_complex(&mut canvas, 20.0, 340.0, font_size as u32);
+                //draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
+                draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
 
-                draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
-                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
-                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                // draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
+                // draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
+                // draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
                 paint.set_font_name("Roboto-Bold");
@@ -253,11 +253,12 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
 }
 
 fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
-    let mut paint = Paint::color(Color::black());
+    let mut paint = Paint::color(Color::rgb(34, 34, 34));
     paint.set_font_name("Roboto-Regular");
     paint.set_font_size(font_size);
 
-    canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица מעמד שעוגן בשנת 한국어/韓國語 日本語 官话xְרִית", paint);
+    //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица מעמד שעוגן בשנת 한국어/韓國語 日本語 官话xְרִית", paint);
+    canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 
 struct PerfGraph {

@@ -146,8 +146,11 @@ impl Shaper {
 
                         // Call harfbuzz
                         let output = {
+                            let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
+
                             let hb_font = Self::hb_font(font);
                             let buffer = Self::hb_buffer(&word, &direction, &script);
+                            //hb::shape(&hb_font, buffer, &[kern])
                             hb::shape(&hb_font, buffer, &[])
                         };
 
@@ -257,8 +260,8 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            height = height.max(ascender - descender);
-            //height = ascender - descender;
+            //height = height.max(size_metrics.height as f32 / 64.0);
+            height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
             glyph.x = xpos;
