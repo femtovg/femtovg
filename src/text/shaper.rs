@@ -146,7 +146,7 @@ impl Shaper {
 
                         // Call harfbuzz
                         let output = {
-                            let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
+                            //let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
 
                             let hb_font = Self::hb_font(font);
                             let buffer = Self::hb_buffer(&word, &direction, &script);

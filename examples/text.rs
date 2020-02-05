@@ -85,17 +85,17 @@ fn main() {
 
                 perf.update(dt);
 
-                // draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
-                // draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                // draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
-                // draw_inc_size(&mut canvas, 270.0, 10.0);
+                draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
+                draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
+                draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
+                draw_inc_size(&mut canvas, 270.0, 10.0);
 
-                //draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
-                draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
+                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
+                //draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
 
-                // draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
-                // draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
-                // draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
+                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
                 paint.set_font_name("Roboto-Bold");
@@ -136,7 +136,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
 
         paint.set_text_baseline(*baseline);
         let res = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
-        //let bbox = canvas.fill_text(x, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
+        //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
         let mut path = Path::new();
         path.rect(res.x, res.y, res.width, res.height);
@@ -257,8 +257,8 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_name("Roboto-Regular");
     paint.set_font_size(font_size);
 
-    //canvas.fill_text(x, y, "Latin النص العربي جميل جدا Hindi हिन्दी,. Кирилица מעמד שעוגן בשנת 한국어/韓國語 日本語 官话xְרִית", paint);
-    canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
+    canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
+    //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 
 struct PerfGraph {
@@ -332,14 +332,9 @@ impl PerfGraph {
 
 const LOREM_TEXT: &str = r#"
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
-עִבְרִית היא שפה שמית, ממשפחת השפות האפרו-אסיאתיות, הידועה כשפתם של היהודים ושל השומרונים, אשר ניב מודרני שלה
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
 Etiam non malesuada felis, nec fringilla quam.
-
-हिन्दी विश्व की एक प्रमुख भाषा है एवं भारत की राजभाषा है। केन्द्रीय स्तर पर भारत में दूसरी आधिकारिक भाषा अंग्रेजी है। यह हिंदुस्तानी भाषा की एक मानकीकृत रूप है जिसमें संस्कृत के तत्सम तथा तद्भव शब्दों का प्रयोग अधिक है और अरबी-फ़ारसी शब्द कम हैं। हिंदी
-
 سنسکرت کی طرف بہت زیادہ
-
 Donec vitae dignissim tellus. Morbi lobortis finibus purus non porttitor. In mi enim, lacinia et condimentum ut, venenatis nec magna. Sed id ex in metus vulputate facilisis sit amet in arcu.
 Fusce tempus, mauris non porta ultricies, velit nulla blandit diam, vel maximus metus mi sed erat. Nam hendrerit enim sit amet nisl dictum gravida. Mauris faucibus feugiat neque ac interdum.
 In dignissim orci id diam suscipit, id interdum nunc aliquam. Nam auctor, neque sit amet molestie euismod, dolor nibh pulvinar ligula, at sagittis nisi dolor a nisl. Praesent placerat ut enim
