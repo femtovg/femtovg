@@ -91,7 +91,6 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
 
     fn try_from(font: ttf::Font<'_>) -> Result<Self> {
         let family_name = font.family_name().ok_or(FontDbError::FontInfoExtrationError)?;
-        //let post_script_name = font.post_script_name().ok_or(FontDbError::FontInfoExtrationError)?;
         let weight = Weight::from_value(font.weight().to_number());
         let width_class = WidthClass::from_value(font.width().to_number());
 
@@ -102,8 +101,6 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
         } else {
             FontStyle::Normal
         };
-
-        //let family_name = format!("{} - {}", post_script_name, family_name);
 
         Ok(Self {
             family_name,
@@ -128,12 +125,28 @@ pub struct FontDb {
 impl FontDb {
 
     pub fn new() -> Result<Self> {
-        Ok(Self {
+        let mut fontdb = Self {
             library: ft::Library::init()?,
             fonts: Vec::new(),
             font_descr: HashMap::new(),
             fallbacks: HashMap::new()
-        })
+        };
+
+        //fontdb.load_system_fonts();
+
+        Ok(fontdb)
+    }
+
+    pub fn load_system_fonts(&mut self) {
+        let sysfonts = system_fonts::query_all();
+
+        for string in &sysfonts {
+            let property = system_fonts::FontPropertyBuilder::new().family(string).build();
+
+            if let Some((font_data, _)) = system_fonts::get(&property) {
+                self.add_font_mem(font_data);
+            }
+        }
     }
 
     pub fn scan_dir<T: AsRef<Path>>(&mut self, path: T) -> Result<()> {
@@ -191,18 +204,63 @@ impl FontDb {
     }
 
     pub fn find_font<F, T>(&mut self, text: &str, style: &TextStyle, callback: F) -> Result<T> where F: Fn(&mut Font) -> (bool, T) {
-        if let Ok(font) = self.find(style) {
-            let (has_missing, mut res) = callback(font);
+        let mut description = FontDescription::from(style);
 
-            if has_missing {
-                if let Ok(font) = self.fallback(text, style) {
-                    let (_, fallback_res) = callback(font);
-                    res = fallback_res;
+        loop {
+            if let Some(font_id) = self.font_descr.get(&description) {
+                let font = self.fonts.get_mut(font_id.0).ok_or(FontDbError::NoFontFound)?;
+
+                let (has_missing, result) = callback(font);
+
+                if !has_missing || !description.degrade() {
+                    return Ok(result);
                 }
+            } else if !description.degrade() {
+                // cant degrade description any more
+                break;
             }
-
-            return Ok(res);
         }
+
+        // try every font
+        for font in &mut self.fonts {
+            if font.has_chars(text) {
+                let (_has_missing, result) = callback(font);
+                return Ok(result);
+            }
+        }
+
+        // just return the first font at this point and let it render .nodef glyphs
+        if let Some(font) = self.fonts.first_mut() {
+            return Ok(callback(font).1);
+        }
+
+
+        // loop {
+        //     if let Some(found_id) = self.font_descr.get(&description) {
+        //         id = *found_id;
+        //         break;
+        //     }
+        //
+        //     if !description.degrade() {
+        //         // cant degrade description any more
+        //         return Err(FontDbError::NoFontFound);
+        //     }
+        // }
+        //
+        //
+        //
+        // if let Ok(font) = self.find(style) {
+        //     let (has_missing, mut res) = callback(font);
+        //
+        //     if has_missing {
+        //         if let Ok(font) = self.fallback(text, style) {
+        //             let (_, fallback_res) = callback(font);
+        //             res = fallback_res;
+        //         }
+        //     }
+        //
+        //     return Ok(res);
+        // }
 
         return Err(FontDbError::NoFontFound);
     }

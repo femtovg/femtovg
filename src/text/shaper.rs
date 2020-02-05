@@ -160,6 +160,7 @@ impl Shaper {
                 let result = fontdb.find_font(&word, style, |font| {
                     font.set_size(style.size);
 
+                    // Call harfbuzz
                     let output = {
                         let hb_font = Self::hb_font(font);
                         let buffer = Self::hb_buffer(&word, &direction, &script);
@@ -171,7 +172,7 @@ impl Shaper {
 
                     let mut items = Vec::new();
 
-                    let  mut has_missing = false;
+                    let mut has_missing = false;
 
                     for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
                         if info.codepoint == 0 {
