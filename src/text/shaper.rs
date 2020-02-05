@@ -257,8 +257,8 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            //height = height.max(ascender - descender);
-            height = ascender - descender;
+            height = height.max(ascender - descender);
+            //height = ascender - descender;
             y = y.min(ypos + offset_y);
 
             glyph.x = xpos;

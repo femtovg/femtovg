@@ -6,10 +6,9 @@ use std::path::Path;
 use std::ffi::OsStr;
 use std::error::Error;
 use std::convert::TryFrom;
-use std::collections::HashMap;
 
+use fnv::FnvHashMap;
 use ttf_parser as ttf;
-use font_loader::system_fonts;
 
 use super::{
     Font,
@@ -36,7 +35,8 @@ pub struct FontDescription {
 impl FontDescription {
     fn degrade(&mut self) -> bool {
         if !self.family_name.is_empty() {
-            self.family_name.clear();
+            // if family_name is "Roboto Regular" or "Roboto-Regular" try to find font by only "Roboto"
+            self.family_name = self.family_name.split(|c| c == ' ' || c == '-').take(1).collect();
             true
         } else if self.weight != Weight::Normal {
             self.weight = Weight::Normal;
@@ -61,28 +61,6 @@ impl From<&TextStyle<'_>> for FontDescription {
             font_style: style.font_style,
             width_class: style.width_class
         }
-    }
-}
-
-impl From<&FontDescription> for system_fonts::FontProperty {
-    fn from(descr: &FontDescription) -> Self {
-        let mut builder = system_fonts::FontPropertyBuilder::new();
-
-        if !descr.family_name.is_empty() {
-            builder = builder.family(&descr.family_name);
-        }
-
-        if descr.weight.is_bold() {
-            builder = builder.bold();
-        }
-
-        builder = match descr.font_style {
-            FontStyle::Italic => builder.italic(),
-            FontStyle::Oblique => builder.oblique(),
-            _ => builder
-        };
-
-        builder.build()
     }
 }
 
@@ -114,7 +92,7 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
 pub struct FontDb {
     pub library: ft::Library,
     fonts: Vec<Font>,
-    font_descr: HashMap<FontDescription, FontId>
+    font_descr: FnvHashMap<FontDescription, FontId>
 }
 
 impl FontDb {
@@ -122,8 +100,8 @@ impl FontDb {
     pub fn new() -> Result<Self> {
         Ok(Self {
             library: ft::Library::init()?,
-            fonts: Vec::new(),
-            font_descr: HashMap::new()
+            fonts: Default::default(),
+            font_descr: Default::default(),
         })
     }
 

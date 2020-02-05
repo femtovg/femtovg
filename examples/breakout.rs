@@ -520,7 +520,7 @@ impl Game {
         paint.set_font_size(80);
 
         paint.set_stroke_width(4.0);
-        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) - 2.0, "rsBREAKOUT", paint);
+        canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
         canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
@@ -682,10 +682,10 @@ impl Game {
         let offset = 30.0;
 
         paint.set_stroke_width(4.0);
-        canvas.stroke_text((canvas.width() / 2.0) - 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+        canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset + 2.0, heading, paint);
+        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
