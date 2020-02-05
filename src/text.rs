@@ -1,4 +1,7 @@
 
+use std::fmt;
+use std::error::Error;
+
 mod text_renderer;
 pub use text_renderer::TextRenderer;
 
@@ -212,6 +215,23 @@ impl Default for WidthClass {
     }
 }
 
-pub struct Glyph {
-
+#[derive(Debug)]
+pub enum TextError {
+    GeneralError(String),
+    //ImageError(image::ImageError),
+    //FontError(FontCacheError)
 }
+
+impl fmt::Display for TextError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "text error")
+    }
+}
+
+// impl From<FontCacheError> for CanvasError {
+//     fn from(error: FontCacheError) -> Self {
+//         Self::FontError(error)
+//     }
+// }
+
+impl Error for TextError {}

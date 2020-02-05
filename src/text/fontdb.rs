@@ -22,7 +22,7 @@ use super::{
 
 type Result<T> = std::result::Result<T, FontDbError>;
 
-#[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -111,42 +111,20 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
     }
 }
 
-pub trait FontDbBackend {
-
-}
-
 pub struct FontDb {
     pub library: ft::Library,
     fonts: Vec<Font>,
-    font_descr: HashMap<FontDescription, FontId>,
-    fallbacks: HashMap<String, Option<FontId>>
+    font_descr: HashMap<FontDescription, FontId>
 }
 
 impl FontDb {
 
     pub fn new() -> Result<Self> {
-        let mut fontdb = Self {
+        Ok(Self {
             library: ft::Library::init()?,
             fonts: Vec::new(),
-            font_descr: HashMap::new(),
-            fallbacks: HashMap::new()
-        };
-
-        //fontdb.load_system_fonts();
-
-        Ok(fontdb)
-    }
-
-    pub fn load_system_fonts(&mut self) {
-        let sysfonts = system_fonts::query_all();
-
-        for string in &sysfonts {
-            let property = system_fonts::FontPropertyBuilder::new().family(string).build();
-
-            if let Some((font_data, _)) = system_fonts::get(&property) {
-                self.add_font_mem(font_data);
-            }
-        }
+            font_descr: HashMap::new()
+        })
     }
 
     pub fn scan_dir<T: AsRef<Path>>(&mut self, path: T) -> Result<()> {
@@ -234,145 +212,9 @@ impl FontDb {
             return Ok(callback(font).1);
         }
 
-
-        // loop {
-        //     if let Some(found_id) = self.font_descr.get(&description) {
-        //         id = *found_id;
-        //         break;
-        //     }
-        //
-        //     if !description.degrade() {
-        //         // cant degrade description any more
-        //         return Err(FontDbError::NoFontFound);
-        //     }
-        // }
-        //
-        //
-        //
-        // if let Ok(font) = self.find(style) {
-        //     let (has_missing, mut res) = callback(font);
-        //
-        //     if has_missing {
-        //         if let Ok(font) = self.fallback(text, style) {
-        //             let (_, fallback_res) = callback(font);
-        //             res = fallback_res;
-        //         }
-        //     }
-        //
-        //     return Ok(res);
-        // }
-
         return Err(FontDbError::NoFontFound);
     }
 
-    pub fn find(&mut self, style: &TextStyle) -> Result<&mut Font> {
-        let mut description = FontDescription::from(style);
-
-        let id;
-
-        loop {
-            if let Some(found_id) = self.font_descr.get(&description) {
-                id = *found_id;
-                break;
-            }
-
-            let property = system_fonts::FontProperty::from(&description);
-
-            if let Some((font_data, _)) = system_fonts::get(&property) {
-                id = self.add_font_mem(font_data)?;
-                self.font_descr.insert(description, id);
-                break;
-            }
-
-            if !description.degrade() {
-                return Err(FontDbError::NoFontFound);
-            }
-        }
-
-        self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound)
-    }
-
-    // TODO: This is slow as hell when there's no font installed on the system that can handle the text
-    // Must cache failed attempts as well
-    pub fn fallback(&mut self, text: &str, style: &TextStyle) -> Result<&mut Font> {
-        // Find a font that has all the codepoints in text
-        if let Some(maybe_id) = self.fallbacks.get(text) {
-            if let Some(id) = maybe_id {
-                return self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound);
-            } else {
-                return Err(FontDbError::NoFontFound);
-            }
-        }
-
-        let id;
-
-        let mut description = FontDescription::from(style);
-
-        'outer: loop {
-            if let Some(a_id) = self.font_descr.get(&description) {
-                if self.fonts[a_id.0].has_chars(text) {
-                    id = *a_id;
-                    break;
-                }
-            }
-
-            let mut property = system_fonts::FontProperty::from(&description);
-
-            let sysfonts = system_fonts::query_specific(&mut property);
-
-            for string in &sysfonts {
-                let property = system_fonts::FontPropertyBuilder::new().family(string).build();
-
-                if let Some((font_data, _)) = system_fonts::get(&property) {
-                    //println!("9 - {}", text);
-                    let ttf_font = ttf::Font::from_data(&font_data, 0)?;
-                    let has_all = text.chars().all(|c| ttf_font.glyph_index(c).is_ok());
-
-                    if has_all {
-                        id = self.add_font_mem(font_data)?;
-                        self.font_descr.insert(description, id);
-                        self.fallbacks.insert(text.to_string(), Some(id));
-                        break 'outer;
-                    }
-                }
-            }
-
-            if !description.degrade() {
-                dbg!("12");
-                self.fallbacks.insert(text.to_string(), None);
-                return Err(FontDbError::NoFontFound);
-            }
-        }
-
-        self.fonts.get_mut(id.0).ok_or(FontDbError::NoFontFound)
-    }
-}
-
-pub struct FontsIterator<'a> {
-    text: &'a str,
-    style: &'a TextStyle<'a>
-}
-
-impl<'a> FontsIterator<'a> {
-
-}
-
-impl<'a> Iterator for FontsIterator<'a> {
-    type Item = &'a mut Font;
-
-    fn next(&mut self) -> Option<&'a mut Font> {
-        // if !self.tried_default {
-        //
-        //
-        //     self.tried_default = true;
-        // }
-        //
-        // if self.tried_default {
-        //
-        // }
-
-        None
-    }
 }
 
 #[derive(Debug)]

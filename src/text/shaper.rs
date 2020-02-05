@@ -1,15 +1,24 @@
 
+use std::hash::{Hash, Hasher};
+
 use unicode_script::Script;
 
 use harfbuzz_rs as hb;
 use self::hb::hb as hb_sys;
 
+use lru_time_cache::LruCache;
+use fnv::FnvHasher;
+
 use super::{
     Align,
     Baseline,
+    Weight,
+    WidthClass,
+    FontStyle,
     Font,
     FontDb,
     FontId,
+    fontdb::FontDbError,
     TextStyle,
     freetype as ft,
     RenderStyle,
@@ -21,6 +30,8 @@ mod run_segmentation;
 use run_segmentation::{
     UnicodeScripts,
 };
+
+const LRU_CACHE_CAPACITY: usize = 1000;
 
 // harfbuzz-sys doesn't add this symbol for mac builds.
 // And we need it since we're using freetype on OSX.
@@ -51,16 +62,154 @@ pub struct ShapedGlyph {
     pub bearing_y: f32
 }
 
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+struct ShapingId {
+    size: u16,
+    text_hash: u64,
+    weight: Weight,
+    width_class: WidthClass,
+    font_style: FontStyle,
+}
+
+impl ShapingId {
+    pub fn new(style: &TextStyle, text: &str) -> Self {
+        let mut hasher = FnvHasher::default();
+        text.hash(&mut hasher);
+
+        ShapingId {
+            size: style.size,
+            text_hash: hasher.finish(),
+            weight: style.weight,
+            width_class: style.width_class,
+            font_style: style.font_style,
+        }
+    }
+}
+
 pub struct Shaper {
+    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), FontDbError>>
 }
 
 impl Shaper {
     pub fn new() -> Self {
         Self {
+            cache: LruCache::with_capacity(LRU_CACHE_CAPACITY)
         }
     }
 
-    pub fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) {
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
+        let mut result = TextLayout {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            glyphs: Vec::new()
+        };
+
+        // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
+        for (script, direction, subtext) in text.unicode_scripts() {
+            // separate words in run
+            let mut words: Vec<&str> = subtext.split(" ").collect();
+
+            // reverse the words in right-to-left scripts bit not the trailing whitespace
+            if direction == Direction::Rtl {
+                let mut rev_range = words.len();
+
+                for (i, word) in words.iter().enumerate().rev() {
+                    if word.is_empty() {
+                        rev_range = i;
+                    } else {
+                        break;
+                    }
+                }
+
+                words[0..rev_range].reverse();
+            }
+
+            let mut words_glyphs = Vec::new();
+
+            // we need the space glyph to join the words after they are shaped
+            let mut space_glyph = None;
+
+            // shape each word and cache the generated glyphs
+            for word in words {
+
+                let shaping_id = ShapingId::new(style, word);
+
+                let result = self.cache.entry(shaping_id).or_insert_with(|| {
+                    fontdb.find_font(&word, style, |font| {
+                        font.set_size(style.size);
+
+                        // Call harfbuzz
+                        let output = {
+                            let hb_font = Self::hb_font(font);
+                            let buffer = Self::hb_buffer(&word, &direction, &script);
+                            hb::shape(&hb_font, buffer, &[])
+                        };
+
+                        let positions = output.get_glyph_positions();
+                        let infos = output.get_glyph_infos();
+
+                        let mut items = Vec::new();
+
+                        let mut has_missing = false;
+
+                        for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
+                            if info.codepoint == 0 {
+                                has_missing = true;
+                            }
+
+                            let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+                            let metrics = font.face.glyph().metrics();
+
+                            items.push(ShapedGlyph {
+                                x: 0.0,
+                                y: 0.0,
+                                c: c,
+                                index: 0,
+                                font_id: font.id,
+                                codepoint: info.codepoint,
+                                width: metrics.width as f32 / 64.0,
+                                height: metrics.height as f32 / 64.0,
+                                advance_x: position.x_advance as f32 / 64.0,
+                                advance_y: position.y_advance as f32 / 64.0,
+                                offset_x: position.x_offset as f32 / 64.0,
+                                offset_y: position.y_offset as f32 / 64.0,
+                                bearing_x: metrics.horiBearingX as f32 / 64.0,
+                                bearing_y: metrics.horiBearingY as f32 / 64.0,
+                            });
+                        }
+
+                        let space_glyph = Self::space_glyph(font, style);
+
+                        (has_missing, (space_glyph, items))
+                    })
+                });
+
+                if let Ok((aspace_glyph, items)) = result {
+                    words_glyphs.push(items.clone());
+                    space_glyph = Some(*aspace_glyph);
+                }
+            }
+
+            if let Some(space_glyph) = space_glyph {
+                result.glyphs.append(&mut words_glyphs.join(&space_glyph));
+            } else {
+                let mut flat = words_glyphs.into_iter().flatten().collect();
+                result.glyphs.append(&mut flat);
+            }
+        }
+
+        self.layout(x, y, fontdb, &mut result, &style);
+
+        result
+    }
+
+    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -108,7 +257,8 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            height = height.max(ascender - descender);
+            //height = height.max(ascender - descender);
+            height = ascender - descender;
             y = y.min(ypos + offset_y);
 
             glyph.x = xpos;
@@ -120,108 +270,6 @@ impl Shaper {
 
         res.y = y;
         res.height = height;
-    }
-
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
-        let mut result = TextLayout {
-            x: 0.0,
-            y: 0.0,
-            width: 0.0,
-            height: 0.0,
-            glyphs: Vec::new()
-        };
-
-        // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
-        for (script, direction, subtext) in text.unicode_scripts() {
-            // separate words in run
-            let mut words: Vec<&str> = subtext.split(" ").collect();
-
-            // reverse the words in right-to-left scripts bit not the trailing whitespace
-            if direction == Direction::Rtl {
-                let mut rev_range = words.len();
-
-                for (i, word) in words.iter().enumerate().rev() {
-                    if word.is_empty() {
-                        rev_range = i;
-                    } else {
-                        break;
-                    }
-                }
-
-                words[0..rev_range].reverse();
-            }
-
-            let mut words_glyphs = Vec::new();
-
-            let mut space_glyph = None;
-
-            for word in words {
-                //'fonts: for font in fontdb.fonts_for(&word, style) {
-                let result = fontdb.find_font(&word, style, |font| {
-                    font.set_size(style.size);
-
-                    // Call harfbuzz
-                    let output = {
-                        let hb_font = Self::hb_font(font);
-                        let buffer = Self::hb_buffer(&word, &direction, &script);
-                        hb::shape(&hb_font, buffer, &[])
-                    };
-
-                    let positions = output.get_glyph_positions();
-                    let infos = output.get_glyph_infos();
-
-                    let mut items = Vec::new();
-
-                    let mut has_missing = false;
-
-                    for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
-                        if info.codepoint == 0 {
-                            has_missing = true;
-                        }
-
-                        let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
-                        let metrics = font.face.glyph().metrics();
-
-                        items.push(ShapedGlyph {
-                            x: 0.0,
-                            y: 0.0,
-                            c: c,
-                            index: 0,
-                            font_id: font.id,
-                            codepoint: info.codepoint,
-                            width: metrics.width as f32 / 64.0,
-                            height: metrics.height as f32 / 64.0,
-                            advance_x: position.x_advance as f32 / 64.0,
-                            advance_y: position.y_advance as f32 / 64.0,
-                            offset_x: position.x_offset as f32 / 64.0,
-                            offset_y: position.y_offset as f32 / 64.0,
-                            bearing_x: metrics.horiBearingX as f32 / 64.0,
-                            bearing_y: metrics.horiBearingY as f32 / 64.0,
-                        });
-                    }
-
-                    let space_glyph = Self::space_glyph(font, style);
-
-                    (has_missing, (space_glyph, items))
-                });
-
-                if let Ok((aspace_glyph, items)) = result {
-                    words_glyphs.push(items);
-                    space_glyph = Some(aspace_glyph);
-                }
-            }
-
-            if let Some(space_glyph) = space_glyph {
-                result.glyphs.append(&mut words_glyphs.join(&space_glyph));
-            } else {
-                let mut flat = words_glyphs.into_iter().flatten().collect();
-                result.glyphs.append(&mut flat);
-            }
-        }
-
-        self.layout(x, y, fontdb, &mut result, &style);
-
-        result
     }
 
     fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {

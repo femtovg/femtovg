@@ -1,5 +1,4 @@
 
-use std::io;
 use std::fmt;
 use std::error::Error;
 
@@ -18,7 +17,6 @@ use crate::{
 };
 
 use super::{
-    Font,
     FontDb,
     FontId,
     TextStyle,
@@ -194,8 +192,8 @@ impl TextRenderer {
 
         let bitmap_glyph = glyph.to_bitmap(ft::RenderMode::Normal, None)?;
         let ft_bitmap = bitmap_glyph.bitmap();
-        let bitmap_left = bitmap_glyph.left();
-        let bitmap_top = bitmap_glyph.top();
+        //let bitmap_left = bitmap_glyph.left();
+        //let bitmap_top = bitmap_glyph.top();
 
         let width = ft_bitmap.width() as u32 + padding * 2;
         let height = ft_bitmap.rows() as u32 + padding * 2;

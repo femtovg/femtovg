@@ -24,6 +24,7 @@ use text::{
     TextRenderer,
     TextStyle,
     RenderStyle,
+    TextError,
 };
 
 
@@ -41,8 +42,8 @@ use renderer::{
     Drawable
 };
 
-mod font_cache;
-use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
+//mod font_cache;
+//use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
 //pub use font_cache::{Align, Baseline};
 
 pub(crate) mod geometry;
@@ -223,7 +224,6 @@ pub struct Canvas<T> {
     fontdb: FontDb,
     shaper: Shaper,
     text_renderer: TextRenderer,
-    font_cache: FontCache,
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
@@ -236,8 +236,6 @@ pub struct Canvas<T> {
 impl<T> Canvas<T> where T: Renderer {
 
     pub fn new(renderer: T) -> Result<Self, CanvasError> {
-        let font_manager = FontCache::new()?;
-
         let fontdb = FontDb::new().expect("Cannot init fontdb");
         let shaper = Shaper::new();
         let text_renderer = TextRenderer::new();
@@ -249,7 +247,6 @@ impl<T> Canvas<T> where T: Renderer {
             fontdb: fontdb,
             shaper: shaper,
             text_renderer: text_renderer,
-            font_cache: font_manager,
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
@@ -707,38 +704,26 @@ impl<T> Canvas<T> where T: Renderer {
     */
 
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) {
-        //self.font_cache.add_font_file(file_path).expect("cannot add font");
         self.fontdb.add_font_file(file_path).expect("cannot add font");
-        // TODO: clear shaping cache
+        self.shaper.clear_cache();
+    }
+
+    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) {
+        self.fontdb.scan_dir(dir_path).expect("cannot add font");
+        self.shaper.clear_cache();
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) {
-        //self.font_cache.add_font_mem(data).expect("cannot add font");
         self.fontdb.add_font_mem(data).expect("cannot add font");
-        // TODO: clear shaping cache
+        self.shaper.clear_cache();
     }
 
-    // TODO: Return Bounds struct from here
-    pub fn text_bounds<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> [f32; 4] {
+    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
-        let invscale = 1.0 / scale;
+        let style = self.text_style_for_paint(&paint);
 
-        // transform paint
-        paint.set_font_size((paint.font_size() as f32 * scale) as u32);
-        paint.set_letter_spacing(paint.letter_spacing() * scale);
-        paint.set_font_blur(paint.font_blur() * scale);
-
-        let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, GlyphRenderStyle::Fill, text).unwrap();
-
-        let mut bounds = layout.bbox;
-
-        bounds[0] *= invscale;
-        bounds[1] *= invscale;
-        bounds[2] *= invscale;
-        bounds[3] *= invscale;
-
-        bounds
+        self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)
     }
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
@@ -755,17 +740,10 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Private
 
-    // TODO: Return Bounds struct from here
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> TextLayout {
-        let transform = self.state().transform;
-        let scissor = self.state().scissor;
+    fn text_style_for_paint<'a>(&self, paint: &'a Paint) -> TextStyle<'a> {
         let scale = self.font_scale() * self.device_px_ratio;
-        let invscale = 1.0 / scale;
-
-        let style = TextStyle {
-            //family_name: "Noto Sans Arabic",
+        TextStyle {
             family_name: paint.font_name,
-            //family_name: "",
             size: (paint.font_size() as f32 * scale) as u16,
             weight: Weight::Normal,
             width_class: WidthClass::Normal,
@@ -774,24 +752,21 @@ impl<T> Canvas<T> where T: Renderer {
             baseline: paint.text_baseline(),
             align: paint.text_align(),
             blur: paint.font_blur() * scale,
-            render_style: render_style
-        };
+            render_style: Default::default()
+        }
+    }
+
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> TextLayout {
+        let transform = self.state().transform;
+        let scissor = self.state().scissor;
+        let scale = self.font_scale() * self.device_px_ratio;
+        let invscale = 1.0 / scale;
+
+        let mut style = self.text_style_for_paint(&paint);
+        style.render_style = render_style;
 
         let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text);
         let res = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
-
-        // transform paint
-        // paint.set_font_size((paint.font_size() as f32 * scale) as u32);
-        // paint.set_letter_spacing(paint.letter_spacing() * scale);
-        // paint.set_font_blur(paint.font_blur() * scale);
-        //
-        // let layout = self.font_cache.layout_text(x * scale, y * scale, &mut self.renderer, paint, render_style, text).unwrap();
-
-        // let text_color = if let PaintFlavor::Color(color) = paint.flavor {
-        //     color
-        // } else {
-        //     Color::white()
-        // };
 
         for cmd in &res.cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
@@ -810,12 +785,6 @@ impl<T> Canvas<T> where T: Renderer {
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
             }
 
-            // let mut paint = Paint::image(cmd.image_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
-            //
-            // if let PaintFlavor::Image { tint, .. } = &mut paint.flavor {
-            //     *tint = text_color;
-            // }
-
             paint.set_alpha_mask(Some(cmd.image_id));
 
             // Apply global alpha
@@ -829,7 +798,6 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
         let params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
-        //params.shader_type = ShaderType::Img.to_f32();// TODO this shouldn't be needed
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
@@ -890,7 +858,7 @@ impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
 pub enum CanvasError {
     GeneralError(String),
     ImageError(image::ImageError),
-    FontError(FontCacheError)
+    TextError(TextError)
 }
 
 impl fmt::Display for CanvasError {
@@ -905,9 +873,9 @@ impl From<image::ImageError> for CanvasError {
     }
 }
 
-impl From<FontCacheError> for CanvasError {
-    fn from(error: FontCacheError) -> Self {
-        Self::FontError(error)
+impl From<TextError> for CanvasError {
+    fn from(error: TextError) -> Self {
+        Self::TextError(error)
     }
 }
 
