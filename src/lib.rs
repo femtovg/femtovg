@@ -743,11 +743,11 @@ impl<T> Canvas<T> where T: Renderer {
     fn text_style_for_paint<'a>(&self, paint: &'a Paint) -> TextStyle<'a> {
         let scale = self.font_scale() * self.device_px_ratio;
         TextStyle {
-            family_name: paint.font_name,
+            family_name: paint.font_family,
             size: (paint.font_size() as f32 * scale) as u16,
-            weight: Weight::Normal,
-            width_class: WidthClass::Normal,
-            font_style: FontStyle::Normal,
+            weight: paint.font_weight(),
+            width_class: paint.font_width_class(),
+            font_style: paint.font_style(),
             letter_spacing: paint.letter_spacing() * scale,
             baseline: paint.text_baseline(),
             align: paint.text_align(),

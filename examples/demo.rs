@@ -20,6 +20,7 @@ use gpucanvas::{
     ImageFlags,
     Align,
     Baseline,
+    Weight,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -327,7 +328,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 
     let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 128));
     text_paint.set_font_size(16);
-    text_paint.set_font_name("Roboto-Bold");
+    text_paint.set_font_family("Roboto");
+    text_paint.set_font_weight(Weight::Bold);
     text_paint.set_text_align(Align::Center);
     text_paint.set_font_blur(2.0);
 	canvas.fill_text(x + (w / 2.0), y + 19.0 + 1.0, title, text_paint);
@@ -356,21 +358,21 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
     text_paint.set_font_size((h * 1.3).round() as u32);
-    text_paint.set_font_name("Entypo");
+    text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
-    canvas.fill_text(x + h * 0.55, y + h * 0.45, "\u{1F50D}", text_paint);
+    canvas.fill_text(x + h * 0.55, y + h * 0.55, "\u{1F50D}", text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
     text_paint.set_font_size(16);
-    text_paint.set_font_name("Roboto-Regular");
+    text_paint.set_font_family("Roboto");
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
-    canvas.fill_text(x + h, y + h * 0.55, title, text_paint);
+    canvas.fill_text(x + h, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
     text_paint.set_font_size((h * 1.3).round() as u32);
-    text_paint.set_font_name("Entypo");
+    text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     canvas.fill_text(x + w - h * 0.55, y + h * 0.45, "\u{2716}", text_paint);
@@ -390,14 +392,14 @@ fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 160));
     text_paint.set_font_size(16);
-    text_paint.set_font_name("Roboto-Regular");
+    text_paint.set_font_family("Roboto");
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
     canvas.fill_text(x + h * 0.3, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
     text_paint.set_font_size((h * 1.3).round() as u32);
-    text_paint.set_font_name("Entypo");
+    text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     canvas.fill_text(x + w - h * 0.5, y + h * 0.45, "\u{E75E}", text_paint);
@@ -628,19 +630,21 @@ impl PerfGraph {
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12);
-        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_family("Roboto");
+        text_paint.set_font_weight(Weight::Light);
     	canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14);
-        text_paint.set_font_name("Roboto-Regular");
+        text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	canvas.fill_text(x + w - 5.0, y + 2., &format!("{:.2} FPS", 1.0 / avg), text_paint);
+    	canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12);
-        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_family("Roboto");
+        text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
     	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);

@@ -2,7 +2,18 @@
 // TODO: Start cap and end cap
 
 use crate::geometry::Transform2D;
-use crate::{Color, ImageId, LineCap, LineJoin, Baseline, FillRule, Align};
+use crate::{
+    Color,
+    ImageId,
+    LineCap,
+    LineJoin,
+    Baseline,
+    FillRule,
+    Align,
+    Weight,
+    WidthClass,
+    FontStyle
+};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {
@@ -80,10 +91,13 @@ pub struct Paint<'a> {
     pub(crate) miter_limit: f32,
     pub(crate) line_cap: LineCap,
     pub(crate) line_join: LineJoin,
-    pub(crate) font_name: &'a str,
+    pub(crate) font_family: &'a str,
     pub(crate) font_size: u32,
-    pub(crate) letter_spacing: f32,
     pub(crate) font_blur: f32,
+    pub(crate) font_weight: Weight,
+    pub(crate) font_width_class: WidthClass,
+    pub(crate) font_style: FontStyle,
+    pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
     pub(crate) fill_rule: FillRule
@@ -101,10 +115,13 @@ impl Default for Paint<'_> {
             miter_limit: 10.0,
             line_cap: Default::default(),
             line_join: Default::default(),
-            font_name: "NotoSans-Regular",
+            font_family: "NotoSans",
             font_size: 16,
-            letter_spacing: 0.0,
             font_blur: 0.0,
+            font_weight: Weight::Normal,
+            font_width_class: WidthClass::Normal,
+            font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
             fill_rule: Default::default(),
@@ -272,16 +289,16 @@ impl<'a> Paint<'a> {
     }
 
     /// Returns the font name that is used when drawing text with this paint
-    pub fn font_name(&self) -> &str {
-        &self.font_name
+    pub fn font_family(&self) -> &str {
+        &self.font_family
     }
 
     /// Sets the font name for text drawn with this paint
     ///
-    /// This needs to be the Fonts postscript name. Eg. "NotoSans-Regular"
+    /// This needs to be the font family name. Eg. "NotoSans" not the postscript name (NotoSans-Regular)
     /// Only has effect on canvas text operations
-    pub fn set_font_name(&mut self, name: &'a str) {
-        self.font_name = name;
+    pub fn set_font_family(&mut self, name: &'a str) {
+        self.font_family = name;
     }
 
     /// Returns the current font size
@@ -344,6 +361,30 @@ impl<'a> Paint<'a> {
     /// Only has effect on canvas text operations
     pub fn set_text_align(&mut self, align: Align) {
         self.text_align = align;
+    }
+
+    pub fn font_weight(&self) -> Weight {
+        self.font_weight
+    }
+
+    pub fn set_font_weight(&mut self, weight: Weight) {
+        self.font_weight = weight;
+    }
+
+    pub fn font_width_class(&self) -> WidthClass {
+        self.font_width_class
+    }
+
+    pub fn set_font_width_class(&mut self, class: WidthClass) {
+        self.font_width_class = class;
+    }
+
+    pub fn font_style(&self) -> FontStyle {
+        self.font_style
+    }
+
+    pub fn set_font_style(&mut self, style: FontStyle) {
+        self.font_style = style;
     }
 
     /// Retrieves the current fill rule setting for this paint

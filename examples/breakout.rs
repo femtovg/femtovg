@@ -21,6 +21,7 @@ use gpucanvas::{
     Baseline,
     ImageId,
     Path,
+    Weight,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -516,7 +517,8 @@ impl Game {
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Bold");
+        paint.set_font_family("Roboto");
+        paint.set_font_weight(Weight::Bold);
         paint.set_font_size(80);
 
         paint.set_stroke_width(4.0);
@@ -528,7 +530,7 @@ impl Game {
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Regular");
+        paint.set_font_family("Roboto");
         paint.set_font_size(16);
         let text = "Click anywhere to START.";
         canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
@@ -623,13 +625,15 @@ impl Game {
         // lives
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Right);
-        paint.set_font_name("Roboto-Bold");
+        paint.set_font_family("Roboto");
+        paint.set_font_weight(Weight::Bold);
         paint.set_font_size(22);
         canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), paint);
 
         // score
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_font_name("Roboto-Bold");
+        paint.set_font_family("Roboto");
+        paint.set_font_weight(Weight::Bold);
         paint.set_font_size(22);
         canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), paint);
     }
@@ -676,7 +680,8 @@ impl Game {
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Bold");
+        paint.set_font_family("Roboto");
+        paint.set_font_weight(Weight::Bold);
         paint.set_font_size(80);
 
         let offset = 30.0;
@@ -690,7 +695,7 @@ impl Game {
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
-        paint.set_font_name("Roboto-Regular");
+        paint.set_font_family("Roboto");
         paint.set_font_size(16);
         canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset * 2.0, subtext, paint);
     }
@@ -741,7 +746,8 @@ impl Powerup {
         let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
         text_paint.set_text_align(Align::Center);
         text_paint.set_text_baseline(Baseline::Middle);
-        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_family("Roboto");
+        text_paint.set_font_weight(Weight::Light);
         text_paint.set_font_size(16);
         canvas.fill_text(self.rect.center().x, self.rect.center().y, &format!("{:?}", self.ty), text_paint);
     }

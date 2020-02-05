@@ -16,6 +16,7 @@ use gpucanvas::{
     Path,
     ImageId,
     ImageFlags,
+    Weight,
     renderer::OpenGl
 };
 
@@ -98,7 +99,8 @@ fn main() {
                 draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
-                paint.set_font_name("Roboto-Bold");
+                paint.set_font_family("Roboto");
+                paint.set_font_weight(Weight::Bold);
                 paint.set_text_baseline(Baseline::Top);
                 paint.set_text_align(Align::Right);
                 canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
@@ -123,7 +125,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
-    paint.set_font_name("Roboto-Regular");
+    paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
     for (i, baseline) in baselines.iter().enumerate() {
@@ -153,7 +155,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
-    paint.set_font_name("Roboto-Regular");
+    paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
     for (i, alignment) in alignments.iter().enumerate() {
@@ -169,7 +171,8 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32, text: &str) {
 
     let mut paint = Paint::color(Color::black());
-    paint.set_font_name("Roboto-Light");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Light);
     paint.set_font_size(font_size);
 
     let mut cursor_y = y;
@@ -187,7 +190,7 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
     for i in 4..23 {
         let mut paint = Paint::color(Color::black());
-        paint.set_font_name("Roboto-Regular");
+        paint.set_font_family("Roboto");
         paint.set_font_size(i);
         let res = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint);
         cursor_y += res.height;
@@ -196,7 +199,8 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
 fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font_name("Roboto-Bold");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
     paint.set_stroke_width(12.0);
     paint.set_font_size(72);
     paint.set_font_blur(2.0);
@@ -217,13 +221,15 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
 fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
-    paint.set_font_name("Roboto-Bold");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
     paint.set_stroke_width(6.0);
     paint.set_font_size(72);
     canvas.stroke_text(x, y, "RUST", paint);
 
     let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
-    paint.set_font_name("Roboto-Bold");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72);
     canvas.fill_text(x, y, "RUST", paint);
 }
@@ -240,21 +246,23 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     let text = "RUST";
 
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font_name("Roboto-Bold");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
     paint.set_stroke_width(4.0);
     paint.set_font_size(72);
     canvas.stroke_text(x, y, text, paint);
 
     //let mut paint = Paint::image(image_id, x, y, 120.0, 120.0, t/10.0, 0.50);
     let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
-    paint.set_font_name("Roboto-Bold");
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72);
     canvas.fill_text(x, y, text, paint);
 }
 
 fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
     let mut paint = Paint::color(Color::rgb(34, 34, 34));
-    paint.set_font_name("Roboto-Regular");
+    paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
     canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
@@ -311,19 +319,21 @@ impl PerfGraph {
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12);
-        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_family("Roboto");
+        text_paint.set_font_weight(Weight::Light);
     	canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14);
-        text_paint.set_font_name("Roboto-Regular");
+        text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	canvas.fill_text(x + w - 5.0, y + 2., &format!("{:.2} FPS", 1.0 / avg), text_paint);
+    	canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12);
-        text_paint.set_font_name("Roboto-Light");
+        text_paint.set_font_family("Roboto");
+        text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
     	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
