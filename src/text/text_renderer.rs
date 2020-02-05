@@ -142,10 +142,10 @@ impl TextRenderer {
 
                 let mut q = Quad::default();
 
-                q.x0 = glyph.x.floor();
-                q.y0 = glyph.y.floor();
-                q.x1 = glyph.x.floor() + rendered.width as f32;
-                q.y1 = glyph.y.floor() + rendered.height as f32;
+                q.x0 = glyph.x;
+                q.y0 = glyph.y;
+                q.x1 = glyph.x + rendered.width as f32;
+                q.y1 = glyph.y + rendered.height as f32;
 
                 q.s0 = rendered.atlas_x as f32 * itw;
                 q.t0 = rendered.atlas_y as f32 * ith;

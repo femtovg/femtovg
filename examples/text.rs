@@ -252,8 +252,8 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     paint.set_font_size(72);
     canvas.stroke_text(x, y, text, paint);
 
-    //let mut paint = Paint::image(image_id, x, y, 120.0, 120.0, t/10.0, 0.50);
-    let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
+    let mut paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50);
+    //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72);
