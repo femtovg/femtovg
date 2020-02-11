@@ -10,23 +10,20 @@ categories = ["graphics"]
 repository = "https://github.com/cytecbg/rscanvas"
 edition = "2018"
 
-[profile.release]
-debug = true
-
 [dependencies]
 fnv = "1.0.6"
+lru = "0.4.3"
 libc = "0.2.66"
 bitflags = "1.2.1"
-image = "0.23.0-preview.0"
-ttf-parser = "0.3"
+image = "0.23.0"
+ttf-parser = "0.3.0"
 harfbuzz_rs = "1.0.1"
-unicode-bidi = "0.3"
-unicode-script = "0.5"
-lru_time_cache = "0.9.0"
+unicode-bidi = "0.3.4"
+unicode-script = "0.5.0"
 
 [build-dependencies]
-gl_generator = "0.13"
-pkg-config = "0.3.11"
+gl_generator = "0.14.0"
+pkg-config = "0.3.17"
 
 [dev-dependencies]
 glutin = "0.22.0"

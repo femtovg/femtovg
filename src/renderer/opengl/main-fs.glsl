@@ -72,8 +72,6 @@ void main(void) {
         float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
         vec4 color = mix(innerCol,outerCol,d);
 
-        // Combine alpha
-        //color *= strokeAlpha * scissor;
         result = color;
     } else if (shaderType == 1) {
         // Image
@@ -88,9 +86,6 @@ void main(void) {
 
         // Apply color tint and alpha.
         color *= innerCol;
-
-        // Combine alpha
-        //color *= strokeAlpha * scissor;
 
         result = color;
     } else if (shaderType == 2) {

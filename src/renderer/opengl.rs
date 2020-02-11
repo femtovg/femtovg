@@ -480,6 +480,7 @@ impl Renderer for OpenGl {
                 return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgr8"))),
             DynamicImage::ImageBgra8(_) =>
                 return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgra8"))),
+            _ => return Err(OpenGlError::UnsuportedImageFromat(String::from("Unknown image format"))),
         }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {

@@ -119,13 +119,11 @@ impl Vertex {
     }
 }
 
-// TODO: Rename those to make more sense - why do we have FillImage and Img?
 #[derive(Copy, Clone)]
 pub enum ShaderType {
     FillGradient,
     FillImage,
     Stencil,
-    Img
 }
 
 impl Default for ShaderType {
@@ -138,7 +136,6 @@ impl ShaderType {
             Self::FillGradient => 0.0,
             Self::FillImage => 1.0,
             Self::Stencil => 2.0,
-            Self::Img => 3.0,
         }
     }
 }
