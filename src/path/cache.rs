@@ -427,7 +427,7 @@ impl PathCache {
     }
 
     // TODO: instead of passing 3 paint values here we can just pass the paint struct as a parameter
-    pub(crate) fn expand_stroke(&mut self, stroke_width: f32, fringe_width: f32, line_cap: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
+    pub(crate) fn expand_stroke(&mut self, stroke_width: f32, fringe_width: f32, line_cap_start: LineCap, line_cap_end: LineCap, line_join: LineJoin, miter_limit: f32, tess_tol: f32) {
         let ncap = curve_divisions(stroke_width, PI, tess_tol);
 
         let stroke_width = stroke_width + (fringe_width * 0.5);
@@ -447,7 +447,7 @@ impl PathCache {
             for (i, (p0, p1)) in contour.point_pairs(&self.points).enumerate() {
                 // Add start cap
                 if !contour.closed && i == 1 {
-                    match line_cap {
+                    match line_cap_start {
                         LineCap::Butt => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, -fringe_width*0.5, fringe_width, u0, u1),
                         LineCap::Square => butt_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, stroke_width-fringe_width, fringe_width, u0, u1),
                         LineCap::Round => round_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, ncap as usize, u0, u1),
@@ -469,7 +469,7 @@ impl PathCache {
 
                 // Add end cap
                 if !contour.closed && i == contour.point_count() - 1 {
-                    match line_cap {
+                    match line_cap_end {
                         LineCap::Butt => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, -fringe_width*0.5, fringe_width, u0, u1),
                         LineCap::Square => butt_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, stroke_width-fringe_width, fringe_width, u0, u1),
                         LineCap::Round => round_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, ncap as usize, u0, u1),

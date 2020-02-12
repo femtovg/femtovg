@@ -89,7 +89,8 @@ pub struct Paint<'a> {
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
-    pub(crate) line_cap: LineCap,
+    pub(crate) line_cap_start: LineCap,
+    pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
     pub(crate) font_family: &'a str,
     pub(crate) font_size: u32,
@@ -113,7 +114,8 @@ impl Default for Paint<'_> {
             stencil_strokes: true,
             stroke_width: 1.0,
             miter_limit: 10.0,
-            line_cap: Default::default(),
+            line_cap_start: Default::default(),
+            line_cap_end: Default::default(),
             line_join: Default::default(),
             font_family: "NotoSans",
             font_size: 16,
@@ -264,16 +266,36 @@ impl<'a> Paint<'a> {
         self.miter_limit = limit;
     }
 
-    /// Returns the current line cap for this paint.
-    pub fn line_cap(&self) -> LineCap {
-        self.line_cap
+    /// Returns the current start line cap for this paint.
+    pub fn line_cap_start(&self) -> LineCap {
+        self.line_cap_start
     }
 
-    /// Sets how the end of the line (cap) is drawn
+    /// Returns the current start line cap for this paint.
+    pub fn line_cap_end(&self) -> LineCap {
+        self.line_cap_end
+    }
+
+    /// Sets how the start and end of the line (cap) is drawn
     ///
     /// By default it's set to LineCap::Butt
     pub fn set_line_cap(&mut self, cap: LineCap) {
-        self.line_cap = cap;
+        self.line_cap_start = cap;
+        self.line_cap_end = cap;
+    }
+
+    /// Sets how the beggining cap of the line is drawn
+    ///
+    /// By default it's set to LineCap::Butt
+    pub fn set_line_cap_start(&mut self, cap: LineCap) {
+        self.line_cap_start = cap;
+    }
+
+    /// Sets how the end cap of the line is drawn
+    ///
+    /// By default it's set to LineCap::Butt
+    pub fn set_line_cap_end(&mut self, cap: LineCap) {
+        self.line_cap_end = cap;
     }
 
     /// Returns the current line join for this paint.

@@ -651,7 +651,15 @@ impl<T> Canvas<T> where T: Renderer {
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
         let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
-        path_cache.expand_stroke(paint.stroke_width() * 0.5, fringe_with, paint.line_cap(), paint.line_join(), paint.miter_limit(), self.tess_tol);
+        path_cache.expand_stroke(
+            paint.stroke_width() * 0.5,
+            fringe_with,
+            paint.line_cap_start,
+            paint.line_cap_end,
+            paint.line_join(),
+            paint.miter_limit(),
+            self.tess_tol
+        );
 
         // GPU uniforms
         let params = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);

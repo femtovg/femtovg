@@ -32,7 +32,6 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [ ] 3D transforms
 * [ ] OpenGl ES2 backend
 * [ ] Color fonts
-* [ ] Separate stroke start and end caps
 
 ## License
 Licensed under either of
