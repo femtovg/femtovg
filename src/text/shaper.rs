@@ -109,7 +109,7 @@ impl Shaper {
             height: 0.0,
             glyphs: Vec::new()
         };
-        
+
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
@@ -166,7 +166,7 @@ impl Shaper {
                                 has_missing = true;
                             }
 
-                            let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+                            let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT);
                             let metrics = font.face.glyph().metrics();
 
                             items.push(ShapedGlyph {
@@ -264,11 +264,11 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            //height = height.max(size_metrics.height as f32 / 64.0);
-            height = size_metrics.height as f32 / 64.0;
+            height = height.max(size_metrics.height as f32 / 64.0);
+            //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
-            glyph.x = xpos;
+            glyph.x = xpos.floor();
             glyph.y = (ypos + offset_y).floor();
 
             cursor_x += glyph.advance_x + style.letter_spacing;
@@ -285,7 +285,7 @@ impl Shaper {
         font.set_size(style.size);
 
         let index = font.face.get_char_index(' ' as u32);
-        let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT | ft::LoadFlag::NO_HINTING);
+        let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT);
         let metrics = font.face.glyph().metrics();
 
         glyph.font_id = font.id;
