@@ -1,6 +1,6 @@
 
+use std::fmt;
 use std::path::Path as FilePath;
-use std::{error::Error, fmt};
 
 use image::DynamicImage;
 use bitflags::bitflags;
@@ -24,9 +24,7 @@ use text::{
     TextRenderer,
     TextStyle,
     RenderStyle,
-    TextError,
 };
-
 
 mod color;
 pub use color::Color;
@@ -235,7 +233,7 @@ pub struct Canvas<T> {
 
 impl<T> Canvas<T> where T: Renderer {
 
-    pub fn new(renderer: T) -> Result<Self, CanvasError> {
+    pub fn new(renderer: T) -> Result<Self, Error> {
         let fontdb = FontDb::new().expect("Cannot init fontdb");
         let shaper = Shaper::new();
         let text_renderer = TextRenderer::new();
@@ -356,14 +354,14 @@ impl<T> Canvas<T> where T: Renderer {
     // Images
 
     /// Creates image by loading it from the disk from specified file name.
-    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, CanvasError> {
+    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, Error> {
         let image = image::open(filename)?;
 
         Ok(self.create_image(&image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, CanvasError> {
+    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, Error> {
         let image = image::load_from_memory(data)?;
 
         Ok(self.create_image(&image, flags))
@@ -863,28 +861,21 @@ impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
 }*/
 
 #[derive(Debug)]
-pub enum CanvasError {
+pub enum Error {
     GeneralError(String),
     ImageError(image::ImageError),
-    TextError(TextError)
 }
 
-impl fmt::Display for CanvasError {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "canvas error")
     }
 }
 
-impl From<image::ImageError> for CanvasError {
+impl From<image::ImageError> for Error {
     fn from(error: image::ImageError) -> Self {
         Self::ImageError(error)
     }
 }
 
-impl From<TextError> for CanvasError {
-    fn from(error: TextError) -> Self {
-        Self::TextError(error)
-    }
-}
-
-impl Error for CanvasError {}
+impl std::error::Error for Error {}
