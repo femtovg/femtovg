@@ -1,10 +1,7 @@
 
 use std::fs;
-use std::io;
-use std::fmt;
 use std::path::Path;
 use std::ffi::OsStr;
-use std::error::Error;
 use std::convert::TryFrom;
 
 use fnv::FnvHashMap;
@@ -19,7 +16,9 @@ use super::{
     freetype as ft,
 };
 
-type Result<T> = std::result::Result<T, FontDbError>;
+use crate::Error;
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);
@@ -72,10 +71,10 @@ impl From<&TextStyle<'_>> for FontDescription {
 }
 
 impl TryFrom<ttf::Font<'_>> for FontDescription {
-    type Error = FontDbError;
+    type Error = Error;
 
     fn try_from(font: ttf::Font<'_>) -> Result<Self> {
-        let family_name = font.family_name().ok_or(FontDbError::FontInfoExtrationError)?;
+        let family_name = font.family_name().ok_or(Error::FontInfoExtracionError)?;
         let weight = Weight::from_value(font.weight().to_number());
         let width_class = WidthClass::from_value(font.width().to_number());
 
@@ -171,7 +170,7 @@ impl FontDb {
 
         loop {
             if let Some(font_id) = self.font_descr.get(&description) {
-                let font = self.fonts.get_mut(font_id.0).ok_or(FontDbError::NoFontFound)?;
+                let font = self.fonts.get_mut(font_id.0).ok_or(Error::NoFontFound)?;
 
                 let (has_missing, result) = callback(font);
 
@@ -197,42 +196,42 @@ impl FontDb {
             return Ok(callback(font).1);
         }
 
-        return Err(FontDbError::NoFontFound);
+        return Err(Error::NoFontFound);
     }
 
 }
 
-#[derive(Debug)]
-pub enum FontDbError {
-    IoError(io::Error),
-    FreetypeError(ft::Error),
-    TtfParserError(ttf::Error),
-    NoFontFound,
-    FontInfoExtrationError
-}
-
-impl fmt::Display for FontDbError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "font db error")
-    }
-}
-
-impl From<io::Error> for FontDbError {
-    fn from(error: io::Error) -> Self {
-        Self::IoError(error)
-    }
-}
-
-impl From<ft::Error> for FontDbError {
-    fn from(error: ft::Error) -> Self {
-        Self::FreetypeError(error)
-    }
-}
-
-impl From<ttf::Error> for FontDbError {
-    fn from(error: ttf::Error) -> Self {
-        Self::TtfParserError(error)
-    }
-}
-
-impl Error for FontDbError {}
+// #[derive(Debug)]
+// pub enum FontDbError {
+//     IoError(io::Error),
+//     FreetypeError(ft::Error),
+//     TtfParserError(ttf::Error),
+//     NoFontFound,
+//     FontInfoExtracionError
+// }
+//
+// impl fmt::Display for FontDbError {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         write!(f, "font db error")
+//     }
+// }
+//
+// impl From<io::Error> for FontDbError {
+//     fn from(error: io::Error) -> Self {
+//         Self::IoError(error)
+//     }
+// }
+//
+// impl From<ft::Error> for FontDbError {
+//     fn from(error: ft::Error) -> Self {
+//         Self::FreetypeError(error)
+//     }
+// }
+//
+// impl From<ttf::Error> for FontDbError {
+//     fn from(error: ttf::Error) -> Self {
+//         Self::TtfParserError(error)
+//     }
+// }
+//
+// impl Error for FontDbError {}

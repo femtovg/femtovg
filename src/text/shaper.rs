@@ -21,13 +21,14 @@ use super::{
     Font,
     FontDb,
     FontId,
-    fontdb::FontDbError,
     TextStyle,
     freetype as ft,
     RenderStyle,
     TextLayout,
     GLYPH_PADDING
 };
+
+use crate::Error;
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -85,16 +86,22 @@ impl ShapingId {
 }
 
 pub struct Shaper {
-    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), FontDbError>, FnvBuildHasher>
+    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), Error>, FnvBuildHasher>
 }
 
-impl Shaper {
-    pub fn new() -> Self {
+impl Default for Shaper {
+    fn default() -> Self {
         let fnv = FnvBuildHasher::default();
 
         Self {
             cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv)
         }
+    }
+}
+
+impl Shaper {
+    pub fn new() -> Self {
+        Default::default()
     }
 
     pub fn clear_cache(&mut self) {

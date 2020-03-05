@@ -89,6 +89,7 @@ pub struct FontTexture {
     image_id: ImageId
 }
 
+#[derive(Default)]
 pub struct TextRenderer {
     textures: Vec<FontTexture>,
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>

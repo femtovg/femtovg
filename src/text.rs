@@ -1,7 +1,4 @@
 
-use std::fmt;
-use std::error::Error;
-
 mod text_renderer;
 pub use text_renderer::TextRenderer;
 
@@ -14,7 +11,7 @@ pub use shaper::{
 mod font;
 pub use font::Font;
 
-mod freetype;
+pub mod freetype;
 
 mod fontdb;
 pub use fontdb::{FontDb, FontId};

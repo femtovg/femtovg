@@ -1,9 +1,11 @@
 
+use std::io;
 use std::fmt;
 use std::path::Path as FilePath;
 
 use image::DynamicImage;
 use bitflags::bitflags;
+use ttf_parser as ttf;
 
 mod utils;
 
@@ -58,6 +60,8 @@ pub use path::{
     Path,
     Winding
 };
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
@@ -233,18 +237,16 @@ pub struct Canvas<T> {
 
 impl<T> Canvas<T> where T: Renderer {
 
-    pub fn new(renderer: T) -> Result<Self, Error> {
-        let fontdb = FontDb::new().expect("Cannot init fontdb");
-        let shaper = Shaper::new();
-        let text_renderer = TextRenderer::new();
+    pub fn new(renderer: T) -> Result<Self> {
+        let fontdb = FontDb::new()?;
 
         let mut canvas = Self {
             width: Default::default(),
             height: Default::default(),
             renderer: renderer,
             fontdb: fontdb,
-            shaper: shaper,
-            text_renderer: text_renderer,
+            shaper: Default::default(),
+            text_renderer: Default::default(),
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
@@ -296,8 +298,6 @@ impl<T> Canvas<T> where T: Renderer {
         self.renderer.render(&self.verts, &self.commands);
         self.commands.clear();
         self.verts.clear();
-        //self.state_stack.clear();
-        //self.save();
     }
 
     pub fn screenshot(&mut self) -> Option<DynamicImage> {
@@ -354,14 +354,14 @@ impl<T> Canvas<T> where T: Renderer {
     // Images
 
     /// Creates image by loading it from the disk from specified file name.
-    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, Error> {
+    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
         let image = image::open(filename)?;
 
         Ok(self.create_image(&image, flags))
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, Error> {
+    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
         let image = image::load_from_memory(data)?;
 
         Ok(self.create_image(&image, flags))
@@ -542,6 +542,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
+        // fringe_with is the size of the strip of triangles generated at the path border used for AA
         let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
         path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4);
 
@@ -609,7 +610,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.commands.push(cmd);
     }
 
-    /// Fills the current path with current stroke style.
+    /// Strokes the provided Path using Paint.
     pub fn stroke_path(&mut self, path: &mut Path, mut paint: Paint) {
         let transform = self.state().transform;
 
@@ -709,19 +710,22 @@ impl<T> Canvas<T> where T: Renderer {
         See: https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/platform/fonts/README.md
     */
 
-    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) {
-        self.fontdb.add_font_file(file_path).expect("cannot add font");
+    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<()> {
+        self.fontdb.add_font_file(file_path)?;
         self.shaper.clear_cache();
+        Ok(())
     }
 
-    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) {
-        self.fontdb.scan_dir(dir_path).expect("cannot add font");
+    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<()> {
+        self.fontdb.scan_dir(dir_path)?;
         self.shaper.clear_cache();
+        Ok(())
     }
 
-    pub fn add_font_mem(&mut self, data: Vec<u8>) {
-        self.fontdb.add_font_mem(data).expect("cannot add font");
+    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<()> {
+        self.fontdb.add_font_mem(data)?;
         self.shaper.clear_cache();
+        Ok(())
     }
 
     pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
@@ -864,6 +868,11 @@ impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
 pub enum Error {
     GeneralError(String),
     ImageError(image::ImageError),
+    IoError(io::Error),
+    FreetypeError(text::freetype::Error),
+    TtfParserError(ttf::Error),
+    NoFontFound,
+    FontInfoExtracionError
 }
 
 impl fmt::Display for Error {
@@ -875,6 +884,24 @@ impl fmt::Display for Error {
 impl From<image::ImageError> for Error {
     fn from(error: image::ImageError) -> Self {
         Self::ImageError(error)
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::IoError(error)
+    }
+}
+
+impl From<text::freetype::Error> for Error {
+    fn from(error: text::freetype::Error) -> Self {
+        Self::FreetypeError(error)
+    }
+}
+
+impl From<ttf::Error> for Error {
+    fn from(error: ttf::Error) -> Self {
+        Self::TtfParserError(error)
     }
 }
 
