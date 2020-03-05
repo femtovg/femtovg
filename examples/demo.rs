@@ -40,11 +40,11 @@ fn main() {
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
-    canvas.add_font("examples/assets/Roboto-Bold.ttf");
-    canvas.add_font("examples/assets/Roboto-Light.ttf");
-    canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    canvas.add_font("examples/assets/entypo.ttf");
-    //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf");
+    canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font");
+    //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
 
     //let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 

@@ -890,9 +890,9 @@ fn main() {
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
     canvas.set_size(window_size.width as u32, window_size.height as u32, windowed_context.window().scale_factor() as f32);
 
-    canvas.add_font("examples/assets/Roboto-Bold.ttf");
-    canvas.add_font("examples/assets/Roboto-Light.ttf");
-    canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font");
 
     let mut game = Game::new(&mut canvas, levels);
     game.size = Size::new(window_size.width as f32, window_size.height as f32);

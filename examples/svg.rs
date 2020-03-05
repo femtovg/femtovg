@@ -34,9 +34,9 @@ fn main() {
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
-    canvas.add_font("examples/assets/Roboto-Bold.ttf");
-    canvas.add_font("examples/assets/Roboto-Light.ttf");
-    canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font");
+    canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font");
 
     let mut screenshot_image_id = None;
 

@@ -36,11 +36,11 @@ fn main() {
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
     canvas.set_size(window_size.width as u32, window_size.height as u32, windowed_context.window().scale_factor() as f32);
 
-    canvas.add_font("examples/assets/NotoSans-Regular.ttf");
-    canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    canvas.add_font("examples/assets/Roboto-Bold.ttf");
-    canvas.add_font("examples/assets/Roboto-Light.ttf");
-    canvas.add_font("examples/assets/amiri-regular.ttf");
+    let _ = canvas.add_font("examples/assets/NotoSans-Regular.ttf");
+    let _ = canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    let _ = canvas.add_font("examples/assets/Roboto-Bold.ttf");
+    let _ = canvas.add_font("examples/assets/Roboto-Light.ttf");
+    let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
     let image_id = canvas.create_image_file("examples/assets/pattern.jpg", flags).expect("Cannot create image");
