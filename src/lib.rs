@@ -14,6 +14,7 @@ TODO:
         - Renderer Error type interation with Canvas Error type
         - Canvas with renderer reference or renderer with render(canvas: Canvas) method
     - Use imgref crate instead of the image crate
+    - Review geometry module and maybe migrate to euclid
     - Custom shader support
     - Review test functions for:
         - Measuring text - text_bounds?
