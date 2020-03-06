@@ -100,15 +100,11 @@ impl Default for Shaper {
 }
 
 impl Shaper {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> TextLayout {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Result<TextLayout, Error> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -149,7 +145,7 @@ impl Shaper {
 
                 if self.cache.peek(&shaping_id).is_none() {
                     let ret = fontdb.find_font(&word, style, |font| {
-                        font.set_size(style.size);
+                        let _ = font.set_size(style.size);
 
                         // Call harfbuzz
                         let output = {
@@ -218,12 +214,12 @@ impl Shaper {
             }
         }
 
-        self.layout(x, y, fontdb, &mut result, &style);
+        self.layout(x, y, fontdb, &mut result, &style)?;
 
-        result
+        Ok(result)
     }
 
-    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) {
+    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), Error> {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -247,20 +243,18 @@ impl Shaper {
 
         res.x = cursor_x;
 
-        // TODO: Error handling
-
         let mut height = 0.0f32;
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
-            let font = fontdb.get_mut(glyph.font_id).unwrap();
-            font.set_size(style.size);
+            let font = fontdb.get_mut(glyph.font_id).ok_or(Error::NoFontFound)?;
+            font.set_size(style.size)?;
 
             let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
             // Baseline alignment
-            let size_metrics = font.face.size_metrics().unwrap();
+            let size_metrics = font.face.size_metrics().ok_or(Error::FontInfoExtracionError)?;
             let ascender = size_metrics.ascender as f32 / 64.0;
             let descender = size_metrics.descender as f32 / 64.0;
 
@@ -284,12 +278,14 @@ impl Shaper {
 
         res.y = y;
         res.height = height;
+
+        Ok(())
     }
 
     fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {
         let mut glyph = ShapedGlyph::default();
 
-        font.set_size(style.size);
+        let _ = font.set_size(style.size);
 
         let index = font.face.get_char_index(' ' as u32);
         let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT);

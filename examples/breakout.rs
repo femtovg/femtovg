@@ -522,10 +522,10 @@ impl Game {
         paint.set_font_size(80);
 
         paint.set_stroke_width(4.0);
-        canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
+        let _ = canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
-        canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
+        let _ = canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -533,7 +533,7 @@ impl Game {
         paint.set_font_family("Roboto");
         paint.set_font_size(16);
         let text = "Click anywhere to START.";
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
+        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
     }
 
     fn draw_game(&self, canvas: &mut Canvas) {
@@ -628,14 +628,14 @@ impl Game {
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
         paint.set_font_size(22);
-        canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), paint);
+        let _ = canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), paint);
 
         // score
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
         paint.set_font_size(22);
-        canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), paint);
+        let _ = canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), paint);
     }
 
     fn draw_round_info(&self, canvas: &mut Canvas) {
@@ -687,17 +687,17 @@ impl Game {
         let offset = 30.0;
 
         paint.set_stroke_width(4.0);
-        canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+        let _ = canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
         paint.set_font_family("Roboto");
         paint.set_font_size(16);
-        canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset * 2.0, subtext, paint);
+        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset * 2.0, subtext, paint);
     }
 }
 
@@ -749,7 +749,7 @@ impl Powerup {
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
         text_paint.set_font_size(16);
-        canvas.fill_text(self.rect.center().x, self.rect.center().y, &format!("{:?}", self.ty), text_paint);
+        let _ = canvas.fill_text(self.rect.center().x, self.rect.center().y, &format!("{:?}", self.ty), text_paint);
     }
 }
 

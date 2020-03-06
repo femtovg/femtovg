@@ -1,4 +1,3 @@
-
 use std::time::Instant;
 
 use glutin::event::{Event, WindowEvent};
@@ -103,7 +102,7 @@ fn main() {
                 paint.set_font_weight(Weight::Bold);
                 paint.set_text_baseline(Baseline::Top);
                 paint.set_text_align(Align::Right);
-                canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
+                let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
 
                 canvas.save();
                 canvas.reset();
@@ -137,12 +136,14 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
         paint.set_text_baseline(*baseline);
-        let res = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint);
-        //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
-        let mut path = Path::new();
-        path.rect(res.x, res.y, res.width, res.height);
-        canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+        if let Ok(res) = canvas.fill_text(10.0, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint) {
+            //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
+
+            let mut path = Path::new();
+            path.rect(res.x, res.y, res.width, res.height);
+            canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+        }
     }
 }
 
@@ -160,11 +161,12 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 
     for (i, alignment) in alignments.iter().enumerate() {
         paint.set_text_align(*alignment);
-        let res = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint);
 
-        let mut path = Path::new();
-        path.rect(res.x, res.y, res.width, res.height);
-        canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+        if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint) {
+            let mut path = Path::new();
+            path.rect(res.x, res.y, res.width, res.height);
+            canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
+        }
     }
 }
 
@@ -180,8 +182,9 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let linegap = 3.0;
 
     for line in text.lines() {
-        let res = canvas.fill_text(x, cursor_y, line, paint);
-        cursor_y += res.height + linegap;
+        if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
+            cursor_y += res.height + linegap;
+        }
     }
 }
 
@@ -192,8 +195,10 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
         let mut paint = Paint::color(Color::black());
         paint.set_font_family("Roboto");
         paint.set_font_size(i);
-        let res = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint);
-        cursor_y += res.height;
+
+        if let Ok(res) = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint) {
+            cursor_y += res.height;
+        }
     }
 }
 
@@ -204,19 +209,19 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_stroke_width(12.0);
     paint.set_font_size(72);
     paint.set_font_blur(2.0);
-    canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
+    let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
 
     paint.set_font_blur(0.0);
     paint.set_color(Color::black());
     paint.set_stroke_width(10.0);
-    canvas.stroke_text(x, y, "RUST", paint);
+    let _ = canvas.stroke_text(x, y, "RUST", paint);
 
     paint.set_stroke_width(6.0);
     paint.set_color(Color::hex("#B7410E"));
-    canvas.stroke_text(x, y, "RUST", paint);
+    let _ = canvas.stroke_text(x, y, "RUST", paint);
 
     paint.set_color(Color::white());
-    canvas.fill_text(x, y, "RUST", paint);
+    let _ = canvas.fill_text(x, y, "RUST", paint);
 }
 
 fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
@@ -225,13 +230,13 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_font_weight(Weight::Bold);
     paint.set_stroke_width(6.0);
     paint.set_font_size(72);
-    canvas.stroke_text(x, y, "RUST", paint);
+    let _ = canvas.stroke_text(x, y, "RUST", paint);
 
     let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72);
-    canvas.fill_text(x, y, "RUST", paint);
+    let _ = canvas.fill_text(x, y, "RUST", paint);
 }
 
 fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
@@ -250,14 +255,14 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     paint.set_font_weight(Weight::Bold);
     paint.set_stroke_width(4.0);
     paint.set_font_size(72);
-    canvas.stroke_text(x, y, text, paint);
+    let _ = canvas.stroke_text(x, y, text, paint);
 
     let mut paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50);
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72);
-    canvas.fill_text(x, y, text, paint);
+    let _ = canvas.fill_text(x, y, text, paint);
 }
 
 fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
@@ -265,7 +270,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
-    canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
+    let _ = canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 
@@ -321,14 +326,14 @@ impl PerfGraph {
         text_paint.set_font_size(12);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
-    	canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
+    	let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14);
         text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+    	let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12);
@@ -336,7 +341,7 @@ impl PerfGraph {
         text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
-    	canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
+    	let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
     }
 }
 

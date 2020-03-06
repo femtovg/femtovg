@@ -4,6 +4,8 @@ use super::fontdb::{
     FontId
 };
 
+use crate::Error;
+
 pub struct Font {
     pub(crate) id: FontId,
     pub(crate) face: ft::Face,
@@ -18,8 +20,9 @@ impl Font {
         }
     }
 
-    pub fn set_size(&mut self, size: u16) {
-        self.face.set_pixel_sizes(0, size as u32).unwrap();
+    pub fn set_size(&mut self, size: u16) -> Result<(), Error> {
+        self.face.set_pixel_sizes(0, size as u32)?;
+        Ok(())
     }
 
     pub fn postscript_name(&self) -> String {

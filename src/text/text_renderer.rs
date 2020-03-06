@@ -1,7 +1,4 @@
 
-use std::fmt;
-use std::error::Error;
-
 use fnv::FnvHashMap;
 use image::{
     DynamicImage,
@@ -13,7 +10,8 @@ use image::{
 use crate::{
     Renderer,
     ImageId,
-    ImageFlags
+    ImageFlags,
+    Error
 };
 
 use super::{
@@ -32,8 +30,6 @@ use atlas::Atlas;
 
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
-
-type Result<T> = std::result::Result<T, TextRendererError>;
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct RenderedGlyphId {
@@ -96,12 +92,6 @@ pub struct TextRenderer {
 }
 
 impl TextRenderer {
-    pub fn new() -> Self {
-        Self {
-            textures: Default::default(),
-            glyph_cache: Default::default()
-        }
-    }
 
     pub fn render<T: Renderer>(
         &mut self,
@@ -109,7 +99,7 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
-    ) -> Result<Vec<DrawCmd>> {
+    ) -> Result<Vec<DrawCmd>, Error> {
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -161,12 +151,12 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,
         glyph: &ShapedGlyph
-    ) -> Result<RenderedGlyph> {
+    ) -> Result<RenderedGlyph, Error> {
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
 
-        let font = fontdb.get_mut(glyph.font_id).ok_or(TextRendererError::FontNotFound)?;
+        let font = fontdb.get_mut(glyph.font_id).ok_or(Error::NoFontFound)?;
 
         // Load Freetype glyph slot and fill or stroke
         //let index = font.face.get_char_index(glyph.codepoint as u32);
@@ -245,13 +235,13 @@ impl TextRenderer {
                 atlas_size *= 2;
             };
 
-            let loc = loc.ok_or(TextRendererError::FontSizeTooLargeForAtlas)?;
+            let loc = loc.ok_or(Error::FontSizeTooLargeForAtlas)?;
 
             let mut image = GrayImage::new(atlas.size().0 as u32, atlas.size().1 as u32);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
             let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
-            let image_id = image_res.or_else(|e| Err(TextRendererError::GeneralError(format!("{}", e))))?;
+            let image_id = image_res.or_else(|e| Err(Error::GeneralError(format!("{}", e))))?;
 
             textures.push(FontTexture { atlas, image_id });
 
@@ -268,32 +258,3 @@ impl TextRenderer {
         })
     }
 }
-
-#[derive(Debug)]
-pub enum TextRendererError {
-    GeneralError(String),
-    FreetypeError(ft::Error),
-    ImageError(image::ImageError),
-    FontNotFound,
-    FontSizeTooLargeForAtlas
-}
-
-impl fmt::Display for TextRendererError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "text renderer error")
-    }
-}
-
-impl From<ft::Error> for TextRendererError {
-    fn from(error: ft::Error) -> Self {
-        Self::FreetypeError(error)
-    }
-}
-
-impl From<image::ImageError> for TextRendererError {
-    fn from(error: image::ImageError) -> Self {
-        Self::ImageError(error)
-    }
-}
-
-impl Error for TextRendererError {}

@@ -150,7 +150,7 @@ fn path_contains_point() {
 fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
 
-    canvas.add_font("examples/assets/Roboto-Regular.ttf");
+    canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Font not found");
 
     let mut paint = Paint::color(Color::black());
     paint.set_text_baseline(Baseline::Top);

@@ -728,7 +728,7 @@ impl<T> Canvas<T> where T: Renderer {
         Ok(())
     }
 
-    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
+    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let style = self.text_style_for_paint(&paint);
@@ -736,13 +736,14 @@ impl<T> Canvas<T> where T: Renderer {
         self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)
     }
 
-    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
+    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
         let text = text.as_ref();
         self.draw_text(x, y, text, paint, RenderStyle::Fill)
     }
 
-    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> TextLayout {
+    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
         let text = text.as_ref();
+        
         self.draw_text(x, y, text, paint, RenderStyle::Stroke {
             width: paint.stroke_width().ceil() as u16// TODO: this is fushy
         })
@@ -766,7 +767,7 @@ impl<T> Canvas<T> where T: Renderer {
         }
     }
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> TextLayout {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> Result<TextLayout> {
         let transform = self.state().transform;
         let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
@@ -775,7 +776,7 @@ impl<T> Canvas<T> where T: Renderer {
         let mut style = self.text_style_for_paint(&paint);
         style.render_style = render_style;
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text);
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
         let cmds = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
 
         for cmd in &cmds {
@@ -803,7 +804,7 @@ impl<T> Canvas<T> where T: Renderer {
             self.render_triangles(&verts, &paint, &scissor);
         }
 
-        layout
+        Ok(layout)
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
@@ -872,7 +873,8 @@ pub enum Error {
     FreetypeError(text::freetype::Error),
     TtfParserError(ttf::Error),
     NoFontFound,
-    FontInfoExtracionError
+    FontInfoExtracionError,
+    FontSizeTooLargeForAtlas
 }
 
 impl fmt::Display for Error {
