@@ -42,10 +42,6 @@ use renderer::{
     Drawable
 };
 
-//mod font_cache;
-//use font_cache::{FontCache, FontCacheError, GlyphRenderStyle};
-//pub use font_cache::{Align, Baseline};
-
 pub(crate) mod geometry;
 use geometry::*;
 pub use geometry::Transform2D;
@@ -743,9 +739,9 @@ impl<T> Canvas<T> where T: Renderer {
 
     pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
         let text = text.as_ref();
-        
+
         self.draw_text(x, y, text, paint, RenderStyle::Stroke {
-            width: paint.stroke_width().ceil() as u16// TODO: this is fushy
+            width: paint.stroke_width().ceil() as u16// TODO: this is fishy
         })
     }
 
@@ -839,33 +835,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 }
 
-/*
-ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like
-glyphs. I very much wanted to render glyps on the GPU using the same code path as other shapes and
-without using freetype, but the qulity was horrendous.
-impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.move_to(x, y);
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.line_to(x, y);
-    }
-
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.quad_to(x1, y1, x, y);
-    }
-
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.bezier_to(x1, y1, x2, y2, x, y);
-    }
-
-    fn close(&mut self) {
-        self.close_path();
-    }
-}*/
-
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     GeneralError(String),
     ImageError(image::ImageError),
@@ -908,3 +879,29 @@ impl From<ttf::Error> for Error {
 }
 
 impl std::error::Error for Error {}
+
+/*
+ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like
+glyphs. I very much wanted to render glyps on the GPU using the same code path as other shapes and
+without using freetype, but the qulity was horrendous.
+impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.line_to(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.quad_to(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.bezier_to(x1, y1, x2, y2, x, y);
+    }
+
+    fn close(&mut self) {
+        self.close_path();
+    }
+}*/
