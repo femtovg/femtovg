@@ -21,6 +21,8 @@ TODO:
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Emoji support
+    - Tests
+    - Documentation
 */
 
 mod utils;
