@@ -7,6 +7,22 @@ use image::DynamicImage;
 use bitflags::bitflags;
 use ttf_parser as ttf;
 
+/*
+TODO:
+    - Final review of project architecture:
+        - Canvas<T> vs Canvas with Box<dyn Renderer>
+        - Renderer Error type interation with Canvas Error type
+        - Canvas with renderer reference or renderer with render(canvas: Canvas) method
+    - Use imgref crate instead of the image crate
+    - Custom shader support
+    - Review test functions for:
+        - Measuring text - text_bounds?
+        - Computing bounding boxes - text_bounds?
+        - Mapping from coordinates to character indices
+        - Mapping from character index to coordinates
+        - Emoji support
+*/
+
 mod utils;
 
 mod text;
@@ -695,16 +711,6 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     // Text
-
-    /*
-        Required api methods for editing/selecting text:
-        - Measuring text - text_bounds?
-        - Computing bounding boxes - text_bounds?
-        - Mapping from coordinates to character indices
-        - Mapping from character index to coordinates
-
-        See: https://chromium.googlesource.com/chromium/src/+/master/third_party/blink/renderer/platform/fonts/README.md
-    */
 
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<()> {
         self.fontdb.add_font_file(file_path)?;
