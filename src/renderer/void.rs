@@ -1,8 +1,5 @@
 #![allow(unused_variables)]
 
-use std::fmt;
-use std::error;
-
 use image::DynamicImage;
 
 use super::{
@@ -14,17 +11,17 @@ use super::{
     ImageId
 };
 
+use crate::ErrorKind;
+
 /// Void renderer used for testing
 pub struct Void;
 
 impl Renderer for Void {
-    type Error = VoidError;
-
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]) {}
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, VoidError> {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         Ok(ImageId(0))
     }
 
@@ -37,14 +34,3 @@ impl Renderer for Void {
 
     fn screenshot(&mut self) -> Option<DynamicImage> { None }
 }
-
-#[derive(Debug)]
-pub struct VoidError;
-
-impl fmt::Display for VoidError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Void error")
-    }
-}
-
-impl error::Error for VoidError {}

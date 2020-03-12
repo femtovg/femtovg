@@ -103,7 +103,7 @@ fn main() {
                     }
 
                     if let Some(image) = canvas.screenshot() {
-                        screenshot_image_id = Some(canvas.create_image(&image, ImageFlags::empty()));
+                        screenshot_image_id = Some(canvas.create_image(&image, ImageFlags::empty()).unwrap());
                     }
                 }
                 WindowEvent::CloseRequested => {

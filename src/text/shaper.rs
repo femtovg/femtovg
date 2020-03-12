@@ -28,7 +28,7 @@ use super::{
     GLYPH_PADDING
 };
 
-use crate::Error;
+use crate::ErrorKind;
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -86,7 +86,7 @@ impl ShapingId {
 }
 
 pub struct Shaper {
-    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), Error>, FnvBuildHasher>
+    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), ErrorKind>, FnvBuildHasher>
 }
 
 impl Default for Shaper {
@@ -104,7 +104,7 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Result<TextLayout, Error> {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -219,7 +219,7 @@ impl Shaper {
         Ok(result)
     }
 
-    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), Error> {
+    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -247,14 +247,14 @@ impl Shaper {
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
-            let font = fontdb.get_mut(glyph.font_id).ok_or(Error::NoFontFound)?;
+            let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             font.set_size(style.size)?;
 
             let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
             // Baseline alignment
-            let size_metrics = font.face.size_metrics().ok_or(Error::FontInfoExtracionError)?;
+            let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;
             let ascender = size_metrics.ascender as f32 / 64.0;
             let descender = size_metrics.descender as f32 / 64.0;
 

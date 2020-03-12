@@ -1,11 +1,12 @@
 
 use std::str;
 use std::ptr;
-use std::{error::Error, fmt};
-use std::ffi::{NulError, CString};
+use std::ffi::CString;
 
 use super::gl;
 use super::gl::types::*;
+
+use crate::ErrorKind;
 
 pub(crate) struct Shader {
     prog: GLuint,
@@ -19,7 +20,7 @@ pub(crate) struct Shader {
 
 impl Shader {
 
-    pub fn new(opts: &str, vertex_src: &str, fragment_src: &str) -> Result<Self, ShaderError> {
+    pub fn new(opts: &str, vertex_src: &str, fragment_src: &str) -> Result<Self, ErrorKind> {
 
         let vertex_src = CString::new(format!("#version 100\n{}\n{}", opts, vertex_src))?;
         let fragment_src = CString::new(format!("#version 100\n{}\n{}", opts, fragment_src))?;
@@ -67,8 +68,8 @@ impl Shader {
                 gl::GetProgramInfoLog(shader.prog, log_length, ptr::null_mut(), info_log.as_mut_ptr() as *mut GLchar);
 
                 return Err(match str::from_utf8(&info_log) {
-                    Ok(msg) => ShaderError::ProgramLinkError(msg.to_string()),
-                    Err(err) => ShaderError::ProgramLinkError(format!("{}", err)),
+                    Ok(msg) => ErrorKind::ShaderLinkError(msg.to_string()),
+                    Err(err) => ErrorKind::ShaderLinkError(format!("{}", err)),
                 });
             }
         }
@@ -84,7 +85,7 @@ impl Shader {
         Ok(shader)
     }
 
-    fn check_shader_ok(shader: GLuint, stage: &str) -> Result<(), ShaderError> {
+    fn check_shader_ok(shader: GLuint, stage: &str) -> Result<(), ErrorKind> {
         let mut success = i32::from(gl::FALSE);
 
         unsafe { gl::GetShaderiv(shader, gl::COMPILE_STATUS, &mut success); }
@@ -104,8 +105,8 @@ impl Shader {
             };
 
             Err(match str::from_utf8(&info_log) {
-                Ok(msg) => ShaderError::CompileError(format!("{} {}", stage, msg)),
-                Err(err) => ShaderError::CompileError(format!("{} {}", stage, err)),
+                Ok(msg) => ErrorKind::ShaderCompileError(format!("{} {}", stage, msg)),
+                Err(err) => ErrorKind::ShaderCompileError(format!("{} {}", stage, err)),
             })
         } else {
             Ok(())
@@ -148,24 +149,3 @@ impl Drop for Shader {
         }
     }
 }
-
-#[derive(Debug)]
-pub enum ShaderError {
-    CompileError(String),
-    ProgramLinkError(String),
-    GeneralError(String)
-}
-
-impl fmt::Display for ShaderError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "invalid first item to double")
-    }
-}
-
-impl From<NulError> for ShaderError {
-    fn from(error: NulError) -> Self {
-        ShaderError::GeneralError(error.description().to_string())
-    }
-}
-
-impl Error for ShaderError {}

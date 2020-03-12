@@ -1,11 +1,8 @@
 
-use std::io;
-use std::fmt;
 use std::path::Path as FilePath;
 
 use image::DynamicImage;
 use bitflags::bitflags;
-use ttf_parser as ttf;
 
 /*
 TODO:
@@ -13,6 +10,7 @@ TODO:
         - Canvas<T> vs Canvas with Box<dyn Renderer>
         - Renderer Error type interation with Canvas Error type
         - Canvas with renderer reference or renderer with render(canvas: Canvas) method
+            - Canvas with Box<dyn Renderer>
     - Use imgref crate instead of the image crate
     - Review geometry module and maybe migrate to euclid
     - Custom shader support
@@ -29,6 +27,9 @@ TODO:
 mod utils;
 
 mod text;
+
+mod error;
+pub use error::ErrorKind;
 
 pub use text::{
     Weight,
@@ -76,7 +77,7 @@ pub use path::{
     Winding
 };
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, ErrorKind>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
@@ -372,19 +373,19 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
         let image = image::open(filename)?;
 
-        Ok(self.create_image(&image, flags))
+        self.create_image(&image, flags)
     }
 
     /// Creates image by loading it from the specified chunk of memory.
     pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
         let image = image::load_from_memory(data)?;
 
-        Ok(self.create_image(&image, flags))
+        self.create_image(&image, flags)
     }
 
     /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> ImageId {
-        self.renderer.create_image(image, flags).unwrap()
+    pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
+        self.renderer.create_image(image, flags)
     }
 
     /// Updates image data specified by image handle.
@@ -843,51 +844,6 @@ impl<T> Canvas<T> where T: Renderer {
         self.state_stack.last_mut().unwrap()
     }
 }
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum Error {
-    GeneralError(String),
-    ImageError(image::ImageError),
-    IoError(io::Error),
-    FreetypeError(text::freetype::Error),
-    TtfParserError(ttf::Error),
-    NoFontFound,
-    FontInfoExtracionError,
-    FontSizeTooLargeForAtlas
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "canvas error")
-    }
-}
-
-impl From<image::ImageError> for Error {
-    fn from(error: image::ImageError) -> Self {
-        Self::ImageError(error)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self {
-        Self::IoError(error)
-    }
-}
-
-impl From<text::freetype::Error> for Error {
-    fn from(error: text::freetype::Error) -> Self {
-        Self::FreetypeError(error)
-    }
-}
-
-impl From<ttf::Error> for Error {
-    fn from(error: ttf::Error) -> Self {
-        Self::TtfParserError(error)
-    }
-}
-
-impl std::error::Error for Error {}
 
 /*
 ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like

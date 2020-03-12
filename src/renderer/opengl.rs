@@ -2,18 +2,17 @@
 use std::ptr;
 use std::mem;
 use std::ops::DerefMut;
-use std::ffi::{CStr, NulError, c_void};
-use std::{error::Error, fmt};
+use std::ffi::{CStr, c_void};
 
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
 use super::{Command, Renderer, CommandType, Params, TextureType};
-use crate::{Color, ImageFlags, FillRule, CompositeOperationState, BlendFactor};
+use crate::{Color, ImageFlags, FillRule, CompositeOperationState, BlendFactor, ErrorKind};
 use crate::renderer::{Vertex, ImageId};
 
 mod shader;
-use shader::{Shader, ShaderError};
+use shader::Shader;
 
 mod uniform_array;
 use uniform_array::UniformArray;
@@ -47,7 +46,7 @@ pub struct OpenGl {
 
 impl OpenGl {
 
-    pub fn new<F>(load_fn: F) -> Result<Self, OpenGlError> where F: Fn(&'static str) -> *const c_void {
+    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind> where F: Fn(&'static str) -> *const c_void {
         let debug = true;
         let antialias = true;
 
@@ -324,7 +323,6 @@ impl OpenGl {
 }
 
 impl Renderer for OpenGl {
-    type Error = OpenGlError;
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -406,7 +404,7 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, OpenGlError> {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let size = image.dimensions();
 
         let mut texture = Texture {
@@ -475,12 +473,12 @@ impl Renderer for OpenGl {
                 texture.tex_type = TextureType::Rgba;
             },
             DynamicImage::ImageLumaA8(_) =>
-                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageLumaA8"))),
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
             DynamicImage::ImageBgr8(_) =>
-                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgr8"))),
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgr8"))),
             DynamicImage::ImageBgra8(_) =>
-                return Err(OpenGlError::UnsuportedImageFromat(String::from("ImageBgra8"))),
-            _ => return Err(OpenGlError::UnsuportedImageFromat(String::from("Unknown image format"))),
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgra8"))),
+            _ => return Err(ErrorKind::UnsuportedImageFromat(String::from("Unknown image format"))),
         }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
@@ -679,30 +677,3 @@ impl Drop for OpenGl {
         }
     }
 }
-
-#[derive(Debug)]
-pub enum OpenGlError {
-    GeneralError(String),
-    ShaderError(ShaderError),
-    UnsuportedImageFromat(String)
-}
-
-impl fmt::Display for OpenGlError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OpenGl error: {:?}", self)
-    }
-}
-
-impl From<NulError> for OpenGlError {
-    fn from(error: NulError) -> Self {
-        OpenGlError::GeneralError(error.description().to_string())
-    }
-}
-
-impl From<ShaderError> for OpenGlError {
-    fn from(error: ShaderError) -> Self {
-        OpenGlError::ShaderError(error)
-    }
-}
-
-impl Error for OpenGlError {}

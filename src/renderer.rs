@@ -1,10 +1,15 @@
 //! Module containing renderer implementations
 
-use std::error;
-
 use image::DynamicImage;
 
-use crate::{Color, FillRule, ImageId, ImageFlags, CompositeOperationState};
+use crate::{
+    Color,
+    ErrorKind,
+    FillRule,
+    ImageId,
+    ImageFlags,
+    CompositeOperationState
+};
 
 mod opengl;
 pub use opengl::OpenGl;
@@ -82,13 +87,11 @@ impl Command {
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer {
-    type Error: error::Error;
-
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, Self::Error>;
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind>;
     fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32);
     fn delete_image(&mut self, id: ImageId);
 

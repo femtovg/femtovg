@@ -11,7 +11,7 @@ use crate::{
     Renderer,
     ImageId,
     ImageFlags,
-    Error
+    ErrorKind
 };
 
 use super::{
@@ -99,7 +99,7 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
-    ) -> Result<Vec<DrawCmd>, Error> {
+    ) -> Result<Vec<DrawCmd>, ErrorKind> {
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -151,12 +151,12 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,
         glyph: &ShapedGlyph
-    ) -> Result<RenderedGlyph, Error> {
+    ) -> Result<RenderedGlyph, ErrorKind> {
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
 
-        let font = fontdb.get_mut(glyph.font_id).ok_or(Error::NoFontFound)?;
+        let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
         // Load Freetype glyph slot and fill or stroke
         //let index = font.face.get_char_index(glyph.codepoint as u32);
@@ -235,13 +235,15 @@ impl TextRenderer {
                 atlas_size *= 2;
             };
 
-            let loc = loc.ok_or(Error::FontSizeTooLargeForAtlas)?;
+            let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
             let mut image = GrayImage::new(atlas.size().0 as u32, atlas.size().1 as u32);
             image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
 
-            let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
-            let image_id = image_res.or_else(|e| Err(Error::GeneralError(format!("{}", e))))?;
+            //let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
+            //let image_id = image_res.or_else(|e| Err(ErrorKind::GeneralError(format!("{}", e))))?;
+
+            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty())?;
 
             textures.push(FontTexture { atlas, image_id });
 
