@@ -23,7 +23,10 @@ pub enum ErrorKind {
     FontSizeTooLargeForAtlas,
     ShaderCompileError(String),
     ShaderLinkError(String),
-    UnsuportedImageFromat(String)
+    ImageIdNotFound,
+    ImageUpdateOutOfBounds,
+    ImageUpdateWithDifferentFormat,
+    UnsuportedImageFromat(String),
 }
 
 impl Display for ErrorKind {

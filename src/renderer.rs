@@ -4,7 +4,7 @@ use image::DynamicImage;
 
 use crate::{
     Color,
-    ErrorKind,
+    Result,
     FillRule,
     ImageId,
     ImageFlags,
@@ -91,8 +91,8 @@ pub trait Renderer {
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]);
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind>;
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32);
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId>;
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()>;
     fn delete_image(&mut self, id: ImageId);
 
     fn texture_flags(&self, id: ImageId) -> ImageFlags;

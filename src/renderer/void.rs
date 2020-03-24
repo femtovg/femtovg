@@ -11,7 +11,9 @@ use super::{
     ImageId
 };
 
-use crate::ErrorKind;
+use crate::Result;
+
+// TODO: Void renderer should behave correctly when dealing with images.
 
 /// Void renderer used for testing
 pub struct Void;
@@ -21,11 +23,14 @@ impl Renderer for Void {
 
     fn render(&mut self, verts: &[Vertex], commands: &[Command]) {}
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
         Ok(ImageId(0))
     }
 
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {}
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
+        Ok(())
+    }
+
     fn delete_image(&mut self, id: ImageId) {}
 
     fn texture_flags(&self, id: ImageId) -> ImageFlags { ImageFlags::empty() }

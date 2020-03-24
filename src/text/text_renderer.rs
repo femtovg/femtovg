@@ -11,6 +11,7 @@ use crate::{
     Renderer,
     ImageId,
     ImageFlags,
+    Result,
     ErrorKind
 };
 
@@ -99,7 +100,7 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
-    ) -> Result<Vec<DrawCmd>, ErrorKind> {
+    ) -> Result<Vec<DrawCmd>> {
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -151,7 +152,7 @@ impl TextRenderer {
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,
         glyph: &ShapedGlyph
-    ) -> Result<RenderedGlyph, ErrorKind> {
+    ) -> Result<RenderedGlyph> {
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
@@ -212,7 +213,7 @@ impl TextRenderer {
 
         let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
             // A location for the new glyph was found in an extisting atlas
-            renderer.update_image(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32);
+            renderer.update_image(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32)?;
 
             (tex_index, (atlas_x, atlas_y))
         } else {

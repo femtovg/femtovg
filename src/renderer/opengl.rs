@@ -7,9 +7,24 @@ use std::ffi::{CStr, c_void};
 use fnv::FnvHashMap;
 use image::{DynamicImage, GenericImageView};
 
-use super::{Command, Renderer, CommandType, Params, TextureType};
-use crate::{Color, ImageFlags, FillRule, CompositeOperationState, BlendFactor, ErrorKind};
-use crate::renderer::{Vertex, ImageId};
+use crate::{
+    Color,
+    Result,
+    ImageFlags,
+    FillRule,
+    CompositeOperationState,
+    BlendFactor,
+    ErrorKind,
+    renderer::{Vertex, ImageId}
+};
+
+use super::{
+    Params,
+    Renderer,
+    Command,
+    CommandType,
+    TextureType
+};
 
 mod shader;
 use shader::Shader;
@@ -46,7 +61,7 @@ pub struct OpenGl {
 
 impl OpenGl {
 
-    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind> where F: Fn(&'static str) -> *const c_void {
+    pub fn new<F>(load_fn: F) -> Result<Self> where F: Fn(&'static str) -> *const c_void {
         let debug = true;
         let antialias = true;
 
@@ -404,7 +419,7 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
+    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
         let size = image.dimensions();
 
         let mut texture = Texture {
@@ -537,20 +552,20 @@ impl Renderer for OpenGl {
         Ok(ImageId(id))
     }
 
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
+    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
         let size = image.dimensions();
 
         let texture = match self.textures.get(&id) {
             Some(texture) => texture,
-            None => return
+            None => return Err(ErrorKind::ImageIdNotFound)
         };
 
         if x + size.0 > texture.width {
-            panic!();// TODO: error handling
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
         if y + size.1 > texture.height {
-            panic!();// TODO: error handling
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
         unsafe {
@@ -564,7 +579,7 @@ impl Renderer for OpenGl {
                 let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
 
                 if texture.tex_type != TextureType::Alpha {
-                    panic!("Attemped to update texture with an image of a different format");
+                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
                 gl::TexSubImage2D(
@@ -581,7 +596,7 @@ impl Renderer for OpenGl {
             }
             DynamicImage::ImageRgb8(rgb_image) => unsafe {
                 if texture.tex_type != TextureType::Rgb {
-                    panic!("Attemped to update texture with an image of a different format");
+                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
                 gl::TexSubImage2D(
@@ -598,7 +613,7 @@ impl Renderer for OpenGl {
             }
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
                 if texture.tex_type != TextureType::Rgba {
-                    panic!("Attemped to update texture with an image of a different format");
+                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
                 gl::TexSubImage2D(
@@ -613,7 +628,13 @@ impl Renderer for OpenGl {
                     rgba_image.as_ref().as_ptr() as *const GLvoid
                 );
             }
-            _ => panic!("Unsupported image format")
+            DynamicImage::ImageLumaA8(_) =>
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
+            DynamicImage::ImageBgr8(_) =>
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgr8"))),
+            DynamicImage::ImageBgra8(_) =>
+                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgra8"))),
+            _ => return Err(ErrorKind::UnsuportedImageFromat(String::from("Unknown image format"))),
         }
 
         unsafe {
@@ -623,6 +644,8 @@ impl Renderer for OpenGl {
             //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
+
+        Ok(())
     }
 
     fn delete_image(&mut self, id: ImageId) {

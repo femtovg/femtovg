@@ -389,8 +389,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) {
-        self.renderer.update_image(id, image, x, y);
+    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
+        self.renderer.update_image(id, image, x, y)
     }
 
     /// Deletes created image.
