@@ -759,14 +759,8 @@ impl From<i32> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(error::Error::description(self))
-    }
-}
-
-impl error::Error for Error {
-    fn description(&self) -> &str {
         use self::Error::*;
-        match *self {
+        let str = match *self {
             Ok                           => "Ok",
             CannotOpenResource           => "Cannot open resource",
             UnknownFileFormat            => "Unknown file format",
@@ -861,6 +855,10 @@ impl error::Error for Error {
             UnexpectedPixelMode          => "Unexpected pixel mode",
             InvalidPath                  => "Invalid path",
             Unknown                      => "Unknown",
-        }
+        };
+
+        f.write_str(str)
     }
 }
+
+impl error::Error for Error {}

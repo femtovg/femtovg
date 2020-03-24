@@ -58,7 +58,7 @@ impl From<ttf::Error> for ErrorKind {
 
 impl From<NulError> for ErrorKind {
     fn from(error: NulError) -> Self {
-        Self::GeneralError(error.description().to_string())
+        Self::GeneralError(error.to_string())
     }
 }
 
