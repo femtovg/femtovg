@@ -11,7 +11,7 @@ use crate::{
     Renderer,
     ImageId,
     ImageFlags,
-    Result,
+    ImageStore,
     ErrorKind
 };
 
@@ -94,13 +94,14 @@ pub struct TextRenderer {
 
 impl TextRenderer {
 
-    pub fn render<T: Renderer>(
+    pub(crate) fn render<T: Renderer>(
         &mut self,
         renderer: &mut T,
+        images: &mut ImageStore<T>,
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
-    ) -> Result<Vec<DrawCmd>> {
+    ) -> Result<Vec<DrawCmd>, ErrorKind> {
 
         let mut cmd_map = FnvHashMap::default();
 
@@ -110,7 +111,7 @@ impl TextRenderer {
             let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
             if !self.glyph_cache.contains_key(&id) {
-                let glyph = Self::render_glyph(renderer, textures, fontdb, style, &glyph)?;
+                let glyph = Self::render_glyph(renderer, images, textures, fontdb, style, &glyph)?;
                 self.glyph_cache.insert(id.clone(), glyph);
             }
 
@@ -148,11 +149,12 @@ impl TextRenderer {
 
     fn render_glyph<T: Renderer>(
         renderer: &mut T,
+        images: &mut ImageStore<T>,
         textures: &mut Vec<FontTexture>,
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,
         glyph: &ShapedGlyph
-    ) -> Result<RenderedGlyph> {
+    ) -> Result<RenderedGlyph, ErrorKind> {
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
@@ -213,7 +215,7 @@ impl TextRenderer {
 
         let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
             // A location for the new glyph was found in an extisting atlas
-            renderer.update_image(textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x as u32, atlas_y as u32)?;
+            images.update(renderer, textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x, atlas_y)?;
 
             (tex_index, (atlas_x, atlas_y))
         } else {
@@ -244,7 +246,7 @@ impl TextRenderer {
             //let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
             //let image_id = image_res.or_else(|e| Err(ErrorKind::GeneralError(format!("{}", e))))?;
 
-            let image_id = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty())?;
+            let image_id = images.add(renderer, &DynamicImage::ImageLuma8(image), ImageFlags::empty())?;
 
             textures.push(FontTexture { atlas, image_id });
 

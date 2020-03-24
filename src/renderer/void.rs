@@ -1,6 +1,9 @@
 #![allow(unused_variables)]
 
-use image::DynamicImage;
+use image::{
+    DynamicImage,
+    GenericImageView
+};
 
 use super::{
     Renderer,
@@ -8,7 +11,9 @@ use super::{
     Command,
     ImageFlags,
     Vertex,
-    ImageId
+    ImageStore,
+    ImageInfo,
+    Image
 };
 
 use crate::Result;
@@ -19,23 +24,42 @@ use crate::Result;
 pub struct Void;
 
 impl Renderer for Void {
+    type Image = VoidImage;
+
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
-    fn render(&mut self, verts: &[Vertex], commands: &[Command]) {}
+    fn render(&mut self, images: &ImageStore<Void>, verts: &[Vertex], commands: &[Command]) {}
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
-        Ok(ImageId(0))
+    fn screenshot(&mut self) -> Option<DynamicImage> { None }
+}
+
+pub struct VoidImage {
+    info: ImageInfo
+}
+
+impl Image<Void> for VoidImage {
+    fn create(renderer: &mut Void, image: &DynamicImage, flags: ImageFlags) -> Result<VoidImage> {
+        let size = image.dimensions();
+
+        Ok(VoidImage {
+            info: ImageInfo {
+                width: size.0 as usize,
+                height: size.1 as usize,
+                flags: flags,
+                format: TextureType::Rgba
+            }
+        })
     }
 
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
+    fn update(&mut self, renderer: &mut Void, data: &DynamicImage, x: usize, y: usize) -> Result<()> {
         Ok(())
     }
 
-    fn delete_image(&mut self, id: ImageId) {}
+    fn delete(self, renderer: &mut Void) {
 
-    fn texture_flags(&self, id: ImageId) -> ImageFlags { ImageFlags::empty() }
-    fn texture_size(&self, id: ImageId) -> (u32, u32) { (0,0) }
-    fn texture_type(&self, id: ImageId) -> Option<TextureType> { None }
+    }
 
-    fn screenshot(&mut self) -> Option<DynamicImage> { None }
+    fn info(&self) -> ImageInfo {
+        self.info
+    }
 }

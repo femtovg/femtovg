@@ -4,17 +4,15 @@ use std::mem;
 use std::ops::DerefMut;
 use std::ffi::{CStr, c_void};
 
-use fnv::FnvHashMap;
-use image::{DynamicImage, GenericImageView};
+use image::DynamicImage;
 
 use crate::{
     Color,
     Result,
-    ImageFlags,
+    ImageStore,
     FillRule,
     CompositeOperationState,
     BlendFactor,
-    ErrorKind,
     renderer::{Vertex, ImageId}
 };
 
@@ -23,11 +21,13 @@ use super::{
     Renderer,
     Command,
     CommandType,
-    TextureType
 };
 
 mod shader;
 use shader::Shader;
+
+mod texture;
+use texture::Texture;
 
 mod uniform_array;
 use uniform_array::UniformArray;
@@ -39,14 +39,6 @@ mod gl {
 
 use gl::types::*;
 
-struct Texture {
-    tex: GLuint,
-    width: u32,
-    height: u32,
-    flags: ImageFlags,
-    tex_type: TextureType
-}
-
 pub struct OpenGl {
     debug: bool,
     antialias: bool,
@@ -55,8 +47,6 @@ pub struct OpenGl {
     shader: Shader,
     vert_arr: GLuint,
     vert_buff: GLuint,
-    last_texture_id: u32,
-    textures: FnvHashMap<ImageId, Texture>
 }
 
 impl OpenGl {
@@ -84,8 +74,6 @@ impl OpenGl {
             shader: shader,
             vert_arr: 0,
             vert_buff: 0,
-            last_texture_id: 0,
-            textures: Default::default()
         };
 
         unsafe {
@@ -97,6 +85,10 @@ impl OpenGl {
         }
 
         Ok(opengl)
+    }
+
+    pub fn is_opengles(&self) -> bool {
+        self.is_opengles
     }
 
     fn check_error(&self, label: &str) {
@@ -145,8 +137,8 @@ impl OpenGl {
         }
     }
 
-    fn convex_fill(&self, cmd: &Command, gpu_paint: Params) {
-        self.set_uniforms(gpu_paint, cmd.image, cmd.alpha_mask);
+    fn convex_fill(&self, images: &ImageStore<Self>, cmd: &Command, gpu_paint: Params) {
+        self.set_uniforms(images, gpu_paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
@@ -161,7 +153,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, cmd: &Command, stencil_paint: Params, fill_paint: Params) {
+    fn concave_fill(&self, images: &ImageStore<Self>, cmd: &Command, stencil_paint: Params, fill_paint: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -170,7 +162,7 @@ impl OpenGl {
             //gl::DepthMask(gl::FALSE);
         }
 
-        self.set_uniforms(stencil_paint, None, None);
+        self.set_uniforms(images, stencil_paint, None, None);
 
         unsafe {
             gl::StencilOpSeparate(gl::FRONT, gl::KEEP, gl::KEEP, gl::INCR_WRAP);
@@ -191,7 +183,7 @@ impl OpenGl {
             //gl::DepthMask(gl::TRUE);
         }
 
-        self.set_uniforms(fill_paint, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, fill_paint, cmd.image, cmd.alpha_mask);
 
         if self.antialias {
             unsafe {
@@ -229,8 +221,8 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, cmd: &Command, paint: Params) {
-        self.set_uniforms(paint, cmd.image, cmd.alpha_mask);
+    fn stroke(&self, images: &ImageStore<Self>, cmd: &Command, paint: Params) {
+        self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -241,7 +233,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, cmd: &Command, paint1: Params, paint2: Params) {
+    fn stencil_stroke(&self, images: &ImageStore<Self>, cmd: &Command, paint1: Params, paint2: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -251,7 +243,7 @@ impl OpenGl {
             gl::StencilOp(gl::KEEP, gl::KEEP, gl::INCR);
         }
 
-        self.set_uniforms(paint2, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint2, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -260,7 +252,7 @@ impl OpenGl {
         }
 
         // Draw anti-aliased pixels.
-        self.set_uniforms(paint1, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint1, cmd.image, cmd.alpha_mask);
 
         unsafe {
             gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
@@ -294,8 +286,8 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, cmd: &Command, paint: Params) {
-        self.set_uniforms(paint, cmd.image, cmd.alpha_mask);
+    fn triangles(&self, images: &ImageStore<Self>, cmd: &Command, paint: Params) {
+        self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         if let Some((start, count)) = cmd.triangles_verts {
             unsafe { gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32); }
@@ -304,19 +296,19 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, paint: Params, image_id: Option<ImageId>, alpha_mask: Option<ImageId>) {
+    fn set_uniforms(&self, images: &ImageStore<Self>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
         let arr = UniformArray::from(paint);
         self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
-        let tex = image_id.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
+        let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
 
         unsafe {
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, tex);
         }
 
-        let masktex = alpha_mask.and_then(|id| self.textures.get(&id)).map_or(0, |texture| texture.tex);
+        let masktex = alpha_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
 
         unsafe {
             gl::ActiveTexture(gl::TEXTURE0 + 1);
@@ -338,6 +330,7 @@ impl OpenGl {
 }
 
 impl Renderer for OpenGl {
+    type Image = Texture;
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -348,7 +341,7 @@ impl Renderer for OpenGl {
         }
     }
 
-    fn render(&mut self, verts: &[Vertex], commands: &[Command]) {
+    fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]) {
         unsafe {
             self.shader.bind();
 
@@ -393,11 +386,11 @@ impl Renderer for OpenGl {
             self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
-                CommandType::ConvexFill { params } => self.convex_fill(cmd, params),
-                CommandType::ConcaveFill { stencil_params, fill_params } => self.concave_fill(cmd, stencil_params, fill_params),
-                CommandType::Stroke { params } => self.stroke(cmd, params),
-                CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(cmd, params1, params2),
-                CommandType::Triangles { params } => self.triangles(cmd, params),
+                CommandType::ConvexFill { params } => self.convex_fill(images, cmd, params),
+                CommandType::ConcaveFill { stencil_params, fill_params } => self.concave_fill(images, cmd, stencil_params, fill_params),
+                CommandType::Stroke { params } => self.stroke(images, cmd, params),
+                CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(images, cmd, params1, params2),
+                CommandType::Triangles { params } => self.triangles(images, cmd, params),
                 CommandType::ClearRect { x, y, width, height, color } => {
                     self.clear_rect(x, y, width, height, color);
                 }
@@ -419,259 +412,6 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
-        let size = image.dimensions();
-
-        let mut texture = Texture {
-            tex: 0,
-            width: size.0,
-            height: size.1,
-            flags: flags,
-            tex_type: TextureType::Rgba
-        };
-
-        unsafe {
-            gl::GenTextures(1, &mut texture.tex);
-            gl::BindTexture(gl::TEXTURE_2D, texture.tex);
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.width as i32);
-            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-        }
-
-        match image {
-            DynamicImage::ImageLuma8(gray_image) => unsafe {
-                let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
-
-                gl::TexImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    format as i32,
-                    texture.width as i32,
-                    texture.height as i32,
-                    0,
-                    format,
-                    gl::UNSIGNED_BYTE,
-                    gray_image.as_ref().as_ptr() as *const GLvoid
-                );
-
-                texture.tex_type = TextureType::Alpha;
-            },
-            DynamicImage::ImageRgb8(rgb_image) => unsafe {
-                gl::TexImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    gl::RGB as i32,
-                    texture.width as i32,
-                    texture.height as i32,
-                    0,
-                    gl::RGB,
-                    gl::UNSIGNED_BYTE,
-                    rgb_image.as_ref().as_ptr() as *const GLvoid
-                );
-
-                texture.tex_type = TextureType::Rgb;
-            },
-            DynamicImage::ImageRgba8(rgba_image) => unsafe {
-                gl::TexImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    gl::RGBA as i32,
-                    texture.width as i32,
-                    texture.height as i32,
-                    0,
-                    gl::RGBA,
-                    gl::UNSIGNED_BYTE,
-                    rgba_image.as_ref().as_ptr() as *const GLvoid
-                );
-
-                texture.tex_type = TextureType::Rgba;
-            },
-            DynamicImage::ImageLumaA8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
-            DynamicImage::ImageBgr8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgr8"))),
-            DynamicImage::ImageBgra8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgra8"))),
-            _ => return Err(ErrorKind::UnsuportedImageFromat(String::from("Unknown image format"))),
-        }
-
-        if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
-            if flags.contains(ImageFlags::NEAREST) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST_MIPMAP_NEAREST as i32); }
-            } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); }
-            }
-        } else {
-            if flags.contains(ImageFlags::NEAREST) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); }
-            } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32); }
-            }
-        }
-
-        if flags.contains(ImageFlags::NEAREST) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32); }
-        } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32); }
-        }
-
-        if flags.contains(ImageFlags::REPEAT_X) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32); }
-        } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32); }
-        }
-
-        if flags.contains(ImageFlags::REPEAT_Y) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32); }
-        } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
-        }
-
-        unsafe {
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
-            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-        }
-
-        if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
-            unsafe {
-                gl::GenerateMipmap(gl::TEXTURE_2D);
-                //gl::TexParameteri(gl::TEXTURE_2D, gl::GENERATE_MIPMAP, gl::TRUE);
-            }
-        }
-
-        unsafe { gl::BindTexture(gl::TEXTURE_2D, 0); }
-
-        let id = self.last_texture_id;
-        self.last_texture_id = self.last_texture_id.wrapping_add(1);
-
-        self.textures.insert(ImageId(id), texture);
-
-        Ok(ImageId(id))
-    }
-
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
-        let size = image.dimensions();
-
-        let texture = match self.textures.get(&id) {
-            Some(texture) => texture,
-            None => return Err(ErrorKind::ImageIdNotFound)
-        };
-
-        if x + size.0 > texture.width {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        if y + size.1 > texture.height {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, texture.tex);
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, size.0 as i32);
-        }
-
-        match image {
-            DynamicImage::ImageLuma8(gray_image) => unsafe {
-                let format = if self.is_opengles { gl::LUMINANCE } else { gl::RED };
-
-                if texture.tex_type != TextureType::Alpha {
-                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
-                }
-
-                gl::TexSubImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
-                    format,
-                    gl::UNSIGNED_BYTE,
-                    gray_image.as_ref().as_ptr() as *const GLvoid
-                );
-            }
-            DynamicImage::ImageRgb8(rgb_image) => unsafe {
-                if texture.tex_type != TextureType::Rgb {
-                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
-                }
-
-                gl::TexSubImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
-                    gl::RGB,
-                    gl::UNSIGNED_BYTE,
-                    rgb_image.as_ref().as_ptr() as *const GLvoid
-                );
-            }
-            DynamicImage::ImageRgba8(rgba_image) => unsafe {
-                if texture.tex_type != TextureType::Rgba {
-                    return Err(ErrorKind::ImageUpdateWithDifferentFormat);
-                }
-
-                gl::TexSubImage2D(
-                    gl::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
-                    gl::RGBA,
-                    gl::UNSIGNED_BYTE,
-                    rgba_image.as_ref().as_ptr() as *const GLvoid
-                );
-            }
-            DynamicImage::ImageLumaA8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
-            DynamicImage::ImageBgr8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgr8"))),
-            DynamicImage::ImageBgra8(_) =>
-                return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageBgra8"))),
-            _ => return Err(ErrorKind::UnsuportedImageFromat(String::from("Unknown image format"))),
-        }
-
-        unsafe {
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
-            //gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-            //gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-
-        Ok(())
-    }
-
-    fn delete_image(&mut self, id: ImageId) {
-        if let Some(texture) = self.textures.remove(&id) {
-            unsafe {
-                gl::DeleteTextures(1, &texture.tex);
-            }
-        }
-    }
-
-    fn texture_flags(&self, id: ImageId) -> ImageFlags {
-        self.textures.get(&id).unwrap().flags
-    }
-
-    fn texture_size(&self, id: ImageId) -> (u32, u32) {
-        let tex = self.textures.get(&id).unwrap();
-
-        (tex.width, tex.height)
-    }
-
-    fn texture_type(&self, id: ImageId) -> Option<TextureType> {
-        let tex = self.textures.get(&id).unwrap();
-
-        Some(tex.tex_type)
-    }
-
     fn screenshot(&mut self) -> Option<DynamicImage> {
         let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
 
@@ -687,10 +427,6 @@ impl Renderer for OpenGl {
 
 impl Drop for OpenGl {
     fn drop(&mut self) {
-        for (_, texture) in self.textures.drain() {
-            unsafe { gl::DeleteTextures(1, &texture.tex); }
-        }
-
         if self.vert_arr != 0 {
             unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
         }

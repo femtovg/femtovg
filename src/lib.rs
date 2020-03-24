@@ -3,6 +3,7 @@ use std::path::Path as FilePath;
 
 use image::DynamicImage;
 use bitflags::bitflags;
+use generational_arena::{Arena, Index};
 
 /*
 TODO:
@@ -11,6 +12,7 @@ TODO:
         - Renderer Error type interation with Canvas Error type
         - Canvas with renderer reference or renderer with render(canvas: Canvas) method
             - Canvas with Box<dyn Renderer>
+    - Move all image related stuff to image module
     - Use imgref crate instead of the image crate
     - Review geometry module and maybe migrate to euclid
     - Custom shader support
@@ -20,6 +22,7 @@ TODO:
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Emoji support
+    - Make sure use-es follow the pattern std, crates, crate, super, mod
     - Tests
     - Documentation
 */
@@ -59,7 +62,8 @@ use renderer::{
     Command,
     CommandType,
     ShaderType,
-    Drawable
+    Drawable,
+    Image
 };
 
 pub(crate) mod geometry;
@@ -214,7 +218,7 @@ impl Default for LineJoin {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct ImageId(pub u32);
+pub struct ImageId(pub Index);
 
 #[derive(Copy, Clone)]
 struct State {
@@ -235,7 +239,41 @@ impl Default for State {
     }
 }
 
-pub struct Canvas<T> {
+pub struct ImageStore<T: Renderer>(Arena<T::Image>);
+
+impl<T: Renderer> ImageStore<T> {
+    pub fn new() -> Self {
+        Self(Arena::new())
+    }
+
+    pub fn add(&mut self, renderer: &mut T, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
+        let image = T::Image::create(renderer, image, flags)?;
+
+        Ok(ImageId(self.0.insert(image)))
+    }
+
+    pub fn get(&self, id: ImageId) -> Option<&T::Image> {
+        self.0.get(id.0)
+    }
+
+    pub fn update(&mut self, renderer: &mut T, id: ImageId, image_src: &DynamicImage, x: usize, y: usize) -> Result<()> {
+        if let Some(image) = self.0.get_mut(id.0) {
+            image.update(renderer, image_src, x, y)?;
+        } else {
+            return Err(ErrorKind::ImageIdNotFound);
+        }
+
+        Ok(())
+    }
+
+    pub fn remove(&mut self, renderer: &mut T, id: ImageId) {
+        if let Some(image) = self.0.remove(id.0) {
+            image.delete(renderer);
+        }
+    }
+}
+
+pub struct Canvas<T: Renderer> {
     width: f32,
     height: f32,
     renderer: T,
@@ -245,6 +283,7 @@ pub struct Canvas<T> {
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
+    images: ImageStore<T>,
     fringe_width: f32,
     device_px_ratio: f32,
     tess_tol: f32,
@@ -266,6 +305,7 @@ impl<T> Canvas<T> where T: Renderer {
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
+            images: ImageStore::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
             tess_tol: 0.25,
@@ -311,7 +351,7 @@ impl<T> Canvas<T> where T: Renderer {
     ///
     /// Call this at the end of rach frame.
     pub fn flush(&mut self) {
-        self.renderer.render(&self.verts, &self.commands);
+        self.renderer.render(&self.images, &self.verts, &self.commands);
         self.commands.clear();
         self.verts.clear();
     }
@@ -385,17 +425,17 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Creates image by loading it from the specified chunk of memory.
     pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
-        self.renderer.create_image(image, flags)
+        self.images.add(&mut self.renderer, image, flags)
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()> {
-        self.renderer.update_image(id, image, x, y)
+    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: usize, y: usize) -> Result<()> {
+        self.images.update(&mut self.renderer, id, image, x, y)
     }
 
     /// Deletes created image.
     pub fn delete_image(&mut self, id: ImageId) {
-        self.renderer.delete_image(id);
+        self.images.remove(&mut self.renderer, id);
     }
 
     // Transforms
@@ -564,7 +604,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
-            let params = Params::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let params = Params::new(&self.images, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
 
             CommandType::ConvexFill { params }
         } else {
@@ -572,7 +612,7 @@ impl<T> Canvas<T> where T: Renderer {
             stencil_params.stroke_thr = -1.0;
             stencil_params.shader_type = ShaderType::Stencil.to_f32();
 
-            let fill_params = Params::new(&self.renderer, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let fill_params = Params::new(&self.images, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
 
             CommandType::ConcaveFill { stencil_params, fill_params }
         };
@@ -677,10 +717,10 @@ impl<T> Canvas<T> where T: Renderer {
         );
 
         // GPU uniforms
-        let params = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let params = Params::new(&self.images, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
-            let params2 = Params::new(&self.renderer, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let params2 = Params::new(&self.images, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
 
             CommandType::StencilStroke { params1: params, params2 }
         } else {
@@ -783,7 +823,7 @@ impl<T> Canvas<T> where T: Renderer {
         style.render_style = render_style;
 
         let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
-        let cmds = self.text_renderer.render(&mut self.renderer, &mut self.fontdb, &layout, &style).unwrap();
+        let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
         for cmd in &cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
@@ -814,7 +854,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
-        let params = Params::new(&self.renderer, paint, scissor, 1.0, 1.0, -1.0);
+        let params = Params::new(&self.images, paint, scissor, 1.0, 1.0, -1.0);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;

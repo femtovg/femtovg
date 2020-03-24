@@ -1,7 +1,9 @@
 
-use crate::{ImageFlags, Scissor, Color};
+use crate::{ImageFlags, ImageStore, Scissor, Color};
 use crate::paint::{Paint, PaintFlavor};
 use crate::geometry::Transform2D;
+use crate::renderer::Image;
+
 use super::{ShaderType, TextureType, Renderer};
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -24,7 +26,7 @@ pub struct Params {
 
 impl Params {
 
-    pub(crate) fn new<T: Renderer>(backend: &T, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
+    pub(crate) fn new<T: Renderer>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
         let mut params = Params::default();
 
         // Scissor
@@ -65,7 +67,8 @@ impl Params {
                 inv_transform = paint.transform.inversed();
             },
             PaintFlavor::Image { id, cx, cy, width, height, angle, alpha } => {
-                let texture_flags = backend.texture_flags(id);
+                // TODO: fix this unwrap
+                let image_info = images.get(id).unwrap().info();//.texture_flags(id);
 
                 params.extent[0] = width;
                 params.extent[1] = height;
@@ -80,7 +83,7 @@ impl Params {
                 transform.translate(cx, cy);
                 transform.multiply(&paint.transform);
 
-                if texture_flags.contains(ImageFlags::FLIP_Y) {
+                if image_info.flags.contains(ImageFlags::FLIP_Y) {
                     let mut m1 = Transform2D::identity();
                     m1.translate(0.0, height * 0.5);
                     m1.multiply(&transform);
@@ -99,9 +102,9 @@ impl Params {
 
                 params.shader_type = ShaderType::FillImage.to_f32();
 
-                params.tex_type = match backend.texture_type(id) {
-                    Some(TextureType::Rgba) => if texture_flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
-                    Some(TextureType::Alpha) => 2.0,
+                params.tex_type = match image_info.format {
+                    TextureType::Rgba => if image_info.flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                    TextureType::Alpha => 2.0,
                     _ => 0.0
                 };
             },

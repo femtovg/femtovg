@@ -8,6 +8,7 @@ use crate::{
     FillRule,
     ImageId,
     ImageFlags,
+    ImageStore,
     CompositeOperationState
 };
 
@@ -19,6 +20,8 @@ pub use void::Void;
 
 mod params;
 pub(crate) use params::Params;
+
+// TODO: Rename this to ImageFormat
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {
@@ -85,19 +88,37 @@ impl Command {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct ImageInfo {
+    flags: ImageFlags,
+    width: usize,
+    height: usize,
+    format: TextureType
+}
+
+pub trait Image<T: Renderer> {
+    fn create(renderer: &mut T, data: &DynamicImage, flags: ImageFlags) -> Result<Self> where Self: Sized;
+    fn update(&mut self, renderer: &mut T, data: &DynamicImage, x: usize, y: usize) -> Result<()>;
+    fn delete(self, renderer: &mut T);
+
+    fn info(&self) -> ImageInfo;
+}
+
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
-pub trait Renderer {
+pub trait Renderer: Sized {
+    type Image: Image<Self>;
+
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
-    fn render(&mut self, verts: &[Vertex], commands: &[Command]);
+    fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]);
 
-    fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId>;
-    fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()>;
-    fn delete_image(&mut self, id: ImageId);
-
-    fn texture_flags(&self, id: ImageId) -> ImageFlags;
-    fn texture_size(&self, id: ImageId) -> (u32, u32);
-    fn texture_type(&self, id: ImageId) -> Option<TextureType>;
+    // fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId>;
+    // fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()>;
+    // fn delete_image(&mut self, id: ImageId);
+    //
+    // fn texture_flags(&self, id: ImageId) -> ImageFlags;
+    // fn texture_size(&self, id: ImageId) -> (u32, u32);
+    // fn texture_type(&self, id: ImageId) -> Option<TextureType>;
 
     fn screenshot(&mut self) -> Option<DynamicImage>;
 }
