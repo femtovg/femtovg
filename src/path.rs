@@ -9,6 +9,7 @@ pub use cache::{PathCache, Convexity};
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
 
+// TODO: use Solidity enum here
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum Winding {
     CCW = 1,

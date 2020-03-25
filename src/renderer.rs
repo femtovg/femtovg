@@ -112,14 +112,6 @@ pub trait Renderer: Sized {
 
     fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]);
 
-    // fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId>;
-    // fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: u32, y: u32) -> Result<()>;
-    // fn delete_image(&mut self, id: ImageId);
-    //
-    // fn texture_flags(&self, id: ImageId) -> ImageFlags;
-    // fn texture_size(&self, id: ImageId) -> (u32, u32);
-    // fn texture_type(&self, id: ImageId) -> Option<TextureType>;
-
     fn screenshot(&mut self) -> Option<DynamicImage>;
 }
 

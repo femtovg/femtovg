@@ -7,16 +7,11 @@ use generational_arena::{Arena, Index};
 
 /*
 TODO:
-    - Final review of project architecture:
-        - Canvas<T> vs Canvas with Box<dyn Renderer>
-        - Renderer Error type interation with Canvas Error type
-        - Canvas with renderer reference or renderer with render(canvas: Canvas) method
-            - Canvas with Box<dyn Renderer>
     - Move all image related stuff to image module
     - Use imgref crate instead of the image crate
     - Review geometry module and maybe migrate to euclid
     - Custom shader support
-    - Review test functions for:
+    - Review text functions for:
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?
         - Mapping from coordinates to character indices
@@ -268,6 +263,12 @@ impl<T: Renderer> ImageStore<T> {
 
     pub fn remove(&mut self, renderer: &mut T, id: ImageId) {
         if let Some(image) = self.0.remove(id.0) {
+            image.delete(renderer);
+        }
+    }
+
+    pub fn clear(&mut self, renderer: &mut T) {
+        for (_idx, image) in self.0.drain() {
             image.delete(renderer);
         }
     }
@@ -882,6 +883,12 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn state_mut(&mut self) -> &mut State {
         self.state_stack.last_mut().unwrap()
+    }
+}
+
+impl<T: Renderer> Drop for Canvas<T> {
+    fn drop(&mut self) {
+        self.images.clear(&mut self.renderer);
     }
 }
 
