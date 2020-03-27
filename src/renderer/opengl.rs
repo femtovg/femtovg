@@ -356,9 +356,9 @@ impl Renderer for OpenGl {
             gl::Disable(gl::DEPTH_TEST);
             gl::Disable(gl::SCISSOR_TEST);
             gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
-            gl::StencilMask(0xffffffff);
+            gl::StencilMask(0xffff_ffff);
             gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
-            gl::StencilFunc(gl::ALWAYS, 0, 0xffffffff);
+            gl::StencilFunc(gl::ALWAYS, 0, 0xffff_ffff);
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
 

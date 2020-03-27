@@ -66,12 +66,13 @@ impl Atlas {
             }
         }
 
-        besti?;
+        if let Some(besti) = besti {
+            // Perform the actual packing.
+            self.add_skyline_level(besti, bestx, besty, rect_width, rect_height);
+            return Some((bestx, besty));
+        }
 
-        // Perform the actual packing.
-        self.add_skyline_level(besti.unwrap(), bestx, besty, rect_width, rect_height);
-
-        Some((bestx, besty))
+        None
     }
 
     fn insert_node(&mut self, idx: usize, x: usize, y: usize, width: usize) {

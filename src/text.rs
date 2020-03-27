@@ -135,7 +135,7 @@ impl Weight {
         }
     }
 
-    pub fn value(&self) -> u16 {
+    pub fn value(self) -> u16 {
         match self {
             Self::Thin          => 100,
             Self::ExtraLight    => 200,
@@ -147,11 +147,11 @@ impl Weight {
             Self::ExtraBold     => 800,
             Self::Black         => 900,
             Self::ExtraBlack    => 950,
-            Self::Value(value)  => *value,
+            Self::Value(value)  => value,
         }
     }
 
-    pub fn is_bold(&self) -> bool {
+    pub fn is_bold(self) -> bool {
         self.value() > Self::Normal.value()
     }
 }
@@ -191,7 +191,7 @@ impl WidthClass {
         }
     }
 
-    pub fn value(&self) -> u16 {
+    pub fn value(self) -> u16 {
         match self {
             Self::UltraCondensed   => 1,
             Self::ExtraCondensed   => 2,

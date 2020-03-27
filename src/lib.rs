@@ -235,6 +235,12 @@ impl Default for State {
 
 pub struct ImageStore<T: Renderer>(Arena<T::Image>);
 
+impl<T: Renderer> Default for ImageStore<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Renderer> ImageStore<T> {
     pub fn new() -> Self {
         Self(Arena::new())
@@ -313,7 +319,6 @@ impl<T> Canvas<T> where T: Renderer {
         };
 
         canvas.save();
-        canvas.reset();
 
         Ok(canvas)
     }

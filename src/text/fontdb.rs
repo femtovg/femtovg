@@ -140,19 +140,16 @@ impl FontDb {
         let font = ttf::Font::from_data(&data, 0)?;
         let description = FontDescription::try_from(font)?;
 
-        let id;
-
-        if !self.font_descr.contains_key(&description) {
+        if let Some(id) = self.font_descr.get(&description).copied() {
+            Ok(id)
+        } else {
             let face = self.library.new_memory_face(data, 0)?;
 
-            id = FontId(self.fonts.len());
+            let id = FontId(self.fonts.len());
             self.fonts.push(Font::new(id, face));
             self.font_descr.insert(description, id);
-        } else {
-            id = *self.font_descr.get(&description).unwrap();
+            Ok(id)
         }
-
-        Ok(id)
     }
 
     pub fn get(&self, id: FontId) -> Option<&Font> {
@@ -194,7 +191,7 @@ impl FontDb {
             return Ok(callback(font).1);
         }
 
-        return Err(ErrorKind::NoFontFound);
+        Err(ErrorKind::NoFontFound)
     }
 
 }

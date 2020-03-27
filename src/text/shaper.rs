@@ -85,8 +85,10 @@ impl ShapingId {
     }
 }
 
+type Cache<H> = LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), ErrorKind>, H>;
+
 pub struct Shaper {
-    cache: LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), ErrorKind>, FnvBuildHasher>
+    cache: Cache<FnvBuildHasher>
 }
 
 impl Default for Shaper {
@@ -116,7 +118,7 @@ impl Shaper {
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
-            let mut words: Vec<&str> = subtext.split(" ").collect();
+            let mut words: Vec<&str> = subtext.split(' ').collect();
 
             // reverse the words in right-to-left scripts bit not the trailing whitespace
             if direction == Direction::Rtl {
@@ -152,7 +154,7 @@ impl Shaper {
                             //let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
 
                             let hb_font = Self::hb_font(font);
-                            let buffer = Self::hb_buffer(&word, &direction, &script);
+                            let buffer = Self::hb_buffer(&word, direction, script);
                             //hb::shape(&hb_font, buffer, &[kern])
                             hb::shape(&hb_font, buffer, &[])
                         };
@@ -198,11 +200,11 @@ impl Shaper {
                     self.cache.put(shaping_id, ret);
                 }
 
-                let result = self.cache.get(&shaping_id).unwrap();
-
-                if let Ok((aspace_glyph, items)) = result {
-                    words_glyphs.push(items.clone());
-                    space_glyph = Some(*aspace_glyph);
+                if let Some(result) = self.cache.get(&shaping_id) {
+                    if let Ok((aspace_glyph, items)) = result {
+                        words_glyphs.push(items.clone());
+                        space_glyph = Some(*aspace_glyph);
+                    }
                 }
             }
 
@@ -310,7 +312,7 @@ impl Shaper {
         }
     }
 
-    fn hb_buffer(text: &str, direction: &Direction, script: &Script) -> hb::UnicodeBuffer {
+    fn hb_buffer(text: &str, direction: Direction, script: Script) -> hb::UnicodeBuffer {
         let mut buffer = hb::UnicodeBuffer::new()
             .add_str(text)
             .set_direction(match direction {

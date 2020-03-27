@@ -521,7 +521,7 @@ impl PathCache {
                 p1.dmy = (dly0 + dly1) * 0.5;
                 let dmr2 = p1.dmx * p1.dmx + p1.dmy * p1.dmy;
 
-                if dmr2 > 0.000001 {
+                if dmr2 > 0.000_001 {
                     let scale = (1.0 / dmr2).min(600.0);
 
                     p1.dmx *= scale;
