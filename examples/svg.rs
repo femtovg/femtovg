@@ -150,7 +150,7 @@ fn main() {
                 canvas.restore();
 
                 canvas.save();
-                //canvas.reset();
+                canvas.reset();
                 perf.render(&mut canvas, 5.0, 5.0);
                 canvas.restore();
 
