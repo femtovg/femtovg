@@ -2,7 +2,7 @@
 use std::ptr;
 use std::mem;
 use std::ops::DerefMut;
-use std::ffi::{CStr, c_void};
+use std::ffi::{CString, CStr, c_void};
 
 use image::DynamicImage;
 
@@ -23,8 +23,11 @@ use super::{
     CommandType,
 };
 
-mod shader;
-use shader::Shader;
+mod program;
+use program::{
+    Shader,
+    Program
+};
 
 mod texture;
 use texture::Texture;
@@ -44,7 +47,7 @@ pub struct OpenGl {
     antialias: bool,
     is_opengles: bool,
     view: [f32; 2],
-    shader: Shader,
+    program: Program,
     vert_arr: GLuint,
     vert_buff: GLuint,
 }
@@ -57,21 +60,21 @@ impl OpenGl {
 
         gl::load_with(load_fn);
 
-        let frag_shader_src = include_str!("opengl/main-fs.glsl");
-        let vert_shader_src = include_str!("opengl/main-vs.glsl");
+        let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
+        let vert_shader_src = format!("#version 100\n{}\n{}", shader_defs, include_str!("opengl/main-vs.glsl"));
+        let frag_shader_src = format!("#version 100\n{}\n{}", shader_defs, include_str!("opengl/main-fs.glsl"));
 
-        let shader = if antialias {
-            Shader::new("#define EDGE_AA 1", vert_shader_src, frag_shader_src)?
-        } else {
-            Shader::new("", vert_shader_src, frag_shader_src)?
-        };
+        let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
+        let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
+
+        let program = Program::new(&[vert_shader, frag_shader])?;
 
         let mut opengl = OpenGl {
             debug: debug,
             antialias: antialias,
             is_opengles: false,
             view: [0.0, 0.0],
-            shader: shader,
+            program: program,
             vert_arr: 0,
             vert_buff: 0,
         };
@@ -298,7 +301,7 @@ impl OpenGl {
 
     fn set_uniforms(&self, images: &ImageStore<Self>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
         let arr = UniformArray::from(paint);
-        self.shader.set_config(UniformArray::size() as i32, arr.as_ptr());
+        self.program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
         let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
@@ -342,9 +345,9 @@ impl Renderer for OpenGl {
     }
 
     fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]) {
-        unsafe {
-            self.shader.bind();
+        self.program.bind();
 
+        unsafe {
             gl::Enable(gl::CULL_FACE);
 
             gl::CullFace(gl::BACK);
@@ -375,10 +378,10 @@ impl Renderer for OpenGl {
         }
 
         // Bind the two uniform samplers to texture units
-        self.shader.set_tex(0);
-        self.shader.set_masktex(1);
+        self.program.set_tex(0);
+        self.program.set_masktex(1);
         // Set uniforms
-        self.shader.set_view(self.view);
+        self.program.set_view(self.view);
 
         self.check_error("render prepare");
 
@@ -407,7 +410,7 @@ impl Renderer for OpenGl {
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
 
-        self.shader.unbind();
+        self.program.unbind();
 
         self.check_error("render done");
     }
