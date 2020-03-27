@@ -7,7 +7,7 @@ use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
-use crate::{Winding, LineJoin, LineCap, FillRule};
+use crate::{Solidity, LineJoin, LineCap, FillRule};
 use crate::utils::VecRetainMut;
 
 use super::Verb;
@@ -71,7 +71,7 @@ pub struct Contour {
     point_range: Range<usize>,
     closed: bool,
     bevel: usize,
-    winding: Winding,
+    solidity: Solidity,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity
@@ -83,7 +83,7 @@ impl Default for Contour {
             point_range: 0..0,
             closed: Default::default(),
             bevel: Default::default(),
-            winding: Default::default(),
+            solidity: Default::default(),
             fill: Default::default(),
             stroke: Default::default(),
             convexity: Default::default()
@@ -178,8 +178,8 @@ impl PathCache {
                 Verb::Close => if let Some(contour) = cache.contours.last_mut() {
                     contour.closed = true;
                 }
-                Verb::Winding(winding) => if let Some(contour) = cache.contours.last_mut() {
-                    contour.winding = *winding;
+                Verb::Solidity(solidity) => if let Some(contour) = cache.contours.last_mut() {
+                    contour.solidity = *solidity;
                 }
             }
         }
@@ -203,14 +203,14 @@ impl PathCache {
                 return false;
             }
 
-            // Enforce winding.
+            // Enforce solidity by reversing the winding.
             let area = Contour::polygon_area(points);
 
-            if contour.winding == Winding::CCW && area < 0.0 {
+            if contour.solidity == Solidity::Solid && area < 0.0 {
                 points.reverse();
             }
 
-            if contour.winding == Winding::CW && area > 0.0 {
+            if contour.solidity == Solidity::Hole && area > 0.0 {
                 points.reverse();
             }
 

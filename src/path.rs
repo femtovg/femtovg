@@ -9,16 +9,15 @@ pub use cache::{PathCache, Convexity};
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
 
-// TODO: use Solidity enum here
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-pub enum Winding {
-    CCW = 1,
-    CW = 2
+pub enum Solidity {
+    Solid = 1,
+    Hole = 2
 }
 
-impl Default for Winding {
+impl Default for Solidity {
     fn default() -> Self {
-        Winding::CCW
+        Self::Solid
     }
 }
 
@@ -28,7 +27,7 @@ pub enum Verb {
     LineTo(f32, f32),
     BezierTo(f32, f32, f32, f32, f32, f32),
     Close,
-    Winding(Winding)
+    Solidity(Solidity)
 }
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
@@ -120,19 +119,18 @@ impl Path {
         self.append(&[Verb::Close]);
     }
 
-    /// Sets the current sub-path winding, see Winding and Solidity
-    // TODO: Change this to solidity. Make a Solidity enum
-    pub fn winding(&mut self, winding: Winding) {
-        self.append(&[Verb::Winding(winding)]);
+    /// Sets the current sub-path winding, see Solidity
+    pub fn solidity(&mut self, solidity: Solidity) {
+        self.append(&[Verb::Solidity(solidity)]);
     }
 
     /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
     /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
     /// Angles are specified in radians.
-    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Winding) {
+    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Solidity) {
         let mut da = a1 - a0;
 
-        if dir == Winding::CW {
+        if dir == Solidity::Hole {
             if da.abs() >= PI * 2.0 {
                 da = PI * 2.0;
             } else {
@@ -152,7 +150,7 @@ impl Path {
         // TODO: Maybe use small stack vec here
         let mut commands = Vec::with_capacity(ndivs as usize);
 
-        if dir == Winding::CCW {
+        if dir == Solidity::Solid {
             kappa = -kappa;
         }
 
@@ -222,13 +220,13 @@ impl Path {
             cy = y1 + dy0*d + -dx0*radius;
             a0 = dx0.atan2(-dy0);
             a1 = -dx1.atan2(dy1);
-            dir = Winding::CW;
+            dir = Solidity::Hole;
         } else {
             cx = x1 + dx0*d + -dy0*radius;
             cy = y1 + dy0*d + dx0*radius;
             a0 = -dx0.atan2(dy0);
             a1 = dx1.atan2(-dy1);
-            dir = Winding::CCW;
+            dir = Solidity::Solid;
         }
 
         self.arc(cx, cy, radius, a0, a1, dir);

@@ -16,7 +16,7 @@ use gpucanvas::{
     LineCap,
     LineJoin,
     FillRule,
-    Winding,
+    Solidity,
     ImageFlags,
     Align,
     Baseline,
@@ -312,7 +312,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	let mut path = Path::new();
 	path.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
 	path.rounded_rect(x, y, w, h, corner_radius);
-	path.winding(Winding::CW);
+	path.solidity(Solidity::Hole);
 	canvas.fill_path(&mut path, shadow_paint);
 
 	// Header
@@ -660,8 +660,8 @@ fn draw_spinner<T: Renderer>(canvas: &mut Canvas<T>, cx: f32, cy: f32, r: f32, t
     canvas.save();
 
     let mut path = Path::new();
-    path.arc(cx, cy, r0, a0, a1, Winding::CW);
-    path.arc(cx, cy, r1, a1, a0, Winding::CCW);
+    path.arc(cx, cy, r0, a0, a1, Solidity::Hole);
+    path.arc(cx, cy, r1, a1, a0, Solidity::Solid);
     path.close();
 
     let ax = cx + a0.cos() * (r0+r1)*0.5;

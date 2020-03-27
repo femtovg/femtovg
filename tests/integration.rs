@@ -4,7 +4,7 @@ use gpucanvas::{
     Path,
     Paint,
     Color,
-    Winding,
+    Solidity,
     FillRule,
     Baseline,
     renderer::Void
@@ -116,7 +116,7 @@ fn degenerate_arc() {
 
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
-    path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Winding::CW);
+    path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Solidity::Hole);
 
     canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
     canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));

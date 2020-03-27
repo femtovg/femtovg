@@ -72,7 +72,7 @@ mod path;
 use path::Convexity;
 pub use path::{
     Path,
-    Winding
+    Solidity
 };
 
 type Result<T> = std::result::Result<T, ErrorKind>;
