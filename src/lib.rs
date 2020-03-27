@@ -7,8 +7,8 @@ use generational_arena::{Arena, Index};
 
 /*
 TODO:
-    - Move all image related stuff to image module
     - Use imgref crate instead of the image crate
+    - Move all image related stuff to image module
     - Review geometry module and maybe migrate to euclid
     - Custom shader support
     - Review text functions for:
@@ -17,7 +17,6 @@ TODO:
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Emoji support
-    - Make sure use-es follow the pattern std, crates, crate, super, mod
     - Tests
     - Documentation
 */

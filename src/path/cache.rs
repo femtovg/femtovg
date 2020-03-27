@@ -9,6 +9,7 @@ use crate::geometry::{self, Bounds, Transform2D};
 use crate::renderer::Vertex;
 use crate::{Winding, LineJoin, LineCap, FillRule};
 use crate::utils::VecRetainMut;
+
 use super::Verb;
 
 bitflags! {

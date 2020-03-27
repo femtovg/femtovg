@@ -7,6 +7,8 @@ use std::convert::TryFrom;
 use fnv::FnvHashMap;
 use ttf_parser as ttf;
 
+use crate::ErrorKind;
+
 use super::{
     Font,
     Weight,
@@ -15,8 +17,6 @@ use super::{
     WidthClass,
     freetype as ft,
 };
-
-use crate::ErrorKind;
 
 #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);

@@ -1,10 +1,10 @@
 
+use crate::ErrorKind;
+
 use super::freetype as ft;
 use super::fontdb::{
     FontId
 };
-
-use crate::ErrorKind;
 
 pub struct Font {
     pub(crate) id: FontId,

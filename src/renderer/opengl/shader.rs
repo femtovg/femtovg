@@ -3,10 +3,10 @@ use std::str;
 use std::ptr;
 use std::ffi::CString;
 
+use crate::ErrorKind;
+
 use super::gl;
 use super::gl::types::*;
-
-use crate::ErrorKind;
 
 pub(crate) struct Shader {
     prog: GLuint,

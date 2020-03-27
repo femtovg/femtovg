@@ -21,7 +21,7 @@ pub use void::Void;
 mod params;
 pub(crate) use params::Params;
 
-// TODO: Rename this to ImageFormat
+// TODO: Rename this to ImageFormat and move it to it's own image mod
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum TextureType {

@@ -55,7 +55,6 @@ impl Params {
 
         params.has_mask = if paint.alpha_mask().is_some() { 1.0 } else { 0.0 };
 
-        // Paint flavor
         let inv_transform;
 
         match paint.flavor {
@@ -67,8 +66,10 @@ impl Params {
                 inv_transform = paint.transform.inversed();
             },
             PaintFlavor::Image { id, cx, cy, width, height, angle, alpha } => {
-                // TODO: fix this unwrap
-                let image_info = images.get(id).unwrap().info();//.texture_flags(id);
+                let image_info = match images.get(id) {
+                    Some(image) => image.info(),
+                    None => return params
+                };
 
                 params.extent[0] = width;
                 params.extent[1] = height;

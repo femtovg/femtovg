@@ -5,6 +5,11 @@ use image::{
     GenericImageView
 };
 
+use crate::{
+    Result,
+    ErrorKind
+};
+
 use super::{
     Renderer,
     TextureType,
@@ -15,10 +20,6 @@ use super::{
     ImageInfo,
     Image
 };
-
-use crate::Result;
-
-// TODO: Void renderer should behave correctly when dealing with images.
 
 /// Void renderer used for testing
 pub struct Void;
@@ -52,6 +53,16 @@ impl Image<Void> for VoidImage {
     }
 
     fn update(&mut self, renderer: &mut Void, data: &DynamicImage, x: usize, y: usize) -> Result<()> {
+        let size = data.dimensions();
+
+        if x + size.0 as usize > self.info.width {
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
+        }
+
+        if y + size.1 as usize > self.info.height {
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
+        }
+
         Ok(())
     }
 

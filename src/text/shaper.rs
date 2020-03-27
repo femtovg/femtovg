@@ -12,6 +12,8 @@ use self::hb::hb as hb_sys;
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
 
+use crate::ErrorKind;
+
 use super::{
     Align,
     Baseline,
@@ -27,8 +29,6 @@ use super::{
     TextLayout,
     GLYPH_PADDING
 };
-
-use crate::ErrorKind;
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
