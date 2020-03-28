@@ -56,8 +56,7 @@ use renderer::{
     Command,
     CommandType,
     ShaderType,
-    Drawable,
-    Image
+    Drawable
 };
 
 pub(crate) mod geometry;
@@ -246,8 +245,8 @@ impl<T: Renderer> ImageStore<T> {
         Self(Arena::new())
     }
 
-    pub fn add(&mut self, renderer: &mut T, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
-        let image = T::Image::create(renderer, image, flags)?;
+    pub fn add(&mut self, renderer: &mut T, data: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
+        let image = renderer.create_image(data, flags)?;
 
         Ok(ImageId(self.0.insert(image)))
     }
@@ -258,7 +257,7 @@ impl<T: Renderer> ImageStore<T> {
 
     pub fn update(&mut self, renderer: &mut T, id: ImageId, image_src: &DynamicImage, x: usize, y: usize) -> Result<()> {
         if let Some(image) = self.0.get_mut(id.0) {
-            image.update(renderer, image_src, x, y)?;
+            renderer.update_image(image, image_src, x, y)?;
         } else {
             return Err(ErrorKind::ImageIdNotFound);
         }
@@ -268,13 +267,13 @@ impl<T: Renderer> ImageStore<T> {
 
     pub fn remove(&mut self, renderer: &mut T, id: ImageId) {
         if let Some(image) = self.0.remove(id.0) {
-            image.delete(renderer);
+            renderer.delete_image(image);
         }
     }
 
     pub fn clear(&mut self, renderer: &mut T) {
         for (_idx, image) in self.0.drain() {
-            image.delete(renderer);
+            renderer.delete_image(image);
         }
     }
 }

@@ -8,13 +8,12 @@ use crate::{
     renderer::{
         Image,
         ImageInfo,
-        TextureType
+        ImageFormat
     }
 };
 
 use super::gl;
 use super::gl::types::*;
-use super::OpenGl;
 
 pub struct Texture {
     id: GLuint,
@@ -22,13 +21,7 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn id(&self) -> GLuint {
-        self.id
-    }
-}
-
-impl Image<OpenGl> for Texture {
-    fn create(renderer: &mut OpenGl, image: &DynamicImage, flags: ImageFlags) -> Result<Texture> {
+    pub fn new(image: &DynamicImage, flags: ImageFlags, opengles: bool) -> Result<Self> {
         let size = image.dimensions();
 
         let mut texture = Texture {
@@ -37,7 +30,7 @@ impl Image<OpenGl> for Texture {
                 width: size.0 as usize,
                 height: size.1 as usize,
                 flags: flags,
-                format: TextureType::Rgba
+                format: ImageFormat::Rgba
             }
         };
 
@@ -52,7 +45,7 @@ impl Image<OpenGl> for Texture {
 
         match image {
             DynamicImage::ImageLuma8(gray_image) => unsafe {
-                let format = if renderer.is_opengles() { gl::LUMINANCE } else { gl::RED };
+                let format = if opengles { gl::LUMINANCE } else { gl::RED };
 
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
@@ -66,7 +59,7 @@ impl Image<OpenGl> for Texture {
                     gray_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = TextureType::Alpha;
+                texture.info.format = ImageFormat::Alpha;
             },
             DynamicImage::ImageRgb8(rgb_image) => unsafe {
                 gl::TexImage2D(
@@ -81,7 +74,7 @@ impl Image<OpenGl> for Texture {
                     rgb_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = TextureType::Rgb;
+                texture.info.format = ImageFormat::Rgb;
             },
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
                 gl::TexImage2D(
@@ -96,7 +89,7 @@ impl Image<OpenGl> for Texture {
                     rgba_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = TextureType::Rgba;
+                texture.info.format = ImageFormat::Rgba;
             },
             DynamicImage::ImageLumaA8(_) =>
                 return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
@@ -158,7 +151,11 @@ impl Image<OpenGl> for Texture {
         Ok(texture)
     }
 
-    fn update(&mut self, renderer: &mut OpenGl, image: &DynamicImage, x: usize, y: usize) -> Result<()> {
+    pub fn id(&self) -> GLuint {
+        self.id
+    }
+
+    pub fn update(&mut self, image: &DynamicImage, x: usize, y: usize, opengles: bool) -> Result<()> {
         let size = image.dimensions();
 
         if x + size.0 as usize > self.info.width {
@@ -177,9 +174,9 @@ impl Image<OpenGl> for Texture {
 
         match image {
             DynamicImage::ImageLuma8(gray_image) => unsafe {
-                let format = if renderer.is_opengles() { gl::LUMINANCE } else { gl::RED };
+                let format = if opengles { gl::LUMINANCE } else { gl::RED };
 
-                if self.info.format != TextureType::Alpha {
+                if self.info.format != ImageFormat::Alpha {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
@@ -196,7 +193,7 @@ impl Image<OpenGl> for Texture {
                 );
             }
             DynamicImage::ImageRgb8(rgb_image) => unsafe {
-                if self.info.format != TextureType::Rgb {
+                if self.info.format != ImageFormat::Rgb {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
@@ -213,7 +210,7 @@ impl Image<OpenGl> for Texture {
                 );
             }
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
-                if self.info.format != TextureType::Rgba {
+                if self.info.format != ImageFormat::Rgba {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
@@ -249,12 +246,14 @@ impl Image<OpenGl> for Texture {
         Ok(())
     }
 
-    fn delete(self, _renderer: &mut OpenGl) {
+    pub fn delete(self) {
         unsafe {
             gl::DeleteTextures(1, &self.id);
         }
     }
+}
 
+impl Image for Texture {
     fn info(&self) -> ImageInfo {
         self.info
     }

@@ -21,10 +21,10 @@ pub use void::Void;
 mod params;
 pub(crate) use params::Params;
 
-// TODO: Rename this to ImageFormat and move it to it's own image mod
+// TODO: Move this to it's own image mod
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum TextureType {
+pub enum ImageFormat {
     Rgb,
     Rgba,
     Alpha
@@ -93,24 +93,24 @@ pub struct ImageInfo {
     flags: ImageFlags,
     width: usize,
     height: usize,
-    format: TextureType
+    format: ImageFormat
 }
 
-pub trait Image<T: Renderer> {
-    fn create(renderer: &mut T, data: &DynamicImage, flags: ImageFlags) -> Result<Self> where Self: Sized;
-    fn update(&mut self, renderer: &mut T, data: &DynamicImage, x: usize, y: usize) -> Result<()>;
-    fn delete(self, renderer: &mut T);
-
+pub trait Image {
     fn info(&self) -> ImageInfo;
 }
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
 pub trait Renderer: Sized {
-    type Image: Image<Self>;
+    type Image: Image;
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]);
+
+    fn create_image(&mut self, data: &DynamicImage, flags: ImageFlags) -> Result<Self::Image>;
+    fn update_image(&mut self, image: &mut Self::Image, data: &DynamicImage, x: usize, y: usize) -> Result<()>;
+    fn delete_image(&mut self, image: Self::Image);
 
     fn screenshot(&mut self) -> Option<DynamicImage>;
 }

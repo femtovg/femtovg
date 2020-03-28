@@ -1,10 +1,20 @@
 
-use crate::{ImageFlags, ImageStore, Scissor, Color};
-use crate::paint::{Paint, PaintFlavor};
-use crate::geometry::Transform2D;
-use crate::renderer::Image;
+use crate::{
+    ImageFlags,
+    ImageStore,
+    Scissor,
+    Color,
+    Paint,
+    PaintFlavor,
+    Transform2D,
+};
 
-use super::{ShaderType, TextureType, Renderer};
+use super::{
+    Image,
+    ShaderType,
+    ImageFormat,
+    Renderer
+};
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Params {
@@ -104,8 +114,8 @@ impl Params {
                 params.shader_type = ShaderType::FillImage.to_f32();
 
                 params.tex_type = match image_info.format {
-                    TextureType::Rgba => if image_info.flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
-                    TextureType::Alpha => 2.0,
+                    ImageFormat::Rgba => if image_info.flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                    ImageFormat::Alpha => 2.0,
                     _ => 0.0
                 };
             },

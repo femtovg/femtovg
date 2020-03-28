@@ -21,6 +21,7 @@ use super::{
     Renderer,
     Command,
     CommandType,
+    ImageFlags
 };
 
 mod program;
@@ -413,6 +414,18 @@ impl Renderer for OpenGl {
         self.program.unbind();
 
         self.check_error("render done");
+    }
+
+    fn create_image(&mut self, data: &DynamicImage, flags: ImageFlags) -> Result<Self::Image> {
+        Texture::new(data, flags, self.is_opengles)
+    }
+
+    fn update_image(&mut self, image: &mut Self::Image, data: &DynamicImage, x: usize, y: usize) -> Result<()> {
+        image.update(data, x, y, self.is_opengles)
+    }
+
+    fn delete_image(&mut self, image: Self::Image) {
+        image.delete();
     }
 
     fn screenshot(&mut self) -> Option<DynamicImage> {
