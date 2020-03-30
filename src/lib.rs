@@ -56,7 +56,8 @@ use renderer::{
     Command,
     CommandType,
     ShaderType,
-    Drawable
+    Drawable,
+    Image
 };
 
 pub(crate) mod geometry;
@@ -232,30 +233,30 @@ impl Default for State {
     }
 }
 
-pub struct ImageStore<T: Renderer>(Arena<T::Image>);
+pub struct ImageStore<T>(Arena<T>);
 
-impl<T: Renderer> Default for ImageStore<T> {
+impl<T: Image> Default for ImageStore<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Renderer> ImageStore<T> {
+impl<T: Image> ImageStore<T> {
     pub fn new() -> Self {
         Self(Arena::new())
     }
 
-    pub fn add(&mut self, renderer: &mut T, data: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
+    pub fn add<R: Renderer<Image = T>>(&mut self, renderer: &mut R, data: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
         let image = renderer.create_image(data, flags)?;
 
         Ok(ImageId(self.0.insert(image)))
     }
 
-    pub fn get(&self, id: ImageId) -> Option<&T::Image> {
+    pub fn get(&self, id: ImageId) -> Option<&T> {
         self.0.get(id.0)
     }
 
-    pub fn update(&mut self, renderer: &mut T, id: ImageId, image_src: &DynamicImage, x: usize, y: usize) -> Result<()> {
+    pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, image_src: &DynamicImage, x: usize, y: usize) -> Result<()> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(image, image_src, x, y)?;
         } else {
@@ -265,13 +266,13 @@ impl<T: Renderer> ImageStore<T> {
         Ok(())
     }
 
-    pub fn remove(&mut self, renderer: &mut T, id: ImageId) {
+    pub fn remove<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId) {
         if let Some(image) = self.0.remove(id.0) {
             renderer.delete_image(image);
         }
     }
 
-    pub fn clear(&mut self, renderer: &mut T) {
+    pub fn clear<R: Renderer<Image = T>>(&mut self, renderer: &mut R) {
         for (_idx, image) in self.0.drain() {
             renderer.delete_image(image);
         }
@@ -288,7 +289,7 @@ pub struct Canvas<T: Renderer> {
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
-    images: ImageStore<T>,
+    images: ImageStore<T::Image>,
     fringe_width: f32,
     device_px_ratio: f32,
     tess_tol: f32,

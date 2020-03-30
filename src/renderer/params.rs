@@ -13,7 +13,6 @@ use super::{
     Image,
     ShaderType,
     ImageFormat,
-    Renderer
 };
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -36,7 +35,7 @@ pub struct Params {
 
 impl Params {
 
-    pub(crate) fn new<T: Renderer>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
+    pub(crate) fn new<T: Image>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
         let mut params = Params::default();
 
         // Scissor

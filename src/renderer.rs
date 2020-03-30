@@ -101,12 +101,12 @@ pub trait Image {
 }
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.
-pub trait Renderer: Sized {
+pub trait Renderer {
     type Image: Image;
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
-    fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]);
+    fn render(&mut self, images: &ImageStore<Self::Image>, verts: &[Vertex], commands: &[Command]);
 
     fn create_image(&mut self, data: &DynamicImage, flags: ImageFlags) -> Result<Self::Image>;
     fn update_image(&mut self, image: &mut Self::Image, data: &DynamicImage, x: usize, y: usize) -> Result<()>;

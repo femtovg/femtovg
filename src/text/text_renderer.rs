@@ -97,7 +97,7 @@ impl TextRenderer {
     pub(crate) fn render<T: Renderer>(
         &mut self,
         renderer: &mut T,
-        images: &mut ImageStore<T>,
+        images: &mut ImageStore<T::Image>,
         fontdb: &mut FontDb,
         text_layout: &TextLayout,
         style: &TextStyle<'_>
@@ -149,7 +149,7 @@ impl TextRenderer {
 
     fn render_glyph<T: Renderer>(
         renderer: &mut T,
-        images: &mut ImageStore<T>,
+        images: &mut ImageStore<T::Image>,
         textures: &mut Vec<FontTexture>,
         fontdb: &mut FontDb,
         style: &TextStyle<'_>,

@@ -29,7 +29,7 @@ impl Renderer for Void {
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
-    fn render(&mut self, images: &ImageStore<Void>, verts: &[Vertex], commands: &[Command]) {}
+    fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
 
     fn create_image(&mut self, data: &DynamicImage, flags: ImageFlags) -> Result<Self::Image> {
         let size = data.dimensions();

@@ -141,7 +141,7 @@ impl OpenGl {
         }
     }
 
-    fn convex_fill(&self, images: &ImageStore<Self>, cmd: &Command, gpu_paint: Params) {
+    fn convex_fill(&self, images: &ImageStore<Texture>, cmd: &Command, gpu_paint: Params) {
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
@@ -157,7 +157,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, images: &ImageStore<Self>, cmd: &Command, stencil_paint: Params, fill_paint: Params) {
+    fn concave_fill(&self, images: &ImageStore<Texture>, cmd: &Command, stencil_paint: Params, fill_paint: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -225,7 +225,7 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, images: &ImageStore<Self>, cmd: &Command, paint: Params) {
+    fn stroke(&self, images: &ImageStore<Texture>, cmd: &Command, paint: Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
@@ -237,7 +237,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, images: &ImageStore<Self>, cmd: &Command, paint1: Params, paint2: Params) {
+    fn stencil_stroke(&self, images: &ImageStore<Texture>, cmd: &Command, paint1: Params, paint2: Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -290,7 +290,7 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, images: &ImageStore<Self>, cmd: &Command, paint: Params) {
+    fn triangles(&self, images: &ImageStore<Texture>, cmd: &Command, paint: Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -300,7 +300,7 @@ impl OpenGl {
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, images: &ImageStore<Self>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
+    fn set_uniforms(&self, images: &ImageStore<Texture>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
         let arr = UniformArray::from(paint);
         self.program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
@@ -345,7 +345,7 @@ impl Renderer for OpenGl {
         }
     }
 
-    fn render(&mut self, images: &ImageStore<Self>, verts: &[Vertex], commands: &[Command]) {
+    fn render(&mut self, images: &ImageStore<Texture>, verts: &[Vertex], commands: &[Command]) {
         self.program.bind();
 
         unsafe {
