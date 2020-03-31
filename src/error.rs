@@ -4,7 +4,6 @@ use std::error::Error;
 use std::ffi::NulError;
 use std::fmt::{self, Display, Formatter};
 
-use image::ImageError;
 use ttf_parser as ttf;
 
 use crate::text;
@@ -14,7 +13,8 @@ use crate::text;
 #[non_exhaustive]
 pub enum ErrorKind {
     GeneralError(String),
-    ImageError(image::ImageError),
+    #[cfg(feature = "image-loading")]
+    ImageError(::image::ImageError),
     IoError(io::Error),
     FreetypeError(text::freetype::Error),
     TtfParserError(ttf::Error),
@@ -26,7 +26,7 @@ pub enum ErrorKind {
     ImageIdNotFound,
     ImageUpdateOutOfBounds,
     ImageUpdateWithDifferentFormat,
-    UnsuportedImageFromat(String),
+    UnsuportedImageFromat,
 }
 
 impl Display for ErrorKind {
@@ -35,8 +35,9 @@ impl Display for ErrorKind {
     }
 }
 
-impl From<ImageError> for ErrorKind {
-    fn from(error: ImageError) -> Self {
+#[cfg(feature = "image-loading")]
+impl From<::image::ImageError> for ErrorKind {
+    fn from(error: ::image::ImageError) -> Self {
         Self::ImageError(error)
     }
 }

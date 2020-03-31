@@ -104,8 +104,8 @@ fn main() {
                         canvas.delete_image(screenshot_image_id);
                     }
 
-                    if let Some(image) = canvas.screenshot() {
-                        screenshot_image_id = Some(canvas.create_image(&image, ImageFlags::empty()).unwrap());
+                    if let Ok(image) = canvas.screenshot() {
+                        screenshot_image_id = Some(canvas.create_image(image.as_ref(), ImageFlags::empty()).unwrap());
                     }
                 }
                 WindowEvent::CloseRequested => {

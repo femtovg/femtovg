@@ -7,20 +7,26 @@ readme = "README.md"
 authors = ["Peter Todorov <ptodorov@cytec.bg>"]
 keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
 categories = ["graphics"]
-repository = "https://github.com/cytecbg/rscanvas"
+repository = "https://github.com/cytecbg/gpucanvas"
 edition = "2018"
 
 [dependencies]
 fnv = "1.0.6"
-lru = "0.4.3"
+rgb = "0.8.16"
 libc = "0.2.68"
+imgref = "1.4.0"
 bitflags = "1.2.1"
-image = "0.23.2"
 ttf-parser = "0.3.0"
 harfbuzz_rs = "1.0.1"
 unicode-bidi = "0.3.4"
 unicode-script = "0.5.0"
 generational-arena = "0.2.7"
+lru = { version = "0.4.3", default-features = false }
+image = { version = "0.23.2", optional = true }
+
+[features]
+default = ["image-loading"]
+image-loading = ["image"]
 
 [build-dependencies]
 gl_generator = "0.14.0"

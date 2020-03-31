@@ -1,11 +1,11 @@
 
 use std::path::Path as FilePath;
 
-use ::image::DynamicImage;
+use rgb::RGBA8;
+use imgref::ImgVec;
 
 /*
 TODO:
-    - Use imgref crate instead of the image crate
     - Review geometry module and maybe migrate to euclid
     - Custom shader support
     - Review text functions for:
@@ -50,6 +50,7 @@ pub use crate::image::{
     ImageFlags,
     ImageStore,
     ImageFormat,
+    ImageSource,
 };
 
 mod color;
@@ -306,7 +307,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.verts.clear();
     }
 
-    pub fn screenshot(&mut self) -> Option<DynamicImage> {
+    pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
         self.renderer.screenshot()
     }
 
@@ -359,28 +360,37 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Images
 
-    /// Creates image by loading it from the disk from specified file name.
+    pub fn create_image<'a, S: Into<ImageSource<'a>>>(&mut self, src: S, flags: ImageFlags) -> Result<ImageId> {
+        self.images.add(&mut self.renderer, src.into(), flags)
+    }
+
+    /// Decode an image from file
+    #[cfg(feature = "image-loading")]
     pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
         let image = ::image::open(filename)?;
 
-        self.create_image(&image, flags)
+        use std::convert::TryFrom;
+
+        let src = ImageSource::try_from(&image)?;
+
+        self.images.add(&mut self.renderer, src, flags)
     }
 
-    /// Creates image by loading it from the specified chunk of memory.
+    /// Decode an image from memory
+    #[cfg(feature = "image-loading")]
     pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
         let image = ::image::load_from_memory(data)?;
 
-        self.create_image(&image, flags)
-    }
+        use std::convert::TryFrom;
 
-    /// Creates image by loading it from the specified chunk of memory.
-    pub fn create_image(&mut self, image: &DynamicImage, flags: ImageFlags) -> Result<ImageId> {
-        self.images.add(&mut self.renderer, image, flags)
+        let src = ImageSource::try_from(&image)?;
+
+        self.images.add(&mut self.renderer, src, flags)
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image(&mut self, id: ImageId, image: &DynamicImage, x: usize, y: usize) -> Result<()> {
-        self.images.update(&mut self.renderer, id, image, x, y)
+    pub fn update_image<'a, S: Into<ImageSource<'a>>>(&mut self, id: ImageId, src: S, x: usize, y: usize) -> Result<()> {
+        self.images.update(&mut self.renderer, id, src.into(), x, y)
     }
 
     /// Deletes created image.

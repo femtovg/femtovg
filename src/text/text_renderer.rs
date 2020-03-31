@@ -1,11 +1,8 @@
 
+use rgb::alt::Gray;
+use imgref::ImgVec;
+
 use fnv::FnvHashMap;
-use image::{
-    DynamicImage,
-    GrayImage,
-    Luma,
-    GenericImage
-};
 
 use crate::{
     Renderer,
@@ -155,6 +152,8 @@ impl TextRenderer {
         style: &TextStyle<'_>,
         glyph: &ShapedGlyph
     ) -> Result<RenderedGlyph, ErrorKind> {
+        // TODO: Review data types to reduce "var as type"
+
         let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
 
         let stroker = fontdb.library.new_stroker()?;
@@ -185,25 +184,24 @@ impl TextRenderer {
         let height = ft_bitmap.rows() as u32 + padding * 2;
 
         // Extract image data from the freetype bitmap and add padding
-        let mut glyph_image = GrayImage::new(width, height);
+        let mut glyph_image = ImgVec::new(vec![Gray(0u8); width as usize * height as usize], width as usize, height as usize);
 
         let mut ft_glyph_offset = 0;
 
         for y in 0..height {
             for x in 0..width {
                 if (x < padding || x >= width - padding) || (y < padding || y >= height - padding) {
-                    let pixel = Luma([0]);
-                    glyph_image.put_pixel(x as u32, y as u32, pixel);
+
                 } else {
-                    let pixel = Luma([ft_bitmap.buffer()[ft_glyph_offset]]);
-                    glyph_image.put_pixel(x as u32, y as u32, pixel);
+                    glyph_image[(x, y)] = Gray(ft_bitmap.buffer()[ft_glyph_offset]);
                     ft_glyph_offset += 1;
                 }
             }
         }
 
         if style.blur > 0.0 {
-            glyph_image = image::imageops::blur(&glyph_image, style.blur);
+            // TODO: Do renderer blurring
+            //glyph_image = image::imageops::blur(&glyph_image, style.blur);
         }
 
         //glyph_image.save("/home/ptodorov/glyph_test.png");
@@ -215,7 +213,7 @@ impl TextRenderer {
 
         let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
             // A location for the new glyph was found in an extisting atlas
-            images.update(renderer, textures[tex_index].image_id, &DynamicImage::ImageLuma8(glyph_image), atlas_x, atlas_y)?;
+            images.update(renderer, textures[tex_index].image_id, glyph_image.as_ref().into(), atlas_x, atlas_y)?;
 
             (tex_index, (atlas_x, atlas_y))
         } else {
@@ -240,13 +238,16 @@ impl TextRenderer {
 
             let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-            let mut image = GrayImage::new(atlas.size().0 as u32, atlas.size().1 as u32);
-            image.copy_from(&glyph_image, loc.0 as u32, loc.1 as u32)?;
+            let mut image = ImgVec::new(vec![Gray(0u8); atlas.size().0 * atlas.size().1], atlas.size().0, atlas.size().1);
 
-            //let image_res = renderer.create_image(&DynamicImage::ImageLuma8(image), ImageFlags::empty());
-            //let image_id = image_res.or_else(|e| Err(ErrorKind::GeneralError(format!("{}", e))))?;
+            // Copy glyph image to atlas image
+            for (y_offset, row) in glyph_image.rows().enumerate() {
+                for (x_offset, element) in row.iter().enumerate() {
+                    image[(loc.0 + x_offset, loc.1 + y_offset)] = *element;
+                }
+            }
 
-            let image_id = images.add(renderer, &DynamicImage::ImageLuma8(image), ImageFlags::empty())?;
+            let image_id = images.add(renderer, image.as_ref().into(), ImageFlags::empty())?;
 
             textures.push(FontTexture { atlas, image_id });
 

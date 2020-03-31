@@ -112,7 +112,7 @@ impl Params {
 
                 params.tex_type = match image_info.format() {
                     ImageFormat::Rgba => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
-                    ImageFormat::Alpha => 2.0,
+                    ImageFormat::Gray => 2.0,
                     _ => 0.0
                 };
             },

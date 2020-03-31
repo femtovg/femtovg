@@ -1,15 +1,16 @@
 
 use std::ptr;
 use std::mem;
-use std::ops::DerefMut;
 use std::ffi::{CString, CStr, c_void};
 
-use image::DynamicImage;
+use rgb::RGBA8;
+use imgref::ImgVec;
 
 use crate::{
     Color,
     Result,
     ImageStore,
+    ImageSource,
     FillRule,
     CompositeOperationState,
     BlendFactor,
@@ -21,7 +22,8 @@ use super::{
     Renderer,
     Command,
     CommandType,
-    ImageFlags
+    ImageFlags,
+    RenderTarget
 };
 
 mod program;
@@ -416,11 +418,11 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, data: &DynamicImage, flags: ImageFlags) -> Result<Self::Image> {
+    fn create_image(&mut self, data: ImageSource, flags: ImageFlags) -> Result<Self::Image> {
         Texture::new(data, flags, self.is_opengles)
     }
 
-    fn update_image(&mut self, image: &mut Self::Image, data: &DynamicImage, x: usize, y: usize) -> Result<()> {
+    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()> {
         image.update(data, x, y, self.is_opengles)
     }
 
@@ -428,16 +430,34 @@ impl Renderer for OpenGl {
         image.delete();
     }
 
-    fn screenshot(&mut self) -> Option<DynamicImage> {
-        let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
+    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
+        match target {
+            RenderTarget::Screen => {
+                //glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            },
+            RenderTarget::Image(id) => {
+                if let Some(texture) = images.get(id) {
+
+                }
+            }
+        }
+    }
+
+    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+        //let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
+        let w = self.view[0] as usize;
+        let h = self.view[1] as usize;
+
+        let mut image = ImgVec::new(vec![RGBA8 {r:255, g:255, b:255, a: 255}; w*h], w, h);
 
         unsafe {
-            gl::ReadPixels(0, 0, self.view[0] as i32, self.view[1] as i32, gl::RGBA, gl::UNSIGNED_BYTE, image.deref_mut().as_ptr() as *mut GLvoid);
+            gl::ReadPixels(0, 0, self.view[0] as i32, self.view[1] as i32, gl::RGBA, gl::UNSIGNED_BYTE, image.buf_mut().as_ptr() as *mut GLvoid);
         }
 
-        image = image::imageops::flip_vertical(&image);
+        // TODO: flip image
+        //image = image::imageops::flip_vertical(&image);
 
-        Some(DynamicImage::ImageRgba8(image))
+        Ok(image)
     }
 }
 
