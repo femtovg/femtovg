@@ -6,6 +6,7 @@ use crate::{
     Color,
     Result,
     FillRule,
+    Image,
     ImageId,
     ImageFlags,
     ImageStore,
@@ -20,15 +21,6 @@ pub use void::Void;
 
 mod params;
 pub(crate) use params::Params;
-
-// TODO: Move this to it's own image mod
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ImageFormat {
-    Rgb,
-    Rgba,
-    Alpha
-}
 
 #[derive(Copy, Clone, Default)]
 pub struct Drawable {
@@ -86,18 +78,6 @@ impl Command {
             composite_operation: Default::default()
         }
     }
-}
-
-#[derive(Copy, Clone)]
-pub struct ImageInfo {
-    flags: ImageFlags,
-    width: usize,
-    height: usize,
-    format: ImageFormat
-}
-
-pub trait Image {
-    fn info(&self) -> ImageInfo;
 }
 
 /// This is the main renderer trait that the [Canvas](../struct.Canvas.html) draws to.

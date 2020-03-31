@@ -7,18 +7,18 @@ use image::{
 
 use crate::{
     Result,
-    ErrorKind
+    ErrorKind,
+    Image,
+    ImageInfo,
+    ImageStore,
+    ImageFormat,
 };
 
 use super::{
     Renderer,
-    ImageFormat,
     Command,
     ImageFlags,
     Vertex,
-    ImageStore,
-    ImageInfo,
-    Image
 };
 
 /// Void renderer used for testing
@@ -35,23 +35,18 @@ impl Renderer for Void {
         let size = data.dimensions();
 
         Ok(VoidImage {
-            info: ImageInfo {
-                width: size.0 as usize,
-                height: size.1 as usize,
-                flags: flags,
-                format: ImageFormat::Rgba
-            }
+            info: ImageInfo::new(flags, size.0 as usize, size.1 as usize, ImageFormat::Rgba)
         })
     }
 
     fn update_image(&mut self, image: &mut Self::Image, data: &DynamicImage, x: usize, y: usize) -> Result<()> {
         let size = data.dimensions();
 
-        if x + size.0 as usize > image.info.width {
+        if x + size.0 as usize > image.info.width() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
-        if y + size.1 as usize > image.info.height {
+        if y + size.1 as usize > image.info.height() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 

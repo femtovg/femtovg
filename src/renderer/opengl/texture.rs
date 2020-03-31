@@ -5,11 +5,9 @@ use crate::{
     Result,
     ErrorKind,
     ImageFlags,
-    renderer::{
-        Image,
-        ImageInfo,
-        ImageFormat
-    }
+    Image,
+    ImageInfo,
+    ImageFormat
 };
 
 use super::gl;
@@ -26,19 +24,14 @@ impl Texture {
 
         let mut texture = Texture {
             id: 0,
-            info: ImageInfo {
-                width: size.0 as usize,
-                height: size.1 as usize,
-                flags: flags,
-                format: ImageFormat::Rgba
-            }
+            info: ImageInfo::new(flags, size.0 as usize, size.1 as usize, ImageFormat::Rgba)
         };
 
         unsafe {
             gl::GenTextures(1, &mut texture.id);
             gl::BindTexture(gl::TEXTURE_2D, texture.id);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.info.width as i32);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.info.width() as i32);
             gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
             gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
         }
@@ -51,45 +44,45 @@ impl Texture {
                     gl::TEXTURE_2D,
                     0,
                     format as i32,
-                    texture.info.width as i32,
-                    texture.info.height as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
                     0,
                     format,
                     gl::UNSIGNED_BYTE,
                     gray_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = ImageFormat::Alpha;
+                texture.info.set_format(ImageFormat::Alpha);
             },
             DynamicImage::ImageRgb8(rgb_image) => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
                     gl::RGB as i32,
-                    texture.info.width as i32,
-                    texture.info.height as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
                     0,
                     gl::RGB,
                     gl::UNSIGNED_BYTE,
                     rgb_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = ImageFormat::Rgb;
+                texture.info.set_format(ImageFormat::Rgb);
             },
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
                     gl::RGBA as i32,
-                    texture.info.width as i32,
-                    texture.info.height as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
                     0,
                     gl::RGBA,
                     gl::UNSIGNED_BYTE,
                     rgba_image.as_ref().as_ptr() as *const GLvoid
                 );
 
-                texture.info.format = ImageFormat::Rgba;
+                texture.info.set_format(ImageFormat::Rgba);
             },
             DynamicImage::ImageLumaA8(_) =>
                 return Err(ErrorKind::UnsuportedImageFromat(String::from("ImageLumaA8"))),
@@ -158,11 +151,11 @@ impl Texture {
     pub fn update(&mut self, image: &DynamicImage, x: usize, y: usize, opengles: bool) -> Result<()> {
         let size = image.dimensions();
 
-        if x + size.0 as usize > self.info.width {
+        if x + size.0 as usize > self.info.width() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
-        if y + size.1 as usize > self.info.height {
+        if y + size.1 as usize > self.info.height() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
@@ -176,7 +169,7 @@ impl Texture {
             DynamicImage::ImageLuma8(gray_image) => unsafe {
                 let format = if opengles { gl::LUMINANCE } else { gl::RED };
 
-                if self.info.format != ImageFormat::Alpha {
+                if self.info.format() != ImageFormat::Alpha {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
@@ -193,7 +186,7 @@ impl Texture {
                 );
             }
             DynamicImage::ImageRgb8(rgb_image) => unsafe {
-                if self.info.format != ImageFormat::Rgb {
+                if self.info.format() != ImageFormat::Rgb {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 
@@ -210,7 +203,7 @@ impl Texture {
                 );
             }
             DynamicImage::ImageRgba8(rgba_image) => unsafe {
-                if self.info.format != ImageFormat::Rgba {
+                if self.info.format() != ImageFormat::Rgba {
                     return Err(ErrorKind::ImageUpdateWithDifferentFormat);
                 }
 

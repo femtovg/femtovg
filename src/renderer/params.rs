@@ -1,5 +1,7 @@
 
 use crate::{
+    Image,
+    ImageFormat,
     ImageFlags,
     ImageStore,
     Scissor,
@@ -9,11 +11,7 @@ use crate::{
     Transform2D,
 };
 
-use super::{
-    Image,
-    ShaderType,
-    ImageFormat,
-};
+use super::ShaderType;
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Params {
@@ -93,7 +91,7 @@ impl Params {
                 transform.translate(cx, cy);
                 transform.multiply(&paint.transform);
 
-                if image_info.flags.contains(ImageFlags::FLIP_Y) {
+                if image_info.flags().contains(ImageFlags::FLIP_Y) {
                     let mut m1 = Transform2D::identity();
                     m1.translate(0.0, height * 0.5);
                     m1.multiply(&transform);
@@ -112,8 +110,8 @@ impl Params {
 
                 params.shader_type = ShaderType::FillImage.to_f32();
 
-                params.tex_type = match image_info.format {
-                    ImageFormat::Rgba => if image_info.flags.contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                params.tex_type = match image_info.format() {
+                    ImageFormat::Rgba => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
                     ImageFormat::Alpha => 2.0,
                     _ => 0.0
                 };
