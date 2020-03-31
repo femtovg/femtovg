@@ -10,6 +10,8 @@ use crate::{
 use super::gl;
 use super::gl::types::*;
 
+const GLSL_VERSION: &str = "#version 130";
+
 pub(crate) struct Shader {
     id: GLuint
 }
@@ -67,10 +69,6 @@ impl Drop for Shader {
 
 pub(crate) struct Program {
     id: GLuint,
-    loc_viewsize: GLint,
-    loc_tex: GLint,
-    loc_masktex: GLint,
-    loc_frag: GLint,
 }
 
 impl Program {
@@ -78,10 +76,6 @@ impl Program {
     pub fn new(shaders: &[Shader]) -> Result<Self> {
         let mut program = Self {
             id: unsafe { gl::CreateProgram() },
-            loc_viewsize: Default::default(),
-            loc_tex: Default::default(),
-            loc_masktex: Default::default(),
-            loc_frag: Default::default(),
         };
 
         // Attach stages
@@ -90,9 +84,6 @@ impl Program {
         }
 
         unsafe {
-            gl::BindAttribLocation(program.id, 0, CString::new("vertex")?.as_ptr());
-            gl::BindAttribLocation(program.id, 1, CString::new("tcoord")?.as_ptr());
-
             gl::LinkProgram(program.id);
         }
 
@@ -118,14 +109,6 @@ impl Program {
             unsafe { gl::DetachShader(program.id, shader.id()); }
         }
 
-        // Uniform locations
-        unsafe {
-            program.loc_viewsize = gl::GetUniformLocation(program.id, CString::new("viewSize")?.as_ptr());
-            program.loc_tex = gl::GetUniformLocation(program.id, CString::new("tex")?.as_ptr());
-            program.loc_masktex = gl::GetUniformLocation(program.id, CString::new("masktex")?.as_ptr());
-            program.loc_frag = gl::GetUniformLocation(program.id, CString::new("frag")?.as_ptr());
-        }
-
         Ok(program)
     }
 
@@ -135,6 +118,59 @@ impl Program {
 
     pub(crate) fn unbind(&self) {
         unsafe { gl::UseProgram(0); }
+    }
+
+    fn uniform_location(&self, name: &str) -> Result<GLint> {
+        unsafe {
+            Ok(gl::GetUniformLocation(self.id, CString::new(name)?.as_ptr()))
+        }
+    }
+}
+
+impl Drop for Program {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteProgram(self.id);
+        }
+    }
+}
+
+pub struct MainProgram {
+    program: Program,
+    loc_viewsize: GLint,
+    loc_tex: GLint,
+    loc_masktex: GLint,
+    loc_frag: GLint,
+}
+
+impl MainProgram {
+    pub(crate) fn new(antialias: bool) -> Result<Self> {
+        let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
+        let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
+        let frag_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-fs.glsl"));
+
+        let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
+        let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
+
+        let program = Program::new(&[vert_shader, frag_shader])?;
+
+        unsafe {
+            gl::BindAttribLocation(program.id, 0, CString::new("vertex")?.as_ptr());
+            gl::BindAttribLocation(program.id, 1, CString::new("tcoord")?.as_ptr());
+        }
+
+        let loc_viewsize = program.uniform_location("viewSize")?;
+        let loc_tex = program.uniform_location("tex")?;
+        let loc_masktex = program.uniform_location("masktex")?;
+        let loc_frag = program.uniform_location("frag")?;
+
+        Ok(Self {
+            program,
+            loc_viewsize,
+            loc_tex,
+            loc_masktex,
+            loc_frag,
+        })
     }
 
     pub(crate) fn set_tex(&self, tex: GLint) {
@@ -154,13 +190,68 @@ impl Program {
             gl::Uniform4fv(self.loc_frag, count, ptr);
         }
     }
+
+    pub(crate) fn bind(&self) {
+        self.program.bind();
+    }
+
+    pub(crate) fn unbind(&self) {
+        self.program.unbind();
+    }
 }
 
-impl Drop for Program {
-    fn drop(&mut self) {
+pub struct BlurProgram {
+    program: Program,
+    loc_image: GLint,
+    loc_horizontal: GLint,
+    loc_image_size: GLint,
+}
+
+impl BlurProgram {
+    pub fn new() -> Result<Self> {
+        let vert_shader_src = format!("{}\n{}", GLSL_VERSION, include_str!("blur-vs.glsl"));
+        let frag_shader_src = format!("{}\n{}", GLSL_VERSION, include_str!("blur-fs.glsl"));
+
+        let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
+        let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
+
+        let program = Program::new(&[vert_shader, frag_shader])?;
+
         unsafe {
-            gl::DeleteProgram(self.id);
+            gl::BindAttribLocation(program.id, 0, CString::new("vertex")?.as_ptr());
+            gl::BindAttribLocation(program.id, 1, CString::new("tcoord")?.as_ptr());
         }
+
+        let loc_image = program.uniform_location("image")?;
+        let loc_horizontal = program.uniform_location("horizontal")?;
+        let loc_image_size = program.uniform_location("image_size")?;
+
+        Ok(Self {
+            program,
+            loc_image,
+            loc_horizontal,
+            loc_image_size
+        })
+    }
+
+    pub(crate) fn set_image(&self, image: GLint) {
+        unsafe { gl::Uniform1i(self.loc_image, image); }
+    }
+
+    pub(crate) fn set_horizontal(&self, horizontal: bool) {
+        unsafe { gl::Uniform1i(self.loc_horizontal, horizontal as i32); }
+    }
+
+    pub(crate) fn set_image_size(&self, size: [f32; 2]) {
+        unsafe { gl::Uniform2fv(self.loc_image_size, 1, size.as_ptr()); }
+    }
+
+    pub(crate) fn bind(&self) {
+        self.program.bind();
+    }
+
+    pub(crate) fn unbind(&self) {
+        self.program.unbind();
     }
 }
 

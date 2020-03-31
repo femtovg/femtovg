@@ -9,7 +9,9 @@ use imgref::ImgVec;
 use crate::{
     Color,
     Result,
+    Image,
     ImageStore,
+    ImageFormat,
     ImageSource,
     FillRule,
     CompositeOperationState,
@@ -29,7 +31,9 @@ use super::{
 mod program;
 use program::{
     Shader,
-    Program
+    Program,
+    MainProgram,
+    BlurProgram
 };
 
 mod texture;
@@ -50,9 +54,12 @@ pub struct OpenGl {
     antialias: bool,
     is_opengles: bool,
     view: [f32; 2],
-    program: Program,
+    main_program: MainProgram,
+    blur_program: BlurProgram,
     vert_arr: GLuint,
     vert_buff: GLuint,
+    quad_vao: GLuint,
+    quad_vbo: GLuint
 }
 
 impl OpenGl {
@@ -63,23 +70,20 @@ impl OpenGl {
 
         gl::load_with(load_fn);
 
-        let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
-        let vert_shader_src = format!("#version 100\n{}\n{}", shader_defs, include_str!("opengl/main-vs.glsl"));
-        let frag_shader_src = format!("#version 100\n{}\n{}", shader_defs, include_str!("opengl/main-fs.glsl"));
-
-        let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
-        let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
-
-        let program = Program::new(&[vert_shader, frag_shader])?;
+        let main_program = MainProgram::new(antialias)?;
+        let blur_program = BlurProgram::new()?;
 
         let mut opengl = OpenGl {
             debug: debug,
             antialias: antialias,
             is_opengles: false,
             view: [0.0, 0.0],
-            program: program,
-            vert_arr: 0,
-            vert_buff: 0,
+            main_program: main_program,
+            blur_program: blur_program,
+            vert_arr: Default::default(),
+            vert_buff: Default::default(),
+            quad_vao: Default::default(),
+            quad_vbo: Default::default(),
         };
 
         unsafe {
@@ -90,11 +94,46 @@ impl OpenGl {
             gl::GenBuffers(1, &mut opengl.vert_buff);
         }
 
+        opengl.create_quad();
+
         Ok(opengl)
     }
 
     pub fn is_opengles(&self) -> bool {
         self.is_opengles
+    }
+
+    fn create_quad(&mut self) {
+        let verts: [f32; 16] = [
+            -1.0,  1.0, 0.0, 1.0,
+            -1.0, -1.0, 0.0, 0.0,
+             1.0,  1.0, 1.0, 1.0,
+             1.0, -1.0, 1.0, 0.0,
+        ];
+
+        unsafe {
+            gl::GenVertexArrays(1, &mut self.quad_vao);
+            gl::GenBuffers(1, &mut self.quad_vbo);
+            gl::BindVertexArray(self.quad_vao);
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
+
+            let size = verts.len() * mem::size_of::<f32>();
+            gl::BufferData(gl::ARRAY_BUFFER, size as isize, verts.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
+
+            gl::EnableVertexAttribArray(0);
+            gl::EnableVertexAttribArray(1);
+
+            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, ptr::null::<c_void>());
+            gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, (2 * mem::size_of::<f32>()) as *const c_void);
+        }
+    }
+
+    fn render_quad(&self) {
+        unsafe {
+            gl::BindVertexArray(self.quad_vao);
+            gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+            gl::BindVertexArray(0);
+        }
     }
 
     fn check_error(&self, label: &str) {
@@ -304,7 +343,7 @@ impl OpenGl {
 
     fn set_uniforms(&self, images: &ImageStore<Texture>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
         let arr = UniformArray::from(paint);
-        self.program.set_config(UniformArray::size() as i32, arr.as_ptr());
+        self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
         let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
@@ -348,7 +387,7 @@ impl Renderer for OpenGl {
     }
 
     fn render(&mut self, images: &ImageStore<Texture>, verts: &[Vertex], commands: &[Command]) {
-        self.program.bind();
+        self.main_program.bind();
 
         unsafe {
             gl::Enable(gl::CULL_FACE);
@@ -381,10 +420,10 @@ impl Renderer for OpenGl {
         }
 
         // Bind the two uniform samplers to texture units
-        self.program.set_tex(0);
-        self.program.set_masktex(1);
+        self.main_program.set_tex(0);
+        self.main_program.set_masktex(1);
         // Set uniforms
-        self.program.set_view(self.view);
+        self.main_program.set_view(self.view);
 
         self.check_error("render prepare");
 
@@ -413,7 +452,7 @@ impl Renderer for OpenGl {
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
 
-        self.program.unbind();
+        self.main_program.unbind();
 
         self.check_error("render done");
     }
@@ -443,6 +482,108 @@ impl Renderer for OpenGl {
         }
     }
 
+    fn blur(&mut self, texture: &mut Texture, amount: f32, x: usize, y: usize, width: usize, height: usize) {
+        let pingpong_fbo = [0; 2];
+        let pingpong_tex = [0; 2];
+
+        unsafe {
+            gl::GenFramebuffers(2, pingpong_fbo.as_ptr() as *mut GLuint);
+            gl::GenTextures(2, pingpong_tex.as_ptr() as *mut GLuint);
+
+            gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+            gl::Enable(gl::SCISSOR_TEST);
+
+            let padding = amount as i32 * 2;
+
+            gl::Scissor(
+                x as i32 - padding,
+                y as i32 - padding,
+                width as i32 + padding * 2,
+                height as i32 + padding * 2
+            );
+        }
+
+        let gl_format = match texture.info().format() {
+            ImageFormat::Rgb => gl::RGB,
+            ImageFormat::Rgba => gl::RGBA,
+            ImageFormat::Gray => gl::RED,
+        };
+
+        for (fbo, tex) in pingpong_fbo.iter().zip(pingpong_tex.iter()) {
+            unsafe {
+                gl::BindFramebuffer(gl::FRAMEBUFFER, *fbo);
+                gl::BindTexture(gl::TEXTURE_2D, *tex);
+                gl::TexImage2D(gl::TEXTURE_2D, 0, gl_format as i32, texture.info().width() as i32, texture.info().height() as i32, 0, gl_format, gl::UNSIGNED_BYTE, ptr::null());
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+
+                gl::FramebufferTexture2D(
+                    gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, *tex, 0
+                );
+
+                if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
+                    panic!("Framebuffer not complete!");
+                }
+            }
+        }
+
+        self.check_error("blur setup");
+
+        let mut horizontal = true;
+        let amount = (amount * 2.0) as usize;
+
+        self.blur_program.bind();
+        self.blur_program.set_image(0);
+        self.blur_program.set_image_size([
+            texture.info().width() as f32,
+            texture.info().height() as f32
+        ]);
+
+        for i in 0..amount {
+            unsafe {
+                gl::BindFramebuffer(gl::FRAMEBUFFER, pingpong_fbo[horizontal as usize]);
+                self.blur_program.set_horizontal(horizontal);
+                gl::BindTexture(gl::TEXTURE_2D, if i == 0 { texture.id() } else { pingpong_tex[!horizontal as usize] });
+            }
+
+            self.render_quad();
+
+            horizontal = !horizontal;
+        }
+
+        self.check_error("blur render");
+
+        self.blur_program.unbind();
+
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, texture.id());
+            gl::CopyTexSubImage2D(
+                gl::TEXTURE_2D,
+                0,
+                x as i32,
+                y as i32,
+                x as i32,
+                y as i32,
+                width as i32,
+                height as i32
+            );
+
+            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+
+            gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
+            gl::Disable(gl::SCISSOR_TEST);
+        }
+
+        unsafe {
+            gl::DeleteTextures(2, pingpong_tex.as_ptr() as *mut GLuint);
+            gl::DeleteFramebuffers(2, pingpong_fbo.as_ptr() as *mut GLuint);
+        }
+
+        self.check_error("blur copy");
+    }
+
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
         //let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
         let w = self.view[0] as usize;
@@ -469,6 +610,14 @@ impl Drop for OpenGl {
 
         if self.vert_buff != 0 {
             unsafe { gl::DeleteBuffers(1, &self.vert_buff); }
+        }
+
+        if self.quad_vao != 0 {
+            unsafe { gl::DeleteVertexArrays(1, &self.quad_vao); }
+        }
+
+        if self.quad_vbo != 0 {
+            unsafe { gl::DeleteBuffers(1, &self.quad_vbo); }
         }
     }
 }

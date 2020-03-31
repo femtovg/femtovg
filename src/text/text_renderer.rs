@@ -215,6 +215,10 @@ impl TextRenderer {
             // A location for the new glyph was found in an extisting atlas
             images.update(renderer, textures[tex_index].image_id, glyph_image.as_ref().into(), atlas_x, atlas_y)?;
 
+            if style.blur > 0.0 {
+                renderer.blur(images.get_mut(textures[tex_index].image_id).unwrap(), style.blur, atlas_x, atlas_y, width as usize, height as usize);
+            }
+
             (tex_index, (atlas_x, atlas_y))
         } else {
             // All atlases are exausted and a new one must be created
@@ -248,6 +252,10 @@ impl TextRenderer {
             }
 
             let image_id = images.add(renderer, image.as_ref().into(), ImageFlags::empty())?;
+
+            if style.blur > 0.0 {
+                renderer.blur(images.get_mut(image_id).unwrap(), style.blur, loc.0, loc.1, width as usize, height as usize);
+            }
 
             textures.push(FontTexture { atlas, image_id });
 

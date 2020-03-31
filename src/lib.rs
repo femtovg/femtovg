@@ -398,6 +398,12 @@ impl<T> Canvas<T> where T: Renderer {
         self.images.remove(&mut self.renderer, id);
     }
 
+    pub fn blur_image(&mut self, id: ImageId, amount: u8, x: usize, y: usize, width: usize, height: usize) {
+        if let Some(img) = self.images.get_mut(id) {
+            self.renderer.blur(img, amount as f32, x, y, width, height);
+        }
+    }
+
     // Transforms
 
     /// Resets current transform to a identity matrix.

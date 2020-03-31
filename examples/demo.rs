@@ -46,7 +46,10 @@ fn main() {
     canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font");
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
 
-    //let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
+    // TODO: check image blurring with different image flags
+    let image_id = canvas.create_image_file("examples/assets/lidl.jpg", ImageFlags::empty()).expect("Cannot create image");
+
+    canvas.blur_image(image_id, 2, 510, 410, 100, 100);
 
     let mut screenshot_image_id = None;
 
@@ -160,6 +163,13 @@ fn main() {
                     path.rect(x, y, 512.0, 512.0);
                     canvas.fill_path(&mut path, paint);
                     canvas.stroke_path(&mut path, Paint::color(Color::hex("454545")));
+                }
+
+                if false {
+                    let paint = Paint::image(image_id, 15.0, 15.0, 960.0, 960.0, 0.0, 1.0);
+                    let mut path = Path::new();
+                    path.rect(15.0, 15.0, 960.0, 960.0);
+                    canvas.fill_path(&mut path, paint);
                 }
 
                 canvas.flush();
@@ -326,7 +336,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	path.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 32)));
 
-    let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 128));
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 255));
     text_paint.set_font_size(16);
     text_paint.set_font_family("Roboto");
     text_paint.set_font_weight(Weight::Bold);

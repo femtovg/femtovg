@@ -175,6 +175,10 @@ impl<T: Image> ImageStore<T> {
         self.0.get(id.0)
     }
 
+    pub fn get_mut(&mut self, id: ImageId) -> Option<&mut T> {
+        self.0.get_mut(id.0)
+    }
+
     pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, data: ImageSource, x: usize, y: usize) -> Result<()> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(image, data, x, y)?;

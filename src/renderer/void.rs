@@ -56,6 +56,10 @@ impl Renderer for Void {
 
     fn set_target(&mut self, images: &ImageStore<Self::Image>, target: RenderTarget) {}
 
+    fn blur(&mut self, image: &mut Self::Image, amount: f32, x: usize, y: usize, width: usize, height: usize) {
+
+    }
+
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
         Ok(ImgVec::new(Vec::new(), 0, 0))
     }
