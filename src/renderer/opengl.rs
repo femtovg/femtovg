@@ -1,7 +1,7 @@
 
 use std::ptr;
 use std::mem;
-use std::ffi::{CString, CStr, c_void};
+use std::ffi::{CStr, c_void};
 
 use rgb::RGBA8;
 use imgref::ImgVec;
@@ -30,8 +30,6 @@ use super::{
 
 mod program;
 use program::{
-    Shader,
-    Program,
     MainProgram,
     BlurProgram
 };

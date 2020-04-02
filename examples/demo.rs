@@ -46,10 +46,8 @@ fn main() {
     canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font");
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
 
-    // TODO: check image blurring with different image flags
-    let image_id = canvas.create_image_file("examples/assets/lidl.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
-
-    canvas.blur_image(image_id, 10, 510, 410, 100, 100);
+    //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
+    //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
 
     let mut screenshot_image_id = None;
 
@@ -165,12 +163,12 @@ fn main() {
                     canvas.stroke_path(&mut path, Paint::color(Color::hex("454545")));
                 }
 
-                if true {
-                    let paint = Paint::image(image_id, size.width as f32, 15.0, 960.0, 960.0, 0.0, 1.0);
-                    let mut path = Path::new();
-                    path.rect(size.width as f32, 15.0, 960.0, 960.0);
-                    canvas.fill_path(&mut path, paint);
-                }
+                // if true {
+                //     let paint = Paint::image(image_id, size.width as f32, 15.0, 1920.0, 1080.0, 0.0, 1.0);
+                //     let mut path = Path::new();
+                //     path.rect(size.width as f32, 15.0, 1920.0, 1080.0);
+                //     canvas.fill_path(&mut path, paint);
+                // }
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();

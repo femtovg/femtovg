@@ -74,7 +74,7 @@ pub(crate) struct Program {
 impl Program {
 
     pub fn new(shaders: &[Shader]) -> Result<Self> {
-        let mut program = Self {
+        let program = Self {
             id: unsafe { gl::CreateProgram() },
         };
 
