@@ -34,7 +34,7 @@ pub struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
     size: u16,
-    blur: u32,
+    blur: u8,
     render_style: RenderStyle
 }
 
@@ -44,7 +44,7 @@ impl RenderedGlyphId {
             glyph_index,
             font_id,
             size: style.size,
-            blur: (style.blur * 1000.0) as u32,
+            blur: style.blur,
             render_style: style.render_style
         }
     }
@@ -109,6 +109,7 @@ impl TextRenderer {
 
             if !self.glyph_cache.contains_key(&id) {
                 let glyph = Self::render_glyph(renderer, images, textures, fontdb, style, &glyph)?;
+
                 self.glyph_cache.insert(id.clone(), glyph);
             }
 
@@ -154,7 +155,7 @@ impl TextRenderer {
     ) -> Result<RenderedGlyph, ErrorKind> {
         // TODO: Review data types to reduce "var as type"
 
-        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
+        let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 
         let stroker = fontdb.library.new_stroker()?;
 
@@ -199,11 +200,6 @@ impl TextRenderer {
             }
         }
 
-        if style.blur > 0.0 {
-            // TODO: Do renderer blurring
-            //glyph_image = image::imageops::blur(&glyph_image, style.blur);
-        }
-
         //glyph_image.save("/home/ptodorov/glyph_test.png");
 
         // Find a free location in one of the the atlases
@@ -214,10 +210,6 @@ impl TextRenderer {
         let (tex_index, (atlas_x, atlas_y)) = if let Some((tex_index, (atlas_x, atlas_y))) = texture_search_result {
             // A location for the new glyph was found in an extisting atlas
             images.update(renderer, textures[tex_index].image_id, glyph_image.as_ref().into(), atlas_x, atlas_y)?;
-
-            if style.blur > 0.0 {
-                renderer.blur(images.get_mut(textures[tex_index].image_id).unwrap(), style.blur, atlas_x, atlas_y, width as usize, height as usize);
-            }
 
             (tex_index, (atlas_x, atlas_y))
         } else {
@@ -253,14 +245,21 @@ impl TextRenderer {
 
             let image_id = images.add(renderer, image.as_ref().into(), ImageFlags::empty())?;
 
-            if style.blur > 0.0 {
-                renderer.blur(images.get_mut(image_id).unwrap(), style.blur, loc.0, loc.1, width as usize, height as usize);
-            }
-
             textures.push(FontTexture { atlas, image_id });
 
             (textures.len() - 1, loc)
         };
+
+        if style.blur > 0 {
+            renderer.blur(
+                images.get_mut(textures[tex_index].image_id).unwrap(),
+                style.blur,
+                atlas_x + style.blur as usize,
+                atlas_y + style.blur as usize,
+                width as usize - style.blur as usize,
+                height as usize - style.blur as usize,
+            );
+        }
 
         Ok(RenderedGlyph {
             width: width,

@@ -33,7 +33,7 @@ fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
-    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_vsync(true).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
@@ -47,9 +47,9 @@ fn main() {
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
 
     // TODO: check image blurring with different image flags
-    let image_id = canvas.create_image_file("examples/assets/lidl.jpg", ImageFlags::empty()).expect("Cannot create image");
+    let image_id = canvas.create_image_file("examples/assets/lidl.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
-    canvas.blur_image(image_id, 2, 510, 410, 100, 100);
+    canvas.blur_image(image_id, 10, 510, 410, 100, 100);
 
     let mut screenshot_image_id = None;
 
@@ -165,10 +165,10 @@ fn main() {
                     canvas.stroke_path(&mut path, Paint::color(Color::hex("454545")));
                 }
 
-                if false {
-                    let paint = Paint::image(image_id, 15.0, 15.0, 960.0, 960.0, 0.0, 1.0);
+                if true {
+                    let paint = Paint::image(image_id, size.width as f32, 15.0, 960.0, 960.0, 0.0, 1.0);
                     let mut path = Path::new();
-                    path.rect(15.0, 15.0, 960.0, 960.0);
+                    path.rect(size.width as f32, 15.0, 960.0, 960.0);
                     canvas.fill_path(&mut path, paint);
                 }
 
@@ -341,10 +341,10 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
     text_paint.set_font_family("Roboto");
     text_paint.set_font_weight(Weight::Bold);
     text_paint.set_text_align(Align::Center);
-    text_paint.set_font_blur(2.0);
+    text_paint.set_font_blur(2);
 	let _ = canvas.fill_text(x + (w / 2.0), y + 19.0 + 1.0, title, text_paint);
 
-    text_paint.set_font_blur(0.0);
+    text_paint.set_font_blur(0);
     text_paint.set_color(Color::rgba(220, 220, 220, 160));
 
 	let _ = canvas.fill_text(x + (w / 2.0), y + 19.0, title, text_paint);

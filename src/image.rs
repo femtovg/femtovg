@@ -28,6 +28,17 @@ pub enum ImageFormat {
     Gray
 }
 
+bitflags! {
+    pub struct ImageFlags: u32 {
+        const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
+        const REPEAT_X = 1 << 1;        // Repeat image in X direction.
+        const REPEAT_Y = 1 << 2;        // Repeat image in Y direction.
+        const FLIP_Y = 1 << 3;          // Flips (inverses) image in Y direction when rendered.
+        const PREMULTIPLIED = 1 << 4;   // Image data has premultiplied alpha.
+        const NEAREST = 1 << 5;         // Image interpolation is Nearest instead Linear
+    }
+}
+
 #[derive(Copy, Clone)]
 #[non_exhaustive]
 pub enum ImageSource<'a> {
@@ -100,17 +111,6 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
             // Buut that is an expensive operation on the render thread that will remain hidden from the user
             _ => Err(ErrorKind::UnsuportedImageFromat)
         }
-    }
-}
-
-bitflags! {
-    pub struct ImageFlags: u32 {
-        const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
-        const REPEAT_X = 1 << 1;        // Repeat image in X direction.
-        const REPEAT_Y = 1 << 2;        // Repeat image in Y direction.
-        const FLIP_Y = 1 << 3;          // Flips (inverses) image in Y direction when rendered.
-        const PREMULTIPLIED = 1 << 4;   // Image data has premultiplied alpha.
-        const NEAREST = 1 << 5;         // Image interpolation is Nearest instead Linear
     }
 }
 

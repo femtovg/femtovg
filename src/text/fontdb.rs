@@ -18,6 +18,8 @@ use super::{
     freetype as ft,
 };
 
+// TODO: use generational arena for font_ids
+
 #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);
 

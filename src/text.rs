@@ -28,7 +28,7 @@ pub struct TextStyle<'a> {
     pub letter_spacing: f32,
     pub baseline: Baseline,
     pub align: Align,
-    pub blur: f32,
+    pub blur: u8,
     pub render_style: RenderStyle
 }
 

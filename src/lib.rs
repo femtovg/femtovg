@@ -400,7 +400,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     pub fn blur_image(&mut self, id: ImageId, amount: u8, x: usize, y: usize, width: usize, height: usize) {
         if let Some(img) = self.images.get_mut(id) {
-            self.renderer.blur(img, amount as f32, x, y, width, height);
+            self.renderer.blur(img, amount, x, y, width, height);
         }
     }
 
@@ -774,7 +774,7 @@ impl<T> Canvas<T> where T: Renderer {
             letter_spacing: paint.letter_spacing() * scale,
             baseline: paint.text_baseline(),
             align: paint.text_align(),
-            blur: paint.font_blur() * scale,
+            blur: paint.font_blur().saturating_mul(scale.min(255.0) as u8),
             render_style: Default::default()
         }
     }
@@ -789,6 +789,9 @@ impl<T> Canvas<T> where T: Renderer {
         style.render_style = render_style;
 
         let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+
+        // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
+
         let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
         for cmd in &cmds {
@@ -839,7 +842,7 @@ impl<T> Canvas<T> where T: Renderer {
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
 
-        geometry::quantize(avg_scale, 0.01).min(7.0)
+        geometry::quantize(avg_scale, 0.1).min(7.0)
     }
 
     fn state(&self) -> &State {

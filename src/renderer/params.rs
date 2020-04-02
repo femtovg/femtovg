@@ -100,6 +100,7 @@ impl Params {
                     m2.scale(1.0, -1.0);
                     m2.multiply(&m1);
 
+                    let mut m1 = Transform2D::identity();
                     m1.translate(0.0, -height * 0.5);
                     m1.multiply(&m2);
 

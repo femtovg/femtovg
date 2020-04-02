@@ -225,7 +225,7 @@ impl Shaper {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
-        let mut padding = GLYPH_PADDING + style.blur.ceil() as u32;
+        let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 
         let line_width = if let RenderStyle::Stroke { width } = style.render_style {
             padding += width as u32;

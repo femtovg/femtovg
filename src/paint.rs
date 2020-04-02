@@ -92,7 +92,7 @@ pub struct Paint<'a> {
     pub(crate) line_join: LineJoin,
     pub(crate) font_family: &'a str,
     pub(crate) font_size: u32,
-    pub(crate) font_blur: f32,
+    pub(crate) font_blur: u8,
     pub(crate) font_weight: Weight,
     pub(crate) font_width_class: WidthClass,
     pub(crate) font_style: FontStyle,
@@ -117,7 +117,7 @@ impl Default for Paint<'_> {
             line_join: Default::default(),
             font_family: "NotoSans",
             font_size: 16,
-            font_blur: 0.0,
+            font_blur: 0,
             font_weight: Weight::Normal,
             font_width_class: WidthClass::Normal,
             font_style: FontStyle::Normal,
@@ -348,14 +348,14 @@ impl<'a> Paint<'a> {
     }
 
     /// Returns the current font blur
-    pub fn font_blur(&self) -> f32 {
+    pub fn font_blur(&self) -> u8 {
         self.font_blur
     }
 
     /// Sets the font blur radius
     ///
     /// Useful for implementing text shadow. Only has effect on canvas text operations
-    pub fn set_font_blur(&mut self, blur: f32) {
+    pub fn set_font_blur(&mut self, blur: u8) {
         self.font_blur = blur;
     }
 

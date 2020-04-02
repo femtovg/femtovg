@@ -56,7 +56,7 @@ impl Renderer for Void {
 
     fn set_target(&mut self, images: &ImageStore<Self::Image>, target: RenderTarget) {}
 
-    fn blur(&mut self, image: &mut Self::Image, amount: f32, x: usize, y: usize, width: usize, height: usize) {
+    fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize) {
 
     }
 
