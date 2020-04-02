@@ -398,9 +398,20 @@ impl<T> Canvas<T> where T: Renderer {
         self.images.remove(&mut self.renderer, id);
     }
 
+    /// Blurs the provided image inside the specified region.
+    /// Amount is the number of times that the blur is ran against the image.
     pub fn blur_image(&mut self, id: ImageId, amount: u8, x: usize, y: usize, width: usize, height: usize) {
         if let Some(img) = self.images.get_mut(id) {
             self.renderer.blur(img, amount, x, y, width, height);
+        }
+    }
+
+    /// Returns the size in pixels of the image for the specified id.
+    pub fn image_size(&self, id: ImageId) -> Result<(usize, usize)> {
+        if let Some(img) = self.images.get(id) {
+            Ok((img.info().width(), img.info().height()))
+        } else {
+            Err(ErrorKind::ImageIdNotFound)
         }
     }
 
