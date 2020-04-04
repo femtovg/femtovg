@@ -21,6 +21,8 @@ use gpucanvas::{
     Align,
     Baseline,
     Weight,
+    RenderTarget,
+    ImageFormat,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -48,6 +50,8 @@ fn main() {
 
     //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
     //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
+
+    let graph_image_id = canvas.create_image_empty(1000, 600, ImageFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
 
     let mut screenshot_image_id = None;
 
@@ -130,8 +134,26 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
+                {
+                    canvas.set_render_target(RenderTarget::Image(graph_image_id));
+                    draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                    canvas.flush();
+                    canvas.set_render_target(RenderTarget::Screen);
+
+                    canvas.blur_image(graph_image_id, 4, 50, 150, 300, 400);
+
+                    canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
+
+                    let mut path = Path::new();
+                    path.rect(0.0, 0.0, width, height);
+                    canvas.fill_path(
+                        &mut path,
+                        Paint::image(graph_image_id, 0.0, 0.0, width, height, 0.0, 1.0)
+                    );
+                }
+
                 draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
                 draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
@@ -313,7 +335,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	// Window
 	let mut path = Path::new();
     path.rounded_rect(x, y, w, h, corner_radius);
-	canvas.fill_path(&mut path, Paint::color(Color::rgba(28, 30, 34, 192)));
+	canvas.fill_path(&mut path, Paint::color(Color::rgba(168, 204, 215, 100)));
 
 	// Drop shadow
     let shadow_paint = Paint::box_gradient(x, y + 2.0, w, h, corner_radius * 2.0, 10.0, Color::rgba(0,0,0,128), Color::rgba(0,0,0,0));
@@ -334,7 +356,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	path.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 32)));
 
-    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 255));
+    let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 32));
     text_paint.set_font_size(16);
     text_paint.set_font_family("Roboto");
     text_paint.set_font_weight(Weight::Bold);

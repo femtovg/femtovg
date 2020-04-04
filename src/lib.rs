@@ -56,7 +56,11 @@ mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::Renderer;
+pub use renderer::{
+    Renderer,
+    RenderTarget
+};
+
 use renderer::{
     Vertex,
     Params,
@@ -355,6 +359,10 @@ impl<T> Canvas<T> where T: Renderer {
     /// Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately.
     pub fn global_composite_blend_func_separate(&mut self, src_rgb: BlendFactor, dst_rgb: BlendFactor, src_alpha: BlendFactor, dst_alpha: BlendFactor) {
         self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
+    }
+
+    pub fn set_render_target(&mut self, target: RenderTarget) {
+        self.renderer.set_target(&self.images, target);
     }
 
     // Images
