@@ -96,7 +96,7 @@ struct Game {
 
 impl Game {
     fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
-        let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
+        let image_id = canvas.load_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
 
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 

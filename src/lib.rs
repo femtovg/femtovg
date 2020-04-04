@@ -44,7 +44,6 @@ use text::{
 
 mod image;
 pub use crate::image::{
-    Image,
     ImageId,
     ImageInfo,
     ImageFlags,
@@ -360,32 +359,45 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Images
 
+    pub fn create_image_empty(&mut self, width: usize, height: usize, format: ImageFormat, flags: ImageFlags) -> Result<ImageId> {
+        let info = ImageInfo::new(flags, width, height, format);
+
+        self.images.alloc(&mut self.renderer, info)
+    }
+
     pub fn create_image<'a, S: Into<ImageSource<'a>>>(&mut self, src: S, flags: ImageFlags) -> Result<ImageId> {
-        self.images.add(&mut self.renderer, src.into(), flags)
+        let src = src.into();
+        let size = src.dimensions();
+
+        let id = self.create_image_empty(size.0, size.1, src.format(), flags)?;
+
+        self.images.update(&mut self.renderer, id, src, 0, 0)?;
+
+        Ok(id)
     }
 
     /// Decode an image from file
     #[cfg(feature = "image-loading")]
-    pub fn create_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
+    pub fn load_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
         let image = ::image::open(filename)?;
 
         use std::convert::TryFrom;
 
         let src = ImageSource::try_from(&image)?;
 
-        self.images.add(&mut self.renderer, src, flags)
+        self.create_image(src, flags)
     }
 
     /// Decode an image from memory
     #[cfg(feature = "image-loading")]
-    pub fn create_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
+    pub fn load_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
         let image = ::image::load_from_memory(data)?;
 
         use std::convert::TryFrom;
 
         let src = ImageSource::try_from(&image)?;
 
-        self.images.add(&mut self.renderer, src, flags)
+        self.create_image(src, flags)
     }
 
     /// Updates image data specified by image handle.
@@ -408,8 +420,8 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Returns the size in pixels of the image for the specified id.
     pub fn image_size(&self, id: ImageId) -> Result<(usize, usize)> {
-        if let Some(img) = self.images.get(id) {
-            Ok((img.info().width(), img.info().height()))
+        if let Some(info) = self.images.info(id) {
+            Ok((info.width(), info.height()))
         } else {
             Err(ErrorKind::ImageIdNotFound)
         }

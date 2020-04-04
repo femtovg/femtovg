@@ -1,11 +1,13 @@
 
+use std::ptr;
+
 use crate::{
     Result,
     ErrorKind,
     ImageFlags,
-    Image,
     ImageInfo,
-    ImageSource
+    ImageSource,
+    ImageFormat,
 };
 
 use super::gl;
@@ -17,12 +19,12 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(src: ImageSource, flags: ImageFlags, opengles: bool) -> Result<Self> {
-        let size = src.dimensions();
+    pub fn new(info: ImageInfo, opengles: bool) -> Result<Self> {
+        //let size = src.dimensions();
 
         let mut texture = Texture {
             id: 0,
-            info: ImageInfo::new(flags, size.0, size.1, src.format())
+            info: info
         };
 
         unsafe {
@@ -34,8 +36,8 @@ impl Texture {
             gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
         }
 
-        match src {
-            ImageSource::Gray(data) => unsafe {
+        match info.format() {
+            ImageFormat::Gray8 => unsafe {
                 let format = if opengles { gl::LUMINANCE } else { gl::RED };
 
                 gl::TexImage2D(
@@ -47,10 +49,11 @@ impl Texture {
                     0,
                     format,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    ptr::null()
+                    //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageSource::Rgb(data) => unsafe {
+            ImageFormat::Rgb8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
@@ -60,10 +63,11 @@ impl Texture {
                     0,
                     gl::RGB,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    ptr::null(),
+                    //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageSource::Rgba(data) => unsafe {
+            ImageFormat::Rgba8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
@@ -73,10 +77,13 @@ impl Texture {
                     0,
                     gl::RGBA,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    ptr::null(),
+                    //data.buf().as_ptr() as *const GLvoid
                 );
             },
         }
+
+        let flags = texture.info.flags();
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
             if flags.contains(ImageFlags::NEAREST) {
@@ -198,6 +205,13 @@ impl Texture {
             }
         }
 
+        if self.info.flags().contains(ImageFlags::GENERATE_MIPMAPS) {
+            unsafe {
+                gl::GenerateMipmap(gl::TEXTURE_2D);
+                //gl::TexParameteri(gl::TEXTURE_2D, gl::GENERATE_MIPMAP, gl::TRUE);
+            }
+        }
+
         unsafe {
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
             gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
@@ -214,10 +228,8 @@ impl Texture {
             gl::DeleteTextures(1, &self.id);
         }
     }
-}
 
-impl Image for Texture {
-    fn info(&self) -> ImageInfo {
+    pub fn info(&self) -> ImageInfo {
         self.info
     }
 }

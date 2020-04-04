@@ -20,12 +20,11 @@ use crate::{
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub Index);
 
-// TODO: Rename those to RGB8, RGBA8, GRAY8 to better indicate size
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ImageFormat {
-    Rgb,
-    Rgba,
-    Gray
+    Rgb8,
+    Rgba8,
+    Gray8
 }
 
 bitflags! {
@@ -50,9 +49,9 @@ pub enum ImageSource<'a> {
 impl ImageSource<'_> {
     pub fn format(&self) -> ImageFormat {
         match self {
-            Self::Rgb(_) => ImageFormat::Rgb,
-            Self::Rgba(_) => ImageFormat::Rgb,
-            Self::Gray(_) => ImageFormat::Gray,
+            Self::Rgb(_) => ImageFormat::Rgb8,
+            Self::Rgba(_) => ImageFormat::Rgb8,
+            Self::Gray(_) => ImageFormat::Gray8,
         }
     }
 
@@ -148,40 +147,36 @@ impl ImageInfo {
     }
 }
 
-pub trait Image {
-    fn info(&self) -> ImageInfo;
-}
+pub struct ImageStore<T>(Arena<(ImageInfo, T)>);
 
-pub struct ImageStore<T>(Arena<T>);
-
-impl<T: Image> Default for ImageStore<T> {
+impl<T> Default for ImageStore<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Image> ImageStore<T> {
+impl<T> ImageStore<T> {
     pub fn new() -> Self {
         Self(Arena::new())
     }
 
-    pub fn add<R: Renderer<Image = T>>(&mut self, renderer: &mut R, data: ImageSource, flags: ImageFlags) -> Result<ImageId> {
-        let image = renderer.create_image(data, flags)?;
+    pub fn alloc<R: Renderer<Image = T>>(&mut self, renderer: &mut R, info: ImageInfo) -> Result<ImageId> {
+        let image = renderer.alloc_image(info)?;
 
-        Ok(ImageId(self.0.insert(image)))
+        Ok(ImageId(self.0.insert((info, image))))
     }
 
     pub fn get(&self, id: ImageId) -> Option<&T> {
-        self.0.get(id.0)
+        self.0.get(id.0).map(|inner| &inner.1)
     }
 
     pub fn get_mut(&mut self, id: ImageId) -> Option<&mut T> {
-        self.0.get_mut(id.0)
+        self.0.get_mut(id.0).map(|inner| &mut inner.1)
     }
 
     pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, data: ImageSource, x: usize, y: usize) -> Result<()> {
         if let Some(image) = self.0.get_mut(id.0) {
-            renderer.update_image(image, data, x, y)?;
+            renderer.update_image(&mut image.1, data, x, y)?;
         } else {
             return Err(ErrorKind::ImageIdNotFound);
         }
@@ -189,15 +184,19 @@ impl<T: Image> ImageStore<T> {
         Ok(())
     }
 
+    pub fn info(&self, id: ImageId) -> Option<ImageInfo> {
+        self.0.get(id.0).map(|inner| inner.0)
+    }
+
     pub fn remove<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId) {
         if let Some(image) = self.0.remove(id.0) {
-            renderer.delete_image(image);
+            renderer.delete_image(image.1);
         }
     }
 
     pub fn clear<R: Renderer<Image = T>>(&mut self, renderer: &mut R) {
         for (_idx, image) in self.0.drain() {
-            renderer.delete_image(image);
+            renderer.delete_image(image.1);
         }
     }
 }

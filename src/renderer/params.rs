@@ -1,6 +1,5 @@
 
 use crate::{
-    Image,
     ImageFormat,
     ImageFlags,
     ImageStore,
@@ -33,7 +32,7 @@ pub struct Params {
 
 impl Params {
 
-    pub(crate) fn new<T: Image>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
+    pub(crate) fn new<T>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
         let mut params = Params::default();
 
         // Scissor
@@ -73,8 +72,8 @@ impl Params {
                 inv_transform = paint.transform.inversed();
             },
             PaintFlavor::Image { id, cx, cy, width, height, angle, alpha } => {
-                let image_info = match images.get(id) {
-                    Some(image) => image.info(),
+                let image_info = match images.info(id) {
+                    Some(info) => info,
                     None => return params
                 };
 
@@ -112,8 +111,8 @@ impl Params {
                 params.shader_type = ShaderType::FillImage.to_f32();
 
                 params.tex_type = match image_info.format() {
-                    ImageFormat::Rgba => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
-                    ImageFormat::Gray => 2.0,
+                    ImageFormat::Rgba8 => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                    ImageFormat::Gray8 => 2.0,
                     _ => 0.0
                 };
             },

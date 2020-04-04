@@ -6,7 +6,6 @@ use imgref::ImgVec;
 use crate::{
     Result,
     ErrorKind,
-    Image,
     ImageInfo,
     ImageStore,
     ImageSource,
@@ -15,7 +14,6 @@ use crate::{
 use super::{
     Renderer,
     Command,
-    ImageFlags,
     Vertex,
     RenderTarget
 };
@@ -30,11 +28,9 @@ impl Renderer for Void {
 
     fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
 
-    fn create_image(&mut self, data: ImageSource, flags: ImageFlags) -> Result<Self::Image> {
-        let size = data.dimensions();
-
+    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image> {
         Ok(VoidImage {
-            info: ImageInfo::new(flags, size.0, size.1, data.format())
+            info
         })
     }
 
@@ -67,10 +63,4 @@ impl Renderer for Void {
 
 pub struct VoidImage {
     info: ImageInfo
-}
-
-impl Image for VoidImage {
-    fn info(&self) -> ImageInfo {
-        self.info
-    }
 }

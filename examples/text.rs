@@ -42,7 +42,7 @@ fn main() {
     let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
-    let image_id = canvas.create_image_file("examples/assets/pattern.jpg", flags).expect("Cannot create image");
+    let image_id = canvas.load_image_file("examples/assets/pattern.jpg", flags).expect("Cannot create image");
 
     let start = Instant::now();
     let mut prevt = start;

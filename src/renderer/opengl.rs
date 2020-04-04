@@ -9,7 +9,7 @@ use imgref::ImgVec;
 use crate::{
     Color,
     Result,
-    Image,
+    ImageInfo,
     ImageStore,
     ImageFormat,
     ImageSource,
@@ -457,8 +457,8 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn create_image(&mut self, data: ImageSource, flags: ImageFlags) -> Result<Self::Image> {
-        Texture::new(data, flags, self.is_opengles)
+    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image> {
+        Texture::new(info, self.is_opengles)
     }
 
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()> {
@@ -506,9 +506,9 @@ impl Renderer for OpenGl {
         }
 
         let gl_format = match texture.info().format() {
-            ImageFormat::Rgb => gl::RGB,
-            ImageFormat::Rgba => gl::RGBA,
-            ImageFormat::Gray => gl::RED,
+            ImageFormat::Rgb8 => gl::RGB,
+            ImageFormat::Rgba8 => gl::RGBA,
+            ImageFormat::Gray8 => gl::RED,
         };
 
         for (fbo, tex) in pingpong_fbo.iter().zip(pingpong_tex.iter()) {
@@ -539,6 +539,7 @@ impl Renderer for OpenGl {
 
         self.blur_program.bind();
         self.blur_program.set_image(0);
+        // TODO: depending on the final glsl version, we may be able to use textureSize inside the shader
         self.blur_program.set_image_size([
             texture.info().width() as f32,
             texture.info().height() as f32
@@ -582,9 +583,7 @@ impl Renderer for OpenGl {
 
             gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             gl::Disable(gl::SCISSOR_TEST);
-        }
 
-        unsafe {
             gl::DeleteTextures(2, pingpong_tex.as_ptr() as *mut GLuint);
             gl::DeleteFramebuffers(2, pingpong_fbo.as_ptr() as *mut GLuint);
         }

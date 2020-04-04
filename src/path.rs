@@ -21,6 +21,9 @@ impl Default for Solidity {
     }
 }
 
+// TODO: Optimize path memory requirements by implementing the path more like in the original nanovg
+// ref https://people.gnome.org/~federico/blog/reducing-memory-consumption-in-librsvg-4.html 
+
 #[derive(Copy, Clone, Debug)]
 pub enum Verb {
     MoveTo(f32, f32),

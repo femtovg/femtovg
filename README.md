@@ -11,7 +11,7 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Anti-aliasing
 * [x] Bézier paths filling and stroking
 * [x] Solid color and image pattern fills and strokes
-* [x] Gradients - box (for easy box shadows), linear (2 points only) and radial
+* [x] Gradients - box, linear (2 points only) and radial
 * [x] Stroke width and miterlimit
 * [x] Stroke caps: butt, round and square
 * [x] Stroke joins: miter, round and bevel
