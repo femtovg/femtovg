@@ -10,7 +10,7 @@ use crate::{
 use super::gl;
 use super::gl::types::*;
 
-const GLSL_VERSION: &str = "#version 130";
+const GLSL_VERSION: &str = "#version 100";
 
 pub(crate) struct Shader {
     id: GLuint
