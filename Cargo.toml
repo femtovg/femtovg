@@ -17,6 +17,7 @@ libc = "0.2.68"
 imgref = "1.4.0"
 bitflags = "1.2.1"
 ttf-parser = "0.3.0"
+servo-freetype-sys = "4.0.5"
 harfbuzz_rs = "1.0.1"
 unicode-bidi = "0.3.4"
 unicode-script = "0.5.0"
@@ -30,7 +31,6 @@ image-loading = ["image"]
 
 [build-dependencies]
 gl_generator = "0.14.0"
-pkg-config = "0.3.17"
 
 [dev-dependencies]
 glutin = "0.22.0"
