@@ -16,12 +16,13 @@ rgb = "0.8.16"
 libc = "0.2.68"
 imgref = "1.4.0"
 bitflags = "1.2.1"
-ttf-parser = "0.3.0"
+ttf-parser = "0.5.0"
 servo-freetype-sys = "4.0.5"
 harfbuzz_rs = "1.0.1"
 unicode-bidi = "0.3.4"
 unicode-script = "0.5.0"
 generational-arena = "0.2.7"
+#rustybuzz = { git = "https://github.com/RazrFalcon/rustybuzz.git" }
 lru = { version = "0.4.3", default-features = false }
 image = { version = "0.23.2", optional = true }
 

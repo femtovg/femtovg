@@ -15,6 +15,7 @@ fn main() {
     Registry::new(Api::Gles2, (3, 0), Profile::Core, Fallbacks::All, [])
         .write_bindings(GlobalGenerator, &mut file)
         .unwrap();
-        
-    println!("cargo:rustc-link-lib=static=freetype");
+
+    // TODO: This is needed on older OSX versions
+    //println!("cargo:rustc-link-lib=static=freetype");
 }

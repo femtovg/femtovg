@@ -4,8 +4,6 @@ use std::error::Error;
 use std::ffi::NulError;
 use std::fmt::{self, Display, Formatter};
 
-use ttf_parser as ttf;
-
 use crate::text;
 
 /// Enum with all possible canvas errors that could occur.
@@ -17,7 +15,7 @@ pub enum ErrorKind {
     ImageError(::image::ImageError),
     IoError(io::Error),
     FreetypeError(text::freetype::Error),
-    TtfParserError(ttf::Error),
+    FontParseError,
     NoFontFound,
     FontInfoExtracionError,
     FontSizeTooLargeForAtlas,
@@ -51,12 +49,6 @@ impl From<io::Error> for ErrorKind {
 impl From<text::freetype::Error> for ErrorKind {
     fn from(error: text::freetype::Error) -> Self {
         Self::FreetypeError(error)
-    }
-}
-
-impl From<ttf::Error> for ErrorKind {
-    fn from(error: ttf::Error) -> Self {
-        Self::TtfParserError(error)
     }
 }
 

@@ -139,7 +139,7 @@ impl FontDb {
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
-        let font = ttf::Font::from_data(&data, 0)?;
+        let font = ttf::Font::from_data(&data, 0).ok_or(ErrorKind::FontParseError)?;
         let description = FontDescription::try_from(font)?;
 
         if let Some(id) = self.font_descr.get(&description).copied() {

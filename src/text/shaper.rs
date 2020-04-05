@@ -153,11 +153,21 @@ impl Shaper {
                         let output = {
                             //let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
 
-                            let hb_font = Self::hb_font(font);
+                            let mut hb_font = Self::hb_font(font);
+                            hb_font.set_scale(style.size as i32 * 72, style.size as i32 * 72);
                             let buffer = Self::hb_buffer(&word, direction, script);
+
                             //hb::shape(&hb_font, buffer, &[kern])
                             hb::shape(&hb_font, buffer, &[])
                         };
+
+                        // let output = {
+                        //     let rb_font = Self::rb_font(font);
+                        //     //rb_font.set_scale(style.size, style.size);
+                        //     let buffer = Self::rb_buffer(&word, direction, script);
+                        //
+                        //     rustybuzz::shape(&rb_font, buffer, &[])
+                        // };
 
                         let positions = output.get_glyph_positions();
                         let infos = output.get_glyph_infos();
@@ -301,11 +311,32 @@ impl Shaper {
         glyph
     }
 
+    // TODO: error handling
+    // fn rb_font(font: &mut Font) -> rustybuzz::Font {
+    //     let face = match rustybuzz::Face::new(&font.data, 0) {
+    //         Some(v) => v,
+    //         None => {
+    //             eprintln!("Error: malformed font.");
+    //             std::process::exit(1);
+    //         }
+    //     };
+    //
+    //     rustybuzz::Font::new(face)
+    // }
+    //
+    // fn rb_buffer(text: &str, direction: Direction, script: Script) -> rustybuzz::Buffer {
+    //     let mut buffer = rustybuzz::Buffer::new(text);
+    //
+    //     // TODO: Direction and script
+    //
+    //     buffer
+    // }
+
     fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
         // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
         // And I didn't want to read the file a second time and keep it in memory just to give
         // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
-        
+
         let face = hb::Face::new(font.data.clone(), 0);
 		hb::Font::new(face)
     }
