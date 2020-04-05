@@ -362,6 +362,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_render_target(&mut self, target: RenderTarget) {
+        self.flush();
         self.renderer.set_target(&self.images, target);
     }
 
