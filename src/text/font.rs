@@ -9,14 +9,16 @@ use super::fontdb::{
 pub struct Font {
     pub(crate) id: FontId,
     pub(crate) face: ft::Face,
+    pub(crate) data: Vec<u8>
 }
 
 impl Font {
 
-    pub fn new(id: FontId, face: ft::Face) -> Self {
+    pub fn new(id: FontId, face: ft::Face, data: Vec<u8>) -> Self {
         Self {
             id,
-            face
+            face,
+            data
         }
     }
 

@@ -145,10 +145,10 @@ impl FontDb {
         if let Some(id) = self.font_descr.get(&description).copied() {
             Ok(id)
         } else {
-            let face = self.library.new_memory_face(data, 0)?;
+            let face = self.library.new_memory_face(data.clone(), 0)?;
 
             let id = FontId(self.fonts.len());
-            self.fonts.push(Font::new(id, face));
+            self.fonts.push(Font::new(id, face, data));
             self.font_descr.insert(description, id);
             Ok(id)
         }

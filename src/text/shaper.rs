@@ -34,9 +34,9 @@ const LRU_CACHE_CAPACITY: usize = 1000;
 
 // harfbuzz-sys doesn't add this symbol for mac builds.
 // And we need it since we're using freetype on OSX.
-extern "C" {
-    pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
-}
+//extern "C" {
+//    pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
+//}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Direction {
@@ -305,11 +305,9 @@ impl Shaper {
         // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
         // And I didn't want to read the file a second time and keep it in memory just to give
         // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
-
-        unsafe {
-            let raw_font = hb_ft_font_create_referenced(font.face.raw_mut());
-            hb::Owned::from_raw(raw_font)
-        }
+        
+        let face = hb::Face::new(font.data.clone(), 0);
+		hb::Font::new(face)
     }
 
     fn hb_buffer(text: &str, direction: Direction, script: Script) -> hb::UnicodeBuffer {

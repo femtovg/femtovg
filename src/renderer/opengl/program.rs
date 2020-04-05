@@ -73,15 +73,21 @@ pub(crate) struct Program {
 
 impl Program {
 
-    pub fn new(shaders: &[Shader]) -> Result<Self> {
+    pub fn new(shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self> {
         let program = Self {
             id: unsafe { gl::CreateProgram() },
         };
-
+        
         // Attach stages
         for shader in shaders {
             unsafe { gl::AttachShader(program.id, shader.id()); }
         }
+        
+        for (i, loc) in attrib_locations.iter().enumerate() {
+			unsafe {
+				gl::BindAttribLocation(program.id, i as u32, CString::new(*loc)?.as_ptr());
+			}
+		}
 
         unsafe {
             gl::LinkProgram(program.id);
@@ -108,7 +114,7 @@ impl Program {
         for shader in shaders {
             unsafe { gl::DetachShader(program.id, shader.id()); }
         }
-
+        
         Ok(program)
     }
 
@@ -152,12 +158,10 @@ impl MainProgram {
         let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
         let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
 
-        let program = Program::new(&[vert_shader, frag_shader])?;
-
-        unsafe {
-            gl::BindAttribLocation(program.id, 0, CString::new("vertex")?.as_ptr());
-            gl::BindAttribLocation(program.id, 1, CString::new("tcoord")?.as_ptr());
-        }
+        let program = Program::new(
+			&[vert_shader, frag_shader],
+			&["vertex", "tcoord"]
+		)?;
 
         let loc_viewsize = program.uniform_location("viewSize")?;
         let loc_tex = program.uniform_location("tex")?;
@@ -215,12 +219,10 @@ impl BlurProgram {
         let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
         let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
 
-        let program = Program::new(&[vert_shader, frag_shader])?;
-
-        unsafe {
-            gl::BindAttribLocation(program.id, 0, CString::new("vertex")?.as_ptr());
-            gl::BindAttribLocation(program.id, 1, CString::new("tcoord")?.as_ptr());
-        }
+        let program = Program::new(
+			&[vert_shader, frag_shader],
+			&["vertex", "tcoord"]
+		)?;
 
         let loc_image = program.uniform_location("image")?;
         let loc_horizontal = program.uniform_location("horizontal")?;
