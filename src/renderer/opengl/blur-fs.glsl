@@ -8,8 +8,6 @@ uniform sampler2D image;
 uniform bool horizontal;
 uniform vec2 image_size;
 
-
-
 void main() {
     float weight[5];
     weight[0] = 0.2270270270;
