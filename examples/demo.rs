@@ -138,7 +138,7 @@ fn main() {
 
                 {
                     canvas.set_render_target(RenderTarget::Image(graph_image_id));
-                    canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
+                    canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
                     draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                     canvas.set_render_target(RenderTarget::Screen);
 
