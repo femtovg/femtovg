@@ -134,6 +134,8 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
+                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+
                 {
                     canvas.set_render_target(RenderTarget::Image(graph_image_id));
                     canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
@@ -150,7 +152,7 @@ fn main() {
                     );
                 }
 
-                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                //draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
