@@ -22,7 +22,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
     paint.set_anti_alias(false);
 
     for glyph in &text_layout.glyphs {
-        let mut path_builder = {
+        let mut path = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
 
@@ -36,14 +36,14 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
             let mut path_builder = TransformedPathBuilder(Path::new(), transform);
             font.outline_glyph(ttf_parser::GlyphId(glyph.codepoint as u16), &mut path_builder);
 
-            path_builder
+            path_builder.0
         };
 
         if let RenderStyle::Stroke { width } = style.render_style {
             paint.set_stroke_width(width as f32);
-            canvas.stroke_path(&mut path_builder.0, paint);
+            canvas.stroke_path(&mut path, paint);
         } else {
-            canvas.fill_path(&mut path_builder.0, paint);
+            canvas.fill_path(&mut path, paint);
         }
     }
 

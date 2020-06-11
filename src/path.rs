@@ -329,39 +329,4 @@ impl Path {
 
         self.verbs.extend_from_slice(verbs);
     }
-
-    pub fn apply_transform(&mut self, transform: Transform2D) {
-        let (tx, ty) = transform.transform_point(self.lastx, self.lasty);
-        self.lastx = tx;
-        self.lasty = ty;
-
-        for cmd in &mut self.verbs {
-            match cmd {
-                Verb::MoveTo(x, y) => {
-                    let (tx, ty) = transform.transform_point(*x, *y);
-                    *x = tx;
-                    *y = ty;
-                }
-                Verb::LineTo(x, y) => {
-                    let (tx, ty) = transform.transform_point(*x, *y);
-                    *x = tx;
-                    *y = ty;
-                }
-                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-                    let (tx, ty) = transform.transform_point(*c1x, *c1y);
-                    *c1x = tx;
-                    *c1y = ty;
-
-                    let (tx, ty) = transform.transform_point(*c2x, *c2y);
-                    *c2x = tx;
-                    *c2y = ty;
-
-                    let (tx, ty) = transform.transform_point(*x, *y);
-                    *x = tx;
-                    *y = ty;
-                }
-                _ => ()
-            }
-        }
-    }
 }
