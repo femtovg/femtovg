@@ -362,6 +362,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_render_target(&mut self, target: RenderTarget) {
+        // TODO: This should be part of the state stack
         self.flush();
         self.renderer.set_target(&self.images, target);
     }
@@ -824,32 +825,34 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
+        text::render_text(self, &layout, &style, &paint, invscale)?;
 
-        for cmd in &cmds {
-            let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
+        // let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
-            for quad in &cmd.quads {
-                let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
-                let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
-                let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
-                let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
+        // for cmd in &cmds {
+        //     let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
-                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-                verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
-                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
-                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-            }
+        //     for quad in &cmd.quads {
+        //         let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
+        //         let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
+        //         let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
+        //         let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
 
-            paint.set_alpha_mask(Some(cmd.image_id));
+        //         verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+        //         verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+        //         verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
+        //         verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+        //         verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
+        //         verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+        //     }
 
-            // Apply global alpha
-            paint.mul_alpha(self.state().alpha);
+        //     paint.set_alpha_mask(Some(cmd.image_id));
 
-            self.render_triangles(&verts, &paint, &scissor);
-        }
+        //     // Apply global alpha
+        //     paint.mul_alpha(self.state().alpha);
+
+        //     self.render_triangles(&verts, &paint, &scissor);
+        // }
 
         Ok(layout)
     }
@@ -877,6 +880,8 @@ impl<T> Canvas<T> where T: Renderer {
         geometry::quantize(avg_scale, 0.1).min(7.0)
     }
 
+    //
+
     fn state(&self) -> &State {
         self.state_stack.last().unwrap()
     }
@@ -891,29 +896,3 @@ impl<T: Renderer> Drop for Canvas<T> {
         self.images.clear(&mut self.renderer);
     }
 }
-
-/*
-ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like
-glyphs. I very much wanted to render glyps on the GPU using the same code path as other shapes and
-without using freetype, but the qulity was horrendous.
-impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.move_to(x, y);
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.line_to(x, y);
-    }
-
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.quad_to(x1, y1, x, y);
-    }
-
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.bezier_to(x1, y1, x2, y2, x, y);
-    }
-
-    fn close(&mut self) {
-        self.close_path();
-    }
-}*/

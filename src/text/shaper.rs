@@ -262,8 +262,15 @@ impl Shaper {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             font.set_size(style.size)?;
 
-            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
-            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+            // these two lines are for use with freetype renderer
+            //let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
+            //let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+            
+            // these two lines are for use with canvas renderer
+            let xpos = cursor_x + glyph.offset_x - (padding as f32) - (line_width as f32) / 2.0;
+            let ypos = cursor_y + glyph.offset_y - (padding as f32) - (line_width as f32) / 2.0;
+            let xpos = cursor_x + glyph.offset_x;
+            let ypos = cursor_y + glyph.offset_y;
 
             // Baseline alignment
             let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;

@@ -28,7 +28,7 @@ fn main() {
         .with_resizable(false)
         .with_title("Text demo");
 
-    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_multisampling(16).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -241,7 +241,7 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
 fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
 
-    let mut paint = Paint::color(Color::hex("7300AB"));
+    let mut paint = Paint::color(Color::hex("#7300AB"));
     paint.set_stroke_width(3.0);
     let mut path = Path::new();
     path.move_to(x, y - 2.0);

@@ -1,6 +1,9 @@
 
 mod text_renderer;
-pub use text_renderer::TextRenderer;
+pub use text_renderer::{TextRenderer, Atlas};
+
+mod text_helper;
+pub use text_helper::render_text;
 
 mod shaper;
 pub use shaper::{

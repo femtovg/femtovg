@@ -26,7 +26,7 @@ use super::{
 };
 
 mod atlas;
-use atlas::Atlas;
+pub use atlas::Atlas;
 
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
