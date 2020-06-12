@@ -214,6 +214,9 @@ struct State {
     composite_operation: CompositeOperationState,
     transform: Transform2D,
     scissor: Scissor,
+    render_target: RenderTarget,
+    render_target_size: (f32, f32),
+    render_target_dpi: f32,
     alpha: f32,
 }
 
@@ -223,14 +226,15 @@ impl Default for State {
             composite_operation: Default::default(),
             transform: Transform2D::identity(),
             scissor: Default::default(),
+            render_target: RenderTarget::Screen,
+            render_target_size: (0.0, 0.0),
+            render_target_dpi: 0.0,
             alpha: 1.0,
         }
     }
 }
 
 pub struct Canvas<T: Renderer> {
-    width: f32,
-    height: f32,
     renderer: T,
     fontdb: FontDb,
     shaper: Shaper,
@@ -251,8 +255,6 @@ impl<T> Canvas<T> where T: Renderer {
         let fontdb = FontDb::new()?;
 
         let mut canvas = Self {
-            width: Default::default(),
-            height: Default::default(),
             renderer: renderer,
             fontdb: fontdb,
             shaper: Default::default(),
@@ -273,12 +275,13 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
-        self.width = width as f32;
-        self.height = height as f32;
         self.fringe_width = 1.0 / dpi;
         self.tess_tol = 0.25 / dpi;
         self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
+        
+        self.state_mut().render_target_size = (width as f32, height as f32);
+        self.state_mut().render_target_dpi = dpi;
 
         self.renderer.set_size(width, height, dpi);
     }
@@ -293,12 +296,12 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Returns the with of the canvas
     pub fn width(&self) -> f32 {
-        self.width
+        self.state().render_target_size.0
     }
 
     /// Returns the height of the canvas
     pub fn height(&self) -> f32 {
-        self.height
+        self.state().render_target_size.1
     }
 
     /// Tells the renderer to execute all drawing commands and clears the current internal state
@@ -327,8 +330,14 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Restores the previous render state
     pub fn restore(&mut self) {
-        if self.state_stack.len() > 1 {
-            self.state_stack.pop();
+        if let Some(old_state) = self.state_stack.pop() {
+            if old_state.render_target != self.state().render_target {
+                self.flush();
+                self.renderer.set_target(&self.images, self.state().render_target);
+                self.set_size(old_state.render_target_size.0 as u32, old_state.render_target_size.1 as u32, old_state.render_target_dpi);
+            }
+        } else {
+            self.reset();
         }
     }
 
@@ -362,9 +371,9 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_render_target(&mut self, target: RenderTarget) {
-        // TODO: This should be part of the state stack
         self.flush();
         self.renderer.set_target(&self.images, target);
+        self.state_mut().render_target = target;
     }
 
     // Images
@@ -566,8 +575,8 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return false;
         }
 
@@ -582,8 +591,8 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return;
         }
 
@@ -673,8 +682,8 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return;
         }
 
