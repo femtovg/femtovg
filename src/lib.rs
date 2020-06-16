@@ -40,6 +40,7 @@ use text::{
     TextRenderer,
     TextStyle,
     RenderStyle,
+    TextHelperContext
 };
 
 mod image;
@@ -239,6 +240,7 @@ pub struct Canvas<T: Renderer> {
     fontdb: FontDb,
     shaper: Shaper,
     text_renderer: TextRenderer,
+    text_helper_context: TextHelperContext,
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
@@ -259,6 +261,7 @@ impl<T> Canvas<T> where T: Renderer {
             fontdb: fontdb,
             shaper: Default::default(),
             text_renderer: Default::default(),
+            text_helper_context: Default::default(),
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
@@ -329,8 +332,12 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Restores the previous render state
+    ///
+    /// Restoring the initial/first state will just reset it to the defaults
     pub fn restore(&mut self) {
-        if let Some(old_state) = self.state_stack.pop() {
+        if self.state_stack.len() > 1 {
+            let old_state = self.state_stack.pop().expect("Prev line should ensure this never happens");
+
             if old_state.render_target != self.state().render_target {
                 self.flush();
                 self.renderer.set_target(&self.images, self.state().render_target);
@@ -343,7 +350,10 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Resets current render state to default values. Does not affect the render state stack.
     pub fn reset(&mut self) {
+        let initial = self.state_stack.first().copied().unwrap();
         *self.state_mut() = Default::default();
+        self.state_mut().render_target_size = initial.render_target_size;
+        self.state_mut().render_target_dpi = initial.render_target_dpi;
     }
 
     // Render styles
@@ -374,6 +384,12 @@ impl<T> Canvas<T> where T: Renderer {
         self.flush();
         self.renderer.set_target(&self.images, target);
         self.state_mut().render_target = target;
+
+        if let RenderTarget::Image(image_id) = target {
+            if let Ok(size) = self.image_size(image_id) {
+                self.set_size(size.0 as u32, size.1 as u32, 1.0);
+            }
+        }
     }
 
     // Images
@@ -499,6 +515,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Returns the current transformation matrix
+    ///
+    /// TODO: It's not ok that this method returns Transform2D while set_transform accepts 6 floats - make it consistant
     pub fn transform(&self) -> Transform2D {
         self.state().transform
     }
@@ -581,6 +599,15 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         path_cache.contains_point(x, y, fill_rule)
+    }
+
+    pub fn path_bbox(&self, path: &mut Path) -> Bounds {
+        let transform = self.state().transform;
+
+        // The path cache saves a flattened and transformed version of the path.
+        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+
+        path_cache.bounds
     }
 
     /// Fills the current path with current fill style.
@@ -834,34 +861,35 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        text::render_text(self, &layout, &style, &paint, invscale)?;
+        // text::render_text_direct(self, &layout, &style, &paint, invscale)?;
 
-        // let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
+        let cmds = text::render_text(self, &layout, &style, &paint, invscale)?;
+        //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
-        // for cmd in &cmds {
-        //     let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
+        for cmd in &cmds {
+            let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
-        //     for quad in &cmd.quads {
-        //         let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
-        //         let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
-        //         let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
-        //         let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
+            for quad in &cmd.quads {
+                let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
+                let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
+                let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
+                let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
 
-        //         verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-        //         verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-        //         verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
-        //         verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-        //         verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
-        //         verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-        //     }
+                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+                verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
+                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
+                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+            }
 
-        //     paint.set_alpha_mask(Some(cmd.image_id));
+            paint.set_alpha_mask(Some(cmd.image_id));
 
-        //     // Apply global alpha
-        //     paint.mul_alpha(self.state().alpha);
+            // Apply global alpha
+            paint.mul_alpha(self.state().alpha);
 
-        //     self.render_triangles(&verts, &paint, &scissor);
-        // }
+            self.render_triangles(&verts, &paint, &scissor);
+        }
 
         Ok(layout)
     }

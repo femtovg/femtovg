@@ -3,7 +3,11 @@ mod text_renderer;
 pub use text_renderer::{TextRenderer, Atlas};
 
 mod text_helper;
-pub use text_helper::render_text;
+pub use text_helper::{
+    render_text,
+    render_text_direct,
+    TextHelperContext
+};
 
 mod shaper;
 pub use shaper::{

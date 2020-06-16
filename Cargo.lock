@@ -507,7 +507,7 @@ dependencies = [
  "svg 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ttf-parser 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-bidi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "unicode-script 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "unicode-script 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "usvg 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -1250,7 +1250,7 @@ dependencies = [
 
 [[package]]
 name = "unicode-script"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -1287,7 +1287,7 @@ dependencies = [
  "svgtypes 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ttf-parser 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-bidi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "unicode-script 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "unicode-script 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "unicode-vo 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xmlwriter 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1625,7 +1625,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum toml 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)" = "ffc92d160b1eef40665be3a05630d003936a3bc7da7421277846c2613e92c71a"
 "checksum ttf-parser 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "52fbe7769f5af5d7d25aea74b9443b64e544a5ffb4d2b2968295ddea934f1a06"
 "checksum unicode-bidi 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "49f2bd0c6468a8230e1db229cff8029217cf623c767ea5d60bfbd42729ea54d5"
-"checksum unicode-script 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "dc3ca3febe3d301fa4ff250e63a11d9da58390c3f079c736fc6602bcd36449d2"
+"checksum unicode-script 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "58b33414ea8db4b7ea0343548dbdc31d27aef06beacf7044a87e564d9b0feb7d"
 "checksum unicode-vo 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b1d386ff53b415b7fe27b50bb44679e2cc4660272694b7b6f3326d8480823a94"
 "checksum unicode-xid 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc72304796d0818e357ead4e000d19c9c174ab23dc11093ac919054d20a6a7fc"
 "checksum unicode-xid 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "826e7639553986605ec5979c7dd957c7895e93eabed50ab2ffa7f6128a75097c"

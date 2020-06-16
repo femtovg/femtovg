@@ -54,7 +54,7 @@ fn main() {
 
     let graph_image_id = canvas.create_image_empty(1000, 600, ImageFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
 
-    let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
+    //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
     let mut screenshot_image_id = None;
 
@@ -142,11 +142,15 @@ fn main() {
                 {
                     canvas.save();
                     canvas.set_render_target(RenderTarget::Image(graph_image_id));
+                    //canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.3, 0.3, 0.32, 1.0));
                     canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
                     draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                     canvas.restore();
 
                     canvas.blur_image(graph_image_id, 4, 50, 150, 300, 400);
+
+                    canvas.save();
+                    canvas.reset();
 
                     let mut path = Path::new();
                     path.rect(0.0, 0.0, width, height);
@@ -154,22 +158,8 @@ fn main() {
                         &mut path,
                         Paint::image(graph_image_id, 0.0, 0.0, width, height, 0.0, 1.0)
                     );
-                }
 
-                {
-                    canvas.save();
-                    canvas.set_render_target(RenderTarget::Image(image_id));
-                    draw_eyes(&mut canvas, 25.0, 25.0, 150.0, 100.0, mousex, mousey, t);
                     canvas.restore();
-
-                    if let Ok((w, h)) = canvas.image_size(image_id) {
-                        let mut path = Path::new();
-                        path.rect(400.0, 25.0, w as f32 / 5.0, h as f32 / 5.0);
-                        canvas.fill_path(
-                            &mut path,
-                            Paint::image(image_id, 400.0, 25.0, w as f32 / 5.0, h as f32 / 5.0, 0.0, 1.0)
-                        );
-                    }
                 }
 
                 //draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);

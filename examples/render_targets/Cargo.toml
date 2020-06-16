@@ -1,0 +1,9 @@
+[package]
+name = "render_targets"
+version = "0.1.0"
+authors = ["Peter Todorov <ptodorov@cytec.bg>"]
+edition = "2018"
+
+[dependencies]
+glutin = "0.24.1"
+gpucanvas = { path = "../.." }
