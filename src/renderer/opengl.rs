@@ -505,6 +505,9 @@ impl Renderer for OpenGl {
                         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
                         gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
 
+                        self.view[0] = texture.info().width() as f32;
+                        self.view[1] = texture.info().height() as f32;
+
                         gl::BindTexture(gl::TEXTURE_2D, texture.id());
                         gl::FramebufferTexture2D(
                             gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0

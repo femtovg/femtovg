@@ -215,9 +215,6 @@ struct State {
     composite_operation: CompositeOperationState,
     transform: Transform2D,
     scissor: Scissor,
-    render_target: RenderTarget,
-    render_target_size: (f32, f32),
-    render_target_dpi: f32,
     alpha: f32,
 }
 
@@ -227,20 +224,20 @@ impl Default for State {
             composite_operation: Default::default(),
             transform: Transform2D::identity(),
             scissor: Default::default(),
-            render_target: RenderTarget::Screen,
-            render_target_size: (0.0, 0.0),
-            render_target_dpi: 0.0,
             alpha: 1.0,
         }
     }
 }
 
 pub struct Canvas<T: Renderer> {
+    width: u32,
+    height: u32,
     renderer: T,
     fontdb: FontDb,
     shaper: Shaper,
     text_renderer: TextRenderer,
     text_helper_context: TextHelperContext,
+    current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
@@ -257,11 +254,14 @@ impl<T> Canvas<T> where T: Renderer {
         let fontdb = FontDb::new()?;
 
         let mut canvas = Self {
+            width: 0,
+            height: 0,
             renderer: renderer,
             fontdb: fontdb,
             shaper: Default::default(),
             text_renderer: Default::default(),
             text_helper_context: Default::default(),
+            current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
@@ -278,14 +278,13 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
+        self.width = width;
+        self.height = height;
         self.fringe_width = 1.0 / dpi;
         self.tess_tol = 0.25 / dpi;
         self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
         
-        self.state_mut().render_target_size = (width as f32, height as f32);
-        self.state_mut().render_target_dpi = dpi;
-
         self.renderer.set_size(width, height, dpi);
     }
 
@@ -299,12 +298,12 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Returns the with of the canvas
     pub fn width(&self) -> f32 {
-        self.state().render_target_size.0
+        self.width as f32
     }
 
     /// Returns the height of the canvas
     pub fn height(&self) -> f32 {
-        self.state().render_target_size.1
+        self.height as f32
     }
 
     /// Tells the renderer to execute all drawing commands and clears the current internal state
@@ -336,13 +335,7 @@ impl<T> Canvas<T> where T: Renderer {
     /// Restoring the initial/first state will just reset it to the defaults
     pub fn restore(&mut self) {
         if self.state_stack.len() > 1 {
-            let old_state = self.state_stack.pop().expect("Prev line should ensure this never happens");
-
-            if old_state.render_target != self.state().render_target {
-                self.flush();
-                self.renderer.set_target(&self.images, self.state().render_target);
-                self.set_size(old_state.render_target_size.0 as u32, old_state.render_target_size.1 as u32, old_state.render_target_dpi);
-            }
+            self.state_stack.pop();
         } else {
             self.reset();
         }
@@ -350,10 +343,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Resets current render state to default values. Does not affect the render state stack.
     pub fn reset(&mut self) {
-        let initial = self.state_stack.first().copied().unwrap();
         *self.state_mut() = Default::default();
-        self.state_mut().render_target_size = initial.render_target_size;
-        self.state_mut().render_target_dpi = initial.render_target_dpi;
     }
 
     // Render styles
@@ -383,13 +373,7 @@ impl<T> Canvas<T> where T: Renderer {
     pub fn set_render_target(&mut self, target: RenderTarget) {
         self.flush();
         self.renderer.set_target(&self.images, target);
-        self.state_mut().render_target = target;
-
-        if let RenderTarget::Image(image_id) = target {
-            if let Ok(size) = self.image_size(image_id) {
-                self.set_size(size.0 as u32, size.1 as u32, 1.0);
-            }
-        }
+        self.current_render_target = target;
     }
 
     // Images

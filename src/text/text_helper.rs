@@ -99,6 +99,8 @@ pub struct TextHelperContext {
 pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
+    let initial_render_target = canvas.current_render_target;
+
     for glyph in &text_layout.glyphs {
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
@@ -137,13 +139,20 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         }
     }
 
+    canvas.set_render_target(initial_render_target);
+
     // debug draw
     {
+        canvas.save();
+        canvas.reset();
+
         let image_id = canvas.text_helper_context.textures[0].image_id;
 
         let mut path = Path::new();
         path.rect(400.0, 20.0, 512.0, 512.0);
         canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
+
+        canvas.restore();
     }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
@@ -201,14 +210,17 @@ pub fn render_glyph<T: Renderer>(
         let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, atlas.size().0, atlas.size().1, ImageFormat::Gray8);
         let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
+        //let image = ImgVec::new(vec![Gray(0u8); atlas.size().0 * atlas.size().1], atlas.size().0, atlas.size().1);
+        //canvas.images.update(&mut canvas.renderer, image_id, image.as_ref().into(), 0, 0)?;
+
         // canvas.save();
         // canvas.reset();
         // canvas.set_render_target(RenderTarget::Image(image_id));
-        // //canvas.clear_rect(0, 0, atlas_size as u32, atlas_size as u32, Color::black());
-        // let mut path = Path::new();
-        // path.rect(0.0, 0.0, atlas_size as f32, atlas_size as f32);
-        // canvas.fill_path(&mut path, Paint::color(Color::black()));
-        // canvas.restore();
+        // canvas.clear_rect(0, 0, atlas_size as u32, atlas_size as u32, Color::black());
+        //let mut path = Path::new();
+        //path.rect(0.0, 0.0, atlas_size as f32, atlas_size as f32);
+        //canvas.fill_path(&mut path, Paint::color(Color::black()));
+        //canvas.restore();
         
         canvas.text_helper_context.textures.push(FontTexture { atlas, image_id });
 
@@ -227,21 +239,22 @@ pub fn render_glyph<T: Renderer>(
     let mut path = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, x as f32, y as f32)?
+        glyph_path(font, glyph.codepoint as u16, style.size as f32, x as f32, 512.0 - height as f32 - y as f32)?
     };
 
     //canvas.clear_rect(0, 0, 512, 512, Color::white());
-    let mut square_path = Path::new();
-    square_path.rect(0.0, 0.0, 1000.0, 1000.0);
+
+    // let mut square_path = Path::new();
+    // square_path.rect(x as f32, 512.0 - glyph.height - y as f32, glyph.width, glyph.height);
+    // canvas.fill_path(&mut square_path, Paint::color(Color::white()));
+
+    canvas.clear_rect(x as u32, 512 - height as u32 - y as u32, width as u32, height as u32, Color::black());
 
     let mut paint = Paint::color(Color::white());
     paint.set_fill_rule(FillRule::EvenOdd);
     paint.set_anti_alias(false);
 
-    //canvas.scale(1.0, -1.0);
-
     canvas.fill_path(&mut path, paint);
-    //canvas.fill_path(&mut square_path, Paint::color(Color::white()));
 
     canvas.restore();
 
@@ -308,7 +321,8 @@ fn glyph_path(font: ttf_parser::Font, codepoint: u16, size: f32, x: f32, y: f32)
     let scale = size / units_per_em as f32;
 
     let mut transform = Transform2D::identity();
-    transform.scale(scale, -scale);
+
+    transform.scale(scale, scale);
     transform.translate(x, y);
     
     let mut path_builder = TransformedPathBuilder(Path::new(), transform);
