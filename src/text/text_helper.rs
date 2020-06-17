@@ -151,6 +151,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         let mut path = Path::new();
         path.rect(400.0, 20.0, 512.0, 512.0);
         canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
+        canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
         canvas.restore();
     }
@@ -167,13 +168,13 @@ pub fn render_glyph<T: Renderer>(
 ) -> Result<RenderedGlyph, ErrorKind> {
     let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 
-    let mut path = {
-        let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, 0.0, 0.0)?
-    };
+    // let mut path = {
+    //     let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+    //     let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+    //     glyph_path(font, glyph.codepoint as u16, style.size as f32, 0.0, 0.0)?
+    // };
 
-    let bounds = canvas.path_bbox(&mut path);
+    // let bounds = canvas.path_bbox(&mut path);
     //let width = (bounds.maxx - bounds.minx) as u32 + padding * 2;
     //let height = (bounds.maxy - bounds.miny) as u32 + padding * 2;
 
@@ -239,7 +240,7 @@ pub fn render_glyph<T: Renderer>(
     let mut path = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, x as f32, 512.0 - height as f32 - y as f32)?
+        glyph_path(font, glyph.codepoint as u16, style.size as f32, x as f32, 512.0 - y as f32 - glyph.bearing_y as f32)?
     };
 
     //canvas.clear_rect(0, 0, 512, 512, Color::white());
@@ -248,7 +249,7 @@ pub fn render_glyph<T: Renderer>(
     // square_path.rect(x as f32, 512.0 - glyph.height - y as f32, glyph.width, glyph.height);
     // canvas.fill_path(&mut square_path, Paint::color(Color::white()));
 
-    canvas.clear_rect(x as u32, 512 - height as u32 - y as u32, width as u32, height as u32, Color::black());
+    canvas.clear_rect(x as u32, 512 - y as u32 - height as u32, width as u32, height as u32, Color::black());
 
     let mut paint = Paint::color(Color::white());
     paint.set_fill_rule(FillRule::EvenOdd);

@@ -505,6 +505,7 @@ impl Renderer for OpenGl {
                         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
                         gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
 
+                        // TODO: this forgets the screen viewport size
                         self.view[0] = texture.info().width() as f32;
                         self.view[1] = texture.info().height() as f32;
 
