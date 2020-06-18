@@ -58,7 +58,9 @@ pub struct ShapedGlyph {
     pub offset_x: f32,
     pub offset_y: f32,
     pub bearing_x: f32,
-    pub bearing_y: f32
+    pub bearing_y: f32,
+    pub calc_offset_x: f32,
+    pub calc_offset_y: f32,
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -199,6 +201,8 @@ impl Shaper {
                                 offset_y: position.y_offset as f32 / 64.0,
                                 bearing_x: metrics.horiBearingX as f32 / 64.0,
                                 bearing_y: metrics.horiBearingY as f32 / 64.0,
+                                calc_offset_x: 0.0,
+                                calc_offset_y: 0.0,
                             });
                         }
 
@@ -262,9 +266,12 @@ impl Shaper {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             font.set_size(style.size)?;
 
+            glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
+            glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+
             // these two lines are for use with freetype renderer
-            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
-            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+            let xpos = cursor_x + glyph.calc_offset_x;
+            let ypos = cursor_y + glyph.calc_offset_y;
             
             // these two lines are for use with canvas renderer
             // let xpos = cursor_x + glyph.offset_x - (padding as f32) - (line_width as f32) / 2.0;

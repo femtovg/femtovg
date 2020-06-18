@@ -21,7 +21,7 @@ use crate::{
 pub struct ImageId(pub Index);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ImageFormat {
+pub enum PixelFormat {
     Rgb8,
     Rgba8,
     Gray8
@@ -47,11 +47,11 @@ pub enum ImageSource<'a> {
 }
 
 impl ImageSource<'_> {
-    pub fn format(&self) -> ImageFormat {
+    pub fn format(&self) -> PixelFormat {
         match self {
-            Self::Rgb(_) => ImageFormat::Rgb8,
-            Self::Rgba(_) => ImageFormat::Rgb8,
-            Self::Gray(_) => ImageFormat::Gray8,
+            Self::Rgb(_) => PixelFormat::Rgb8,
+            Self::Rgba(_) => PixelFormat::Rgb8,
+            Self::Gray(_) => PixelFormat::Gray8,
         }
     }
 
@@ -118,11 +118,11 @@ pub struct ImageInfo {
     flags: ImageFlags,
     width: usize,
     height: usize,
-    format: ImageFormat
+    format: PixelFormat
 }
 
 impl ImageInfo {
-    pub fn new(flags: ImageFlags, width: usize, height: usize, format: ImageFormat) -> Self {
+    pub fn new(flags: ImageFlags, width: usize, height: usize, format: PixelFormat) -> Self {
         Self { flags, width, height, format }
     }
 
@@ -138,11 +138,11 @@ impl ImageInfo {
         self.height
     }
 
-    pub fn format(&self) -> ImageFormat {
+    pub fn format(&self) -> PixelFormat {
         self.format
     }
 
-    pub fn set_format(&mut self, format: ImageFormat) {
+    pub fn set_format(&mut self, format: PixelFormat) {
         self.format = format;
     }
 }

@@ -11,7 +11,7 @@ use crate::{
     Result,
     ImageInfo,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageSource,
     FillRule,
     CompositeOperationState,
@@ -563,9 +563,9 @@ impl Renderer for OpenGl {
         }
 
         let gl_format = match texture.info().format() {
-            ImageFormat::Rgb8 => gl::RGB,
-            ImageFormat::Rgba8 => gl::RGBA,
-            ImageFormat::Gray8 => gl::RED,
+            PixelFormat::Rgb8 => gl::RGB,
+            PixelFormat::Rgba8 => gl::RGBA,
+            PixelFormat::Gray8 => gl::RED,
         };
 
         for (fbo, tex) in pingpong_fbo.iter().zip(pingpong_tex.iter()) {

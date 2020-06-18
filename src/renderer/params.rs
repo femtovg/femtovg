@@ -1,6 +1,6 @@
 
 use crate::{
-    ImageFormat,
+    PixelFormat,
     ImageFlags,
     ImageStore,
     Scissor,
@@ -111,8 +111,8 @@ impl Params {
                 params.shader_type = ShaderType::FillImage.to_f32();
 
                 params.tex_type = match image_info.format() {
-                    ImageFormat::Rgba8 => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
-                    ImageFormat::Gray8 => 2.0,
+                    PixelFormat::Rgba8 => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                    PixelFormat::Gray8 => 2.0,
                     _ => 0.0
                 };
             },

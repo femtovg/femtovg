@@ -15,7 +15,7 @@ use crate::{
     ImageId,
     ImageFlags,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageInfo,
     RenderTarget,
     Color
@@ -208,7 +208,7 @@ pub fn render_glyph<T: Renderer>(
 
         let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-        let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, atlas.size().0, atlas.size().1, ImageFormat::Gray8);
+        let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
         //let image = ImgVec::new(vec![Gray(0u8); atlas.size().0 * atlas.size().1], atlas.size().0, atlas.size().1);
@@ -236,18 +236,15 @@ pub fn render_glyph<T: Renderer>(
     canvas.reset();
     canvas.set_render_target(RenderTarget::Image(image_id));
 
-    // TODO: Find a way to remove this dupe call of glyph_path
     let mut path = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, x as f32, 512.0 - y as f32 - glyph.bearing_y as f32)?
+
+        let x = x as f32 - glyph.calc_offset_x;
+        let y = 512.0 - y as f32 + glyph.calc_offset_y;
+
+        glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
     };
-
-    //canvas.clear_rect(0, 0, 512, 512, Color::white());
-
-    // let mut square_path = Path::new();
-    // square_path.rect(x as f32, 512.0 - glyph.height - y as f32, glyph.width, glyph.height);
-    // canvas.fill_path(&mut square_path, Paint::color(Color::white()));
 
     canvas.clear_rect(x as u32, 512 - y as u32 - height as u32, width as u32, height as u32, Color::black());
 

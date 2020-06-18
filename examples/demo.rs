@@ -22,7 +22,7 @@ use gpucanvas::{
     Baseline,
     Weight,
     RenderTarget,
-    ImageFormat,
+    PixelFormat,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -52,7 +52,7 @@ fn main() {
     //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
     //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
 
-    let graph_image_id = canvas.create_image_empty(1000, 600, ImageFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
+    let graph_image_id = canvas.create_image_empty(1000, 600, PixelFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
 
     //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 

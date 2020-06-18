@@ -7,7 +7,7 @@ use crate::{
     ImageFlags,
     ImageInfo,
     ImageSource,
-    ImageFormat,
+    PixelFormat,
 };
 
 use super::gl;
@@ -37,7 +37,7 @@ impl Texture {
         }
 
         match info.format() {
-            ImageFormat::Gray8 => unsafe {
+            PixelFormat::Gray8 => unsafe {
                 let format = if opengles { gl::LUMINANCE } else { gl::RED };
                 //let internal_format = if opengles { gl::LUMINANCE } else { gl::R8 };
 
@@ -54,7 +54,7 @@ impl Texture {
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageFormat::Rgb8 => unsafe {
+            PixelFormat::Rgb8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
@@ -68,7 +68,7 @@ impl Texture {
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageFormat::Rgba8 => unsafe {
+            PixelFormat::Rgba8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,

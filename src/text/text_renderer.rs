@@ -9,7 +9,7 @@ use crate::{
     ImageId,
     ImageFlags,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageInfo,
     ErrorKind
 };
@@ -245,7 +245,7 @@ impl TextRenderer {
                 }
             }
 
-            let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, ImageFormat::Gray8);
+            let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
             let image_id = images.alloc(renderer, info)?;
             images.update(renderer, image_id, image.as_ref().into(), 0, 0)?;
 

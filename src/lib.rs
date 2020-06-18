@@ -49,7 +49,7 @@ pub use crate::image::{
     ImageInfo,
     ImageFlags,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageSource,
 };
 
@@ -378,7 +378,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Images
 
-    pub fn create_image_empty(&mut self, width: usize, height: usize, format: ImageFormat, flags: ImageFlags) -> Result<ImageId> {
+    pub fn create_image_empty(&mut self, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<ImageId> {
         let info = ImageInfo::new(flags, width, height, format);
 
         self.images.alloc(&mut self.renderer, info)
