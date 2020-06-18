@@ -263,9 +263,7 @@ impl Shaper {
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
-            let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            font.set_size(style.size)?;
-
+            
             glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
             glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
@@ -279,10 +277,22 @@ impl Shaper {
             // let xpos = cursor_x + glyph.offset_x;
             // let ypos = cursor_y + glyph.offset_y;
 
+            // TODO: Instead of allways getting units per em and calculating scale just move this to the Font struct
+            // and have getters that accept font_size and return correctly scaled result
+
+            let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            //font.set_size(style.size)?;
+
+            let units_per_em = font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
+            let scale = style.size as f32 / units_per_em as f32;
+
             // Baseline alignment
-            let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;
-            let ascender = size_metrics.ascender as f32 / 64.0;
-            let descender = size_metrics.descender as f32 / 64.0;
+            // let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;
+            // let ascender = size_metrics.ascender as f32 / 64.0;
+            // let descender = size_metrics.descender as f32 / 64.0;
+            let ascender = font.ascender() as f32 * scale;
+            let descender = font.descender() as f32 * scale;
 
             let offset_y = match style.baseline {
                 Baseline::Top => ascender,
@@ -291,7 +301,8 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            height = height.max(size_metrics.height as f32 / 64.0);
+            //height = height.max(size_metrics.height as f32 / 64.0);
+            height = height.max(font.height() as f32 * scale);
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 

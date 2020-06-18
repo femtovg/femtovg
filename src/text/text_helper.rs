@@ -208,7 +208,7 @@ pub fn render_glyph<T: Renderer>(
 
         let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-        let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, atlas.size().0, atlas.size().1, PixelFormat::Gray8);
+        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
         //let image = ImgVec::new(vec![Gray(0u8); atlas.size().0 * atlas.size().1], atlas.size().0, atlas.size().1);
