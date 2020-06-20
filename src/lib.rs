@@ -1,3 +1,4 @@
+#![feature(split_inclusive)]
 
 use std::path::Path as FilePath;
 
@@ -38,7 +39,6 @@ pub use text::{
 use text::{
     FontDb,
     Shaper,
-    TextRenderer,
     TextStyle,
     RenderStyle,
     TextHelperContext
@@ -236,8 +236,7 @@ pub struct Canvas<T: Renderer> {
     renderer: T,
     fontdb: FontDb,
     shaper: Shaper,
-    text_renderer: TextRenderer,
-    text_helper_context: TextHelperContext,
+    text_helper_context: TextHelperContext,// TODO: rename this
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -260,7 +259,6 @@ impl<T> Canvas<T> where T: Renderer {
             renderer: renderer,
             fontdb: fontdb,
             shaper: Default::default(),
-            text_renderer: Default::default(),
             text_helper_context: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),

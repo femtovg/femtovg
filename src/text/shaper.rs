@@ -7,7 +7,7 @@ use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass};
 
 use harfbuzz_rs as hb;
-use self::hb::hb as hb_sys;
+//use self::hb::hb as hb_sys;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
@@ -24,7 +24,6 @@ use super::{
     FontDb,
     FontId,
     TextStyle,
-    freetype as ft,
     RenderStyle,
     TextLayout,
     GLYPH_PADDING
@@ -87,7 +86,7 @@ impl ShapingId {
     }
 }
 
-type Cache<H> = LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), ErrorKind>, H>;
+type Cache<H> = LruCache<ShapingId, Result<Vec<ShapedGlyph>, ErrorKind>, H>;
 
 pub struct Shaper {
     cache: Cache<FnvBuildHasher>
@@ -120,27 +119,14 @@ impl Shaper {
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
-            let mut words: Vec<&str> = subtext.split(' ').collect();
+            let mut words: Vec<&str> = subtext.split_inclusive(' ').collect();
 
-            // reverse the words in right-to-left scripts bit not the trailing whitespace
+            // reverse the words in right-to-left scripts
             if direction == Direction::Rtl {
-                let mut rev_range = words.len();
-
-                for (i, word) in words.iter().enumerate().rev() {
-                    if word.is_empty() {
-                        rev_range = i;
-                    } else {
-                        break;
-                    }
-                }
-
-                words[0..rev_range].reverse();
+                words.reverse();
             }
 
             let mut words_glyphs = Vec::new();
-
-            // we need the space glyph to join the words after they are shaped
-            let mut space_glyph = None;
 
             // shape each word and cache the generated glyphs
             for word in words {
@@ -148,8 +134,10 @@ impl Shaper {
                 let shaping_id = ShapingId::new(style, word);
 
                 if self.cache.peek(&shaping_id).is_none() {
+
+                    // find_font will call the closure with each font matching the provided style
+                    // until a font capable of shaping the word is found
                     let ret = fontdb.find_font(&word, style, |font| {
-                        let _ = font.set_size(style.size);
 
                         // Call harfbuzz
                         let output = {
@@ -183,82 +171,48 @@ impl Shaper {
                                 has_missing = true;
                             }
 
-                            let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT);
-                            let metrics = font.face.glyph().metrics();
-
-                            // dbg!((
-                            //     metrics.width as f32 / 64.0,
-                            //     metrics.height as f32 / 64.0,
-                            //     metrics.horiBearingX as f32 / 64.0,
-                            //     metrics.horiBearingY as f32 / 64.0,
-                            // ));
-
-                            // dbg!((
-                            //     metrics.width,
-                            //     metrics.height,
-                            //     metrics.horiBearingX,
-                            //     metrics.horiBearingY,
-                            // ));
-
-                            let id = font.id;
-                            let font = font.font_ref();
-                            let units_per_em = font.units_per_em().expect("get units per em");// TODO: remove this unwrap
-                            let scale = style.size as f32 / units_per_em as f32;
-
-                            let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);
-
-                            let bbox = font.glyph_bounding_box(glyph_id).expect("fetch bounding box");// TODO: remove this unwrap
-                            let hor_bearing = font.glyph_hor_side_bearing(glyph_id).unwrap_or(0);// TODO: remove this unwrap
-                            let ver_bearing = font.glyph_ver_side_bearing(glyph_id).unwrap_or(0);// TODO: remove this unwrap
-
-                            //dbg!(bbox, hor_bearing, ver_bearing);
-
-                            let g = ShapedGlyph {
-                                x: 0.0,
-                                y: 0.0,
+                            let mut g = ShapedGlyph {
                                 c: c,
-                                index: 0,
-                                font_id: id,
+                                font_id: font.id,
                                 codepoint: info.codepoint,
-                                width: bbox.width() as f32 * scale,
-                                height: bbox.height() as f32 * scale,
                                 advance_x: position.x_advance as f32 / 64.0,
                                 advance_y: position.y_advance as f32 / 64.0,
                                 offset_x: position.x_offset as f32 / 64.0,
                                 offset_y: position.y_offset as f32 / 64.0,
-                                bearing_x: bbox.x_min as f32 * scale,
-                                bearing_y: bbox.y_max as f32 * scale,
-                                calc_offset_x: 0.0,
-                                calc_offset_y: 0.0,
+                                ..Default::default()
                             };
 
-                            //dbg!(g);
+                            let id = font.id;
+                            let scale = font.scale(style.size as f32);
+                            let font = font.font_ref();
+                            
+                            let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);
+
+                            if let Some(bbox) = font.glyph_bounding_box(glyph_id) {
+                                g.width = bbox.width() as f32 * scale;
+                                g.height = bbox.height() as f32 * scale;
+                                g.bearing_x = bbox.x_min as f32 * scale;
+                                g.bearing_y = bbox.y_max as f32 * scale;
+                            }
 
                             items.push(g);
                         }
 
-                        let space_glyph = Self::space_glyph(font, style);
-
-                        (has_missing, (space_glyph, items))
+                        (has_missing, items)
                     });
 
                     self.cache.put(shaping_id, ret);
                 }
 
                 if let Some(result) = self.cache.get(&shaping_id) {
-                    if let Ok((aspace_glyph, items)) = result {
+                    if let Ok(items) = result {
                         words_glyphs.push(items.clone());
-                        space_glyph = Some(*aspace_glyph);
                     }
                 }
             }
 
-            if let Some(space_glyph) = space_glyph {
-                result.glyphs.append(&mut words_glyphs.join(&space_glyph));
-            } else {
-                let mut flat = words_glyphs.into_iter().flatten().collect();
-                result.glyphs.append(&mut flat);
-            }
+            let mut flat = words_glyphs.into_iter().flatten().collect();
+            result.glyphs.append(&mut flat);
         }
 
         self.layout(x, y, fontdb, &mut result, &style)?;
@@ -266,6 +220,7 @@ impl Shaper {
         Ok(result)
     }
 
+    // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
     fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
@@ -312,18 +267,12 @@ impl Shaper {
             // and have getters that accept font_size and return correctly scaled result
 
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let font = font.font_ref(); //ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            // let font = font.font_ref(); //ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
             //font.set_size(style.size)?;
 
-            let units_per_em = font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
-            let scale = style.size as f32 / units_per_em as f32;
-
             // Baseline alignment
-            // let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;
-            // let ascender = size_metrics.ascender as f32 / 64.0;
-            // let descender = size_metrics.descender as f32 / 64.0;
-            let ascender = font.ascender() as f32 * scale;
-            let descender = font.descender() as f32 * scale;
+            let ascender = font.ascender(style.size as f32);
+            let descender = font.descender(style.size as f32);
 
             let offset_y = match style.baseline {
                 Baseline::Top => ascender,
@@ -333,7 +282,7 @@ impl Shaper {
             };
 
             //height = height.max(size_metrics.height as f32 / 64.0);
-            height = height.max(font.height() as f32 * scale);
+            height = height.max(font.height(style.size as f32));
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
@@ -348,45 +297,6 @@ impl Shaper {
         res.height = height;
 
         Ok(())
-    }
-
-    fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {
-        // let mut glyph = ShapedGlyph::default();
-
-        // let id = font.id;
-        // let font = font.font_ref();
-        
-        // let glyph_id = font.glyph_index(' ').unwrap_or(owned_ttf_parser::GlyphId(0));
-
-        // let units_per_em = font.units_per_em().expect("fetch units per em");// TODO: remove this unwrap
-        // let scale = style.size as f32 / units_per_em as f32;
-
-        // //let bbox = font.glyph_bounding_box(glyph_id).unwrap();// TODO: remove this unwrap
-        // //let ver_bearing = font.glyph_ver_side_bearing(glyph_id).unwrap();// TODO: remove this unwrap
-
-        // let hor_advance = font.glyph_hor_advance(glyph_id).expect("space hor advance");// TODO: remove this unwrap
-
-        // glyph.font_id = id;
-        // glyph.c = ' ';
-        // glyph.codepoint = glyph.c as u32;
-        // glyph.advance_x = hor_advance as f32 * scale; //hor_advance as f32 * scale;
-
-        // glyph
-
-        let mut glyph = ShapedGlyph::default();
-
-        let _ = font.set_size(style.size);
-
-        let index = font.face.get_char_index(' ' as u32);
-        let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT);
-        let metrics = font.face.glyph().metrics();
-
-        glyph.font_id = font.id;
-        glyph.c = ' ';
-        glyph.codepoint = index;
-        glyph.advance_x = metrics.horiAdvance as f32 / 64.0;
-
-        glyph
     }
 
     // TODO: error handling

@@ -1,7 +1,4 @@
 
-mod text_renderer;
-pub use text_renderer::{TextRenderer, Atlas};
-
 mod text_helper;
 pub use text_helper::{
     render_text,
@@ -15,10 +12,11 @@ pub use shaper::{
     ShapedGlyph
 };
 
+mod atlas;
+pub use atlas::Atlas;
+
 mod font;
 pub use font::Font;
-
-pub mod freetype;
 
 mod fontdb;
 pub use fontdb::{FontDb, FontId};

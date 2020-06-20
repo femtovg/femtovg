@@ -29,7 +29,6 @@ use super::{
     FontDb,
     FontId,
     ShapedGlyph,
-    freetype as ft,
     GLYPH_PADDING
 };
 
@@ -142,19 +141,19 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
     canvas.set_render_target(initial_render_target);
 
     // debug draw
-    {
-        canvas.save();
-        canvas.reset();
+    // {
+    //     canvas.save();
+    //     canvas.reset();
 
-        let image_id = canvas.text_helper_context.textures[0].image_id;
+    //     let image_id = canvas.text_helper_context.textures[0].image_id;
 
-        let mut path = Path::new();
-        path.rect(400.0, 20.0, 512.0, 512.0);
-        canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
-        canvas.stroke_path(&mut path, Paint::color(Color::black()));
+    //     let mut path = Path::new();
+    //     path.rect(400.0, 20.0, 512.0, 512.0);
+    //     canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
+    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
-        canvas.restore();
-    }
+    //     canvas.restore();
+    // }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }
@@ -167,16 +166,6 @@ pub fn render_glyph<T: Renderer>(
     invscale: f32
 ) -> Result<RenderedGlyph, ErrorKind> {
     let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
-
-    // let mut path = {
-    //     let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-    //     let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-    //     glyph_path(font, glyph.codepoint as u16, style.size as f32, 0.0, 0.0)?
-    // };
-
-    // let bounds = canvas.path_bbox(&mut path);
-    //let width = (bounds.maxx - bounds.minx) as u32 + padding * 2;
-    //let height = (bounds.maxy - bounds.miny) as u32 + padding * 2;
 
     let width = glyph.width as u32 + padding * 2;
     let height = glyph.height as u32 + padding * 2;
@@ -211,18 +200,6 @@ pub fn render_glyph<T: Renderer>(
         let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
-        //let image = ImgVec::new(vec![Gray(0u8); atlas.size().0 * atlas.size().1], atlas.size().0, atlas.size().1);
-        //canvas.images.update(&mut canvas.renderer, image_id, image.as_ref().into(), 0, 0)?;
-
-        // canvas.save();
-        // canvas.reset();
-        // canvas.set_render_target(RenderTarget::Image(image_id));
-        // canvas.clear_rect(0, 0, atlas_size as u32, atlas_size as u32, Color::black());
-        //let mut path = Path::new();
-        //path.rect(0.0, 0.0, atlas_size as f32, atlas_size as f32);
-        //canvas.fill_path(&mut path, Paint::color(Color::black()));
-        //canvas.restore();
-        
         canvas.text_helper_context.textures.push(FontTexture { atlas, image_id });
 
         let index = canvas.text_helper_context.textures.len() - 1;
@@ -253,6 +230,8 @@ pub fn render_glyph<T: Renderer>(
     paint.set_anti_alias(false);
 
     canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+    // Super ghetto AA
 
     canvas.translate(0.25, 0.25);
     canvas.fill_path(&mut path, paint);

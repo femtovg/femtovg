@@ -14,7 +14,6 @@ pub enum ErrorKind {
     #[cfg(feature = "image-loading")]
     ImageError(::image::ImageError),
     IoError(io::Error),
-    FreetypeError(text::freetype::Error),
     FontParseError,
     NoFontFound,
     FontInfoExtracionError,
@@ -43,12 +42,6 @@ impl From<::image::ImageError> for ErrorKind {
 impl From<io::Error> for ErrorKind {
     fn from(error: io::Error) -> Self {
         Self::IoError(error)
-    }
-}
-
-impl From<text::freetype::Error> for ErrorKind {
-    fn from(error: text::freetype::Error) -> Self {
-        Self::FreetypeError(error)
     }
 }
 

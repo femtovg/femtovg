@@ -14,8 +14,7 @@ use super::{
     Weight,
     FontStyle,
     TextStyle,
-    WidthClass,
-    freetype as ft,
+    WidthClass
 };
 
 // TODO: use generational arena for font_ids
@@ -96,7 +95,6 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
 }
 
 pub struct FontDb {
-    pub library: ft::Library,
     fonts: Vec<Font>,
     font_descr: FnvHashMap<FontDescription, FontId>
 }
@@ -105,7 +103,6 @@ impl FontDb {
 
     pub fn new() -> Result<Self, ErrorKind> {
         Ok(Self {
-            library: ft::Library::init()?,
             fonts: Default::default(),
             font_descr: Default::default(),
         })
@@ -145,10 +142,8 @@ impl FontDb {
         if let Some(id) = self.font_descr.get(&description).copied() {
             Ok(id)
         } else {
-            let face = self.library.new_memory_face(data.clone(), 0)?;
-
             let id = FontId(self.fonts.len());
-            self.fonts.push(Font::new(id, face, data));
+            self.fonts.push(Font::new(id, data)?);
             self.font_descr.insert(description, id);
             Ok(id)
         }
