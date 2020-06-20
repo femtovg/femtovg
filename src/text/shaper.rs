@@ -186,24 +186,55 @@ impl Shaper {
                             let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT);
                             let metrics = font.face.glyph().metrics();
 
-                            items.push(ShapedGlyph {
+                            // dbg!((
+                            //     metrics.width as f32 / 64.0,
+                            //     metrics.height as f32 / 64.0,
+                            //     metrics.horiBearingX as f32 / 64.0,
+                            //     metrics.horiBearingY as f32 / 64.0,
+                            // ));
+
+                            // dbg!((
+                            //     metrics.width,
+                            //     metrics.height,
+                            //     metrics.horiBearingX,
+                            //     metrics.horiBearingY,
+                            // ));
+
+                            let id = font.id;
+                            let font = font.font_ref();
+                            let units_per_em = font.units_per_em().expect("get units per em");// TODO: remove this unwrap
+                            let scale = style.size as f32 / units_per_em as f32;
+
+                            let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);
+
+                            let bbox = font.glyph_bounding_box(glyph_id).expect("fetch bounding box");// TODO: remove this unwrap
+                            let hor_bearing = font.glyph_hor_side_bearing(glyph_id).unwrap_or(0);// TODO: remove this unwrap
+                            let ver_bearing = font.glyph_ver_side_bearing(glyph_id).unwrap_or(0);// TODO: remove this unwrap
+
+                            //dbg!(bbox, hor_bearing, ver_bearing);
+
+                            let g = ShapedGlyph {
                                 x: 0.0,
                                 y: 0.0,
                                 c: c,
                                 index: 0,
-                                font_id: font.id,
+                                font_id: id,
                                 codepoint: info.codepoint,
-                                width: metrics.width as f32 / 64.0,
-                                height: metrics.height as f32 / 64.0,
+                                width: bbox.width() as f32 * scale,
+                                height: bbox.height() as f32 * scale,
                                 advance_x: position.x_advance as f32 / 64.0,
                                 advance_y: position.y_advance as f32 / 64.0,
                                 offset_x: position.x_offset as f32 / 64.0,
                                 offset_y: position.y_offset as f32 / 64.0,
-                                bearing_x: metrics.horiBearingX as f32 / 64.0,
-                                bearing_y: metrics.horiBearingY as f32 / 64.0,
+                                bearing_x: bbox.x_min as f32 * scale,
+                                bearing_y: bbox.y_max as f32 * scale,
                                 calc_offset_x: 0.0,
                                 calc_offset_y: 0.0,
-                            });
+                            };
+
+                            //dbg!(g);
+
+                            items.push(g);
                         }
 
                         let space_glyph = Self::space_glyph(font, style);
@@ -281,7 +312,7 @@ impl Shaper {
             // and have getters that accept font_size and return correctly scaled result
 
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            let font = font.font_ref(); //ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
             //font.set_size(style.size)?;
 
             let units_per_em = font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
@@ -320,6 +351,28 @@ impl Shaper {
     }
 
     fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {
+        // let mut glyph = ShapedGlyph::default();
+
+        // let id = font.id;
+        // let font = font.font_ref();
+        
+        // let glyph_id = font.glyph_index(' ').unwrap_or(owned_ttf_parser::GlyphId(0));
+
+        // let units_per_em = font.units_per_em().expect("fetch units per em");// TODO: remove this unwrap
+        // let scale = style.size as f32 / units_per_em as f32;
+
+        // //let bbox = font.glyph_bounding_box(glyph_id).unwrap();// TODO: remove this unwrap
+        // //let ver_bearing = font.glyph_ver_side_bearing(glyph_id).unwrap();// TODO: remove this unwrap
+
+        // let hor_advance = font.glyph_hor_advance(glyph_id).expect("space hor advance");// TODO: remove this unwrap
+
+        // glyph.font_id = id;
+        // glyph.c = ' ';
+        // glyph.codepoint = glyph.c as u32;
+        // glyph.advance_x = hor_advance as f32 * scale; //hor_advance as f32 * scale;
+
+        // glyph
+
         let mut glyph = ShapedGlyph::default();
 
         let _ = font.set_size(style.size);

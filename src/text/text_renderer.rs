@@ -90,7 +90,7 @@ pub struct TextRenderer {
     textures: Vec<FontTexture>,
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
 }
-
+/*
 impl TextRenderer {
 
     pub(crate) fn render<T: Renderer>(
@@ -275,3 +275,4 @@ impl TextRenderer {
         })
     }
 }
+*/

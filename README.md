@@ -17,7 +17,7 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Stroke joins: miter, round and bevel
 * [x] Fill rules - EvenOdd/NonZero
 * [x] Rectangle scissoring
-* [x] Composition modes (clear, darken, lighten, multiply, etc..)
+* [x] Composition modes (SourceOver, SourceIn, SourceOut, Atop, etc..)
 * [x] Global alpha
 * [x] Text filling and stroking
 * [x] Text shaping

@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::convert::TryFrom;
 
 use fnv::FnvHashMap;
-use ttf_parser as ttf;
+use owned_ttf_parser as ttf;
 
 use crate::ErrorKind;
 

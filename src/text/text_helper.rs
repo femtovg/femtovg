@@ -238,7 +238,7 @@ pub fn render_glyph<T: Renderer>(
 
     let mut path = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+        let font = font.font_ref();//ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
 
         let x = x as f32 - glyph.calc_offset_x;
         let y = 512.0 - y as f32 + glyph.calc_offset_y;
@@ -248,10 +248,22 @@ pub fn render_glyph<T: Renderer>(
 
     canvas.clear_rect(x as u32, 512 - y as u32 - height as u32, width as u32, height as u32, Color::black());
 
-    let mut paint = Paint::color(Color::white());
+    let mut paint = Paint::color(Color::rgbf(0.25, 0.25, 0.25));
     paint.set_fill_rule(FillRule::EvenOdd);
     paint.set_anti_alias(false);
 
+    canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+    canvas.translate(0.25, 0.25);
+    canvas.fill_path(&mut path, paint);
+
+    canvas.translate(0.0, -0.5);
+    canvas.fill_path(&mut path, paint);
+
+    canvas.translate(-0.5, 0.0);
+    canvas.fill_path(&mut path, paint);
+
+    canvas.translate(0.0, 0.5);
     canvas.fill_path(&mut path, paint);
 
     canvas.restore();
@@ -286,7 +298,7 @@ pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &Tex
     for glyph in &text_layout.glyphs {
         let mut path = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let font = ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            let font = font.font_ref();//::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
 
             glyph_path(font, glyph.codepoint as u16, style.size as f32, glyph.x * invscale, glyph.y * invscale)?
 
@@ -314,7 +326,7 @@ pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &Tex
     Ok(())
 }
 
-fn glyph_path(font: ttf_parser::Font, codepoint: u16, size: f32, x: f32, y: f32) -> Result<Path, ErrorKind> {
+fn glyph_path(font: &owned_ttf_parser::Font<'_>, codepoint: u16, size: f32, x: f32, y: f32) -> Result<Path, ErrorKind> {
     let units_per_em = font.units_per_em().ok_or(ErrorKind::FontParseError)?;
     let scale = size / units_per_em as f32;
 
@@ -324,14 +336,14 @@ fn glyph_path(font: ttf_parser::Font, codepoint: u16, size: f32, x: f32, y: f32)
     transform.translate(x, y);
     
     let mut path_builder = TransformedPathBuilder(Path::new(), transform);
-    font.outline_glyph(ttf_parser::GlyphId(codepoint as u16), &mut path_builder);
+    font.outline_glyph(owned_ttf_parser::GlyphId(codepoint as u16), &mut path_builder);
 
     Ok(path_builder.0)
 }
 
 struct TransformedPathBuilder(Path, Transform2D);
 
-impl ttf_parser::OutlineBuilder for TransformedPathBuilder {
+impl owned_ttf_parser::OutlineBuilder for TransformedPathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
         let (x, y) = self.1.transform_point(x, y);
         self.0.move_to(x, y);

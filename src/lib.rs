@@ -16,6 +16,7 @@ TODO:
         - Emoji support
     - Tests
     - Documentation
+    - Porter-Duff blendmodes (https://community.khronos.org/t/blending-mode/34770/4)
 */
 
 mod utils;

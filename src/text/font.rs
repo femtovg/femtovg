@@ -1,4 +1,6 @@
 
+use owned_ttf_parser::{AsFontRef, OwnedFont, Font as TtfFont};
+
 use crate::ErrorKind;
 
 use super::freetype as ft;
@@ -8,17 +10,21 @@ use super::fontdb::{
 
 pub struct Font {
     pub(crate) id: FontId,
+    pub(crate) data: Vec<u8>,
     pub(crate) face: ft::Face,
-    pub(crate) data: Vec<u8>
+    pub(crate) ttf_font: OwnedFont,
 }
 
 impl Font {
 
     pub fn new(id: FontId, face: ft::Face, data: Vec<u8>) -> Self {
+        let ttf_font = OwnedFont::from_vec(data.clone(), 0).unwrap();
+
         Self {
             id,
+            data,
             face,
-            data
+            ttf_font
         }
     }
 
@@ -28,13 +34,19 @@ impl Font {
     }
 
     pub fn postscript_name(&self) -> String {
-        self.face.postscript_name().unwrap_or_else(String::new)
+        self.ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
+        //self.face.postscript_name().unwrap_or_else(String::new)
     }
 
     pub fn has_chars(&self, text: &str) -> bool {
+        let face = self.ttf_font.as_font();
+
         text.chars().all(|c| {
-            self.face.get_char_index(c as u32) != 0
+            face.glyph_index(c).is_some()
         })
     }
 
+    pub fn font_ref(&self) -> &TtfFont<'_> {
+        self.ttf_font.as_font()
+    }
 }
