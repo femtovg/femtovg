@@ -95,16 +95,20 @@ pub struct TextHelperContext {
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
 }
 
-pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<Vec<DrawCmd>, ErrorKind> {
+pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
     let initial_render_target = canvas.current_render_target;
 
     for glyph in &text_layout.glyphs {
+        if glyph.c.is_whitespace() {
+            continue;
+        }
+
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
         if !canvas.text_helper_context.glyph_cache.contains_key(&id) {
-            let glyph = render_glyph(canvas, style, &glyph, paint, invscale)?;
+            let glyph = render_glyph(canvas, style, &glyph)?;
 
             canvas.text_helper_context.glyph_cache.insert(id.clone(), glyph);
         }
@@ -162,8 +166,6 @@ pub fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     style: &TextStyle<'_>,
     glyph: &ShapedGlyph,
-    paint: &Paint,
-    invscale: f32
 ) -> Result<RenderedGlyph, ErrorKind> {
     let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 

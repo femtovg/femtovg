@@ -1,4 +1,5 @@
 
+//TODO: Rename this to text renderer
 mod text_helper;
 pub use text_helper::{
     render_text,

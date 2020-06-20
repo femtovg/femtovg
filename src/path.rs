@@ -52,6 +52,10 @@ impl Path {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.verbs.is_empty()
+    }
+
     pub fn set_distance_tolerance(&mut self, value: f32) {
         self.dist_tol = value;
     }

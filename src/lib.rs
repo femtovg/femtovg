@@ -846,7 +846,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // text::render_text_direct(self, &layout, &style, &paint, invscale)?;
 
-        let cmds = text::render_text(self, &layout, &style, &paint, invscale)?;
+        let cmds = text::render_text(self, &layout, &style)?;
         //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
         for cmd in &cmds {

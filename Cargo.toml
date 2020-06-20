@@ -21,7 +21,7 @@ unicode-bidi = "0.3.4"
 unicode-script = "0.5.1"
 generational-arena = "0.2.8"
 #rustybuzz = { git = "https://github.com/RazrFalcon/rustybuzz.git" }
-lru = { version = "0.5.1", default-features = false }
+lru = { version = "0.5.2", default-features = false }
 image = { version = "0.23.5", optional = true }
 
 [features]
@@ -36,4 +36,4 @@ glutin = "0.24.1"
 euclid = "0.20.13"
 rand = "0.7"
 svg = "0.8.0"
-usvg = "0.9.1"
+usvg = "0.10.0"
