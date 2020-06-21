@@ -20,6 +20,18 @@ TODO:
     - Porter-Duff blendmodes (https://community.khronos.org/t/blending-mode/34770/4)
 */
 
+/*
+RENDER TARGETS:
+
+A better approach to implementing render targets that avoids flushing would be to store
+a set of commands that need to be executed for each target and store the shared buffer
+data for all targets in a single place. At the end of each frame first the shared data
+is uploaded to GPU memory, then the commands for each render target are executed in order.
+
+This still doesn't provide a clear answer on how to handle msaa targets and when to blit/
+resolve them as needed for text rendering.
+*/
+
 mod utils;
 
 mod text;

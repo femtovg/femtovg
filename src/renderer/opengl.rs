@@ -37,6 +37,9 @@ use program::{
 mod texture;
 use texture::Texture;
 
+mod framebuffer;
+use framebuffer::Framebuffer;
+
 mod uniform_array;
 use uniform_array::UniformArray;
 
