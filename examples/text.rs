@@ -270,7 +270,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
-    let _ = canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
+    let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 
@@ -353,7 +353,7 @@ Choice of typeface(s) is the primary aspect of text typography—prose fiction, 
 editorial, educational, religious, scientific, spiritual, and commercial writing all have differing
 characteristics and requirements of appropriate typefaces and their fonts or styles.
 
-سنسکرت کی طرف بہت زیادہ
+اللُّغَة العَرَبِيّة هي أكثرُ اللغاتِ السامية
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.

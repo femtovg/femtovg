@@ -251,7 +251,7 @@ fn render_glyph<T: Renderer>(
     };
 
     canvas.set_render_target(RenderTarget::Image(src_image_id));
-    canvas.clear_rect(src_x as u32, 512 - src_y as u32 - height as u32, width as u32, height as u32, Color::black());
+    canvas.clear_rect(src_x as u32 - 1, 512 - src_y as u32 - height as u32 - 1, width as u32 + 2, height as u32 + 2, Color::black());
 
     //let mut paint = Paint::color(Color::rgbf(0.25, 0.25, 0.25));
     let mut paint = Paint::color(Color::rgbf(1.0, 1.0, 1.0));
