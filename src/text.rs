@@ -22,7 +22,7 @@ pub use font::Font;
 mod fontdb;
 pub use fontdb::{FontDb, FontId};
 
-const GLYPH_PADDING: u32 = 4;
+const GLYPH_PADDING: u32 = 2;
 
 #[derive(Copy, Clone, Default)]
 pub struct TextStyle<'a> {
