@@ -162,6 +162,9 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         canvas.renderer.blit(&canvas.images, &msaa_to_texure_map);
     }
 
+    // TODO: If we're going to be blitting the entire texture then 
+    // its better to use glRenderbufferStorageMultisample as it has
+    // better OpenGL ES support than GL_TEXTURE_2D_MULTISAMPLE
     for (src_image_id, dst_image_id, width, height) in images_to_blit {
         canvas.renderer.blit(&canvas.images, &[
             BlitInfo {
