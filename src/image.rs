@@ -118,12 +118,21 @@ pub struct ImageInfo {
     flags: ImageFlags,
     width: usize,
     height: usize,
-    format: PixelFormat
+    format: PixelFormat,
+    samples: u8,
 }
 
 impl ImageInfo {
     pub fn new(flags: ImageFlags, width: usize, height: usize, format: PixelFormat) -> Self {
-        Self { flags, width, height, format }
+        Self { flags, width, height, format, samples: 1 }
+    }
+
+    pub fn new_msaa(flags: ImageFlags, width: usize, height: usize, format: PixelFormat, samples: u8) -> Self {
+        Self { flags, width, height, format, samples }
+    }
+
+    pub fn samples(&self) -> u8 {
+        self.samples
     }
 
     pub fn flags(&self) -> ImageFlags {

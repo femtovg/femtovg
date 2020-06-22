@@ -280,8 +280,8 @@ impl Shaper {
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
-            glyph.x = xpos.floor();
-            glyph.y = (ypos + offset_y).floor();
+            glyph.x = xpos;//.floor();
+            glyph.y = (ypos + offset_y);//.floor();
 
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;

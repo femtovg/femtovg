@@ -7,7 +7,10 @@ use imgref::ImgVec;
 
 /*
 TODO:
-    - Review geometry module and maybe migrate to euclid
+    - Move examples to their own folders
+    - Finish demo
+    - Redo breakout demo
+    - Migrate to euclid
     - Custom shader support
     - Review text functions for:
         - Measuring text - text_bounds?

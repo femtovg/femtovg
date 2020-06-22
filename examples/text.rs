@@ -28,7 +28,7 @@ fn main() {
         .with_resizable(false)
         .with_title("Text demo");
 
-    let windowed_context = ContextBuilder::new().with_multisampling(8).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -88,9 +88,9 @@ fn main() {
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
                 draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
                 draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
-                draw_inc_size(&mut canvas, 270.0, 10.0);
+                draw_inc_size(&mut canvas, 300.0, 10.0);
 
-                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
+                draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
                 //draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
 
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);

@@ -2,7 +2,7 @@
 use rgb::alt::Gray;
 use imgref::ImgVec;
 
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 
 use crate::{
     Canvas,
@@ -18,7 +18,8 @@ use crate::{
     PixelFormat,
     ImageInfo,
     RenderTarget,
-    Color
+    Color,
+    renderer::BlitInfo
 };
 
 use super::{
@@ -92,6 +93,7 @@ pub struct FontTexture {
 #[derive(Default)]
 pub struct TextHelperContext {
     textures: Vec<FontTexture>,
+    msaa_textures: Vec<FontTexture>,
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
 }
 
@@ -99,6 +101,18 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
     let mut cmd_map = FnvHashMap::default();
 
     let initial_render_target = canvas.current_render_target;
+
+    // clear atlases in the msaa scratch buffers
+    // TODO: This only needs to happen if any of the glyphs are not in cache
+    for texture in &mut canvas.text_helper_context.msaa_textures {
+        let info = canvas.images.info(texture.image_id).expect("Should exist");
+        //texture.atlas = Atlas::new(info.width(), info.height());
+    }
+
+    // This will remember which glyph goes from which msaa texture needs to go to which cache texture
+    let mut msaa_to_texure_map: Vec<BlitInfo> = Vec::new();
+
+    let mut images_to_blit: FnvHashSet<(ImageId, ImageId, usize, usize)> = FnvHashSet::default();
 
     for glyph in &text_layout.glyphs {
         if glyph.c.is_whitespace() {
@@ -108,7 +122,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
         if !canvas.text_helper_context.glyph_cache.contains_key(&id) {
-            let glyph = render_glyph(canvas, style, &glyph)?;
+            let glyph = render_glyph(canvas, style, &glyph, &mut msaa_to_texure_map, &mut images_to_blit)?;
 
             canvas.text_helper_context.glyph_cache.insert(id.clone(), glyph);
         }
@@ -144,37 +158,158 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
 
     canvas.set_render_target(initial_render_target);
 
+    if !msaa_to_texure_map.is_empty() {
+        canvas.renderer.blit(&canvas.images, &msaa_to_texure_map);
+    }
+
+    for (src_image_id, dst_image_id, width, height) in images_to_blit {
+        canvas.renderer.blit(&canvas.images, &[
+            BlitInfo {
+                src_image_id,
+                src_x: 0,
+                src_y: 0,
+                src_w: width as u32,
+                src_h: height as u32,
+                dst_image_id,
+                dst_x: 0,
+                dst_y: 0,
+                dst_w: width as u32,
+                dst_h: height as u32,
+            }
+        ]);
+    }
+
     // debug draw
-    // {
-    //     canvas.save();
-    //     canvas.reset();
+    {
+        // canvas.save();
+        // canvas.reset();
 
-    //     let image_id = canvas.text_helper_context.textures[0].image_id;
+        // let image_id = canvas.text_helper_context.textures[0].image_id;
 
-    //     let mut path = Path::new();
-    //     path.rect(400.0, 20.0, 512.0, 512.0);
-    //     canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
-    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
+        // let mut path = Path::new();
+        // path.rect(400.0, 20.0, 512.0, 512.0);
+        // canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
+        // canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
-    //     canvas.restore();
-    // }
+        // canvas.restore();
+    }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }
 
-pub fn render_glyph<T: Renderer>(
+fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     style: &TextStyle<'_>,
     glyph: &ShapedGlyph,
+    msaa_to_texture_map: &mut Vec<BlitInfo>,
+    images_to_blit: &mut FnvHashSet<(ImageId, ImageId, usize, usize)>
 ) -> Result<RenderedGlyph, ErrorKind> {
     let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
+
+    if let RenderStyle::Stroke { width } = style.render_style {
+        padding += width as u32;
+    }
 
     let width = glyph.width as u32 + padding * 2;
     let height = glyph.height as u32 + padding * 2;
 
+    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
+        &mut canvas.text_helper_context.textures,
+        &mut canvas.images,
+        &mut canvas.renderer,
+        width as usize,
+        height as usize,
+        1
+    )?;
+
+    let (src_index, src_image_id, (src_x, src_y)) = find_texture_or_alloc(
+        &mut canvas.text_helper_context.msaa_textures,
+        &mut canvas.images,
+        &mut canvas.renderer,
+        width as usize,
+        height as usize,
+        8
+    )?;
+
+    images_to_blit.insert((src_image_id, dst_image_id, 512, 512));
+
+    // render glyph to image
+    canvas.save();
+    canvas.reset();
+
+    let mut path = {
+        let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let font = font.font_ref();//ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+
+        let x = src_x as f32 - glyph.calc_offset_x;
+        let y = 512.0 - src_y as f32 + glyph.calc_offset_y;
+
+        glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
+    };
+
+    canvas.set_render_target(RenderTarget::Image(src_image_id));
+    canvas.clear_rect(src_x as u32, 512 - src_y as u32 - height as u32, width as u32, height as u32, Color::black());
+
+    //let mut paint = Paint::color(Color::rgbf(0.25, 0.25, 0.25));
+    let mut paint = Paint::color(Color::rgbf(1.0, 1.0, 1.0));
+    paint.set_fill_rule(FillRule::EvenOdd);
+    paint.set_anti_alias(false);
+
+    if let RenderStyle::Stroke { width } = style.render_style {
+        paint.set_stroke_width(width as f32);
+        canvas.stroke_path(&mut path, paint);
+    } else {
+        canvas.fill_path(&mut path, paint);
+    }
+
+    canvas.restore();
+
+    if style.blur > 0 {
+        // canvas.renderer.blur(
+        //     canvas.images.get_mut(image_id).unwrap(),
+        //     style.blur,
+        //     x + style.blur as usize,
+        //     y + style.blur as usize,
+        //     width as usize - style.blur as usize,
+        //     height as usize - style.blur as usize,
+        // );
+    }
+
+    // msaa_to_texture_map.push(BlitInfo {
+    //     src_image_id,
+    //     src_x: src_x as u32,
+    //     src_y: src_y as u32,
+    //     src_w: width,
+    //     src_h: height,
+    //     dst_image_id,
+    //     dst_x: dst_x as u32,
+    //     dst_y: dst_y as u32,
+    //     dst_w: width,
+    //     dst_h: height,
+    // });
+
+    Ok(RenderedGlyph {
+        width: width,
+        height: height,
+        atlas_x: dst_x as u32,
+        atlas_y: dst_y as u32,
+        texture_index: dst_index,
+        padding: padding,
+    })
+}
+
+fn find_texture_or_alloc<T: Renderer>(
+    textures: &mut Vec<FontTexture>, 
+    images: &mut ImageStore<T::Image>, 
+    renderer: &mut T, 
+    width: usize, 
+    height: usize,
+    samples: u8
+) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
+
     // Find a free location in one of the the atlases
-    let mut texture_search_result = canvas.text_helper_context.textures.iter_mut().enumerate().find_map(|(index, texture)| {
-        texture.atlas.add_rect(width as usize, height as usize).map(|loc| (index, texture.image_id, loc))
+    let mut texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
+        texture.atlas.add_rect(width, height).map(|loc| (index, texture.image_id, loc))
     });
 
     if texture_search_result.is_none() {
@@ -199,75 +334,16 @@ pub fn render_glyph<T: Renderer>(
 
         let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
-        let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
+        let info = ImageInfo::new_msaa(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8, samples);
+        let image_id = images.alloc(renderer, info)?;
 
-        canvas.text_helper_context.textures.push(FontTexture { atlas, image_id });
+        textures.push(FontTexture { atlas, image_id });
 
-        let index = canvas.text_helper_context.textures.len() - 1;
+        let index = textures.len() - 1;
         texture_search_result = Some((index, image_id, loc));
     }
 
-    let (index, image_id, (x, y)) = texture_search_result.unwrap();
-
-    // render glyph to image
-    canvas.save();
-    canvas.reset();
-    canvas.set_render_target(RenderTarget::Image(image_id));
-
-    let mut path = {
-        let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let font = font.font_ref();//ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-
-        let x = x as f32 - glyph.calc_offset_x;
-        let y = 512.0 - y as f32 + glyph.calc_offset_y;
-
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
-    };
-
-    canvas.clear_rect(x as u32, 512 - y as u32 - height as u32, width as u32, height as u32, Color::black());
-
-    let mut paint = Paint::color(Color::rgbf(0.25, 0.25, 0.25));
-    paint.set_fill_rule(FillRule::EvenOdd);
-    paint.set_anti_alias(false);
-
-    canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
-
-    // Super ghetto AA
-
-    canvas.translate(0.25, 0.25);
-    canvas.fill_path(&mut path, paint);
-
-    canvas.translate(0.0, -0.5);
-    canvas.fill_path(&mut path, paint);
-
-    canvas.translate(-0.5, 0.0);
-    canvas.fill_path(&mut path, paint);
-
-    canvas.translate(0.0, 0.5);
-    canvas.fill_path(&mut path, paint);
-
-    canvas.restore();
-
-    if style.blur > 0 {
-        // canvas.renderer.blur(
-        //     canvas.images.get_mut(image_id).unwrap(),
-        //     style.blur,
-        //     x + style.blur as usize,
-        //     y + style.blur as usize,
-        //     width as usize - style.blur as usize,
-        //     height as usize - style.blur as usize,
-        // );
-    }
-
-    Ok(RenderedGlyph {
-        width: width,
-        height: height,
-        atlas_x: x as u32,
-        atlas_y: y as u32,
-        texture_index: index,
-        padding: padding,
-    })
+    texture_search_result.ok_or(ErrorKind::UnknownError)
 }
 
 // TODO this uses the canvas to draw glyphs directly on the screen. This is only OK for large glyph sizes
@@ -352,3 +428,51 @@ impl owned_ttf_parser::OutlineBuilder for TransformedPathBuilder {
         self.0.close();
     }
 }
+
+
+// Super ghetto AA
+    // let points = [
+    //     (-3.0/8.0, 1.0/8.0),
+    //     (1.0/8.0, 3.0/8.0),
+    //     (3.0/8.0, -1.0/8.0),
+    //     (-1.0/8.0, -3.0/8.0),
+    // ];
+
+    // for point in &points {
+    //     canvas.save();
+    //     canvas.translate(point.0/1.5, point.1/1.5);
+
+    //     if let RenderStyle::Stroke { width } = style.render_style {
+    //         canvas.stroke_path(&mut path, paint);
+    //     } else {
+    //         canvas.fill_path(&mut path, paint);
+    //     }
+
+    //     canvas.restore();
+    // }
+
+    // if let RenderStyle::Stroke { width } = style.render_style {
+    //     canvas.translate(0.25, 0.25);
+    //     canvas.stroke_path(&mut path, paint);
+
+    //     canvas.translate(0.0, -0.5);
+    //     canvas.stroke_path(&mut path, paint);
+
+    //     canvas.translate(-0.5, 0.0);
+    //     canvas.stroke_path(&mut path, paint);
+
+    //     canvas.translate(0.0, 0.5);
+    //     canvas.stroke_path(&mut path, paint);
+    // } else {
+    //     canvas.translate(0.25, 0.25);
+    //     canvas.fill_path(&mut path, paint);
+
+    //     canvas.translate(0.0, -0.5);
+    //     canvas.fill_path(&mut path, paint);
+
+    //     canvas.translate(-0.5, 0.0);
+    //     canvas.fill_path(&mut path, paint);
+
+    //     canvas.translate(0.0, 0.5);
+    //     canvas.fill_path(&mut path, paint);
+    // }

@@ -134,6 +134,11 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
+                canvas.save();
+                canvas.reset();
+                perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
+
                 let height = size.height as f32;
                 let width = size.width as f32;
 
@@ -177,10 +182,7 @@ fn main() {
 
                 draw_scissor(&mut canvas, 50.0, height - 80.0, t);
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
+                
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 */

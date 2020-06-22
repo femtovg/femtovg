@@ -10,6 +10,7 @@ use crate::text;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    UnknownError,
     GeneralError(String),
     #[cfg(feature = "image-loading")]
     ImageError(::image::ImageError),

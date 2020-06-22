@@ -5,6 +5,7 @@ use std::ffi::{CStr, c_void};
 
 use rgb::RGBA8;
 use imgref::ImgVec;
+use fnv::FnvHashMap;
 
 use crate::{
     Color,
@@ -25,7 +26,8 @@ use super::{
     Command,
     CommandType,
     ImageFlags,
-    RenderTarget
+    RenderTarget,
+    BlitInfo
 };
 
 mod program;
@@ -55,6 +57,7 @@ pub struct OpenGl {
     antialias: bool,
     is_opengles: bool,
     view: [f32; 2],
+    screen_view: [f32; 2],
     main_program: MainProgram,
     blur_program: BlurProgram,
     vert_arr: GLuint,
@@ -62,7 +65,8 @@ pub struct OpenGl {
     quad_vao: GLuint,
     quad_vbo: GLuint,
     current_render_target: RenderTarget,
-    current_framebuffer: Option<(GLuint, GLuint)>
+    current_framebuffer: Option<(GLuint, GLuint)>,
+    framebuffers: FnvHashMap<ImageId, Framebuffer>
 }
 
 impl OpenGl {
@@ -81,6 +85,7 @@ impl OpenGl {
             antialias: antialias,
             is_opengles: false,
             view: [0.0, 0.0],
+            screen_view: [0.0, 0.0],
             main_program: main_program,
             blur_program: blur_program,
             vert_arr: Default::default(),
@@ -88,7 +93,8 @@ impl OpenGl {
             quad_vao: Default::default(),
             quad_vbo: Default::default(),
             current_render_target: RenderTarget::Screen,
-            current_framebuffer: Default::default()
+            current_framebuffer: Default::default(),
+            framebuffers: Default::default()
         };
 
         unsafe {
@@ -97,6 +103,8 @@ impl OpenGl {
 
             gl::GenVertexArrays(1, &mut opengl.vert_arr);
             gl::GenBuffers(1, &mut opengl.vert_buff);
+
+            gl::Enable(gl::MULTISAMPLE);
         }
 
         opengl.create_quad();
@@ -351,6 +359,8 @@ impl OpenGl {
         self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
+        // TODO: check that images are not MSAA
+
         let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
 
         unsafe {
@@ -385,6 +395,8 @@ impl Renderer for OpenGl {
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
         self.view[1] = height as f32;
+
+        self.screen_view = self.view;
 
         unsafe {
             gl::Viewport(0, 0, width as i32, height as i32);
@@ -476,68 +488,58 @@ impl Renderer for OpenGl {
         image.delete();
     }
 
+    fn blit(&mut self, images: &ImageStore<Self::Image>, info: &[BlitInfo]) {
+  
+        for blit_info in info {
+            if !self.framebuffers.contains_key(&blit_info.src_image_id) {
+                let new = Framebuffer::new(images.get(blit_info.src_image_id).unwrap());
+                self.framebuffers.insert(blit_info.src_image_id, new);
+            }
+
+            if !self.framebuffers.contains_key(&blit_info.dst_image_id) {
+                let new = Framebuffer::new(images.get(blit_info.dst_image_id).unwrap());
+                self.framebuffers.insert(blit_info.dst_image_id, new);
+            }
+
+            let src_fb = self.framebuffers.get(&blit_info.src_image_id).unwrap();
+            let dst_fb = self.framebuffers.get(&blit_info.dst_image_id).unwrap();
+
+            src_fb.blit_to(dst_fb, blit_info);
+
+            self.check_error("blit");
+        }
+
+        Framebuffer::unbind();
+    }
+
     // TODO: Rethink this API. Maybe RenderTarget should be a param in the render method
     fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
-        if self.current_render_target == target {
-            return;
-        }
-
-        unsafe {
-            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-
-        if let Some((fbo, rbo)) = self.current_framebuffer.take() {
-            unsafe {
-                gl::DeleteFramebuffers(1, &fbo);
-                gl::DeleteRenderbuffers(1, &rbo);
-            }
-        }
-
         match target {
             RenderTarget::Screen => unsafe {
+                Framebuffer::unbind();
+                self.view = self.screen_view;
                 gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             },
             RenderTarget::Image(id) => {
                 if let Some(texture) = images.get(id) {
-                    let mut fbo = 0;
-                    let mut rbo = 0;
+                    let fb = self.framebuffers.entry(id).or_insert_with(|| {
+                        Framebuffer::new(texture)
+                    });
+
+                    fb.bind();
+
+                    // TODO: this forgets the screen viewport size
+                    self.view[0] = texture.info().width() as f32;
+                    self.view[1] = texture.info().height() as f32;
 
                     unsafe {
-                        gl::GenFramebuffers(1, &mut fbo);
-                        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
                         gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
-
-                        // TODO: this forgets the screen viewport size
-                        self.view[0] = texture.info().width() as f32;
-                        self.view[1] = texture.info().height() as f32;
-
-                        gl::BindTexture(gl::TEXTURE_2D, texture.id());
-                        gl::FramebufferTexture2D(
-                            gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0
-                        );
-
-                        gl::GenRenderbuffers(1, &mut rbo);
-                        gl::BindRenderbuffer(gl::RENDERBUFFER, rbo);
-                        // Some graphics cards require a depth buffer along with a stencil.
-                        gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, texture.info().width() as i32, texture.info().height() as i32);
-                        gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
-
-                        gl::FramebufferRenderbuffer(
-                            gl::FRAMEBUFFER, gl::STENCIL_ATTACHMENT, gl::RENDERBUFFER, rbo
-                        );
-
-                        if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
-                            panic!("Framebuffer not complete!");
-                        }
                     }
-
-                    self.current_framebuffer = Some((fbo, rbo));
                 }
             }
         }
 
-        self.current_render_target = target;
+        //self.current_render_target = target;
     }
 
     fn blur(&mut self, texture: &mut Texture, amount: u8, x: usize, y: usize, width: usize, height: usize) {

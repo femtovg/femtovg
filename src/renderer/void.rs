@@ -15,7 +15,8 @@ use super::{
     Renderer,
     Command,
     Vertex,
-    RenderTarget
+    RenderTarget,
+    BlitInfo
 };
 
 /// Void renderer used for testing
@@ -55,6 +56,8 @@ impl Renderer for Void {
     fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize) {
 
     }
+
+    fn blit(&mut self, images: &ImageStore<Self::Image>, info: &[BlitInfo]) {}
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
         Ok(ImgVec::new(Vec::new(), 0, 0))
