@@ -12,7 +12,7 @@ fn main() {
 
     let mut file = File::create(&dest.join("gl_bindings.rs")).unwrap();
 
-    Registry::new(Api::Gl, (3, 2), Profile::Core, Fallbacks::All, [])
+    Registry::new(Api::Gles2, (3, 0), Profile::Core, Fallbacks::All, [])
         .write_bindings(GlobalGenerator, &mut file)
         .unwrap();
 

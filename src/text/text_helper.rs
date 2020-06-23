@@ -119,7 +119,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
             let ith = 1.0 / size.1 as f32;
 
             let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
-                image_id: image_id,
+                image_id,
                 quads: Vec::new()
             });
 
@@ -197,7 +197,6 @@ fn render_glyph<T: Renderer>(
         glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
     };
 
-    //canvas.set_render_target(RenderTarget::Image(src_image_id));
     canvas.set_render_target(RenderTarget::Image(dst_image_id));
     canvas.clear_rect(dst_x as u32, 512 - dst_y as u32 - height as u32, width as u32, height as u32, Color::black());
 
@@ -237,7 +236,7 @@ fn render_glyph<T: Renderer>(
         canvas.save();
         canvas.translate(point.0, point.1);
 
-        if let RenderStyle::Stroke { width } = style.render_style {
+        if let RenderStyle::Stroke { width: _ } = style.render_style {
             canvas.stroke_path(&mut path, paint);
         } else {
             canvas.fill_path(&mut path, paint);
@@ -250,10 +249,10 @@ fn render_glyph<T: Renderer>(
 
     if style.blur > 0 {
         // canvas.renderer.blur(
-        //     canvas.images.get_mut(image_id).unwrap(),
+        //     canvas.images.get_mut(dst_image_id).unwrap(),
         //     style.blur,
-        //     x + style.blur as usize,
-        //     y + style.blur as usize,
+        //     dst_x + style.blur as usize,
+        //     dst_y + style.blur as usize,
         //     width as usize - style.blur as usize,
         //     height as usize - style.blur as usize,
         // );

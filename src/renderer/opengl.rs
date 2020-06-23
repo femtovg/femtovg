@@ -63,8 +63,6 @@ pub struct OpenGl {
     vert_buff: GLuint,
     quad_vao: GLuint,
     quad_vbo: GLuint,
-    current_render_target: RenderTarget,
-    current_framebuffer: Option<(GLuint, GLuint)>,
     framebuffers: FnvHashMap<ImageId, Framebuffer>
 }
 
@@ -91,8 +89,6 @@ impl OpenGl {
             vert_buff: Default::default(),
             quad_vao: Default::default(),
             quad_vbo: Default::default(),
-            current_render_target: RenderTarget::Screen,
-            current_framebuffer: Default::default(),
             framebuffers: Default::default()
         };
 
@@ -102,8 +98,6 @@ impl OpenGl {
 
             gl::GenVertexArrays(1, &mut opengl.vert_arr);
             gl::GenBuffers(1, &mut opengl.vert_buff);
-
-            gl::Enable(gl::MULTISAMPLE);
         }
 
         opengl.create_quad();

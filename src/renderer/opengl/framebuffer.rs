@@ -1,7 +1,7 @@
 
 // TODO: Path rendering only needs stencil attachment, try to get rid of the depth attachment
 
-use crate::PixelFormat;
+//use crate::PixelFormat;
 
 use super::{
     gl,
@@ -9,21 +9,11 @@ use super::{
     Texture
 };
 
-enum FramebufferData {
-    Multisampled {
-        color_rbo: GLuint,
-    },
-    Texture {
-
-    }
-}
-
 pub struct Framebuffer {
     fbo: GLuint,
     depth_stencil_rbo: GLuint,
     width: u32,
-    height: u32,
-    data: FramebufferData
+    height: u32
 }
 
 impl Framebuffer {
@@ -58,12 +48,12 @@ impl Framebuffer {
                 // TODO: do not panic here
                 match status {
                     gl::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => panic!("({}) Framebuffer incomplete attachment", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => panic!("({}) Framebuffer incomplete draw buffer", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => panic!("({}) Framebuffer incomplete layer targets", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => panic!("Framebuffer incomplete dimensions", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => panic!("({}) Framebuffer incomplete draw buffer", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => panic!("({}) Framebuffer incomplete layer targets", status),
+                    gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => panic!("({}) Framebuffer incomplete dimensions", status),
                     gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => panic!("({}) Framebuffer incomplete missing attachment", status),
                     gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => panic!("({}) Framebuffer incomplete multisample", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => panic!("({}) Framebuffer incomplete read buffer", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => panic!("({}) Framebuffer incomplete read buffer", status),
                     gl::FRAMEBUFFER_UNSUPPORTED => panic!("({}) Framebuffer unsupported", status),
                     _ => panic!("({}) Framebuffer not complete!", status)
                 };
@@ -76,10 +66,7 @@ impl Framebuffer {
             fbo,
             depth_stencil_rbo,
             width,
-            height,
-            data: FramebufferData::Texture {
-                
-            }
+            height
         }
     }
 
@@ -141,15 +128,6 @@ impl Drop for Framebuffer {
         unsafe {
             gl::DeleteFramebuffers(1, &self.fbo);
             gl::DeleteRenderbuffers(1, &self.depth_stencil_rbo);
-
-            match self.data {
-                FramebufferData::Multisampled { color_rbo } => {
-                    gl::DeleteRenderbuffers(1, &color_rbo);
-                }
-                FramebufferData::Texture {} => {
-
-                }
-            }
         }
     }
 }

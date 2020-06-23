@@ -39,12 +39,12 @@ impl Texture {
         match info.format() {
             PixelFormat::Gray8 => unsafe {
                 //let format = if opengles { gl::RED } else { gl::RED };
-                //let internal_format = if opengles { gl::LUMINANCE } else { gl::R8 };
+                let internal_format = if opengles { gl::LUMINANCE } else { gl::R8 };
 
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
-                    gl::R8 as i32,
+                    internal_format as i32,
                     texture.info.width() as i32,
                     texture.info.height() as i32,
                     0,

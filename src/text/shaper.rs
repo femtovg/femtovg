@@ -1,7 +1,7 @@
 
-use std::iter::{Peekable, DoubleEndedIterator};
+use std::iter::Peekable;
+use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
-use std::str::{Chars, CharIndices};
 
 use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass};

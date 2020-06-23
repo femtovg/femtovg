@@ -4,8 +4,6 @@ use std::error::Error;
 use std::ffi::NulError;
 use std::fmt::{self, Display, Formatter};
 
-use crate::text;
-
 /// Enum with all possible canvas errors that could occur.
 #[derive(Debug)]
 #[non_exhaustive]
