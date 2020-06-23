@@ -100,27 +100,11 @@ pub trait Renderer {
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()>;
     fn delete_image(&mut self, image: Self::Image);
 
-    fn blit(&mut self, images: &ImageStore<Self::Image>, info: &[BlitInfo]);
-
     fn set_target(&mut self, images: &ImageStore<Self::Image>, target: RenderTarget);
 
     fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize);
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>>;
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct BlitInfo {
-    pub src_image_id: ImageId,
-    pub src_x: u32,
-    pub src_y: u32,
-    pub src_w: u32,
-    pub src_h: u32,
-    pub dst_image_id: ImageId,
-    pub dst_x: u32,
-    pub dst_y: u32,
-    pub dst_w: u32,
-    pub dst_h: u32,
 }
 
 /// Vertex struct for specifying triangle geometry

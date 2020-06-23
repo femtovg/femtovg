@@ -1,8 +1,5 @@
 
-use rgb::alt::Gray;
-use imgref::ImgVec;
-
-use fnv::{FnvHashMap, FnvHashSet};
+use fnv::FnvHashMap;
 
 use crate::{
     Canvas,
@@ -18,8 +15,7 @@ use crate::{
     PixelFormat,
     ImageInfo,
     RenderTarget,
-    Color,
-    renderer::BlitInfo
+    Color
 };
 
 use super::{
@@ -93,7 +89,6 @@ pub struct FontTexture {
 #[derive(Default)]
 pub struct TextHelperContext {
     textures: Vec<FontTexture>,
-    msaa_textures: Vec<FontTexture>,
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
 }
 
@@ -101,8 +96,6 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
     let mut cmd_map = FnvHashMap::default();
 
     let initial_render_target = canvas.current_render_target;
-
-    let mut images_to_blit: FnvHashSet<(ImageId, ImageId, usize, usize)> = FnvHashSet::default();
 
     for glyph in &text_layout.glyphs {
         if glyph.c.is_whitespace() {
@@ -112,7 +105,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
         if !canvas.text_helper_context.glyph_cache.contains_key(&id) {
-            let glyph = render_glyph(canvas, style, &glyph, &mut images_to_blit)?;
+            let glyph = render_glyph(canvas, style, &glyph)?;
 
             canvas.text_helper_context.glyph_cache.insert(id.clone(), glyph);
         }
@@ -150,26 +143,6 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         canvas.set_render_target(initial_render_target);
     }
 
-    // TODO: If we're going to be blitting the entire texture then 
-    // its better to use glRenderbufferStorageMultisample as it has
-    // better OpenGL ES support than GL_TEXTURE_2D_MULTISAMPLE
-    for (src_image_id, dst_image_id, width, height) in images_to_blit {
-        canvas.renderer.blit(&canvas.images, &[
-            BlitInfo {
-                src_image_id,
-                src_x: 0,
-                src_y: 0,
-                src_w: width as u32,
-                src_h: height as u32,
-                dst_image_id,
-                dst_x: 0,
-                dst_y: 0,
-                dst_w: width as u32,
-                dst_h: height as u32,
-            }
-        ]);
-    }
-
     // debug draw
     {
         // canvas.save();
@@ -191,8 +164,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
 fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     style: &TextStyle<'_>,
-    glyph: &ShapedGlyph,
-    images_to_blit: &mut FnvHashSet<(ImageId, ImageId, usize, usize)>
+    glyph: &ShapedGlyph
 ) -> Result<RenderedGlyph, ErrorKind> {
     let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 
@@ -208,20 +180,8 @@ fn render_glyph<T: Renderer>(
         &mut canvas.images,
         &mut canvas.renderer,
         width as usize,
-        height as usize,
-        1
+        height as usize
     )?;
-
-    let (_, src_image_id, (src_x, src_y)) = find_texture_or_alloc(
-        &mut canvas.text_helper_context.msaa_textures,
-        &mut canvas.images,
-        &mut canvas.renderer,
-        width as usize,
-        height as usize,
-        8
-    )?;
-
-    //images_to_blit.insert((src_image_id, dst_image_id, 512, 512));
 
     // render glyph to image
     canvas.save();
@@ -231,35 +191,46 @@ fn render_glyph<T: Renderer>(
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let font = font.font_ref();
 
-        let x = src_x as f32 - glyph.calc_offset_x;
-        let y = 512.0 - src_y as f32 + glyph.calc_offset_y;
+        let x = dst_x as f32 - glyph.calc_offset_x;
+        let y = 512.0 - dst_y as f32 + glyph.calc_offset_y;
 
         glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
     };
 
     //canvas.set_render_target(RenderTarget::Image(src_image_id));
     canvas.set_render_target(RenderTarget::Image(dst_image_id));
-    canvas.clear_rect(src_x as u32, 512 - src_y as u32 - height as u32, width as u32, height as u32, Color::black());
+    canvas.clear_rect(dst_x as u32, 512 - dst_y as u32 - height as u32, width as u32, height as u32, Color::black());
 
-    let mut paint = Paint::color(Color::rgbf(1.0/4.0, 1.0/4.0, 1.0/4.0));
-    //let mut paint = Paint::color(Color::rgbf(1.0, 1.0, 1.0));
+    let factor = 1.0/8.0;
+
+    let mut paint = Paint::color(Color::rgbf(factor, factor, factor));
     paint.set_fill_rule(FillRule::EvenOdd);
     paint.set_anti_alias(false);
 
+    if let RenderStyle::Stroke { width } = style.render_style {
+        paint.set_stroke_width(width as f32);
+    }
+
     canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
 
-    // if let RenderStyle::Stroke { width } = style.render_style {
-    //     paint.set_stroke_width(width as f32);
-    //     canvas.stroke_path(&mut path, paint);
-    // } else {
-    //     canvas.fill_path(&mut path, paint);
-    // }
+    // 4x
+    // let points = [
+    //     (-3.0/8.0, 1.0/8.0),
+    //     (1.0/8.0, 3.0/8.0),
+    //     (3.0/8.0, -1.0/8.0),
+    //     (-1.0/8.0, -3.0/8.0),
+    // ];
 
+    // 8x
     let points = [
-        (-3.0/8.0, 1.0/8.0),
-        (1.0/8.0, 3.0/8.0),
-        (3.0/8.0, -1.0/8.0),
-        (-1.0/8.0, -3.0/8.0),
+        (-7.0/16.0,-1.0/16.0),
+        (-1.0/16.0,-5.0/16.0),
+        ( 3.0/16.0,-7.0/16.0),
+        ( 5.0/16.0,-3.0/16.0),
+        ( 5.0/16.0, 1.0/16.0),
+        ( 1.0/16.0, 5.0/16.0),
+        (-3.0/16.0, 7.0/16.0),
+        (-5.0/16.0, 3.0/16.0),
     ];
 
     for point in &points {
@@ -267,7 +238,6 @@ fn render_glyph<T: Renderer>(
         canvas.translate(point.0, point.1);
 
         if let RenderStyle::Stroke { width } = style.render_style {
-            paint.set_stroke_width(width as f32);
             canvas.stroke_path(&mut path, paint);
         } else {
             canvas.fill_path(&mut path, paint);
@@ -304,8 +274,7 @@ fn find_texture_or_alloc<T: Renderer>(
     images: &mut ImageStore<T::Image>, 
     renderer: &mut T, 
     width: usize, 
-    height: usize,
-    samples: u8
+    height: usize
 ) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
 
     // Find a free location in one of the the atlases
@@ -335,7 +304,7 @@ fn find_texture_or_alloc<T: Renderer>(
 
         let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-        let info = ImageInfo::new_msaa(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8, samples);
+        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = images.alloc(renderer, info)?;
 
         textures.push(FontTexture { atlas, image_id });
@@ -429,51 +398,3 @@ impl owned_ttf_parser::OutlineBuilder for TransformedPathBuilder {
         self.0.close();
     }
 }
-
-
-// Super ghetto AA
-    // let points = [
-    //     (-3.0/8.0, 1.0/8.0),
-    //     (1.0/8.0, 3.0/8.0),
-    //     (3.0/8.0, -1.0/8.0),
-    //     (-1.0/8.0, -3.0/8.0),
-    // ];
-
-    // for point in &points {
-    //     canvas.save();
-    //     canvas.translate(point.0/1.5, point.1/1.5);
-
-    //     if let RenderStyle::Stroke { width } = style.render_style {
-    //         canvas.stroke_path(&mut path, paint);
-    //     } else {
-    //         canvas.fill_path(&mut path, paint);
-    //     }
-
-    //     canvas.restore();
-    // }
-
-    // if let RenderStyle::Stroke { width } = style.render_style {
-    //     canvas.translate(0.25, 0.25);
-    //     canvas.stroke_path(&mut path, paint);
-
-    //     canvas.translate(0.0, -0.5);
-    //     canvas.stroke_path(&mut path, paint);
-
-    //     canvas.translate(-0.5, 0.0);
-    //     canvas.stroke_path(&mut path, paint);
-
-    //     canvas.translate(0.0, 0.5);
-    //     canvas.stroke_path(&mut path, paint);
-    // } else {
-    //     canvas.translate(0.25, 0.25);
-    //     canvas.fill_path(&mut path, paint);
-
-    //     canvas.translate(0.0, -0.5);
-    //     canvas.fill_path(&mut path, paint);
-
-    //     canvas.translate(-0.5, 0.0);
-    //     canvas.fill_path(&mut path, paint);
-
-    //     canvas.translate(0.0, 0.5);
-    //     canvas.fill_path(&mut path, paint);
-    // }

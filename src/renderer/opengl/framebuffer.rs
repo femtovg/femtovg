@@ -6,8 +6,7 @@ use crate::PixelFormat;
 use super::{
     gl,
     gl::types::*,
-    Texture,
-    BlitInfo
+    Texture
 };
 
 enum FramebufferData {
@@ -29,58 +28,6 @@ pub struct Framebuffer {
 
 impl Framebuffer {
 
-    // pub fn new_msaa(width: u32, height: u32, format: PixelFormat, samples: u8) -> Self {
-    //     let mut fbo = 0;
-
-    //     unsafe {
-    //         gl::GenFramebuffers(1, &mut fbo);
-    //         gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
-    //     }
-
-    //     let mut color_rbo = 0;
-
-    //     let internal_format = match format {
-    //         PixelFormat::Gray8 => gl::R8,
-    //         PixelFormat::Rgb8 => gl::RGB,
-    //         PixelFormat::Rgba8 => gl::RGBA,
-    //     };
-
-    //     unsafe {
-    //         gl::GenRenderbuffers(1, &mut color_rbo);
-    //         gl::BindRenderbuffer(gl::RENDERBUFFER, color_rbo);
-    //         gl::RenderbufferStorageMultisample(gl::RENDERBUFFER, samples as i32, internal_format, width as i32, height as i32);
-    //         gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
-
-    //         gl::FramebufferRenderbuffer(
-    //             gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::RENDERBUFFER, color_rbo
-    //         );
-    //     }
-
-    //     let depth_stencil_rbo = Self::gen_depth_stencil_rbo(width, height);
-
-    //     unsafe {
-    //         gl::FramebufferRenderbuffer(
-    //             gl::FRAMEBUFFER, gl::DEPTH_STENCIL_ATTACHMENT, gl::RENDERBUFFER, depth_stencil_rbo
-    //         );
-
-    //         if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
-    //             panic!("Framebuffer not complete!");
-    //         }
-    
-    //         gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-    //     }
-
-    //     Framebuffer {
-    //         fbo,
-    //         depth_stencil_rbo,
-    //         width,
-    //         height,
-    //         data: FramebufferData::Multisampled {
-    //             color_rbo
-    //         }
-    //     }
-    // }
-
     pub fn new(texture: &Texture) -> Self {
         let mut fbo = 0;
 
@@ -93,18 +40,12 @@ impl Framebuffer {
         let height = texture.info().height() as u32;
 
         unsafe {
-            if texture.info().samples() == 1 {
-                gl::FramebufferTexture2D(
-                    gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0
-                );
-            } else {
-                gl::FramebufferTexture2D(
-                    gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D_MULTISAMPLE, texture.id(), 0
-                );
-            }
+            gl::FramebufferTexture2D(
+                gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0
+            );
         }
 
-        let depth_stencil_rbo = Self::gen_depth_stencil_rbo(width, height, texture.info().samples());
+        let depth_stencil_rbo = Self::gen_depth_stencil_rbo(width, height);
 
         unsafe {
             gl::FramebufferRenderbuffer(
@@ -156,29 +97,6 @@ impl Framebuffer {
         }
     }
 
-    pub fn blit_to(&self, dest: &Self, info: &BlitInfo) {
-        unsafe {
-            gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, dest.fbo);
-            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.fbo);
-            
-            gl::BlitFramebuffer(
-                info.src_x as i32, 
-                info.src_y as i32, 
-                info.src_w as i32, 
-                info.src_h as i32, 
-                info.dst_x as i32, 
-                info.dst_y as i32, 
-                info.dst_w as i32, 
-                info.dst_h as i32, 
-                gl::COLOR_BUFFER_BIT, 
-                gl::NEAREST
-            );
-
-            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
-            gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
-        }
-    }
-
     // pub fn blit_to_texture(&self, texture: &Texture) {
     //     let dest_fbo = Self::new(texture);
 
@@ -204,21 +122,13 @@ impl Framebuffer {
     //     }
     // }
 
-    
-
-    fn gen_depth_stencil_rbo(width: u32, height: u32, samples: u8) -> GLuint {
+    fn gen_depth_stencil_rbo(width: u32, height: u32) -> GLuint {
         let mut id = 0;
 
         unsafe {
             gl::GenRenderbuffers(1, &mut id);
             gl::BindRenderbuffer(gl::RENDERBUFFER, id);
-
-            if samples == 1 {
-                gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width as i32, height as i32);
-            } else {
-                gl::RenderbufferStorageMultisample(gl::RENDERBUFFER, samples as i32, gl::DEPTH24_STENCIL8, width as i32, height as i32);
-            }
-
+            gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width as i32, height as i32);
             gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
         }
 

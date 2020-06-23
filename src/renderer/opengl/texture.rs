@@ -15,8 +15,7 @@ use super::gl::types::*;
 
 pub struct Texture {
     id: GLuint,
-    info: ImageInfo,
-    is_readable: bool
+    info: ImageInfo
 }
 
 impl Texture {
@@ -25,22 +24,16 @@ impl Texture {
 
         let mut texture = Texture {
             id: 0,
-            info: info,
-            is_readable: info.samples() == 1
+            info: info
         };
 
         unsafe {
             gl::GenTextures(1, &mut texture.id);
-
-            if info.samples() == 1 {
-                gl::BindTexture(gl::TEXTURE_2D, texture.id);
-                gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-                gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.info.width() as i32);
-                gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-                gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-            } else {
-                gl::BindTexture(gl::TEXTURE_2D_MULTISAMPLE, texture.id);
-            }
+            gl::BindTexture(gl::TEXTURE_2D, texture.id);
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, texture.info.width() as i32);
+            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
         }
 
         match info.format() {
@@ -48,136 +41,99 @@ impl Texture {
                 //let format = if opengles { gl::RED } else { gl::RED };
                 //let internal_format = if opengles { gl::LUMINANCE } else { gl::R8 };
 
-                if info.samples() == 1 {
-                    gl::TexImage2D(
-                        gl::TEXTURE_2D,
-                        0,
-                        gl::R8 as i32,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        0,
-                        gl::RED,
-                        gl::UNSIGNED_BYTE,
-                        ptr::null()
-                        //data.buf().as_ptr() as *const GLvoid
-                    );
-                } else {
-                    gl::TexImage2DMultisample(
-                        gl::TEXTURE_2D_MULTISAMPLE,
-                        info.samples() as i32,
-                        gl::R8,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        gl::TRUE
-                    );
-                }
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::R8 as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
+                    0,
+                    gl::RED,
+                    gl::UNSIGNED_BYTE,
+                    ptr::null()
+                    //data.buf().as_ptr() as *const GLvoid
+                );
             },
             PixelFormat::Rgb8 => unsafe {
-                if info.samples() == 1 {
-                    gl::TexImage2D(
-                        gl::TEXTURE_2D,
-                        0,
-                        gl::RGB as i32,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        0,
-                        gl::RGB,
-                        gl::UNSIGNED_BYTE,
-                        ptr::null(),
-                        //data.buf().as_ptr() as *const GLvoid
-                    );
-                } else {
-                    gl::TexImage2DMultisample(
-                        gl::TEXTURE_2D_MULTISAMPLE,
-                        info.samples() as i32,
-                        gl::RGB,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        gl::TRUE
-                    );
-                }
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGB as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
+                    0,
+                    gl::RGB,
+                    gl::UNSIGNED_BYTE,
+                    ptr::null(),
+                    //data.buf().as_ptr() as *const GLvoid
+                );
             },
             PixelFormat::Rgba8 => unsafe {
-                if info.samples() == 1 {
-                    gl::TexImage2D(
-                        gl::TEXTURE_2D,
-                        0,
-                        gl::RGBA as i32,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        0,
-                        gl::RGBA,
-                        gl::UNSIGNED_BYTE,
-                        ptr::null(),
-                        //data.buf().as_ptr() as *const GLvoid
-                    );
-                } else {
-                    gl::TexImage2DMultisample(
-                        gl::TEXTURE_2D_MULTISAMPLE,
-                        info.samples() as i32,
-                        gl::RGBA,
-                        texture.info.width() as i32,
-                        texture.info.height() as i32,
-                        gl::TRUE
-                    );
-                }
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGBA as i32,
+                    texture.info.width() as i32,
+                    texture.info.height() as i32,
+                    0,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    ptr::null(),
+                    //data.buf().as_ptr() as *const GLvoid
+                );
             },
         }
 
-        if info.samples() == 1 {
-            let flags = texture.info.flags();
+        let flags = texture.info.flags();
 
-            if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
-                if flags.contains(ImageFlags::NEAREST) {
-                    unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST_MIPMAP_NEAREST as i32); }
-                } else {
-                    unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); }
-                }
-            } else {
-                if flags.contains(ImageFlags::NEAREST) {
-                    unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); }
-                } else {
-                    unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32); }
-                }
-            }
-
+        if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
             if flags.contains(ImageFlags::NEAREST) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32); }
+                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST_MIPMAP_NEAREST as i32); }
             } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32); }
+                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); }
             }
-
-            if flags.contains(ImageFlags::REPEAT_X) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32); }
+        } else {
+            if flags.contains(ImageFlags::NEAREST) {
+                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); }
             } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32); }
-            }
-
-            if flags.contains(ImageFlags::REPEAT_Y) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32); }
-            } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
-            }
-
-            unsafe {
-                gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
-                gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
-                gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
-                gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
-            }
-
-            if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
-                unsafe {
-                    gl::GenerateMipmap(gl::TEXTURE_2D);
-                    //gl::TexParameteri(gl::TEXTURE_2D, gl::GENERATE_MIPMAP, gl::TRUE);
-                }
+                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32); }
             }
         }
 
-        if info.samples() == 1 {
-            unsafe { gl::BindTexture(gl::TEXTURE_2D, 0); }
+        if flags.contains(ImageFlags::NEAREST) {
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32); }
         } else {
-            unsafe { gl::BindTexture(gl::TEXTURE_2D_MULTISAMPLE, 0); }
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32); }
+        }
+
+        if flags.contains(ImageFlags::REPEAT_X) {
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32); }
+        } else {
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32); }
+        }
+
+        if flags.contains(ImageFlags::REPEAT_Y) {
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32); }
+        } else {
+            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
+        }
+
+        unsafe {
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 4);
+            gl::PixelStorei(gl::UNPACK_ROW_LENGTH, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_PIXELS, 0);
+            gl::PixelStorei(gl::UNPACK_SKIP_ROWS, 0);
+        }
+
+        if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
+            unsafe {
+                gl::GenerateMipmap(gl::TEXTURE_2D);
+                //gl::TexParameteri(gl::TEXTURE_2D, gl::GENERATE_MIPMAP, gl::TRUE);
+            }
+        }
+
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, 0);
         }
 
         Ok(texture)
@@ -200,11 +156,6 @@ impl Texture {
 
         if self.info.format() != src.format() {
             return Err(ErrorKind::ImageUpdateWithDifferentFormat);
-        }
-
-        if !self.is_readable {
-            // TODO: covert this to error
-            panic!("Attempt to update msaaa texrure");
         }
 
         unsafe {

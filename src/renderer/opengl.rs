@@ -26,8 +26,7 @@ use super::{
     Command,
     CommandType,
     ImageFlags,
-    RenderTarget,
-    BlitInfo
+    RenderTarget
 };
 
 mod program;
@@ -486,30 +485,6 @@ impl Renderer for OpenGl {
 
     fn delete_image(&mut self, image: Self::Image) {
         image.delete();
-    }
-
-    fn blit(&mut self, images: &ImageStore<Self::Image>, info: &[BlitInfo]) {
-  
-        for blit_info in info {
-            if !self.framebuffers.contains_key(&blit_info.src_image_id) {
-                let new = Framebuffer::new(images.get(blit_info.src_image_id).unwrap());
-                self.framebuffers.insert(blit_info.src_image_id, new);
-            }
-
-            if !self.framebuffers.contains_key(&blit_info.dst_image_id) {
-                let new = Framebuffer::new(images.get(blit_info.dst_image_id).unwrap());
-                self.framebuffers.insert(blit_info.dst_image_id, new);
-            }
-
-            let src_fb = self.framebuffers.get(&blit_info.src_image_id).unwrap();
-            let dst_fb = self.framebuffers.get(&blit_info.dst_image_id).unwrap();
-
-            src_fb.blit_to(dst_fb, blit_info);
-
-            self.check_error("blit");
-        }
-
-        Framebuffer::unbind();
     }
 
     // TODO: Rethink this API. Maybe RenderTarget should be a param in the render method
