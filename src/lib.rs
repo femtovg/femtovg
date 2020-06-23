@@ -1,4 +1,3 @@
-#![feature(split_inclusive)]
 
 use std::path::Path as FilePath;
 

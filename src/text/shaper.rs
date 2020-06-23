@@ -1,7 +1,7 @@
 
-use std::str::Chars;
-use std::iter::Peekable;
+use std::iter::{Peekable, DoubleEndedIterator};
 use std::hash::{Hash, Hasher};
+use std::str::{Chars, CharIndices};
 
 use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass};
@@ -113,12 +113,7 @@ impl Shaper {
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
-            let mut words: Vec<&str> = subtext.split_inclusive(' ').collect();
-
-            // reverse the words in right-to-left scripts
-            if direction == Direction::Rtl {
-                words.reverse();
-            }
+            let words = subtext.split_whitespace_inclusive();
 
             let mut words_glyphs = Vec::new();
 
@@ -176,7 +171,6 @@ impl Shaper {
                                 ..Default::default()
                             };
 
-                            let id = font.id;
                             let scale = font.scale(style.size as f32);
                             let font = font.font_ref();
                             
@@ -205,7 +199,13 @@ impl Shaper {
                 }
             }
 
-            let mut flat = words_glyphs.into_iter().flatten().collect();
+            // reverse the words in right-to-left scripts
+            let mut flat = if direction == Direction::Rtl {
+                words_glyphs.into_iter().rev().flatten().collect()
+            } else {
+                words_glyphs.into_iter().flatten().collect()
+            };
+
             result.glyphs.append(&mut flat);
         }
 
@@ -280,8 +280,8 @@ impl Shaper {
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
-            glyph.x = xpos;//.floor();
-            glyph.y = (ypos + offset_y);//.floor();
+            glyph.x = xpos.floor();
+            glyph.y = (ypos + offset_y).floor();
 
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;
@@ -351,22 +351,35 @@ impl From<BidiClass> for Direction {
     }
 }
 
-// TODO: Make this borrow a &str instead of allocating a String every time
-pub struct UnicodeScriptIterator<I: Iterator<Item = char>> {
+pub trait UnicodeScripts<I: Iterator<Item=(usize, char)>> {
+    fn unicode_scripts(&self) -> UnicodeScriptIterator<I>;
+}
+
+impl<'a> UnicodeScripts<CharIndices<'a>> for &'a str {
+    fn unicode_scripts(&self) -> UnicodeScriptIterator<CharIndices<'a>> {
+        UnicodeScriptIterator {
+            string: self,
+            iter: self.char_indices().peekable()
+        }
+    }
+}
+
+pub struct UnicodeScriptIterator<'a, I: Iterator<Item=(usize, char)>> {
+    string: &'a str,
     iter: Peekable<I>
 }
 
-impl<I: Iterator<Item = char>> Iterator for UnicodeScriptIterator<I> {
-    type Item = (Script, Direction, String);
+impl<'a, I: Iterator<Item=(usize, char)>> Iterator for UnicodeScriptIterator<'a, I> {
+    type Item = (Script, Direction, &'a str);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(first) = self.iter.next() {
+        if let Some((first_index, first)) = self.iter.next() {
             let direction = Direction::from(bidi_class(first));
             let mut script = first.script();
-            let mut text = String::new();
-            text.push(first);
 
-            while let Some(next) = self.iter.peek() {
+            let mut last_index = self.string.len();
+
+            while let Some((next_index, next)) = self.iter.peek() {
                 let next_script = next.script();
 
                 let next_script = match next_script {
@@ -382,35 +395,72 @@ impl<I: Iterator<Item = char>> Iterator for UnicodeScriptIterator<I> {
                 };
 
                 if next_script == script {
-                    text.push(self.iter.next().unwrap());
+                    self.iter.next();
                 } else {
+                    last_index = *next_index;
                     break;
                 }
             }
 
-            return Some((script, direction, text));
+            return Some((script, direction, &self.string[first_index..last_index]));
         }
 
         None
     }
 }
 
-pub trait UnicodeScripts<I: Iterator<Item = char>> {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<I>;
+trait SplitWhitespaceInclusive {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter;
 }
 
-impl<'a> UnicodeScripts<Chars<'a>> for &'a str {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<Chars<'a>> {
-        UnicodeScriptIterator {
-            iter: self.chars().peekable()
+impl SplitWhitespaceInclusive for &str {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter {
+        SplitWhitespaceInclusiveIter {
+            start: 0,
+            end: self.len(),
+            string: self,
+            char_indices: self.char_indices()
         }
     }
 }
 
-impl<I: Iterator<Item=char>> UnicodeScripts<I> for I {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<I> {
-        UnicodeScriptIterator {
-            iter: self.peekable()
+struct SplitWhitespaceInclusiveIter<'a> {
+    start: usize,
+    end: usize,
+    string: &'a str,
+    char_indices: CharIndices<'a>
+}
+
+impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
+    type Item = &'a str;
+    
+    fn next(&mut self) -> Option<&'a str> {
+        let mut res = None;
+        
+        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[self.start..index]);
+            self.start = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
         }
+        
+        res
     }
 }
+
+// impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
+//     fn next_back(&mut self) -> Option<&'a str> {
+//         let mut res = None;
+
+//         if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
+//             res = Some(&self.string[self.start..index]);
+//             self.start = index;
+//         } else if self.start < self.end {
+//             res = Some(&self.string[self.start..self.end]);
+//             self.start = self.end;
+//         }
+        
+//         res
+//     }
+// }

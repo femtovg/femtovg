@@ -258,7 +258,7 @@ impl Game {
 
         if self.state != State::InGame { return }
 
-        if self.balls[0].on_paddle {
+        if !self.balls.is_empty() && self.balls[0].on_paddle {
             self.balls[0].position = (
                 self.paddle_rect.center() - Point::new(0.0, self.paddle_rect.height() / 2.0 + self.balls[0].radius)
             ).to_point();

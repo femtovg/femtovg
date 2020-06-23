@@ -1,9 +1,20 @@
 use std::time::Instant;
 
-use glutin::event::{Event, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use glutin::window::WindowBuilder;
-use glutin::ContextBuilder;
+use glutin::{
+    ContextBuilder,
+    window::WindowBuilder,
+    event_loop::{
+        ControlFlow, 
+        EventLoop
+    },
+    event::{
+        Event,
+        WindowEvent,
+        ElementState,
+        VirtualKeyCode,
+        KeyboardInput
+    }
+};
 
 use gpucanvas::{
     Renderer,
@@ -51,6 +62,9 @@ fn main() {
 
     let mut font_size = 18;
 
+    let mut x = 5.0;
+    let mut y = 380.0;
+
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -62,6 +76,23 @@ fn main() {
                 }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit
+                }
+                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(keycode), state: ElementState::Pressed, .. }, .. } => {
+                    if *keycode == VirtualKeyCode::W {
+                        y -= 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::S {
+                        y += 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::A {
+                        x -= 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::D {
+                        x += 0.1;
+                    }
                 }
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
@@ -87,12 +118,11 @@ fn main() {
 
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
                 draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
+                draw_paragraph(&mut canvas, x, y, font_size as u32, LOREM_TEXT);
                 draw_inc_size(&mut canvas, 300.0, 10.0);
 
                 draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
-                //draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
-
+                
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
                 draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
