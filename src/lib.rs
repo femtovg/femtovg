@@ -5,6 +5,9 @@ use rgb::RGBA8;
 use imgref::ImgVec;
 
 /*
+HTML5 Canvas API:
+https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
+
 TODO:
     - Move examples to their own folders
     - Finish demo
