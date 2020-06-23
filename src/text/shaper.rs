@@ -107,15 +107,17 @@ impl Shaper {
             y: 0.0,
             width: 0.0,
             height: 0.0,
-            glyphs: Vec::new()
+            glyphs: Vec::with_capacity(text.len())
         };
+
+        let mut words_glyphs = Vec::new();
 
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
             let words = subtext.split_whitespace_inclusive();
 
-            let mut words_glyphs = Vec::new();
+            words_glyphs.clear();
 
             // shape each word and cache the generated glyphs
             for word in words {
@@ -200,13 +202,11 @@ impl Shaper {
             }
 
             // reverse the words in right-to-left scripts
-            let mut flat = if direction == Direction::Rtl {
-                words_glyphs.into_iter().rev().flatten().collect()
+            if direction == Direction::Rtl {
+                result.glyphs.extend(words_glyphs.iter().rev().flatten())
             } else {
-                words_glyphs.into_iter().flatten().collect()
+                result.glyphs.extend(words_glyphs.iter().flatten())
             };
-
-            result.glyphs.append(&mut flat);
         }
 
         self.layout(x, y, fontdb, &mut result, &style)?;
@@ -448,19 +448,3 @@ impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
         res
     }
 }
-
-// impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
-//     fn next_back(&mut self) -> Option<&'a str> {
-//         let mut res = None;
-
-//         if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
-//             res = Some(&self.string[self.start..index]);
-//             self.start = index;
-//         } else if self.start < self.end {
-//             res = Some(&self.string[self.start..self.end]);
-//             self.start = self.end;
-//         }
-        
-//         res
-//     }
-// }

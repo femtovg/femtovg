@@ -107,7 +107,7 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         if !canvas.text_helper_context.glyph_cache.contains_key(&id) {
             let glyph = render_glyph(canvas, style, &glyph)?;
 
-            canvas.text_helper_context.glyph_cache.insert(id.clone(), glyph);
+            canvas.text_helper_context.glyph_cache.insert(id, glyph);
         }
 
         let rendered = canvas.text_helper_context.glyph_cache.get(&id).unwrap();
@@ -315,7 +315,7 @@ fn find_texture_or_alloc<T: Renderer>(
     texture_search_result.ok_or(ErrorKind::UnknownError)
 }
 
-// TODO this uses the canvas to draw glyphs directly on the screen. This is only OK for large glyph sizes
+// TODO this uses the canvas to draw glyphs directly on the screen. This may be OK for large glyph sizes
 pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<(), ErrorKind> {
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
