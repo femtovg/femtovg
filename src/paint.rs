@@ -1,4 +1,7 @@
 
+// TODO: prefix paint creation functions with make_ or new_ 
+// so that they are easier to find when autocompleting
+
 use crate::geometry::Transform2D;
 use crate::{
     Color,

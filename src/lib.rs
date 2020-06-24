@@ -9,7 +9,6 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - Move examples to their own folders
     - Finish demo
     - Redo breakout demo
     - Migrate to euclid

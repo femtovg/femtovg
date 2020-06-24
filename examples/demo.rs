@@ -1,4 +1,5 @@
 
+use std::f32::consts::PI;
 use std::time::Instant;
 
 use glutin::event::{Event, WindowEvent, ElementState, KeyboardInput, VirtualKeyCode, MouseButton};
@@ -169,18 +170,35 @@ fn main() {
                 //     canvas.restore();
                 // }
 
-                //draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+
+                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
+                
 
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
-                draw_search_box(&mut canvas, "Search", 60.0, 95.0, 280.0, 25.0);
-                draw_drop_down(&mut canvas, "Effects", 60.0, 135.0, 280.0, 28.0);
-
                 draw_widths(&mut canvas, 10.0, 50.0, 30.0);
                 draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
                 draw_caps(&mut canvas, 10.0, 300.0, 30.0);
 
                 draw_scissor(&mut canvas, 50.0, height - 80.0, t);
+
+                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+
+                let mut x = 60.0;
+                let mut y = 95.0;
+
+                draw_search_box(&mut canvas, "Search", x, y, 280.0, 25.0);
+                y += 40.0;
+                draw_drop_down(&mut canvas, "Effects", 60.0, 135.0, 280.0, 28.0);
+                y += 45.0;
+
+                draw_label(&mut canvas, "Login", x, y, 280.0, 20.0);
+                y += 25.0;
+                draw_edit_box(&mut canvas, "Email", x, y, 280.0, 28.0);
+                y += 35.0;
+                draw_edit_box(&mut canvas, "Password", x, y, 280.0, 28.0);
+                
 
                 
                 /*
@@ -349,7 +367,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 	// Window
 	let mut path = Path::new();
     path.rounded_rect(x, y, w, h, corner_radius);
-	canvas.fill_path(&mut path, Paint::color(Color::rgba(168, 204, 215, 100)));
+	canvas.fill_path(&mut path, Paint::color(Color::rgba(28, 30, 34, 192)));
 
 	// Drop shadow
     let shadow_paint = Paint::box_gradient(x, y + 2.0, w, h, corner_radius * 2.0, 10.0, Color::rgba(0,0,0,128), Color::rgba(0,0,0,0));
@@ -390,6 +408,102 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
     // canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 255)));
 
 	canvas.restore();
+}
+
+fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, t: f32) {
+    let hue = (t * 0.12).sin();
+
+    canvas.save();
+
+    let cx = x + w * 0.5;
+    let cy = y + h * 0.5;
+    let r1 = if w < h { w } else { h } * 0.5 - 5.0;
+    let r0 = r1 - 20.0;
+    let aeps = 0.5 / r1;
+
+    for i in 0..6 {
+        let a0 = i as f32 / 6.0 * PI * 2.0 - aeps;
+        let a1 = (i as f32 + 1.0) / 6.0 * PI * 2.0 + aeps;
+
+        let mut path = Path::new();
+        path.arc(cx, cy, r0, a0, a1, Solidity::Hole);
+        path.arc(cx, cy, r1, a1, a0, Solidity::Solid);
+        path.close();
+
+        let ax = cx + a0.cos() * (r0+r1)*0.5;
+        let ay = cy + a0.sin() * (r0+r1)*0.5;
+        let bx = cx + a1.cos() * (r0+r1)*0.5;
+        let by = cy + a1.sin() * (r0+r1)*0.5;
+        
+        let paint = Paint::linear_gradient(ax, ay, bx, by, Color::hsla(a0 / (PI*2.0), 1.0, 0.55, 1.0), Color::hsla(a1 / (PI*2.0), 1.0, 0.55, 1.0));
+        
+        canvas.fill_path(&mut path, paint);
+    }
+
+    let mut path = Path::new();
+    path.circle(cx, cy, r0 - 0.5);
+    path.circle(cx, cy, r1 + 0.5);
+    let mut paint = Paint::color(Color::rgba(0, 0, 0, 64));
+    paint.set_stroke_width(1.0);
+    canvas.stroke_path(&mut path, paint);
+
+    // Selector
+    canvas.save();
+    canvas.translate(cx, cy);
+    canvas.rotate(hue * PI * 2.0);
+
+    // Marker on
+    let mut path = Path::new();
+    path.rect(r0 - 1.0, -3.0, r1 - r0 + 2.0, 6.0);
+    paint = Paint::color(Color::rgba(255, 255, 255, 192));
+    paint.set_stroke_width(2.0);
+    canvas.stroke_path(&mut path, paint);
+
+    paint = Paint::box_gradient(r0 - 3.0, -5.0, r1 - r0 + 6.0, 10.0, 2.0, 4.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
+    let mut path = Path::new();
+    path.rect(r0 - 2.0 - 10.0, -4.0 - 10.0, r1 - r0 + 4.0 + 20.0, 8.0 + 20.0);
+    path.rect(r0 - 2.0, -4.0, r1 - r0 + 4.0, 8.0);
+    path.solidity(Solidity::Hole);
+    canvas.fill_path(&mut path, paint);
+
+    // Center triangle
+    let r = r0 - 6.0;
+    let ax = (120.0/180.0 * PI).cos() * r;
+    let ay = (120.0/180.0 * PI).sin() * r;
+    let bx = (-120.0/180.0 * PI).cos() * r;
+    let by = (-120.0/180.0 * PI).sin() * r;
+    
+    let mut path = Path::new();
+    path.move_to(r, 0.0);
+    path.line_to(ax, ay);
+    path.line_to(bx, by);
+    path.close();
+    paint = Paint::linear_gradient(r, 0.0, ax, ay, Color::hsla(hue, 1.0, 0.5, 1.0), Color::rgba(255, 255, 255, 255));
+    canvas.fill_path(&mut path, paint);
+    paint = Paint::linear_gradient((r+ax)*0.5, ay*0.5, bx, by, Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 255));
+    canvas.fill_path(&mut path, paint);
+    paint = Paint::color(Color::rgba(0, 0, 0, 64));
+    canvas.stroke_path(&mut path, paint);
+
+    // Select circle on triangle
+    let ax = (120.0 / 180.0 * PI).cos() * r * 0.3;
+    let ay = (120.0 / 180.0 * PI).sin() * r * 0.4;
+    paint = Paint::color(Color::rgba(255, 255, 255, 192));
+    paint.set_stroke_width(2.0);
+    let mut path = Path::new();
+    path.circle(ax, ay, 5.0);
+    canvas.stroke_path(&mut path, paint);
+
+    paint = Paint::radial_gradient(ax, ay, 7.0, 9.0, Color::rgba(0, 0, 0, 64), Color::rgba(0, 0, 0, 0));
+    let mut path = Path::new();
+    path.rect(ax - 20.0, ay - 20.0, 40.0, 40.0);
+    path.circle(ax, ay, 7.0);
+    path.solidity(Solidity::Hole);
+    canvas.fill_path(&mut path, paint);
+
+    canvas.restore();
+
+    canvas.restore();
 }
 
 fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
@@ -447,6 +561,64 @@ fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + w - h * 0.5, y + h * 0.45, "\u{E75E}", text_paint);
+}
+
+fn draw_label<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, _w: f32, h: f32) {
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 128));
+    text_paint.set_font_size(14);
+    text_paint.set_font_family("Roboto");
+    text_paint.set_text_align(Align::Left);
+    text_paint.set_text_baseline(Baseline::Middle);
+    let _ = canvas.fill_text(x, y + h * 0.5, title, text_paint);
+}
+
+fn draw_edit_box_base<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32) {
+    let paint = Paint::box_gradient(x + 1.0, y + 2.5, w - 2.0, h - 2.0, 3.0, 4.0, Color::rgba(255, 255, 255, 32), Color::rgba(32, 32, 32, 32));
+    
+    let mut path = Path::new();
+    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, 3.0);
+    canvas.fill_path(&mut path, paint);
+
+    let mut path = Path::new();
+    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, 3.5);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 48)));
+}
+
+fn draw_edit_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+    draw_edit_box_base(canvas, x, y, w, h);
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
+    text_paint.set_font_size(16);
+    text_paint.set_font_family("Roboto");
+    text_paint.set_text_align(Align::Left);
+    text_paint.set_text_baseline(Baseline::Middle);
+    let _ = canvas.fill_text(x + h * 0.5, y + h * 0.5, title, text_paint);
+}
+
+fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, title: &str, units: &str, x: f32, y: f32, w: f32, h: f32) {
+    draw_edit_box_base(canvas, x, y, w, h);
+
+    let mut paint = Paint::color(Color::rgba(255, 255, 255, 64));
+    paint.set_font_size(14);
+    paint.set_font_family("Roboto");
+    paint.set_text_align(Align::Right);
+    paint.set_text_baseline(Baseline::Middle);
+
+    if let Ok(layout) = canvas.layout_text(0.0, 0.0, units, paint) {
+        let _ = canvas.fill_text(x + w - h * 0.3, y + h + 0.5, units, paint);
+
+        paint.set_font_size(16);
+        paint.set_color(Color::rgba(255, 255, 255, 128));
+
+        let _ = canvas.fill_text(x + w - layout.width - h * 0.5, y + h * 0.5, title, paint);
+    }
+
+    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
+    text_paint.set_font_size(16);
+    text_paint.set_font_family("Roboto");
+    text_paint.set_text_align(Align::Left);
+    text_paint.set_text_baseline(Baseline::Middle);
+    let _ = canvas.fill_text(x + h * 0.5, y + h * 0.5, title, text_paint);
 }
 
 fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {
