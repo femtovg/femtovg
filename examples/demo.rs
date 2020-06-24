@@ -22,7 +22,7 @@ use gpucanvas::{
     Baseline,
     Weight,
     RenderTarget,
-    ImageFormat,
+    PixelFormat,
     //CompositeOperation,
     renderer::OpenGl
 };
@@ -35,8 +35,9 @@ fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
-    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
+    //let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(8).build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
@@ -51,7 +52,9 @@ fn main() {
     //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
     //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
 
-    let graph_image_id = canvas.create_image_empty(1000, 600, ImageFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
+    let graph_image_id = canvas.create_image_empty(1000, 600, PixelFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
+
+    //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
     let mut screenshot_image_id = None;
 
@@ -131,26 +134,40 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
+                canvas.save();
+                canvas.reset();
+                perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
+
                 let height = size.height as f32;
                 let width = size.width as f32;
 
-                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                // draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
-                {
-                    canvas.set_render_target(RenderTarget::Image(graph_image_id));
-                    canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
-                    draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                    canvas.set_render_target(RenderTarget::Screen);
+                // {
+                //     canvas.save();
+                //     canvas.set_render_target(RenderTarget::Image(graph_image_id));
+                //     //canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.3, 0.3, 0.32, 1.0));
+                //     canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+                //     draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+                //     canvas.restore();
 
-                    canvas.blur_image(graph_image_id, 4, 50, 150, 300, 400);
+                //     canvas.set_render_target(RenderTarget::Screen);
 
-                    let mut path = Path::new();
-                    path.rect(0.0, 0.0, width, height);
-                    canvas.fill_path(
-                        &mut path,
-                        Paint::image(graph_image_id, 0.0, 0.0, width, height, 0.0, 1.0)
-                    );
-                }
+                //     //canvas.blur_image(graph_image_id, 4, 50, 150, 300, 400);
+
+                //     canvas.save();
+                //     canvas.reset();
+
+                //     let mut path = Path::new();
+                //     path.rect(0.0, 0.0, width, height);
+                //     canvas.fill_path(
+                //         &mut path,
+                //         Paint::image(graph_image_id, 0.0, 0.0, width, height, 0.0, 1.0)
+                //     );
+
+                //     canvas.restore();
+                // }
 
                 //draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
@@ -165,10 +182,7 @@ fn main() {
 
                 draw_scissor(&mut canvas, 50.0, height - 80.0, t);
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
+                
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 */
@@ -191,7 +205,7 @@ fn main() {
                 //     path.rect(size.width as f32, 15.0, 1920.0, 1080.0);
                 //     canvas.fill_path(&mut path, paint);
                 // }
-
+                
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
             }

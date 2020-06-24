@@ -7,7 +7,7 @@ use crate::{
     ImageFlags,
     ImageInfo,
     ImageSource,
-    ImageFormat,
+    PixelFormat,
 };
 
 use super::gl;
@@ -37,23 +37,24 @@ impl Texture {
         }
 
         match info.format() {
-            ImageFormat::Gray8 => unsafe {
-                let format = if opengles { gl::LUMINANCE } else { gl::RED };
+            PixelFormat::Gray8 => unsafe {
+                //let format = if opengles { gl::RED } else { gl::RED };
+                let internal_format = if opengles { gl::LUMINANCE } else { gl::R8 };
 
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
-                    format as i32,
+                    internal_format as i32,
                     texture.info.width() as i32,
                     texture.info.height() as i32,
                     0,
-                    format,
+                    gl::RED,
                     gl::UNSIGNED_BYTE,
                     ptr::null()
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageFormat::Rgb8 => unsafe {
+            PixelFormat::Rgb8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
@@ -67,7 +68,7 @@ impl Texture {
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
-            ImageFormat::Rgba8 => unsafe {
+            PixelFormat::Rgba8 => unsafe {
                 gl::TexImage2D(
                     gl::TEXTURE_2D,
                     0,
@@ -131,7 +132,9 @@ impl Texture {
             }
         }
 
-        unsafe { gl::BindTexture(gl::TEXTURE_2D, 0); }
+        unsafe {
+            gl::BindTexture(gl::TEXTURE_2D, 0);
+        }
 
         Ok(texture)
     }
@@ -163,7 +166,7 @@ impl Texture {
 
         match src {
             ImageSource::Gray(data) => unsafe {
-                let format = if opengles { gl::LUMINANCE } else { gl::RED };
+                //let format = if opengles { gl::LUMINANCE } else { gl::RED };
 
                 gl::TexSubImage2D(
                     gl::TEXTURE_2D,
@@ -172,7 +175,7 @@ impl Texture {
                     y as i32,
                     size.0 as i32,
                     size.1 as i32,
-                    format,
+                    gl::R8,
                     gl::UNSIGNED_BYTE,
                     data.buf().as_ptr() as *const GLvoid
                 );

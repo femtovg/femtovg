@@ -5,13 +5,14 @@ use std::ffi::{CStr, c_void};
 
 use rgb::RGBA8;
 use imgref::ImgVec;
+use fnv::FnvHashMap;
 
 use crate::{
     Color,
     Result,
     ImageInfo,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageSource,
     FillRule,
     CompositeOperationState,
@@ -37,6 +38,9 @@ use program::{
 mod texture;
 use texture::Texture;
 
+mod framebuffer;
+use framebuffer::Framebuffer;
+
 mod uniform_array;
 use uniform_array::UniformArray;
 
@@ -52,20 +56,20 @@ pub struct OpenGl {
     antialias: bool,
     is_opengles: bool,
     view: [f32; 2],
+    screen_view: [f32; 2],
     main_program: MainProgram,
     blur_program: BlurProgram,
     vert_arr: GLuint,
     vert_buff: GLuint,
     quad_vao: GLuint,
     quad_vbo: GLuint,
-    current_render_target: RenderTarget,
-    current_framebuffer: Option<(GLuint, GLuint)>
+    framebuffers: FnvHashMap<ImageId, Framebuffer>
 }
 
 impl OpenGl {
 
     pub fn new<F>(load_fn: F) -> Result<Self> where F: Fn(&'static str) -> *const c_void {
-        let debug = true;
+        let debug = cfg!(debug_assertions);
         let antialias = true;
 
         gl::load_with(load_fn);
@@ -78,14 +82,14 @@ impl OpenGl {
             antialias: antialias,
             is_opengles: false,
             view: [0.0, 0.0],
+            screen_view: [0.0, 0.0],
             main_program: main_program,
             blur_program: blur_program,
             vert_arr: Default::default(),
             vert_buff: Default::default(),
             quad_vao: Default::default(),
             quad_vbo: Default::default(),
-            current_render_target: RenderTarget::Screen,
-            current_framebuffer: Default::default()
+            framebuffers: Default::default()
         };
 
         unsafe {
@@ -348,6 +352,8 @@ impl OpenGl {
         self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
+        // TODO: check that images are not MSAA
+
         let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
 
         unsafe {
@@ -374,6 +380,34 @@ impl OpenGl {
             gl::Disable(gl::SCISSOR_TEST);
         }
     }
+
+    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
+        match target {
+            RenderTarget::Screen => unsafe {
+                Framebuffer::unbind();
+                self.view = self.screen_view;
+                gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
+            },
+            RenderTarget::Image(id) => {
+                if let Some(texture) = images.get(id) {
+                    let fb = self.framebuffers.entry(id).or_insert_with(|| {
+                        Framebuffer::new(texture)
+                    });
+
+                    fb.bind();
+
+                    self.view[0] = texture.info().width() as f32;
+                    self.view[1] = texture.info().height() as f32;
+
+                    unsafe {
+                        gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+                    }
+                }
+            }
+        }
+
+        //self.current_render_target = target;
+    }
 }
 
 impl Renderer for OpenGl {
@@ -382,6 +416,8 @@ impl Renderer for OpenGl {
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
         self.view[1] = height as f32;
+
+        self.screen_view = self.view;
 
         unsafe {
             gl::Viewport(0, 0, width as i32, height as i32);
@@ -426,9 +462,7 @@ impl Renderer for OpenGl {
         // Bind the two uniform samplers to texture units
         self.main_program.set_tex(0);
         self.main_program.set_masktex(1);
-        // Set uniforms
-        self.main_program.set_view(self.view);
-
+        
         self.check_error("render prepare");
 
         for cmd in commands {
@@ -442,6 +476,10 @@ impl Renderer for OpenGl {
                 CommandType::Triangles { params } => self.triangles(images, cmd, params),
                 CommandType::ClearRect { x, y, width, height, color } => {
                     self.clear_rect(x, y, width, height, color);
+                },
+                CommandType::SetRenderTarget(target) => {
+                    self.set_target(images, target);
+                    self.main_program.set_view(self.view);
                 }
             }
         }
@@ -473,66 +511,6 @@ impl Renderer for OpenGl {
         image.delete();
     }
 
-    // TODO: Rethink this API. Maybe RenderTarget should be a param in the render method
-    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
-        if self.current_render_target == target {
-            return;
-        }
-
-        unsafe {
-            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-
-        if let Some((fbo, rbo)) = self.current_framebuffer.take() {
-            unsafe {
-                gl::DeleteFramebuffers(1, &fbo);
-                gl::DeleteRenderbuffers(1, &rbo);
-            }
-        }
-
-        match target {
-            RenderTarget::Screen => unsafe {
-                gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
-            },
-            RenderTarget::Image(id) => {
-                if let Some(texture) = images.get(id) {
-                    let mut fbo = 0;
-                    let mut rbo = 0;
-
-                    unsafe {
-                        gl::GenFramebuffers(1, &mut fbo);
-                        gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
-                        gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
-
-                        gl::BindTexture(gl::TEXTURE_2D, texture.id());
-                        gl::FramebufferTexture2D(
-                            gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0
-                        );
-
-                        gl::GenRenderbuffers(1, &mut rbo);
-                        gl::BindRenderbuffer(gl::RENDERBUFFER, rbo);
-                        // Some graphics cards require a depth buffer along with a stencil.
-                        gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, texture.info().width() as i32, texture.info().height() as i32);
-                        gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
-
-                        gl::FramebufferRenderbuffer(
-                            gl::FRAMEBUFFER, gl::STENCIL_ATTACHMENT, gl::RENDERBUFFER, rbo
-                        );
-
-                        if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
-                            panic!("Framebuffer not complete!");
-                        }
-                    }
-
-                    self.current_framebuffer = Some((fbo, rbo));
-                }
-            }
-        }
-
-        self.current_render_target = target;
-    }
-
     fn blur(&mut self, texture: &mut Texture, amount: u8, x: usize, y: usize, width: usize, height: usize) {
         // TODO: validate that the blur region is inside the texture
         
@@ -559,9 +537,9 @@ impl Renderer for OpenGl {
         }
 
         let gl_format = match texture.info().format() {
-            ImageFormat::Rgb8 => gl::RGB,
-            ImageFormat::Rgba8 => gl::RGBA,
-            ImageFormat::Gray8 => gl::RED,
+            PixelFormat::Rgb8 => gl::RGB,
+            PixelFormat::Rgba8 => gl::RGBA,
+            PixelFormat::Gray8 => gl::RED,
         };
 
         for (fbo, tex) in pingpong_fbo.iter().zip(pingpong_tex.iter()) {

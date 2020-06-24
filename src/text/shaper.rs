@@ -1,13 +1,13 @@
 
-use std::str::Chars;
-use std::iter::Peekable;
+use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
+use std::iter::{Peekable, DoubleEndedIterator};
 
 use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass};
 
 use harfbuzz_rs as hb;
-use self::hb::hb as hb_sys;
+//use self::hb::hb as hb_sys;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
@@ -24,19 +24,12 @@ use super::{
     FontDb,
     FontId,
     TextStyle,
-    freetype as ft,
     RenderStyle,
     TextLayout,
     GLYPH_PADDING
 };
 
 const LRU_CACHE_CAPACITY: usize = 1000;
-
-// harfbuzz-sys doesn't add this symbol for mac builds.
-// And we need it since we're using freetype on OSX.
-//extern "C" {
-//    pub fn hb_ft_font_create_referenced(face: ft::ffi::FT_Face) -> *mut hb_sys::hb_font_t;
-//}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Direction {
@@ -58,7 +51,9 @@ pub struct ShapedGlyph {
     pub offset_x: f32,
     pub offset_y: f32,
     pub bearing_x: f32,
-    pub bearing_y: f32
+    pub bearing_y: f32,
+    pub calc_offset_x: f32,
+    pub calc_offset_y: f32
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -85,10 +80,10 @@ impl ShapingId {
     }
 }
 
-type Cache<H> = LruCache<ShapingId, Result<(ShapedGlyph, Vec<ShapedGlyph>), ErrorKind>, H>;
+type Cache<H> = LruCache<ShapingId, Result<Vec<ShapedGlyph>, ErrorKind>, H>;
 
 pub struct Shaper {
-    cache: Cache<FnvBuildHasher>
+    cache: Cache<FnvBuildHasher>,
 }
 
 impl Default for Shaper {
@@ -112,42 +107,35 @@ impl Shaper {
             y: 0.0,
             width: 0.0,
             height: 0.0,
-            glyphs: Vec::new()
+            glyphs: Vec::with_capacity(text.len())
         };
 
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
-            let mut words: Vec<&str> = subtext.split(' ').collect();
-
-            // reverse the words in right-to-left scripts bit not the trailing whitespace
-            if direction == Direction::Rtl {
-                let mut rev_range = words.len();
-
-                for (i, word) in words.iter().enumerate().rev() {
-                    if word.is_empty() {
-                        rev_range = i;
-                    } else {
-                        break;
-                    }
-                }
-
-                words[0..rev_range].reverse();
-            }
-
-            let mut words_glyphs = Vec::new();
-
-            // we need the space glyph to join the words after they are shaped
-            let mut space_glyph = None;
+            let mut words = subtext.split_whitespace_inclusive();
 
             // shape each word and cache the generated glyphs
-            for word in words {
+            loop {
+
+                let maybe_word = if direction == Direction::Rtl {
+                    words.next_back()
+                } else {
+                    words.next()
+                };
+
+                let word = match maybe_word {
+                    Some(word) => word,
+                    None => break
+                };
 
                 let shaping_id = ShapingId::new(style, word);
 
                 if self.cache.peek(&shaping_id).is_none() {
+
+                    // find_font will call the closure with each font matching the provided style
+                    // until a font capable of shaping the word is found
                     let ret = fontdb.find_font(&word, style, |font| {
-                        let _ = font.set_size(style.size);
 
                         // Call harfbuzz
                         let output = {
@@ -181,48 +169,43 @@ impl Shaper {
                                 has_missing = true;
                             }
 
-                            let _ = font.face.load_glyph(info.codepoint, ft::LoadFlag::DEFAULT);
-                            let metrics = font.face.glyph().metrics();
-
-                            items.push(ShapedGlyph {
-                                x: 0.0,
-                                y: 0.0,
+                            let mut g = ShapedGlyph {
                                 c: c,
-                                index: 0,
                                 font_id: font.id,
                                 codepoint: info.codepoint,
-                                width: metrics.width as f32 / 64.0,
-                                height: metrics.height as f32 / 64.0,
                                 advance_x: position.x_advance as f32 / 64.0,
                                 advance_y: position.y_advance as f32 / 64.0,
                                 offset_x: position.x_offset as f32 / 64.0,
                                 offset_y: position.y_offset as f32 / 64.0,
-                                bearing_x: metrics.horiBearingX as f32 / 64.0,
-                                bearing_y: metrics.horiBearingY as f32 / 64.0,
-                            });
+                                ..Default::default()
+                            };
+
+                            let scale = font.scale(style.size as f32);
+                            let font = font.font_ref();
+                            
+                            let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);
+
+                            if let Some(bbox) = font.glyph_bounding_box(glyph_id) {
+                                g.width = bbox.width() as f32 * scale;
+                                g.height = bbox.height() as f32 * scale;
+                                g.bearing_x = bbox.x_min as f32 * scale;
+                                g.bearing_y = bbox.y_max as f32 * scale;
+                            }
+
+                            items.push(g);
                         }
 
-                        let space_glyph = Self::space_glyph(font, style);
-
-                        (has_missing, (space_glyph, items))
+                        (has_missing, items)
                     });
 
                     self.cache.put(shaping_id, ret);
                 }
 
-                if let Some(result) = self.cache.get(&shaping_id) {
-                    if let Ok((aspace_glyph, items)) = result {
-                        words_glyphs.push(items.clone());
-                        space_glyph = Some(*aspace_glyph);
+                if let Some(shape_result) = self.cache.get(&shaping_id) {
+                    if let Ok(items) = shape_result {
+                        result.glyphs.extend(items);
                     }
                 }
-            }
-
-            if let Some(space_glyph) = space_glyph {
-                result.glyphs.append(&mut words_glyphs.join(&space_glyph));
-            } else {
-                let mut flat = words_glyphs.into_iter().flatten().collect();
-                result.glyphs.append(&mut flat);
             }
         }
 
@@ -231,6 +214,7 @@ impl Shaper {
         Ok(result)
     }
 
+    // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
     fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
@@ -259,16 +243,30 @@ impl Shaper {
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
-            let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            font.set_size(style.size)?;
+            
+            glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
+            glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
 
-            let xpos = cursor_x + glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
-            let ypos = cursor_y + glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+            // these two lines are for use with freetype renderer
+            let xpos = cursor_x + glyph.calc_offset_x;
+            let ypos = cursor_y + glyph.calc_offset_y;
+            
+            // these two lines are for use with canvas renderer
+            // let xpos = cursor_x + glyph.offset_x - (padding as f32) - (line_width as f32) / 2.0;
+            // let ypos = cursor_y + glyph.offset_y - (padding as f32) - (line_width as f32) / 2.0;
+            // let xpos = cursor_x + glyph.offset_x;
+            // let ypos = cursor_y + glyph.offset_y;
+
+            // TODO: Instead of allways getting units per em and calculating scale just move this to the Font struct
+            // and have getters that accept font_size and return correctly scaled result
+
+            let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            // let font = font.font_ref(); //ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            //font.set_size(style.size)?;
 
             // Baseline alignment
-            let size_metrics = font.face.size_metrics().ok_or(ErrorKind::FontInfoExtracionError)?;
-            let ascender = size_metrics.ascender as f32 / 64.0;
-            let descender = size_metrics.descender as f32 / 64.0;
+            let ascender = font.ascender(style.size as f32);
+            let descender = font.descender(style.size as f32);
 
             let offset_y = match style.baseline {
                 Baseline::Top => ascender,
@@ -277,7 +275,8 @@ impl Shaper {
                 Baseline::Bottom => descender,
             };
 
-            height = height.max(size_metrics.height as f32 / 64.0);
+            //height = height.max(size_metrics.height as f32 / 64.0);
+            height = height.max(font.height(style.size as f32));
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
@@ -292,23 +291,6 @@ impl Shaper {
         res.height = height;
 
         Ok(())
-    }
-
-    fn space_glyph(font: &mut Font, style: &TextStyle) -> ShapedGlyph {
-        let mut glyph = ShapedGlyph::default();
-
-        let _ = font.set_size(style.size);
-
-        let index = font.face.get_char_index(' ' as u32);
-        let _ = font.face.load_glyph(index, ft::LoadFlag::DEFAULT);
-        let metrics = font.face.glyph().metrics();
-
-        glyph.font_id = font.id;
-        glyph.c = ' ';
-        glyph.codepoint = index;
-        glyph.advance_x = metrics.horiAdvance as f32 / 64.0;
-
-        glyph
     }
 
     // TODO: error handling
@@ -333,10 +315,6 @@ impl Shaper {
     // }
 
     fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
-        // harfbuzz_rs doesn't provide a safe way of creating Face or a Font from a freetype face
-        // And I didn't want to read the file a second time and keep it in memory just to give
-        // it to harfbuzz_rs here. hb::Owned will free the pointer correctly.
-
         let face = hb::Face::new(font.data.clone(), 0);
 		hb::Font::new(face)
     }
@@ -373,22 +351,35 @@ impl From<BidiClass> for Direction {
     }
 }
 
-// TODO: Make this borrow a &str instead of allocating a String every time
-pub struct UnicodeScriptIterator<I: Iterator<Item = char>> {
+pub trait UnicodeScripts<I: Iterator<Item=(usize, char)>> {
+    fn unicode_scripts(&self) -> UnicodeScriptIterator<I>;
+}
+
+impl<'a> UnicodeScripts<CharIndices<'a>> for &'a str {
+    fn unicode_scripts(&self) -> UnicodeScriptIterator<CharIndices<'a>> {
+        UnicodeScriptIterator {
+            string: self,
+            iter: self.char_indices().peekable()
+        }
+    }
+}
+
+pub struct UnicodeScriptIterator<'a, I: Iterator<Item=(usize, char)>> {
+    string: &'a str,
     iter: Peekable<I>
 }
 
-impl<I: Iterator<Item = char>> Iterator for UnicodeScriptIterator<I> {
-    type Item = (Script, Direction, String);
+impl<'a, I: Iterator<Item=(usize, char)>> Iterator for UnicodeScriptIterator<'a, I> {
+    type Item = (Script, Direction, &'a str);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(first) = self.iter.next() {
+        if let Some((first_index, first)) = self.iter.next() {
             let direction = Direction::from(bidi_class(first));
             let mut script = first.script();
-            let mut text = String::new();
-            text.push(first);
 
-            while let Some(next) = self.iter.peek() {
+            let mut last_index = self.string.len();
+
+            while let Some((next_index, next)) = self.iter.peek() {
                 let next_script = next.script();
 
                 let next_script = match next_script {
@@ -404,35 +395,74 @@ impl<I: Iterator<Item = char>> Iterator for UnicodeScriptIterator<I> {
                 };
 
                 if next_script == script {
-                    text.push(self.iter.next().unwrap());
+                    self.iter.next();
                 } else {
+                    last_index = *next_index;
                     break;
                 }
             }
 
-            return Some((script, direction, text));
+            return Some((script, direction, &self.string[first_index..last_index]));
         }
 
         None
     }
 }
 
-pub trait UnicodeScripts<I: Iterator<Item = char>> {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<I>;
+trait SplitWhitespaceInclusive {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter;
 }
 
-impl<'a> UnicodeScripts<Chars<'a>> for &'a str {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<Chars<'a>> {
-        UnicodeScriptIterator {
-            iter: self.chars().peekable()
+impl SplitWhitespaceInclusive for &str {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter {
+        SplitWhitespaceInclusiveIter {
+            start: 0,
+            end: self.len(),
+            string: self,
+            char_indices: self.char_indices()
         }
     }
 }
 
-impl<I: Iterator<Item=char>> UnicodeScripts<I> for I {
-    fn unicode_scripts(self) -> UnicodeScriptIterator<I> {
-        UnicodeScriptIterator {
-            iter: self.peekable()
+struct SplitWhitespaceInclusiveIter<'a> {
+    start: usize,
+    end: usize,
+    string: &'a str,
+    char_indices: CharIndices<'a>
+}
+
+impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
+    type Item = &'a str;
+    
+    fn next(&mut self) -> Option<&'a str> {
+        let mut res = None;
+        
+        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[self.start..index]);
+            self.start = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
         }
+        
+        res
     }
+}
+
+impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
+
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let mut res = None;
+        
+        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[index..self.end]);
+            self.end = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
+        }
+        
+        res
+    }
+
 }

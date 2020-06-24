@@ -124,7 +124,7 @@ impl Default for Paint<'_> {
             letter_spacing: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
-            fill_rule: Default::default(),
+            fill_rule: Default::default()
         }
     }
 }

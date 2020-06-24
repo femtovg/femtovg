@@ -4,17 +4,15 @@ use std::error::Error;
 use std::ffi::NulError;
 use std::fmt::{self, Display, Formatter};
 
-use crate::text;
-
 /// Enum with all possible canvas errors that could occur.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    UnknownError,
     GeneralError(String),
     #[cfg(feature = "image-loading")]
     ImageError(::image::ImageError),
     IoError(io::Error),
-    FreetypeError(text::freetype::Error),
     FontParseError,
     NoFontFound,
     FontInfoExtracionError,
@@ -43,12 +41,6 @@ impl From<::image::ImageError> for ErrorKind {
 impl From<io::Error> for ErrorKind {
     fn from(error: io::Error) -> Self {
         Self::IoError(error)
-    }
-}
-
-impl From<text::freetype::Error> for ErrorKind {
-    fn from(error: text::freetype::Error) -> Self {
-        Self::FreetypeError(error)
     }
 }
 

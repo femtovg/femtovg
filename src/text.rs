@@ -1,6 +1,11 @@
 
-mod text_renderer;
-pub use text_renderer::TextRenderer;
+//TODO: Rename this to text renderer
+mod text_helper;
+pub use text_helper::{
+    render_text,
+    render_text_direct,
+    TextHelperContext
+};
 
 mod shaper;
 pub use shaper::{
@@ -8,10 +13,11 @@ pub use shaper::{
     ShapedGlyph
 };
 
+mod atlas;
+pub use atlas::Atlas;
+
 mod font;
 pub use font::Font;
-
-pub mod freetype;
 
 mod fontdb;
 pub use fontdb::{FontDb, FontId};

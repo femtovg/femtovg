@@ -5,8 +5,14 @@ use rgb::RGBA8;
 use imgref::ImgVec;
 
 /*
+HTML5 Canvas API:
+https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
+
 TODO:
-    - Review geometry module and maybe migrate to euclid
+    - Move examples to their own folders
+    - Finish demo
+    - Redo breakout demo
+    - Migrate to euclid
     - Custom shader support
     - Review text functions for:
         - Measuring text - text_bounds?
@@ -16,6 +22,7 @@ TODO:
         - Emoji support
     - Tests
     - Documentation
+    - Porter-Duff blendmodes (https://community.khronos.org/t/blending-mode/34770/4)
 */
 
 mod utils;
@@ -37,9 +44,9 @@ pub use text::{
 use text::{
     FontDb,
     Shaper,
-    TextRenderer,
     TextStyle,
     RenderStyle,
+    TextHelperContext
 };
 
 mod image;
@@ -48,7 +55,7 @@ pub use crate::image::{
     ImageInfo,
     ImageFlags,
     ImageStore,
-    ImageFormat,
+    PixelFormat,
     ImageSource,
 };
 
@@ -229,12 +236,13 @@ impl Default for State {
 }
 
 pub struct Canvas<T: Renderer> {
-    width: f32,
-    height: f32,
+    width: u32,
+    height: u32,
     renderer: T,
     fontdb: FontDb,
     shaper: Shaper,
-    text_renderer: TextRenderer,
+    text_helper_context: TextHelperContext,// TODO: rename this
+    current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
@@ -251,12 +259,13 @@ impl<T> Canvas<T> where T: Renderer {
         let fontdb = FontDb::new()?;
 
         let mut canvas = Self {
-            width: Default::default(),
-            height: Default::default(),
+            width: 0,
+            height: 0,
             renderer: renderer,
             fontdb: fontdb,
             shaper: Default::default(),
-            text_renderer: Default::default(),
+            text_helper_context: Default::default(),
+            current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
             verts: Default::default(),
@@ -273,13 +282,13 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
-        self.width = width as f32;
-        self.height = height as f32;
+        self.width = width;
+        self.height = height;
         self.fringe_width = 1.0 / dpi;
         self.tess_tol = 0.25 / dpi;
         self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
-
+        
         self.renderer.set_size(width, height, dpi);
     }
 
@@ -288,17 +297,17 @@ impl<T> Canvas<T> where T: Renderer {
             x, y, width, height, color
         });
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     /// Returns the with of the canvas
     pub fn width(&self) -> f32 {
-        self.width
+        self.width as f32
     }
 
     /// Returns the height of the canvas
     pub fn height(&self) -> f32 {
-        self.height
+        self.height as f32
     }
 
     /// Tells the renderer to execute all drawing commands and clears the current internal state
@@ -311,6 +320,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+        self.flush();
         self.renderer.screenshot()
     }
 
@@ -326,9 +336,13 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Restores the previous render state
+    ///
+    /// Restoring the initial/first state will just reset it to the defaults
     pub fn restore(&mut self) {
         if self.state_stack.len() > 1 {
             self.state_stack.pop();
+        } else {
+            self.reset();
         }
     }
 
@@ -361,14 +375,24 @@ impl<T> Canvas<T> where T: Renderer {
         self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
     }
 
+    // TODO: remove self.current_render_target and check in this method if target is different than current render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
-        self.flush();
-        self.renderer.set_target(&self.images, target);
+        //self.flush();
+        //self.renderer.set_target(&self.images, target);
+        if self.current_render_target != target {
+            //self.render_targets.push((target, Vec::new()));
+            self.append_cmd(Command::new(CommandType::SetRenderTarget(target)));
+            self.current_render_target = target;
+        }
+    }
+
+    fn append_cmd(&mut self, cmd: Command) {
+        self.commands.push(cmd);
     }
 
     // Images
 
-    pub fn create_image_empty(&mut self, width: usize, height: usize, format: ImageFormat, flags: ImageFlags) -> Result<ImageId> {
+    pub fn create_image_empty(&mut self, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<ImageId> {
         let info = ImageInfo::new(flags, width, height, format);
 
         self.images.alloc(&mut self.renderer, info)
@@ -489,6 +513,8 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Returns the current transformation matrix
+    ///
+    /// TODO: It's not ok that this method returns Transform2D while set_transform accepts 6 floats - make it consistant
     pub fn transform(&self) -> Transform2D {
         self.state().transform
     }
@@ -565,12 +591,21 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return false;
         }
 
         path_cache.contains_point(x, y, fill_rule)
+    }
+
+    pub fn path_bbox(&self, path: &mut Path) -> Bounds {
+        let transform = self.state().transform;
+
+        // The path cache saves a flattened and transformed version of the path.
+        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+
+        path_cache.bounds
     }
 
     /// Fills the current path with current fill style.
@@ -581,8 +616,8 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return;
         }
 
@@ -661,7 +696,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.triangles_verts = Some((offset, 4));
         }
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     /// Strokes the provided Path using Paint.
@@ -672,8 +707,8 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height {
+        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
+            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
             return;
         }
 
@@ -749,7 +784,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.drawables.push(drawable);
         }
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     // Text
@@ -824,7 +859,10 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
+        // text::render_text_direct(self, &layout, &style, &paint, invscale)?;
+
+        let cmds = text::render_text(self, &layout, &style)?;
+        //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
         for cmd in &cmds {
             let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
@@ -866,7 +904,7 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
 
         self.verts.extend_from_slice(verts);
     }
@@ -876,6 +914,8 @@ impl<T> Canvas<T> where T: Renderer {
 
         geometry::quantize(avg_scale, 0.1).min(7.0)
     }
+
+    //
 
     fn state(&self) -> &State {
         self.state_stack.last().unwrap()
@@ -891,29 +931,3 @@ impl<T: Renderer> Drop for Canvas<T> {
         self.images.clear(&mut self.renderer);
     }
 }
-
-/*
-ttf_parser crate is awesome! But the technique used here is not suitable for very small shapes like
-glyphs. I very much wanted to render glyps on the GPU using the same code path as other shapes and
-without using freetype, but the qulity was horrendous.
-impl<T: Renderer> ttf_parser::OutlineBuilder for Canvas<T> {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.move_to(x, y);
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.line_to(x, y);
-    }
-
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.quad_to(x1, y1, x, y);
-    }
-
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.bezier_to(x1, y1, x2, y2, x, y);
-    }
-
-    fn close(&mut self) {
-        self.close_path();
-    }
-}*/

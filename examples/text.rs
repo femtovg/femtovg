@@ -1,9 +1,20 @@
 use std::time::Instant;
 
-use glutin::event::{Event, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use glutin::window::WindowBuilder;
-use glutin::ContextBuilder;
+use glutin::{
+    ContextBuilder,
+    window::WindowBuilder,
+    event_loop::{
+        ControlFlow, 
+        EventLoop
+    },
+    event::{
+        Event,
+        WindowEvent,
+        ElementState,
+        VirtualKeyCode,
+        KeyboardInput
+    }
+};
 
 use gpucanvas::{
     Renderer,
@@ -51,6 +62,9 @@ fn main() {
 
     let mut font_size = 18;
 
+    let mut x = 5.0;
+    let mut y = 380.0;
+
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -62,6 +76,23 @@ fn main() {
                 }
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit
+                }
+                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(keycode), state: ElementState::Pressed, .. }, .. } => {
+                    if *keycode == VirtualKeyCode::W {
+                        y -= 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::S {
+                        y += 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::A {
+                        x -= 0.1;
+                    }
+
+                    if *keycode == VirtualKeyCode::D {
+                        x += 0.1;
+                    }
                 }
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
@@ -87,12 +118,11 @@ fn main() {
 
                 draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
                 draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                draw_paragraph(&mut canvas, 5.0, 380.0, font_size as u32, LOREM_TEXT);
-                draw_inc_size(&mut canvas, 270.0, 10.0);
+                draw_paragraph(&mut canvas, x, y, font_size as u32, LOREM_TEXT);
+                draw_inc_size(&mut canvas, 300.0, 10.0);
 
-                draw_complex(&mut canvas, 270.0, 340.0, font_size as u32);
-                //draw_complex(&mut canvas, 20.0, size.height as f32 - 20.0, font_size as u32);
-
+                draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
+                
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
                 draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
@@ -241,7 +271,7 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 
 fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
 
-    let mut paint = Paint::color(Color::hex("7300AB"));
+    let mut paint = Paint::color(Color::hex("#7300AB"));
     paint.set_stroke_width(3.0);
     let mut path = Path::new();
     path.move_to(x, y - 2.0);
@@ -270,7 +300,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
-    let _ = canvas.fill_text(x, y, "Latin النص العربي جميل جدا. Кирилица тест", paint);
+    let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 
@@ -353,7 +383,7 @@ Choice of typeface(s) is the primary aspect of text typography—prose fiction, 
 editorial, educational, religious, scientific, spiritual, and commercial writing all have differing
 characteristics and requirements of appropriate typefaces and their fonts or styles.
 
-سنسکرت کی طرف بہت زیادہ
+اللُّغَة العَرَبِيّة هي أكثرُ اللغاتِ السامية
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.

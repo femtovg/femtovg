@@ -34,8 +34,9 @@ pub enum Verb {
 }
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Path {
+    transform: Transform2D,
     verbs: Vec<Verb>,
     lastx: f32,
     lasty: f32,
@@ -49,6 +50,10 @@ impl Path {
             dist_tol: 0.01,
             ..Default::default()
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.verbs.is_empty()
     }
 
     pub fn set_distance_tolerance(&mut self, value: f32) {
