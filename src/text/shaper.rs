@@ -1,7 +1,7 @@
 
-use std::iter::Peekable;
 use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
+use std::iter::{Peekable, DoubleEndedIterator};
 
 use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass};
@@ -83,7 +83,7 @@ impl ShapingId {
 type Cache<H> = LruCache<ShapingId, Result<Vec<ShapedGlyph>, ErrorKind>, H>;
 
 pub struct Shaper {
-    cache: Cache<FnvBuildHasher>
+    cache: Cache<FnvBuildHasher>,
 }
 
 impl Default for Shaper {
@@ -110,17 +110,24 @@ impl Shaper {
             glyphs: Vec::with_capacity(text.len())
         };
 
-        let mut words_glyphs = Vec::new();
-
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
             // separate words in run
-            let words = subtext.split_whitespace_inclusive();
-
-            words_glyphs.clear();
+            let mut words = subtext.split_whitespace_inclusive();
 
             // shape each word and cache the generated glyphs
-            for word in words {
+            loop {
+
+                let maybe_word = if direction == Direction::Rtl {
+                    words.next_back()
+                } else {
+                    words.next()
+                };
+
+                let word = match maybe_word {
+                    Some(word) => word,
+                    None => break
+                };
 
                 let shaping_id = ShapingId::new(style, word);
 
@@ -194,19 +201,12 @@ impl Shaper {
                     self.cache.put(shaping_id, ret);
                 }
 
-                if let Some(result) = self.cache.get(&shaping_id) {
-                    if let Ok(items) = result {
-                        words_glyphs.push(items.clone());
+                if let Some(shape_result) = self.cache.get(&shaping_id) {
+                    if let Ok(items) = shape_result {
+                        result.glyphs.extend(items);
                     }
                 }
             }
-
-            // reverse the words in right-to-left scripts
-            if direction == Direction::Rtl {
-                result.glyphs.extend(words_glyphs.iter().rev().flatten())
-            } else {
-                result.glyphs.extend(words_glyphs.iter().flatten())
-            };
         }
 
         self.layout(x, y, fontdb, &mut result, &style)?;
@@ -447,4 +447,22 @@ impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
         
         res
     }
+}
+
+impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
+
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let mut res = None;
+        
+        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[index..self.end]);
+            self.end = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
+        }
+        
+        res
+    }
+
 }
