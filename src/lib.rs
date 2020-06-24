@@ -25,18 +25,6 @@ TODO:
     - Porter-Duff blendmodes (https://community.khronos.org/t/blending-mode/34770/4)
 */
 
-/*
-RENDER TARGETS:
-
-A better approach to implementing render targets that avoids flushing would be to store
-a set of commands that need to be executed for each target and store the shared buffer
-data for all targets in a single place. At the end of each frame first the shared data
-is uploaded to GPU memory, then the commands for each render target are executed in order.
-
-This still doesn't provide a clear answer on how to handle msaa targets and when to blit/
-resolve them as needed for text rendering.
-*/
-
 mod utils;
 
 mod text;
@@ -309,7 +297,7 @@ impl<T> Canvas<T> where T: Renderer {
             x, y, width, height, color
         });
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     /// Returns the with of the canvas
@@ -332,6 +320,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+        self.flush();
         self.renderer.screenshot()
     }
 
@@ -386,10 +375,19 @@ impl<T> Canvas<T> where T: Renderer {
         self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
     }
 
+    // TODO: remove self.current_render_target and check in this method if target is different than current render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
-        self.flush();
-        self.renderer.set_target(&self.images, target);
-        self.current_render_target = target;
+        //self.flush();
+        //self.renderer.set_target(&self.images, target);
+        if self.current_render_target != target {
+            //self.render_targets.push((target, Vec::new()));
+            self.append_cmd(Command::new(CommandType::SetRenderTarget(target)));
+            self.current_render_target = target;
+        }
+    }
+
+    fn append_cmd(&mut self, cmd: Command) {
+        self.commands.push(cmd);
     }
 
     // Images
@@ -698,7 +696,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.triangles_verts = Some((offset, 4));
         }
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     /// Strokes the provided Path using Paint.
@@ -786,7 +784,7 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.drawables.push(drawable);
         }
 
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
     }
 
     // Text
@@ -906,7 +904,7 @@ impl<T> Canvas<T> where T: Renderer {
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
-        self.commands.push(cmd);
+        self.append_cmd(cmd);
 
         self.verts.extend_from_slice(verts);
     }

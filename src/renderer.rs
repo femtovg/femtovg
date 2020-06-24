@@ -32,6 +32,7 @@ pub struct Drawable {
 
 #[derive(Debug)]
 pub enum CommandType {
+    SetRenderTarget(RenderTarget),
     ClearRect {
         x: u32,
         y: u32,
@@ -99,8 +100,6 @@ pub trait Renderer {
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image>;
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()>;
     fn delete_image(&mut self, image: Self::Image);
-
-    fn set_target(&mut self, images: &ImageStore<Self::Image>, target: RenderTarget);
 
     fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize);
 

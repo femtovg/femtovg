@@ -139,24 +139,22 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         }
     }
 
-    if canvas.current_render_target != initial_render_target {
-        canvas.set_render_target(initial_render_target);
-    }
+    canvas.set_render_target(initial_render_target);
 
     // debug draw
-    {
-        // canvas.save();
-        // canvas.reset();
+    // {
+    //     canvas.save();
+    //     canvas.reset();
 
-        // let image_id = canvas.text_helper_context.textures[0].image_id;
+    //     let image_id = canvas.text_helper_context.textures[0].image_id;
 
-        // let mut path = Path::new();
-        // path.rect(400.0, 20.0, 512.0, 512.0);
-        // canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
-        // canvas.stroke_path(&mut path, Paint::color(Color::black()));
+    //     let mut path = Path::new();
+    //     path.rect(400.0, 20.0, 512.0, 512.0);
+    //     canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
+    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
-        // canvas.restore();
-    }
+    //     canvas.restore();
+    // }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }

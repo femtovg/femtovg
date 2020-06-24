@@ -69,7 +69,7 @@ pub struct OpenGl {
 impl OpenGl {
 
     pub fn new<F>(load_fn: F) -> Result<Self> where F: Fn(&'static str) -> *const c_void {
-        let debug = true;
+        let debug = cfg!(debug_assertions);
         let antialias = true;
 
         gl::load_with(load_fn);
@@ -380,6 +380,34 @@ impl OpenGl {
             gl::Disable(gl::SCISSOR_TEST);
         }
     }
+
+    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
+        match target {
+            RenderTarget::Screen => unsafe {
+                Framebuffer::unbind();
+                self.view = self.screen_view;
+                gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
+            },
+            RenderTarget::Image(id) => {
+                if let Some(texture) = images.get(id) {
+                    let fb = self.framebuffers.entry(id).or_insert_with(|| {
+                        Framebuffer::new(texture)
+                    });
+
+                    fb.bind();
+
+                    self.view[0] = texture.info().width() as f32;
+                    self.view[1] = texture.info().height() as f32;
+
+                    unsafe {
+                        gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+                    }
+                }
+            }
+        }
+
+        //self.current_render_target = target;
+    }
 }
 
 impl Renderer for OpenGl {
@@ -434,9 +462,7 @@ impl Renderer for OpenGl {
         // Bind the two uniform samplers to texture units
         self.main_program.set_tex(0);
         self.main_program.set_masktex(1);
-        // Set uniforms
-        self.main_program.set_view(self.view);
-
+        
         self.check_error("render prepare");
 
         for cmd in commands {
@@ -450,6 +476,10 @@ impl Renderer for OpenGl {
                 CommandType::Triangles { params } => self.triangles(images, cmd, params),
                 CommandType::ClearRect { x, y, width, height, color } => {
                     self.clear_rect(x, y, width, height, color);
+                },
+                CommandType::SetRenderTarget(target) => {
+                    self.set_target(images, target);
+                    self.main_program.set_view(self.view);
                 }
             }
         }
@@ -479,36 +509,6 @@ impl Renderer for OpenGl {
 
     fn delete_image(&mut self, image: Self::Image) {
         image.delete();
-    }
-
-    // TODO: Rethink this API. Maybe RenderTarget should be a param in the render method
-    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
-        match target {
-            RenderTarget::Screen => unsafe {
-                Framebuffer::unbind();
-                self.view = self.screen_view;
-                gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
-            },
-            RenderTarget::Image(id) => {
-                if let Some(texture) = images.get(id) {
-                    let fb = self.framebuffers.entry(id).or_insert_with(|| {
-                        Framebuffer::new(texture)
-                    });
-
-                    fb.bind();
-
-                    // TODO: this forgets the screen viewport size
-                    self.view[0] = texture.info().width() as f32;
-                    self.view[1] = texture.info().height() as f32;
-
-                    unsafe {
-                        gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
-                    }
-                }
-            }
-        }
-
-        //self.current_render_target = target;
     }
 
     fn blur(&mut self, texture: &mut Texture, amount: u8, x: usize, y: usize, width: usize, height: usize) {
