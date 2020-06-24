@@ -135,11 +135,6 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
-
                 let height = size.height as f32;
                 let width = size.width as f32;
 
@@ -198,7 +193,20 @@ fn main() {
                 draw_edit_box(&mut canvas, "Email", x, y, 280.0, 28.0);
                 y += 35.0;
                 draw_edit_box(&mut canvas, "Password", x, y, 280.0, 28.0);
-                
+                y += 38.0;
+                draw_check_box(&mut canvas, "Remember me", x, y, 140.0, 28.0);
+                draw_button(&mut canvas, Some("\u{E740}"), "Sign in", x + 138.0, y, 140.0, 28.0, Color::rgba(0, 96, 128, 255));
+                y += 45.0;
+
+                // Slider
+                draw_label(&mut canvas, "Diameter", x, y, 280.0, 20.0);
+                y += 25.0;
+                draw_edit_box_num(&mut canvas, "123.00", "px", x + 180.0, y, 100.0, 28.0);
+                draw_slider(&mut canvas, 0.4, x, y, 170.0, 28.0);
+                y += 55.0;
+
+                draw_button(&mut canvas, Some("\u{E729}"), "Delete", x, y, 160.0, 28.0, Color::rgba(128, 16, 8, 255));
+                draw_button(&mut canvas, None, "Cancel", x + 170.0, y, 110.0, 28.0, Color::rgba(0, 0, 0, 0));
 
                 
                 /*
@@ -223,6 +231,11 @@ fn main() {
                 //     path.rect(size.width as f32, 15.0, 1920.0, 1080.0);
                 //     canvas.fill_path(&mut path, paint);
                 // }
+
+                canvas.save();
+                canvas.reset();
+                perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
                 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
@@ -605,20 +618,123 @@ fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, title: &str, units: &s
     paint.set_text_baseline(Baseline::Middle);
 
     if let Ok(layout) = canvas.layout_text(0.0, 0.0, units, paint) {
-        let _ = canvas.fill_text(x + w - h * 0.3, y + h + 0.5, units, paint);
+        let _ = canvas.fill_text(x + w - h * 0.3, y + h * 0.5, units, paint);
 
         paint.set_font_size(16);
         paint.set_color(Color::rgba(255, 255, 255, 128));
 
         let _ = canvas.fill_text(x + w - layout.width - h * 0.5, y + h * 0.5, title, paint);
     }
+}
 
-    let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
-    text_paint.set_font_size(16);
-    text_paint.set_font_family("Roboto");
-    text_paint.set_text_align(Align::Left);
-    text_paint.set_text_baseline(Baseline::Middle);
-    let _ = canvas.fill_text(x + h * 0.5, y + h * 0.5, title, text_paint);
+fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, text: &str, x: f32, y: f32, _w: f32, h: f32) {
+    let mut paint = Paint::color(Color::rgba(255, 255, 255, 160));
+    paint.set_font_size(14);
+    paint.set_font_family("Roboto");
+    paint.set_text_baseline(Baseline::Middle);
+
+    let _ = canvas.fill_text(x + 28.0, y + h * 0.5, text, paint);
+
+    paint = Paint::box_gradient(x + 1.0, y + (h * 0.5).floor() - 9.0 + 1.0, 18.0, 18.0, 3.0, 3.0, Color::rgba(0, 0, 0, 32), Color::rgba(0, 0, 0, 92));
+    let mut path = Path::new();
+    path.rounded_rect(x + 1.0, y + (h * 0.5).floor() - 9.0, 18.0, 18.0, 3.0);
+    canvas.fill_path(&mut path, paint);
+
+    paint = Paint::color(Color::rgba(255, 255, 255, 128));
+    paint.set_font_size(36);
+    paint.set_font_family("Entypo");
+    paint.set_text_align(Align::Center);
+    paint.set_text_baseline(Baseline::Middle);
+    let _ = canvas.fill_text(x + 9.0 + 2.0, y + h * 0.5, "\u{2713}", paint);
+}
+
+fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text: &str, x: f32, y: f32, w: f32, h: f32, color: Color) {
+
+    let corner_radius = 4.0;
+
+    let a = if color.is_black() { 16 } else { 32 };
+
+    let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, a), Color::rgba(0, 0, 0, a));
+
+    let mut path = Path::new();
+    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, corner_radius - 1.0);
+
+    if !color.is_black() {
+        canvas.fill_path(&mut path, Paint::color(color));
+    }
+
+    canvas.fill_path(&mut path, bg);
+
+    let mut path = Path::new();
+    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, corner_radius - 0.5);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 48)));
+
+    let mut paint = Paint::color(Color::rgba(255, 255, 255, 96));
+    paint.set_font_size(16);
+    paint.set_font_family("Roboto");
+    paint.set_font_weight(Weight::Bold);
+    paint.set_text_align(Align::Left);
+    paint.set_text_baseline(Baseline::Middle);
+
+    let tw = if let Ok(layout) = canvas.layout_text(0.0, 0.0, text, paint) {
+        layout.width
+    } else {
+        0.0
+    };
+
+    let mut iw = 0.0;
+
+    if let Some(icon) = preicon {
+        paint.set_font_family("Entypo");
+        paint.set_font_size((h * 1.3) as u32);
+
+        if let Ok(layout) = canvas.layout_text(0.0, 0.0, icon, paint) {
+            iw = layout.width + (h * 0.15);
+        }
+
+        let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 - iw * 0.75, y + h * 0.5, icon, paint);
+    }
+
+    paint.set_font_size(16);
+    paint.set_font_family("Roboto");
+    paint.set_color(Color::rgba(0, 0, 0, 160));
+    let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
+    paint.set_color(Color::rgba(255, 255, 255, 160));
+    let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
+}
+
+fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w: f32, h: f32) {
+    let cy = y + (h * 0.5).floor();
+    let kr = (h * 0.25).floor();
+
+    canvas.save();
+
+    // Slot
+    let mut bg = Paint::box_gradient(x, cy - 2.0 + 1.0, w, 4.0, 2.0, 2.0, Color::rgba(0, 0, 0, 32), Color::rgba(0, 0, 0, 128));
+    let mut path = Path::new();
+    path.rounded_rect(x, cy - 2.0, w, 4.0, 2.0);
+    canvas.fill_path(&mut path, bg);
+
+    // Knob Shadow
+    bg = Paint::radial_gradient(x + (pos * w).floor(), cy + 1.0, kr - 3.0, kr + 3.0, Color::rgba(0, 0, 0, 64), Color::rgba(0, 0, 0, 0));
+    let mut path = Path::new();
+    path.rect(x + (pos*w).floor() - kr - 5.0, cy - kr - 5.0, kr * 2.0 + 5.0 + 5.0, kr * 2.0 + 5.0 + 5.0 + 3.0);
+    path.circle(x + (pos*w).floor(), cy, kr);
+    path.solidity(Solidity::Hole);
+    canvas.fill_path(&mut path, bg);
+
+    // Knob
+    bg = Paint::linear_gradient(x, cy - kr, x, cy + kr, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
+    let mut path = Path::new();
+    path.circle(x + (pos*w).floor(), cy, kr - 1.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(40, 43, 48, 255)));
+    canvas.fill_path(&mut path, bg);
+
+    let mut path = Path::new();
+    path.circle(x + (pos*w).floor(), cy, kr - 0.5);
+    canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 92)));
+
+    canvas.restore();
 }
 
 fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f32, t: f32) {

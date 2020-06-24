@@ -117,6 +117,13 @@ impl Color {
     pub fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
+
+    pub fn is_black(&self) -> bool {
+        self.r == 0.0 &&
+        self.g == 0.0 &&
+        self.b == 0.0 &&
+        self.a == 0.0
+    }
 }
 
 impl Default for Color {

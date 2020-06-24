@@ -810,8 +810,13 @@ impl<T> Canvas<T> where T: Renderer {
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let style = self.text_style_for_paint(&paint);
+        let invscale = 1.0 / scale;
 
-        self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)
+        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        layout.width *= invscale;
+        layout.height *= invscale;
+
+        Ok(layout)
     }
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
@@ -854,7 +859,8 @@ impl<T> Canvas<T> where T: Renderer {
         let mut style = self.text_style_for_paint(&paint);
         style.render_style = render_style;
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        //let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
