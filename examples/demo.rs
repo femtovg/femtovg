@@ -22,6 +22,7 @@ use gpucanvas::{
     Align,
     Baseline,
     Weight,
+    ImageId,
     RenderTarget,
     PixelFormat,
     //CompositeOperation,
@@ -56,6 +57,11 @@ fn main() {
     let graph_image_id = canvas.create_image_empty(1000, 600, PixelFormat::Rgba8, ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED).expect("Cannot alloc image");
 
     //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
+
+    let images: Vec<ImageId> = (1..=12).map(|i| {
+        let name = format!("examples/assets/images/image{}.jpg", i);
+        canvas.load_image_file(name, ImageFlags::empty()).expect("cannot load image")
+    }).collect();
 
     let mut screenshot_image_id = None;
 
@@ -180,12 +186,13 @@ fn main() {
 
                 draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
 
-                let mut x = 60.0;
+                let x = 60.0;
                 let mut y = 95.0;
 
                 draw_search_box(&mut canvas, "Search", x, y, 280.0, 25.0);
                 y += 40.0;
                 draw_drop_down(&mut canvas, "Effects", 60.0, 135.0, 280.0, 28.0);
+                let popy = y + 14.0;
                 y += 45.0;
 
                 draw_label(&mut canvas, "Login", x, y, 280.0, 20.0);
@@ -208,7 +215,8 @@ fn main() {
                 draw_button(&mut canvas, Some("\u{E729}"), "Delete", x, y, 160.0, 28.0, Color::rgba(128, 16, 8, 255));
                 draw_button(&mut canvas, None, "Cancel", x + 170.0, y, 110.0, 28.0, Color::rgba(0, 0, 0, 0));
 
-                
+                draw_thumbnails(&mut canvas, 365.0, popy - 30.0, 160.0, 300.0, &images, t);
+
                 /*
                 draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
                 */
@@ -700,7 +708,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
     paint.set_color(Color::rgba(0, 0, 0, 160));
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
     paint.set_color(Color::rgba(255, 255, 255, 160));
-    let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
+    let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5, text, paint);
 }
 
 fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w: f32, h: f32) {
@@ -733,6 +741,115 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
     let mut path = Path::new();
     path.circle(x + (pos*w).floor(), cy, kr - 0.5);
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 92)));
+
+    canvas.restore();
+}
+
+fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, images: &[ImageId], t: f32) {
+    let corner_radius = 3.0;
+    let thumb = 60.0;
+    let arry = 30.5;
+    let stackh = images.len() as f32 / 2.0 * (thumb + 10.0) + 10.0;
+    let u = (1.0 + (t * 0.6).cos()) * 0.5;
+    let u2 = (1.0 - (t * 0.2).cos()) * 0.5;
+
+    canvas.save();
+
+    // Drop shadow
+    let shadow_paint = Paint::box_gradient(x, y + 4.0, w, h, corner_radius * 2.0, 20.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
+    let mut path = Path::new();
+    path.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
+    path.rounded_rect(x, y, w, h, corner_radius);
+    path.solidity(Solidity::Hole);
+    canvas.fill_path(&mut path, shadow_paint);
+
+    // Window
+    let mut path = Path::new();
+    path.rounded_rect(x, y, w, h, corner_radius);
+    path.move_to(x - 10.0, y + arry);
+    path.line_to(x + 1.0, y + arry - 11.0);
+    path.line_to(x + 1.0, y + arry + 11.0);
+    canvas.fill_path(&mut path, Paint::color(Color::rgba(200, 200, 200, 255)));
+
+    canvas.save();
+    canvas.scissor(x, y, w, h);
+    canvas.translate(0.0, -(stackh - h) * u);
+
+    let dv = 1.0 / (images.len() as f32 - 1.0);
+
+    for (i, image) in images.iter().enumerate() {
+        let mut tx = x + 10.0;
+        let mut ty = y + 10.0;
+        tx += (i%2) as f32 * (thumb + 10.0);
+        ty += (i/2) as f32 * (thumb + 10.0);
+
+        let mut iw = thumb;
+        let mut ih = thumb;
+        let mut ix = 0.0;
+        let mut iy = 0.0;
+
+        if let Ok((imgw, imgh)) = canvas.image_size(*image) {
+            if imgw < imgh {
+                iw = thumb;
+                ih = iw * imgh as f32 / imgw as f32;
+                ix = 0.0;
+                iy = -(ih-thumb)*0.5;
+            } else {
+                ih = thumb;
+                iw = ih * imgw as f32 /imgh as f32;
+                ix = -(iw-thumb)*0.5;
+                iy = 0.0;
+            }
+        }
+
+        let v = i as f32 * dv;
+        let a = ((u2 - v) / dv).max(0.0).min(1.0);
+
+        if a < 1.0 {
+            draw_spinner(canvas, tx + thumb / 2.0, ty + thumb / 2.0, thumb * 0.25, t);
+        }
+
+        let img_paint = Paint::image(*image, tx + ix, ty + iy, iw, ih, 0.0 / 180.0 * PI, a);
+        let mut path = Path::new();
+        path.rounded_rect(tx, ty, thumb, thumb, 5.0);
+        canvas.fill_path(&mut path, img_paint);
+
+        let shadow_paint = Paint::box_gradient(tx - 1.0, ty, thumb + 2.0, thumb + 2.0, 5.0, 3.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
+        let mut path = Path::new();
+        path.rect(tx - 5.0, ty - 5.0, thumb + 10.0, thumb + 10.0);
+        path.rounded_rect(tx, ty, thumb, thumb, 6.0);
+        path.solidity(Solidity::Hole);
+        canvas.fill_path(&mut path, shadow_paint);
+
+        let mut path = Path::new();
+        path.rounded_rect(tx + 0.5, ty + 0.5, thumb - 1.0, thumb - 1.0, 4.0 - 0.5);
+        canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 192)));
+    }
+
+    canvas.restore();
+
+    // Hide fades
+    let fade_paint = Paint::linear_gradient(x, y, x, y + 6.0, Color::rgba(200, 200, 200, 255), Color::rgba(200, 200, 200, 0));
+    let mut path = Path::new();
+    path.rect(x + 4.0, y, w - 8.0, 6.0);
+    canvas.fill_path(&mut path, fade_paint);
+
+    let fade_paint = Paint::linear_gradient(x, y + h, x, y + h - 6.0, Color::rgba(200, 200, 200, 255), Color::rgba(200, 200, 200, 0));
+    let mut path = Path::new();
+    path.rect(x + 4.0, y + h - 6.0, w - 8.0, 6.0);
+    canvas.fill_path(&mut path, fade_paint);
+
+    // Scroll bar
+    let shadow_paint = Paint::box_gradient(x + w - 12.0 + 1.0, y + 4.0 + 1.0, 8.0, h - 8.0, 3.0, 4.0, Color::rgba(0, 0, 0, 32), Color::rgba(0, 0, 0, 92));
+    let mut path = Path::new();
+    path.rounded_rect(x + w - 12.0, y + 4.0, 8.0, h - 8.0, 3.0);
+    canvas.fill_path(&mut path, shadow_paint);
+
+    let scrollh = (h / stackh) * (h - 8.0);
+    let shadow_paint = Paint::box_gradient(x + w - 12.0 - 1.0, y + 4.0 + (h - 8.0 - scrollh) * u - 1.0, 8.0, scrollh, 3.0, 4.0, Color::rgba(220, 220, 220, 255), Color::rgba(128, 128, 128, 255));
+    let mut path = Path::new();
+    path.rounded_rect(x + w - 12.0 + 1.0, y + 4.0 + 1.0 + (h - 8.0 - scrollh) * u, 8.0 - 2.0, scrollh - 2.0, 2.0);
+    canvas.fill_path(&mut path, shadow_paint);
 
     canvas.restore();
 }

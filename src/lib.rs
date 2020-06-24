@@ -13,6 +13,7 @@ TODO:
     - Redo breakout demo
     - Migrate to euclid
     - Custom shader support
+    - Canvas push state with callback for auto pop
     - Review text functions for:
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?

@@ -355,6 +355,7 @@ impl PathCache {
 
             if has_fringe {
                 vertex_count += (point_count + contour.bevel*5 + 1) * 2;
+                contour.stroke.reserve(vertex_count);
             }
 
             contour.fill.reserve(vertex_count);
