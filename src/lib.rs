@@ -290,6 +290,8 @@ impl<T> Canvas<T> where T: Renderer {
         self.device_px_ratio = dpi;
         
         self.renderer.set_size(width, height, dpi);
+        
+        self.append_cmd(Command::new(CommandType::SetRenderTarget(RenderTarget::Screen)));
     }
 
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
@@ -865,35 +867,38 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        // text::render_text_direct(self, &layout, &style, &paint, invscale)?;
+        if style.size > 40 {
+            text::render_text_direct(self, &layout, &style, &paint, invscale)?;
+        } else {
+            let cmds = text::render_text(self, &layout, &style)?;
+            //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
-        let cmds = text::render_text(self, &layout, &style)?;
-        //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
+            for cmd in &cmds {
+                let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
-        for cmd in &cmds {
-            let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
+                for quad in &cmd.quads {
+                    let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
+                    let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
+                    let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
+                    let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
 
-            for quad in &cmd.quads {
-                let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
-                let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
-                let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
-                let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
+                    verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                    verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+                    verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
+                    verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                    verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
+                    verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+                }
 
-                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-                verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
-                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
-                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+                paint.set_alpha_mask(Some(cmd.image_id));
+
+                // Apply global alpha
+                paint.mul_alpha(self.state().alpha);
+
+                self.render_triangles(&verts, &paint, &scissor);
             }
-
-            paint.set_alpha_mask(Some(cmd.image_id));
-
-            // Apply global alpha
-            paint.mul_alpha(self.state().alpha);
-
-            self.render_triangles(&verts, &paint, &scissor);
         }
+        
 
         Ok(layout)
     }

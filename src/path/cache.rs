@@ -367,7 +367,9 @@ impl PathCache {
             contour.stroke.clear();
             contour.fill.clear();
 
-            let woff = 0.5 * fringe_width;
+            // TODO: woff = 0.0 produces no artifaacts for small sizes
+            // let woff = 0.5 * fringe_width; produces artifacts
+            let woff = 0.1;//0.5 * fringe_width;
 
             if has_fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {
@@ -412,7 +414,7 @@ impl PathCache {
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
-                        bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, rw);
+                        bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, ru);
                     } else {
                         contour.stroke.push(Vertex::new(p1.x + (p1.dmx * lw), p1.y + (p1.dmy * lw), lu, 1.0));
                         contour.stroke.push(Vertex::new(p1.x - (p1.dmx * rw), p1.y - (p1.dmy * rw), ru, 1.0));

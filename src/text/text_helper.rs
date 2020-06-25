@@ -317,35 +317,63 @@ fn find_texture_or_alloc<T: Renderer>(
 pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<(), ErrorKind> {
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
-    paint.set_anti_alias(false);
+    //paint.set_anti_alias(false);
+
+    if let RenderStyle::Stroke { width } = style.render_style {
+        paint.set_stroke_width(width as f32);
+    }
+
+    //canvas.save();
+    //canvas.set_global_alpha(0.25);
+    //canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+    // let points = [
+    //     (-3.0/8.0, 1.0/8.0),
+    //     (1.0/8.0, 3.0/8.0),
+    //     (3.0/8.0, -1.0/8.0),
+    //     (-1.0/8.0, -3.0/8.0),
+    // ];
 
     for glyph in &text_layout.glyphs {
         let mut path = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let font = font.font_ref();//::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
 
-            glyph_path(font, glyph.codepoint as u16, style.size as f32, glyph.x * invscale, glyph.y * invscale)?
+            let units_per_em = font.units_per_em().ok_or(ErrorKind::FontParseError)?;
+            let scale = style.size as f32 / units_per_em as f32;
 
-            // let units_per_em = font.units_per_em().ok_or(ErrorKind::FontParseError)?;
-            // let scale = paint.font_size() as f32 / units_per_em as f32;
+            let mut transform = Transform2D::identity();
 
-            // let mut transform = Transform2D::identity();
-            // transform.scale(scale, -scale);
-            // transform.translate(glyph.x * invscale, glyph.y * invscale);
+            transform.scale(scale * invscale, -scale * invscale);
+            transform.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
+            
+            let mut path_builder = TransformedPathBuilder(Path::new(), transform);
+            font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path_builder);
 
-            // let mut path_builder = TransformedPathBuilder(Path::new(), transform);
-            // font.outline_glyph(ttf_parser::GlyphId(glyph.codepoint as u16), &mut path_builder);
-
-            // path_builder.0
+            path_builder.0
         };
 
-        if let RenderStyle::Stroke { width } = style.render_style {
-            paint.set_stroke_width(width as f32);
+        if let RenderStyle::Stroke { width:_ } = style.render_style {
             canvas.stroke_path(&mut path, paint);
         } else {
             canvas.fill_path(&mut path, paint);
         }
+
+        // for point in &points {
+        //     canvas.save();
+        //     canvas.translate(point.0, point.1);
+    
+        //     if let RenderStyle::Stroke { width: _ } = style.render_style {
+        //         canvas.stroke_path(&mut path, paint);
+        //     } else {
+        //         canvas.fill_path(&mut path, paint);
+        //     }
+    
+        //     canvas.restore();
+        // }
     }
+
+    //canvas.restore();
 
     Ok(())
 }
