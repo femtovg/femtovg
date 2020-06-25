@@ -300,7 +300,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
-    let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест", paint);
+    let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест iiiiiiiiiiiiiiiiiiiiiiiiiiiii", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 

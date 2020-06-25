@@ -139,13 +139,10 @@ impl Shaper {
 
                         // Call harfbuzz
                         let output = {
-                            //let kern = hb::Feature::new(hb::Tag::new('k', 'e', 'r', 'n'), 0, 0..);
-
                             let mut hb_font = Self::hb_font(font);
-                            hb_font.set_scale(style.size as i32 * 72, style.size as i32 * 72);
+                            hb_font.set_scale(style.size as i32 * 64, style.size as i32 * 64);
                             let buffer = Self::hb_buffer(&word, direction, script);
 
-                            //hb::shape(&hb_font, buffer, &[kern])
                             hb::shape(&hb_font, buffer, &[])
                         };
 
@@ -280,8 +277,8 @@ impl Shaper {
             //height = size_metrics.height as f32 / 64.0;
             y = y.min(ypos + offset_y);
 
-            glyph.x = xpos.floor();
-            glyph.y = (ypos + offset_y).floor();
+            glyph.x = xpos;
+            glyph.y = ypos + offset_y;
 
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;

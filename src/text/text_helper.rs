@@ -170,8 +170,8 @@ fn render_glyph<T: Renderer>(
         padding += width as u32;
     }
 
-    let width = glyph.width as u32 + padding * 2;
-    let height = glyph.height as u32 + padding * 2;
+    let width = glyph.width.ceil() as u32 + padding * 2;
+    let height = glyph.height.ceil() as u32 + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
         &mut canvas.text_helper_context.textures,

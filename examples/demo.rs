@@ -678,7 +678,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 48)));
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 96));
-    paint.set_font_size(16);
+    paint.set_font_size(15);
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_text_align(Align::Left);
@@ -703,7 +703,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
         let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 - iw * 0.75, y + h * 0.5, icon, paint);
     }
 
-    paint.set_font_size(16);
+    paint.set_font_size(15);
     paint.set_font_family("Roboto");
     paint.set_color(Color::rgba(0, 0, 0, 160));
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
