@@ -9,16 +9,19 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
+    - Rename text helper to renderer or something
     - Review text positioning mess
         - evaluate all the maths that is happening from shaping to drawing
         - arabic scripts need to get fixed
     - Text todos:
+        - Review Font api and move shared functionality from the shaper & renderer to it
         - Laying out paragraphs - iterator design + correct breaking
         - Review if TextStyle struct is even needed - it's best to use paint itself
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
+        - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
     - Fix blurring
     - Finish demo text
     - Integrate euclid
