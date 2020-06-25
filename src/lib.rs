@@ -9,20 +9,25 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - Finish demo
-    - Redo breakout demo
-    - Migrate to euclid
-    - Custom shader support
-    - Canvas push state with callback for auto pop
-    - Review text functions for:
+    - Review text positioning mess
+        - evaluate all the maths that is happening from shaping to drawing
+        - arabic scripts need to get fixed
+    - Text todos:
+        - Laying out paragraphs - iterator design + correct breaking
+        - Review if TextStyle struct is even needed - it's best to use paint itself
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
-        - Emoji support
-    - Tests
+    - Fix blurring
+    - Finish demo text
+    - Integrate euclid
+    - Canvas push state with callback auto pop
     - Documentation
-    - Porter-Duff blendmodes (https://community.khronos.org/t/blending-mode/34770/4)
+    - Rename crate to femtovg
+    - Tests
+    - Publish to crates.io
+    - Emoji support
 */
 
 mod utils;
