@@ -139,8 +139,7 @@ impl Shaper {
 
                         // Call harfbuzz
                         let output = {
-                            let mut hb_font = Self::hb_font(font);
-                            hb_font.set_scale(style.size as i32 * 64, style.size as i32 * 64);
+                            let hb_font = Self::hb_font(font);
                             let buffer = Self::hb_buffer(&word, direction, script);
 
                             hb::shape(&hb_font, buffer, &[])
@@ -166,18 +165,19 @@ impl Shaper {
                                 has_missing = true;
                             }
 
+                            let scale = font.scale(style.size as f32);
+
                             let mut g = ShapedGlyph {
                                 c: c,
                                 font_id: font.id,
                                 codepoint: info.codepoint,
-                                advance_x: position.x_advance as f32 / 64.0,
-                                advance_y: position.y_advance as f32 / 64.0,
-                                offset_x: position.x_offset as f32 / 64.0,
-                                offset_y: position.y_offset as f32 / 64.0,
+                                advance_x: position.x_advance as f32 * scale,
+                                advance_y: position.y_advance as f32 * scale,
+                                offset_x: position.x_offset as f32 * scale,
+                                offset_y: position.y_offset as f32 * scale,
                                 ..Default::default()
                             };
 
-                            let scale = font.scale(style.size as f32);
                             let font = font.font_ref();
                             
                             let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);

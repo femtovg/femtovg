@@ -125,10 +125,10 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
 
             let mut q = Quad::default();
 
-            q.x0 = glyph.x;
-            q.y0 = glyph.y;
-            q.x1 = glyph.x + rendered.width as f32;
-            q.y1 = glyph.y + rendered.height as f32;
+            q.x0 = glyph.x.floor();
+            q.y0 = glyph.y.floor();
+            q.x1 = glyph.x.floor() + rendered.width as f32;
+            q.y1 = glyph.y.floor() + rendered.height as f32;
 
             q.s0 = rendered.atlas_x as f32 * itw;
             q.t0 = rendered.atlas_y as f32 * ith;
@@ -170,8 +170,8 @@ fn render_glyph<T: Renderer>(
         padding += width as u32;
     }
 
-    let width = glyph.width.ceil() as u32 + padding * 2;
-    let height = glyph.height.ceil() as u32 + padding * 2;
+    let width = glyph.width as u32 + padding * 2;
+    let height = glyph.height as u32 + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
         &mut canvas.text_helper_context.textures,
