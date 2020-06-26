@@ -12,7 +12,12 @@ use harfbuzz_rs as hb;
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
 
-use crate::ErrorKind;
+use crate::{
+    Path,
+    path::GlyphPathBuilder,
+    ErrorKind,
+    Transform2D
+};
 
 use super::{
     Align,
@@ -139,6 +144,7 @@ impl Shaper {
 
                         // Call harfbuzz
                         let output = {
+                            // TODO: It may be faster if this is created only once and stored inside the Font struct
                             let hb_font = Self::hb_font(font);
                             let buffer = Self::hb_buffer(&word, direction, script);
 
@@ -156,7 +162,7 @@ impl Shaper {
                         let positions = output.get_glyph_positions();
                         let infos = output.get_glyph_infos();
 
-                        let mut items = Vec::new();
+                        let mut items = Vec::with_capacity(positions.len());
 
                         let mut has_missing = false;
 
@@ -216,10 +222,10 @@ impl Shaper {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
-        let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
+        //let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
 
         let line_width = if let RenderStyle::Stroke { width } = style.render_style {
-            padding += width as u32;
+            //padding += width as u32;
             width
         } else {
             0
@@ -241,26 +247,22 @@ impl Shaper {
 
         for glyph in &mut res.glyphs {
             
-            glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32) / 2.0;
-            glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32) / 2.0;
+            // glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32);
+            // glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32);
 
-            // these two lines are for use with freetype renderer
+            glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x;
+            glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y;
+
             let xpos = cursor_x + glyph.calc_offset_x;
             let ypos = cursor_y + glyph.calc_offset_y;
+
+            // glyph.width += line_width as f32;
+            // glyph.height += line_width as f32;
+
+            //dbg!(line_width);
             
-            // these two lines are for use with canvas renderer
-            // let xpos = cursor_x + glyph.offset_x - (padding as f32) - (line_width as f32) / 2.0;
-            // let ypos = cursor_y + glyph.offset_y - (padding as f32) - (line_width as f32) / 2.0;
-            // let xpos = cursor_x + glyph.offset_x;
-            // let ypos = cursor_y + glyph.offset_y;
-
-            // TODO: Instead of allways getting units per em and calculating scale just move this to the Font struct
-            // and have getters that accept font_size and return correctly scaled result
-
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            // let font = font.font_ref(); //ttf_parser::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
-            //font.set_size(style.size)?;
-
+            
             // Baseline alignment
             let ascender = font.ascender(style.size as f32);
             let descender = font.descender(style.size as f32);

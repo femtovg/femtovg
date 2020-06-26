@@ -9,7 +9,6 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - Rename text helper to renderer or something
     - Review text positioning mess
         - evaluate all the maths that is happening from shaping to drawing
         - arabic scripts need to get fixed
@@ -54,7 +53,7 @@ use text::{
     Shaper,
     TextStyle,
     RenderStyle,
-    TextHelperContext
+    TextRendererContext
 };
 
 mod image;
@@ -249,7 +248,7 @@ pub struct Canvas<T: Renderer> {
     renderer: T,
     fontdb: FontDb,
     shaper: Shaper,
-    text_helper_context: TextHelperContext,// TODO: rename this
+    text_renderer_context: TextRendererContext,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -272,7 +271,7 @@ impl<T> Canvas<T> where T: Renderer {
             renderer: renderer,
             fontdb: fontdb,
             shaper: Default::default(),
-            text_helper_context: Default::default(),
+            text_renderer_context: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -870,15 +869,15 @@ impl<T> Canvas<T> where T: Renderer {
         let mut style = self.text_style_for_paint(&paint);
         style.render_style = render_style;
 
-        //let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
-        let layout = self.layout_text(x, y, text, paint)?;
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if style.size > 40 {
-            text::render_text_direct(self, &layout, &style, &paint, invscale)?;
+        if false && style.size > 40 {
+            text::render_direct(self, &layout, &style, &paint, invscale)?;
         } else {
-            let cmds = text::render_text(self, &layout, &style)?;
+            let cmds = text::render_atlas(self, &layout, &style)?;
             //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
             for cmd in &cmds {

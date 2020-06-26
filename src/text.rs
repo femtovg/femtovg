@@ -1,10 +1,10 @@
 
 //TODO: Rename this to text renderer
-mod text_helper;
-pub use text_helper::{
-    render_text,
-    render_text_direct,
-    TextHelperContext
+mod renderer;
+pub use renderer::{
+    render_atlas,
+    render_direct,
+    TextRendererContext
 };
 
 mod shaper;
@@ -22,7 +22,7 @@ pub use font::Font;
 mod fontdb;
 pub use fontdb::{FontDb, FontId};
 
-const GLYPH_PADDING: u32 = 2;
+const GLYPH_PADDING: u32 = 0;
 
 #[derive(Copy, Clone, Default)]
 pub struct TextStyle<'a> {

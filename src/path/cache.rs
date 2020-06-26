@@ -369,7 +369,7 @@ impl PathCache {
 
             // TODO: woff = 0.0 produces no artifaacts for small sizes
             // let woff = 0.5 * fringe_width; produces artifacts
-            let woff = 0.1;//0.5 * fringe_width;
+            let woff = 0.0;//0.5 * fringe_width;
 
             if has_fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {

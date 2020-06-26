@@ -15,7 +15,8 @@ use crate::{
     PixelFormat,
     ImageInfo,
     RenderTarget,
-    Color
+    Color,
+    path::GlyphPathBuilder
 };
 
 use super::{
@@ -87,32 +88,28 @@ pub struct FontTexture {
 }
 
 #[derive(Default)]
-pub struct TextHelperContext {
+pub struct TextRendererContext {
     textures: Vec<FontTexture>,
     glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
 }
 
-pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>) -> Result<Vec<DrawCmd>, ErrorKind> {
+pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
     let initial_render_target = canvas.current_render_target;
 
     for glyph in &text_layout.glyphs {
-        if glyph.c.is_whitespace() {
-            continue;
-        }
-
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, style);
 
-        if !canvas.text_helper_context.glyph_cache.contains_key(&id) {
+        if !canvas.text_renderer_context.glyph_cache.contains_key(&id) {
             let glyph = render_glyph(canvas, style, &glyph)?;
 
-            canvas.text_helper_context.glyph_cache.insert(id, glyph);
+            canvas.text_renderer_context.glyph_cache.insert(id, glyph);
         }
 
-        let rendered = canvas.text_helper_context.glyph_cache.get(&id).unwrap();
+        let rendered = canvas.text_renderer_context.glyph_cache.get(&id).unwrap();
 
-        if let Some(texture) = canvas.text_helper_context.textures.get(rendered.texture_index) {
+        if let Some(texture) = canvas.text_renderer_context.textures.get(rendered.texture_index) {
             let image_id = texture.image_id;
             let size = texture.atlas.size();
             let itw = 1.0 / size.0 as f32;
@@ -125,10 +122,12 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
 
             let mut q = Quad::default();
 
-            q.x0 = glyph.x.floor();
-            q.y0 = glyph.y.floor();
-            q.x1 = glyph.x.floor() + rendered.width as f32;
-            q.y1 = glyph.y.floor() + rendered.height as f32;
+            //dbg!((glyph, rendered));
+
+            q.x0 = glyph.x;
+            q.y0 = glyph.y;
+            q.x1 = glyph.x + rendered.width as f32;
+            q.y1 = glyph.y + rendered.height as f32;
 
             q.s0 = rendered.atlas_x as f32 * itw;
             q.t0 = rendered.atlas_y as f32 * ith;
@@ -139,22 +138,24 @@ pub fn render_text<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout
         }
     }
 
+    //dbg!("aasd");
+
     canvas.set_render_target(initial_render_target);
 
     // debug draw
-    // {
-    //     canvas.save();
-    //     canvas.reset();
+    {
+        canvas.save();
+        canvas.reset();
 
-    //     let image_id = canvas.text_helper_context.textures[0].image_id;
+        let image_id = canvas.text_renderer_context.textures[0].image_id;
 
-    //     let mut path = Path::new();
-    //     path.rect(400.0, 20.0, 512.0, 512.0);
-    //     canvas.fill_path(&mut path, Paint::image(image_id, 400.0, 20.0, 512.0, 512.0, 0.0, 1.0));
-    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
+        let mut path = Path::new();
+        path.rect(20.5, 20.5, 512.0, 512.0);
+        canvas.fill_path(&mut path, Paint::image(image_id, 20.5, 20.5, 512.0, 512.0, 0.0, 1.0));
+        canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
-    //     canvas.restore();
-    // }
+        canvas.restore();
+    }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }
@@ -164,17 +165,21 @@ fn render_glyph<T: Renderer>(
     style: &TextStyle<'_>,
     glyph: &ShapedGlyph
 ) -> Result<RenderedGlyph, ErrorKind> {
-    let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
+    let mut padding = GLYPH_PADDING + style.blur as u32;
 
-    if let RenderStyle::Stroke { width } = style.render_style {
-        padding += width as u32;
-    }
+    let line_width = if let RenderStyle::Stroke { width } = style.render_style {
+        width as u32
+    } else {
+        0
+    };
+
+    padding += line_width;
 
     let width = glyph.width as u32 + padding * 2;
     let height = glyph.height as u32 + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
-        &mut canvas.text_helper_context.textures,
+        &mut canvas.text_renderer_context.textures,
         &mut canvas.images,
         &mut canvas.renderer,
         width as usize,
@@ -189,8 +194,8 @@ fn render_glyph<T: Renderer>(
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let font = font.font_ref();
 
-        let x = dst_x as f32 - glyph.calc_offset_x;
-        let y = 512.0 - dst_y as f32 + glyph.calc_offset_y;
+        let x = dst_x as f32 + padding as f32;
+        let y = 512.0 - dst_y as f32 + glyph.offset_y - glyph.bearing_y - padding as f32;
 
         glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
     };
@@ -313,8 +318,7 @@ fn find_texture_or_alloc<T: Renderer>(
     texture_search_result.ok_or(ErrorKind::UnknownError)
 }
 
-// TODO this uses the canvas to draw glyphs directly on the screen. This may be OK for large glyph sizes
-pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<(), ErrorKind> {
+pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>, paint: &Paint, invscale: f32) -> Result<(), ErrorKind> {
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
     //paint.set_anti_alias(false);
@@ -335,6 +339,7 @@ pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &Tex
     // ];
 
     for glyph in &text_layout.glyphs {
+
         let mut path = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let font = font.font_ref();//::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
@@ -347,7 +352,7 @@ pub fn render_text_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &Tex
             transform.scale(scale * invscale, -scale * invscale);
             transform.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
             
-            let mut path_builder = TransformedPathBuilder(Path::new(), transform);
+            let mut path_builder = GlyphPathBuilder(Path::new(), transform);
             font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path_builder);
 
             path_builder.0
@@ -387,39 +392,8 @@ fn glyph_path(font: &owned_ttf_parser::Font<'_>, codepoint: u16, size: f32, x: f
     transform.scale(scale, scale);
     transform.translate(x, y);
     
-    let mut path_builder = TransformedPathBuilder(Path::new(), transform);
+    let mut path_builder = GlyphPathBuilder(Path::new(), transform);
     font.outline_glyph(owned_ttf_parser::GlyphId(codepoint as u16), &mut path_builder);
 
     Ok(path_builder.0)
-}
-
-struct TransformedPathBuilder(Path, Transform2D);
-
-impl owned_ttf_parser::OutlineBuilder for TransformedPathBuilder {
-    fn move_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.1.transform_point(x, y);
-        self.0.move_to(x, y);
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.1.transform_point(x, y);
-        self.0.line_to(x, y);
-    }
-
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let (x, y) = self.1.transform_point(x, y);
-        let (x1, y1) = self.1.transform_point(x1, y1);
-        self.0.quad_to(x1, y1, x, y);
-    }
-
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let (x, y) = self.1.transform_point(x, y);
-        let (x1, y1) = self.1.transform_point(x1, y1);
-        let (x2, y2) = self.1.transform_point(x2, y2);
-        self.0.bezier_to(x1, y1, x2, y2, x, y);
-    }
-
-    fn close(&mut self) {
-        self.0.close();
-    }
 }

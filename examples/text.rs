@@ -116,28 +116,28 @@ fn main() {
 
                 perf.update(dt);
 
-                draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
-                draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                draw_paragraph(&mut canvas, x, y, font_size as u32, LOREM_TEXT);
-                draw_inc_size(&mut canvas, 300.0, 10.0);
+                // draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
+                // draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
+                // draw_paragraph(&mut canvas, x, y, font_size as u32, LOREM_TEXT);
+                // draw_inc_size(&mut canvas, 300.0, 10.0);
 
-                draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
+                // draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
                 
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
-                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
-                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                // draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
+                // draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
-                let mut paint = Paint::color(Color::hex("B7410E"));
-                paint.set_font_family("Roboto");
-                paint.set_font_weight(Weight::Bold);
-                paint.set_text_baseline(Baseline::Top);
-                paint.set_text_align(Align::Right);
-                let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
+                // let mut paint = Paint::color(Color::hex("B7410E"));
+                // paint.set_font_family("Roboto");
+                // paint.set_font_weight(Weight::Bold);
+                // paint.set_text_baseline(Baseline::Top);
+                // paint.set_text_align(Align::Right);
+                // let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
+                // canvas.save();
+                // canvas.reset();
+                // perf.render(&mut canvas, 5.0, 5.0);
+                // canvas.restore();
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
@@ -239,7 +239,7 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_stroke_width(12.0);
     paint.set_font_size(72);
     paint.set_font_blur(2);
-    let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
+    //let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
 
     paint.set_font_blur(0);
     paint.set_color(Color::black());
@@ -301,6 +301,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_size(font_size);
 
     let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест iiiiiiiiiiiiiiiiiiiiiiiiiiiii", paint);
+    //let _ = canvas.fill_text(x, y, "اللغة العربية", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
 

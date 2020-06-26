@@ -336,3 +336,34 @@ impl Path {
         self.verbs.extend_from_slice(verbs);
     }
 }
+
+pub(crate) struct GlyphPathBuilder(pub Path, pub Transform2D);
+
+impl owned_ttf_parser::OutlineBuilder for GlyphPathBuilder {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let (x, y) = self.1.transform_point(x, y);
+        self.0.move_to(x, y);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let (x, y) = self.1.transform_point(x, y);
+        self.0.line_to(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (x, y) = self.1.transform_point(x, y);
+        let (x1, y1) = self.1.transform_point(x1, y1);
+        self.0.quad_to(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (x, y) = self.1.transform_point(x, y);
+        let (x1, y1) = self.1.transform_point(x1, y1);
+        let (x2, y2) = self.1.transform_point(x2, y2);
+        self.0.bezier_to(x1, y1, x2, y2, x, y);
+    }
+
+    fn close(&mut self) {
+        self.0.close();
+    }
+}
