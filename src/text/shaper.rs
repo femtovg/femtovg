@@ -12,7 +12,10 @@ use harfbuzz_rs as hb;
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
 
-use crate::ErrorKind;
+use crate::{
+    Paint,
+    ErrorKind
+};
 
 use super::{
     Align,
@@ -23,7 +26,6 @@ use super::{
     Font,
     FontDb,
     FontId,
-    TextStyle,
     TextLayout
 };
 
@@ -62,16 +64,16 @@ struct ShapingId {
 }
 
 impl ShapingId {
-    pub fn new(style: &TextStyle, text: &str) -> Self {
+    pub fn new(paint: &Paint, text: &str) -> Self {
         let mut hasher = FnvHasher::default();
         text.hash(&mut hasher);
 
         ShapingId {
-            size: style.size,
+            size: paint.font_size(),
             text_hash: hasher.finish(),
-            weight: style.weight,
-            width_class: style.width_class,
-            font_style: style.font_style,
+            weight: paint.font_weight,
+            width_class: paint.font_width_class,
+            font_style: paint.font_style,
         }
     }
 }
@@ -97,7 +99,7 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, style: &TextStyle, text: &str) -> Result<TextLayout, ErrorKind> {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -125,13 +127,13 @@ impl Shaper {
                     None => break
                 };
 
-                let shaping_id = ShapingId::new(style, word);
+                let shaping_id = ShapingId::new(paint, word);
 
                 if self.cache.peek(&shaping_id).is_none() {
 
                     // find_font will call the closure with each font matching the provided style
                     // until a font capable of shaping the word is found
-                    let ret = fontdb.find_font(&word, style, |font| {
+                    let ret = fontdb.find_font(&word, paint, |font| {
 
                         // Call harfbuzz
                         let output = {
@@ -162,7 +164,7 @@ impl Shaper {
                                 has_missing = true;
                             }
 
-                            let scale = font.scale(style.size as f32);
+                            let scale = font.scale(paint.font_size as f32);
 
                             let mut g = ShapedGlyph {
                                 c: c,
@@ -203,21 +205,21 @@ impl Shaper {
             }
         }
 
-        self.layout(x, y, fontdb, &mut result, &style)?;
+        self.layout(x, y, fontdb, &mut result, paint)?;
 
         Ok(result)
     }
 
     // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
-    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, style: &TextStyle<'_>) -> Result<(), ErrorKind> {
+    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, paint: &Paint) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
         // Calculate total advance for correct horizontal alignment
-        res.width = res.glyphs.iter().fold(0.0, |width, glyph| width + glyph.advance_x + style.letter_spacing);
+        res.width = res.glyphs.iter().fold(0.0, |width, glyph| width + glyph.advance_x + paint.letter_spacing);
 
         // Horizontal alignment
-        match style.align {
+        match paint.text_align {
             Align::Center => cursor_x -= res.width / 2.0,
             Align::Right => cursor_x -= res.width,
             _ => ()
@@ -232,10 +234,10 @@ impl Shaper {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             
             // Baseline alignment
-            let ascender = font.ascender(style.size as f32);
-            let descender = font.descender(style.size as f32);
+            let ascender = font.ascender(paint.font_size as f32);
+            let descender = font.descender(paint.font_size as f32);
 
-            let alignment_offset_y = match style.baseline {
+            let alignment_offset_y = match paint.text_baseline {
                 Baseline::Top => ascender,
                 Baseline::Middle => (ascender + descender) / 2.0,
                 Baseline::Alphabetic => 0.0,
@@ -245,10 +247,10 @@ impl Shaper {
             glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
             glyph.y = cursor_y + glyph.offset_y - glyph.bearing_y + alignment_offset_y;
 
-            height = height.max(font.height(style.size as f32));
+            height = height.max(font.height(paint.font_size as f32));
             y = y.min(glyph.y);
 
-            cursor_x += glyph.advance_x + style.letter_spacing;
+            cursor_x += glyph.advance_x + paint.letter_spacing;
             cursor_y += glyph.advance_y;
         }
 
@@ -302,8 +304,6 @@ impl Shaper {
         buffer
     }
 }
-
-// Segmentation
 
 impl From<BidiClass> for Direction {
     fn from(class: BidiClass) -> Self {

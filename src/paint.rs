@@ -86,7 +86,7 @@ pub struct Paint<'a> {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
     pub(crate) alpha_mask: Option<ImageId>,
-    pub(crate) stroke_width: f32,
+    pub(crate) stroke_width: f32, // TODO: consider renaming this to line width
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
@@ -94,7 +94,7 @@ pub struct Paint<'a> {
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
     pub(crate) font_family: &'a str,
-    pub(crate) font_size: u32,
+    pub(crate) font_size: u16,
     pub(crate) font_blur: u8,
     pub(crate) font_weight: Weight,
     pub(crate) font_width_class: WidthClass,
@@ -327,14 +327,14 @@ impl<'a> Paint<'a> {
     /// Returns the current font size
     ///
     /// Only has effect on canvas text operations
-    pub fn font_size(&self) -> u32 {
+    pub fn font_size(&self) -> u16 {
         self.font_size
     }
 
     /// Sets the font size.
     ///
     /// Only has effect on canvas text operations
-    pub fn set_font_size(&mut self, size: u32) {
+    pub fn set_font_size(&mut self, size: u16) {
         self.font_size = size;
     }
 

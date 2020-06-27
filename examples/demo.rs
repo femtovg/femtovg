@@ -536,7 +536,7 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
 	canvas.fill_path(&mut path, bg);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
-    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_size((h * 1.3).round() as u16);
     text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
@@ -550,7 +550,7 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
     let _ = canvas.fill_text(x + h, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
-    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_size((h * 1.3).round() as u16);
     text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
@@ -577,7 +577,7 @@ fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f
     let _ = canvas.fill_text(x + h * 0.3, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
-    text_paint.set_font_size((h * 1.3).round() as u32);
+    text_paint.set_font_size((h * 1.3).round() as u16);
     text_paint.set_font_family("Entypo");
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
@@ -694,7 +694,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
 
     if let Some(icon) = preicon {
         paint.set_font_family("Entypo");
-        paint.set_font_size((h * 1.3) as u32);
+        paint.set_font_size((h * 1.3) as u16);
 
         if let Ok(layout) = canvas.layout_text(0.0, 0.0, icon, paint) {
             iw = layout.width + (h * 0.15);

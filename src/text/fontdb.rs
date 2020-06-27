@@ -7,13 +7,15 @@ use std::convert::TryFrom;
 use fnv::FnvHashMap;
 use owned_ttf_parser as ttf;
 
-use crate::ErrorKind;
+use crate::{
+    Paint,
+    ErrorKind
+};
 
 use super::{
     Font,
     Weight,
     FontStyle,
-    TextStyle,
     WidthClass
 };
 
@@ -22,6 +24,8 @@ use super::{
 #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);
 
+
+// TODO: this may not be needed. "degrade" can be a method on the Paint
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontDescription {
     family_name: String,
@@ -58,16 +62,17 @@ impl FontDescription {
     }
 }
 
-impl From<&TextStyle<'_>> for FontDescription {
-    fn from(style: &TextStyle) -> Self {
+impl From<&Paint<'_>> for FontDescription {
+    fn from(paint: &Paint) -> Self {
         Self {
-            family_name: style.family_name.to_owned(),
-            weight: style.weight,
-            font_style: style.font_style,
-            width_class: style.width_class
+            family_name: paint.font_family.to_owned(), // TODO: remove this to_owned
+            weight: paint.font_weight,
+            font_style: paint.font_style,
+            width_class: paint.font_width_class
         }
     }
 }
+
 
 impl TryFrom<ttf::Font<'_>> for FontDescription {
     type Error = ErrorKind;
@@ -157,8 +162,8 @@ impl FontDb {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, text: &str, style: &TextStyle, callback: F) -> Result<T, ErrorKind> where F: Fn(&mut Font) -> (bool, T) {
-        let mut description = FontDescription::from(style);
+    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, callback: F) -> Result<T, ErrorKind> where F: Fn(&mut Font) -> (bool, T) {
+        let mut description = FontDescription::from(paint);
 
         loop {
             if let Some(font_id) = self.font_descr.get(&description) {

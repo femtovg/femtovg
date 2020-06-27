@@ -12,9 +12,9 @@ TODO:
     - Review text positioning mess
         - evaluate all the maths that is happening from shaping to drawing
         - arabic scripts need to get fixed
-
     - Text todos:
         - Review if TextStyle struct is even needed - it's best to use paint itself
+
         - Review Font api and move shared functionality from the shaper & renderer to it
         - Laying out paragraphs - iterator design + correct breaking
         - Measuring text - text_bounds?
@@ -31,7 +31,7 @@ TODO:
     - Tests
     - Publish to crates.io
     - Emoji support
-    - text_path -> Path method
+    - fn text_path -> Path
 */
 
 mod utils;
@@ -53,8 +53,7 @@ pub use text::{
 use text::{
     FontDb,
     Shaper,
-    TextStyle,
-    RenderStyle,
+    RenderMode,
     TextRendererContext
 };
 
@@ -818,13 +817,14 @@ impl<T> Canvas<T> where T: Renderer {
         Ok(())
     }
 
-    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
+    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout> {
+        self.transform_text_paint(&mut paint);
+
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
-        let style = self.text_style_for_paint(&paint);
         let invscale = 1.0 / scale;
 
-        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text)?;
         layout.width *= invscale;
         layout.height *= invscale;
 
@@ -832,54 +832,39 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
-        let text = text.as_ref();
-        self.draw_text(x, y, text, paint, RenderStyle::Fill)
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
     pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
-        let text = text.as_ref();
-
-        self.draw_text(x, y, text, paint, RenderStyle::Stroke {
-            width: paint.stroke_width().ceil() as u16// TODO: this is fishy
-        })
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
     // Private
 
-    fn text_style_for_paint<'a>(&self, paint: &'a Paint) -> TextStyle<'a> {
+    fn transform_text_paint(&self, paint: &mut Paint) {
         let scale = self.font_scale() * self.device_px_ratio;
-        TextStyle {
-            family_name: paint.font_family,
-            size: (paint.font_size() as f32 * scale) as u16,
-            weight: paint.font_weight(),
-            width_class: paint.font_width_class(),
-            font_style: paint.font_style(),
-            letter_spacing: paint.letter_spacing() * scale,
-            baseline: paint.text_baseline(),
-            align: paint.text_align(),
-            blur: paint.font_blur().saturating_mul(scale.min(255.0) as u8),
-            render_style: Default::default()
-        }
+        paint.font_size = (paint.font_size as f32 * scale) as u16;
+        paint.letter_spacing = paint.letter_spacing * scale;
+        paint.font_blur = (paint.font_blur as f32 * scale) as u8;
+        paint.stroke_width = paint.stroke_width * scale;
     }
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_style: RenderStyle) -> Result<TextLayout> {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout> {
         let transform = self.state().transform;
-        let scissor = self.state().scissor;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut style = self.text_style_for_paint(&paint);
-        style.render_style = render_style;
+        self.transform_text_paint(&mut paint);
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &style, text)?;
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text)?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if style.size > 40 {
-            text::render_direct(self, &layout, &style, &paint, invscale)?;
+        if false && paint.font_size > 40 {
+            text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
-            let cmds = text::render_atlas(self, &layout, &style)?;
+            let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
             //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
             for cmd in &cmds {
@@ -904,7 +889,7 @@ impl<T> Canvas<T> where T: Renderer {
                 // Apply global alpha
                 paint.mul_alpha(self.state().alpha);
 
-                self.render_triangles(&verts, &paint, &scissor);
+                self.render_triangles(&verts, &paint);
             }
         }
         
@@ -912,8 +897,10 @@ impl<T> Canvas<T> where T: Renderer {
         Ok(layout)
     }
 
-    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint, scissor: &Scissor) {
-        let params = Params::new(&self.images, paint, scissor, 1.0, 1.0, -1.0);
+    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint) {
+        let scissor = self.state().scissor;
+
+        let params = Params::new(&self.images, paint, &scissor, 1.0, 1.0, -1.0);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;

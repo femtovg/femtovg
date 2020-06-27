@@ -96,7 +96,7 @@ fn main() {
                 }
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
-                        font_size += *y as i32;
+                        font_size = (font_size as i32 + *y as i32) as u16;
                         font_size = font_size.max(2);
                     },
                     _ => ()
@@ -116,12 +116,12 @@ fn main() {
 
                 perf.update(dt);
 
-                draw_baselines(&mut canvas, 5.0, 50.0, font_size as u32);
-                draw_alignments(&mut canvas, 120.0, 200.0, font_size as u32);
-                draw_paragraph(&mut canvas, x, y, font_size as u32, LOREM_TEXT);
+                draw_baselines(&mut canvas, 5.0, 50.0, font_size);
+                draw_alignments(&mut canvas, 120.0, 200.0, font_size);
+                draw_paragraph(&mut canvas, x, y, font_size, LOREM_TEXT);
                 draw_inc_size(&mut canvas, 300.0, 10.0);
 
-                draw_complex(&mut canvas, 300.0, 340.0, font_size as u32);
+                draw_complex(&mut canvas, 300.0, 340.0, font_size);
                 
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
@@ -150,7 +150,7 @@ fn main() {
     });
 }
 
-fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
@@ -177,7 +177,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     }
 }
 
-fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
     let alignments = [Align::Left, Align::Center, Align::Right];
 
     let mut path = Path::new();
@@ -200,7 +200,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     }
 }
 
-fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32, text: &str) {
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16, text: &str) {
 
     let mut paint = Paint::color(Color::black());
     paint.set_font_family("Roboto");
@@ -295,7 +295,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     let _ = canvas.fill_text(x, y, text, paint);
 }
 
-fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u32) {
+fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
     let mut paint = Paint::color(Color::rgb(34, 34, 34));
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);

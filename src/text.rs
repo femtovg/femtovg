@@ -1,5 +1,4 @@
 
-//TODO: Rename this to text renderer
 mod renderer;
 pub use renderer::{
     render_atlas,
@@ -21,20 +20,6 @@ pub use font::Font;
 
 mod fontdb;
 pub use fontdb::{FontDb, FontId};
-
-#[derive(Copy, Clone, Default)]
-pub struct TextStyle<'a> {
-    pub family_name: &'a str,
-    pub size: u16,
-    pub weight: Weight,
-    pub width_class: WidthClass,
-    pub font_style: FontStyle,
-    pub letter_spacing: f32,
-    pub baseline: Baseline,
-    pub align: Align,
-    pub blur: u8,
-    pub render_style: RenderStyle
-}
 
 #[derive(Clone, Default, Debug)]
 pub struct TextLayout {
@@ -80,14 +65,12 @@ impl Default for Align {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub enum RenderStyle {
+pub enum RenderMode {
     Fill,
-    Stroke {
-        width: u16
-    }
+    Stroke
 }
 
-impl Default for RenderStyle {
+impl Default for RenderMode {
     fn default() -> Self {
         Self::Fill
     }
