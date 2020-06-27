@@ -14,8 +14,8 @@ TODO:
         - arabic scripts need to get fixed
     - Text todos:
         - Review if TextStyle struct is even needed - it's best to use paint itself
-
         - Review Font api and move shared functionality from the shaper & renderer to it
+        
         - Laying out paragraphs - iterator design + correct breaking
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?

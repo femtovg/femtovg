@@ -2,11 +2,19 @@
 use fnv::FnvHashMap;
 use owned_ttf_parser::{AsFontRef, OwnedFont, Font as TtfFont, GlyphId};
 
-use crate::ErrorKind;
+use crate::{
+    Path,
+    ErrorKind
+};
 
 use super::fontdb::{
     FontId
 };
+
+pub struct Glyph {
+    pub path: Path,
+    pub metrics: Metrics
+}
 
 pub struct Metrics {
     pub(crate) width: f32,
@@ -20,7 +28,7 @@ pub struct Font {
     pub(crate) data: Vec<u8>,
     pub(crate) owned_ttf_font: OwnedFont,
     pub(crate) units_per_em: u16,
-    glyphs: FnvHashMap<char, Metrics>
+    glyphs: FnvHashMap<u16, Glyph>
 }
 
 impl Font {
@@ -39,10 +47,10 @@ impl Font {
         })
     }
 
-    pub fn postscript_name(&self) -> String {
-        self.owned_ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
-        //self.face.postscript_name().unwrap_or_else(String::new)
-    }
+    // pub fn postscript_name(&self) -> String {
+    //     self.owned_ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
+    //     //self.face.postscript_name().unwrap_or_else(String::new)
+    // }
 
     pub fn has_chars(&self, text: &str) -> bool {
         let face = self.owned_ttf_font.as_font();
@@ -72,9 +80,26 @@ impl Font {
         size / self.units_per_em as f32
     }
 
-    // pub fn glyph_metrics(&mut self, c: char, size: f32) -> &Metrics {
-    //     self.glyphs.entry(c).or_insert_with(|| {
+    pub fn glyph(&mut self, codepoint: u16) -> Option<&Glyph> {
 
-    //     })
-    // }
+        if !self.glyphs.contains_key(&codepoint) {
+            let mut path = Path::new();
+
+            let id = GlyphId(codepoint);
+            
+            if let Some(bbox) = self.font_ref().outline_glyph(id, &mut path) {
+                self.glyphs.insert(codepoint, Glyph {
+                    path,
+                    metrics: Metrics {
+                        width: bbox.width() as f32,
+                        height: bbox.height() as f32,
+                        bearing_x: bbox.x_min as f32,
+                        bearing_y: bbox.y_max as f32
+                    }
+                });
+            }
+        }
+
+        self.glyphs.get(&codepoint)
+    }
 }

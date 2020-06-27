@@ -197,10 +197,11 @@ fn render_glyph<T: Renderer>(
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let scale = font.scale(paint.font_size as f32);
 
-        let font = font.font_ref();
-
-        let mut path = Path::new();
-        font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path);
+        let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
+            font_glyph.path.clone()
+        } else {
+            Path::new()
+        };
 
         (path, scale)
     };

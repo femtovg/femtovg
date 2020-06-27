@@ -177,15 +177,11 @@ impl Shaper {
                                 ..Default::default()
                             };
 
-                            let font = font.font_ref();
-                            
-                            let glyph_id = owned_ttf_parser::GlyphId(info.codepoint as u16);
-
-                            if let Some(bbox) = font.glyph_bounding_box(glyph_id) {
-                                g.width = bbox.width() as f32 * scale;
-                                g.height = bbox.height() as f32 * scale;
-                                g.bearing_x = bbox.x_min as f32 * scale;
-                                g.bearing_y = bbox.y_max as f32 * scale;
+                            if let Some(glyph) = font.glyph(info.codepoint as u16) {
+                                g.width = glyph.metrics.width * scale;
+                                g.height = glyph.metrics.height * scale;
+                                g.bearing_x = glyph.metrics.bearing_x * scale;
+                                g.bearing_y = glyph.metrics.bearing_y * scale;
                             }
 
                             items.push(g);
