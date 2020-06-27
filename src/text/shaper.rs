@@ -12,12 +12,7 @@ use harfbuzz_rs as hb;
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
 
-use crate::{
-    Path,
-    path::GlyphPathBuilder,
-    ErrorKind,
-    Transform2D
-};
+use crate::ErrorKind;
 
 use super::{
     Align,
@@ -29,9 +24,7 @@ use super::{
     FontDb,
     FontId,
     TextStyle,
-    RenderStyle,
-    TextLayout,
-    GLYPH_PADDING
+    TextLayout
 };
 
 const LRU_CACHE_CAPACITY: usize = 1000;
@@ -57,8 +50,6 @@ pub struct ShapedGlyph {
     pub offset_y: f32,
     pub bearing_x: f32,
     pub bearing_y: f32,
-    pub calc_offset_x: f32,
-    pub calc_offset_y: f32
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -222,18 +213,10 @@ impl Shaper {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
-        //let mut padding = GLYPH_PADDING + style.blur as u32 * 2;
-
-        let line_width = if let RenderStyle::Stroke { width } = style.render_style {
-            //padding += width as u32;
-            width
-        } else {
-            0
-        };
-
-        // calculate total advance
+        // Calculate total advance for correct horizontal alignment
         res.width = res.glyphs.iter().fold(0.0, |width, glyph| width + glyph.advance_x + style.letter_spacing);
 
+        // Horizontal alignment
         match style.align {
             Align::Center => cursor_x -= res.width / 2.0,
             Align::Right => cursor_x -= res.width,
@@ -246,41 +229,24 @@ impl Shaper {
         let mut y = cursor_y;
 
         for glyph in &mut res.glyphs {
-            
-            // glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x - (padding as f32) - (line_width as f32);
-            // glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y - (padding as f32) - (line_width as f32);
-
-            glyph.calc_offset_x = glyph.offset_x + glyph.bearing_x;
-            glyph.calc_offset_y = glyph.offset_y - glyph.bearing_y;
-
-            let xpos = cursor_x + glyph.calc_offset_x;
-            let ypos = cursor_y + glyph.calc_offset_y;
-
-            // glyph.width += line_width as f32;
-            // glyph.height += line_width as f32;
-
-            //dbg!(line_width);
-            
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             
             // Baseline alignment
             let ascender = font.ascender(style.size as f32);
             let descender = font.descender(style.size as f32);
 
-            let offset_y = match style.baseline {
+            let alignment_offset_y = match style.baseline {
                 Baseline::Top => ascender,
                 Baseline::Middle => (ascender + descender) / 2.0,
                 Baseline::Alphabetic => 0.0,
                 Baseline::Bottom => descender,
             };
 
-            //height = height.max(size_metrics.height as f32 / 64.0);
-            height = height.max(font.height(style.size as f32));
-            //height = size_metrics.height as f32 / 64.0;
-            y = y.min(ypos + offset_y);
+            glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
+            glyph.y = cursor_y + glyph.offset_y - glyph.bearing_y + alignment_offset_y;
 
-            glyph.x = xpos;
-            glyph.y = ypos + offset_y;
+            height = height.max(font.height(style.size as f32));
+            y = y.min(glyph.y);
 
             cursor_x += glyph.advance_x + style.letter_spacing;
             cursor_y += glyph.advance_y;

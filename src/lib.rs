@@ -12,10 +12,11 @@ TODO:
     - Review text positioning mess
         - evaluate all the maths that is happening from shaping to drawing
         - arabic scripts need to get fixed
+
     - Text todos:
+        - Review if TextStyle struct is even needed - it's best to use paint itself
         - Review Font api and move shared functionality from the shaper & renderer to it
         - Laying out paragraphs - iterator design + correct breaking
-        - Review if TextStyle struct is even needed - it's best to use paint itself
         - Measuring text - text_bounds?
         - Computing bounding boxes - text_bounds?
         - Mapping from coordinates to character indices
@@ -30,6 +31,7 @@ TODO:
     - Tests
     - Publish to crates.io
     - Emoji support
+    - text_path -> Path method
 */
 
 mod utils;
@@ -874,7 +876,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if false && style.size > 40 {
+        if style.size > 40 {
             text::render_direct(self, &layout, &style, &paint, invscale)?;
         } else {
             let cmds = text::render_atlas(self, &layout, &style)?;

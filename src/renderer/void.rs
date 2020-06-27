@@ -14,8 +14,7 @@ use crate::{
 use super::{
     Renderer,
     Command,
-    Vertex,
-    RenderTarget
+    Vertex
 };
 
 /// Void renderer used for testing

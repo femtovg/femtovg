@@ -22,8 +22,6 @@ pub use font::Font;
 mod fontdb;
 pub use fontdb::{FontDb, FontId};
 
-const GLYPH_PADDING: u32 = 0;
-
 #[derive(Copy, Clone, Default)]
 pub struct TextStyle<'a> {
     pub family_name: &'a str,

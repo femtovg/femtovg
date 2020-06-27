@@ -8,15 +8,13 @@ use crate::{
     Paint,
     ErrorKind,
     FillRule,
-    geometry::Transform2D,
     ImageId,
     ImageFlags,
     ImageStore,
     PixelFormat,
     ImageInfo,
     RenderTarget,
-    Color,
-    path::GlyphPathBuilder
+    Color
 };
 
 use super::{
@@ -27,9 +25,9 @@ use super::{
     FontDb,
     FontId,
     ShapedGlyph,
-    GLYPH_PADDING
 };
 
+const GLYPH_PADDING: u32 = 1;
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
 
@@ -96,6 +94,12 @@ pub struct TextRendererContext {
 pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, style: &TextStyle<'_>) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
+    let half_line_width = if let RenderStyle::Stroke { width } = style.render_style {
+        width as f32 / 2.0
+    } else {
+        0.0
+    };
+
     let initial_render_target = canvas.current_render_target;
 
     for glyph in &text_layout.glyphs {
@@ -122,12 +126,10 @@ pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayou
 
             let mut q = Quad::default();
 
-            //dbg!((glyph, rendered));
-
-            q.x0 = glyph.x;
-            q.y0 = glyph.y;
-            q.x1 = glyph.x + rendered.width as f32;
-            q.y1 = glyph.y + rendered.height as f32;
+            q.x0 = glyph.x - half_line_width - GLYPH_PADDING as f32;
+            q.y0 = glyph.y - half_line_width - GLYPH_PADDING as f32;
+            q.x1 = q.x0 + rendered.width as f32;
+            q.y1 = q.y0 + rendered.height as f32;
 
             q.s0 = rendered.atlas_x as f32 * itw;
             q.t0 = rendered.atlas_y as f32 * ith;
@@ -143,19 +145,19 @@ pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayou
     canvas.set_render_target(initial_render_target);
 
     // debug draw
-    {
-        canvas.save();
-        canvas.reset();
+    // {
+    //     canvas.save();
+    //     canvas.reset();
 
-        let image_id = canvas.text_renderer_context.textures[0].image_id;
+    //     let image_id = canvas.text_renderer_context.textures[0].image_id;
 
-        let mut path = Path::new();
-        path.rect(20.5, 20.5, 512.0, 512.0);
-        canvas.fill_path(&mut path, Paint::image(image_id, 20.5, 20.5, 512.0, 512.0, 0.0, 1.0));
-        canvas.stroke_path(&mut path, Paint::color(Color::black()));
+    //     let mut path = Path::new();
+    //     path.rect(400.5, 20.5, 512.0, 512.0);
+    //     canvas.fill_path(&mut path, Paint::image(image_id, 400.5, 20.5, 512.0, 512.0, 0.0, 1.0));
+    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
 
-        canvas.restore();
-    }
+    //     canvas.restore();
+    // }
 
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }
@@ -165,7 +167,8 @@ fn render_glyph<T: Renderer>(
     style: &TextStyle<'_>,
     glyph: &ShapedGlyph
 ) -> Result<RenderedGlyph, ErrorKind> {
-    let mut padding = GLYPH_PADDING + style.blur as u32;
+    // TODO: this may be blur * 2 - fix it when blurring iss implemented
+    let padding = GLYPH_PADDING + style.blur as u32;
 
     let line_width = if let RenderStyle::Stroke { width } = style.render_style {
         width as u32
@@ -173,10 +176,8 @@ fn render_glyph<T: Renderer>(
         0
     };
 
-    padding += line_width;
-
-    let width = glyph.width as u32 + padding * 2;
-    let height = glyph.height as u32 + padding * 2;
+    let width = glyph.width.ceil() as u32 + line_width + padding * 2;
+    let height = glyph.height.ceil() as u32 + line_width + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
         &mut canvas.text_renderer_context.textures,
@@ -190,15 +191,23 @@ fn render_glyph<T: Renderer>(
     canvas.save();
     canvas.reset();
 
-    let mut path = {
+    let (mut path, scale) = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let scale = font.scale(style.size as f32);
+
         let font = font.font_ref();
 
-        let x = dst_x as f32 + padding as f32;
-        let y = 512.0 - dst_y as f32 + glyph.offset_y - glyph.bearing_y - padding as f32;
+        let mut path = Path::new();
+        font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path);
 
-        glyph_path(font, glyph.codepoint as u16, style.size as f32, x, y)?
+        (path, scale)
     };
+
+    let x = dst_x as f32 - glyph.bearing_x + (line_width as f32 / 2.0) + padding as f32;
+    let y = 512.0 - dst_y as f32 - glyph.bearing_y - (line_width as f32 / 2.0) - padding as f32;
+
+    canvas.translate(x, y);
+    
 
     canvas.set_render_target(RenderTarget::Image(dst_image_id));
     canvas.clear_rect(dst_x as u32, 512 - dst_y as u32 - height as u32, width as u32, height as u32, Color::black());
@@ -210,7 +219,7 @@ fn render_glyph<T: Renderer>(
     paint.set_anti_alias(false);
 
     if let RenderStyle::Stroke { width } = style.render_style {
-        paint.set_stroke_width(width as f32);
+        paint.set_stroke_width(width as f32 / scale);
     }
 
     canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
@@ -238,6 +247,8 @@ fn render_glyph<T: Renderer>(
     for point in &points {
         canvas.save();
         canvas.translate(point.0, point.1);
+
+        canvas.scale(scale, scale);
 
         if let RenderStyle::Stroke { width: _ } = style.render_style {
             canvas.stroke_path(&mut path, paint);
@@ -323,10 +334,6 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
     paint.set_fill_rule(FillRule::EvenOdd);
     //paint.set_anti_alias(false);
 
-    if let RenderStyle::Stroke { width } = style.render_style {
-        paint.set_stroke_width(width as f32);
-    }
-
     //canvas.save();
     //canvas.set_global_alpha(0.25);
     //canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
@@ -340,29 +347,39 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
 
     for glyph in &text_layout.glyphs {
 
-        let mut path = {
+        let (mut path, scale) = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let font = font.font_ref();//::Font::from_data(&font.data, 0).ok_or(ErrorKind::FontParseError)?;
+            let scale = font.scale(style.size as f32);
+            let font = font.font_ref();
 
-            let units_per_em = font.units_per_em().ok_or(ErrorKind::FontParseError)?;
-            let scale = style.size as f32 / units_per_em as f32;
+            //let mut transform = Transform2D::identity();
 
-            let mut transform = Transform2D::identity();
-
-            transform.scale(scale * invscale, -scale * invscale);
-            transform.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
+            //transform.scale(scale * invscale, -scale * invscale);
+            //transform.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
             
-            let mut path_builder = GlyphPathBuilder(Path::new(), transform);
-            font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path_builder);
+            //let mut path_builder = GlyphPathBuilder(Path::new(), transform);
+            let mut path = Path::new();
+            font.outline_glyph(owned_ttf_parser::GlyphId(glyph.codepoint as u16), &mut path);
 
-            path_builder.0
+            (path, scale)
         };
+
+        canvas.save();
+
+        if let RenderStyle::Stroke { width } = style.render_style {
+            paint.set_stroke_width(width as f32 / scale);
+        }
+
+        canvas.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
+        canvas.scale(scale * invscale, -scale * invscale);
 
         if let RenderStyle::Stroke { width:_ } = style.render_style {
             canvas.stroke_path(&mut path, paint);
         } else {
             canvas.fill_path(&mut path, paint);
         }
+
+        canvas.restore();
 
         // for point in &points {
         //     canvas.save();
@@ -381,19 +398,4 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
     //canvas.restore();
 
     Ok(())
-}
-
-fn glyph_path(font: &owned_ttf_parser::Font<'_>, codepoint: u16, size: f32, x: f32, y: f32) -> Result<Path, ErrorKind> {
-    let units_per_em = font.units_per_em().ok_or(ErrorKind::FontParseError)?;
-    let scale = size / units_per_em as f32;
-
-    let mut transform = Transform2D::identity();
-
-    transform.scale(scale, scale);
-    transform.translate(x, y);
-    
-    let mut path_builder = GlyphPathBuilder(Path::new(), transform);
-    font.outline_glyph(owned_ttf_parser::GlyphId(codepoint as u16), &mut path_builder);
-
-    Ok(path_builder.0)
 }
