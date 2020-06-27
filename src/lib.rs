@@ -17,8 +17,6 @@ TODO:
         - Review Font api and move shared functionality from the shaper & renderer to it
         
         - Laying out paragraphs - iterator design + correct breaking
-        - Measuring text - text_bounds?
-        - Computing bounding boxes - text_bounds?
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
@@ -385,12 +383,9 @@ impl<T> Canvas<T> where T: Renderer {
         self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
     }
 
-    // TODO: remove self.current_render_target and check in this method if target is different than current render target
+    /// Sets a new render target. All drawing operations after this call will happen on the provided render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
-        //self.flush();
-        //self.renderer.set_target(&self.images, target);
         if self.current_render_target != target {
-            //self.render_targets.push((target, Vec::new()));
             self.append_cmd(Command::new(CommandType::SetRenderTarget(target)));
             self.current_render_target = target;
         }
@@ -732,15 +727,15 @@ impl<T> Canvas<T> where T: Renderer {
         // look correct when zooming in. There was probably a good reson for doing so and I may have
         // introduced a bug by removing the upper bound.
         //paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0).min(200.0));
-        paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0));
+        paint.line_width = (paint.line_width * transform.average_scale()).max(0.0);
 
-        if paint.stroke_width() < self.fringe_width {
+        if paint.line_width < self.fringe_width {
             // If the stroke width is less than pixel size, use alpha to emulate coverage.
             // Since coverage is area, scale by alpha*alpha.
-            let alpha = (paint.stroke_width() / self.fringe_width).max(0.0).min(1.0);
+            let alpha = (paint.line_width / self.fringe_width).max(0.0).min(1.0);
 
             paint.mul_alpha(alpha*alpha);
-            paint.set_stroke_width(self.fringe_width)
+            paint.line_width = self.fringe_width;
         }
 
         // Apply global alpha
@@ -750,20 +745,20 @@ impl<T> Canvas<T> where T: Renderer {
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
         let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
         path_cache.expand_stroke(
-            paint.stroke_width() * 0.5,
+            paint.line_width * 0.5,
             fringe_with,
             paint.line_cap_start,
             paint.line_cap_end,
-            paint.line_join(),
-            paint.miter_limit(),
+            paint.line_join,
+            paint.miter_limit,
             self.tess_tol
         );
 
         // GPU uniforms
-        let params = Params::new(&self.images, &paint, &scissor, paint.stroke_width(), self.fringe_width, -1.0);
+        let params = Params::new(&self.images, &paint, &scissor, paint.line_width, self.fringe_width, -1.0);
 
         let flavor = if paint.stencil_strokes() {
-            let params2 = Params::new(&self.images, &paint, &scissor, paint.stroke_width(), self.fringe_width, 1.0 - 0.5/255.0);
+            let params2 = Params::new(&self.images, &paint, &scissor, paint.line_width, self.fringe_width, 1.0 - 0.5/255.0);
 
             CommandType::StencilStroke { params1: params, params2 }
         } else {
@@ -817,7 +812,7 @@ impl<T> Canvas<T> where T: Renderer {
         Ok(())
     }
 
-    pub fn layout_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout> {
+    pub fn measure_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -839,6 +834,8 @@ impl<T> Canvas<T> where T: Renderer {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
+    //pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> 
+
     // Private
 
     fn transform_text_paint(&self, paint: &mut Paint) {
@@ -846,7 +843,7 @@ impl<T> Canvas<T> where T: Renderer {
         paint.font_size = (paint.font_size as f32 * scale) as u16;
         paint.letter_spacing = paint.letter_spacing * scale;
         paint.font_blur = (paint.font_blur as f32 * scale) as u8;
-        paint.stroke_width = paint.stroke_width * scale;
+        paint.line_width = paint.line_width * scale;
     }
 
     fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout> {

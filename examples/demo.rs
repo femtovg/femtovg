@@ -358,7 +358,7 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
     }
 
     let mut line = Paint::color(Color::rgba(0,160,192,255));
-    line.set_stroke_width(3.0);
+    line.set_line_width(3.0);
     canvas.stroke_path(&mut path, line);
 
     // Graph sample pos
@@ -465,7 +465,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     path.circle(cx, cy, r0 - 0.5);
     path.circle(cx, cy, r1 + 0.5);
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 64));
-    paint.set_stroke_width(1.0);
+    paint.set_line_width(1.0);
     canvas.stroke_path(&mut path, paint);
 
     // Selector
@@ -477,7 +477,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     let mut path = Path::new();
     path.rect(r0 - 1.0, -3.0, r1 - r0 + 2.0, 6.0);
     paint = Paint::color(Color::rgba(255, 255, 255, 192));
-    paint.set_stroke_width(2.0);
+    paint.set_line_width(2.0);
     canvas.stroke_path(&mut path, paint);
 
     paint = Paint::box_gradient(r0 - 3.0, -5.0, r1 - r0 + 6.0, 10.0, 2.0, 4.0, Color::rgba(0, 0, 0, 128), Color::rgba(0, 0, 0, 0));
@@ -510,7 +510,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     let ax = (120.0 / 180.0 * PI).cos() * r * 0.3;
     let ay = (120.0 / 180.0 * PI).sin() * r * 0.4;
     paint = Paint::color(Color::rgba(255, 255, 255, 192));
-    paint.set_stroke_width(2.0);
+    paint.set_line_width(2.0);
     let mut path = Path::new();
     path.circle(ax, ay, 5.0);
     canvas.stroke_path(&mut path, paint);
@@ -625,7 +625,7 @@ fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, title: &str, units: &s
     paint.set_text_align(Align::Right);
     paint.set_text_baseline(Baseline::Middle);
 
-    if let Ok(layout) = canvas.layout_text(0.0, 0.0, units, paint) {
+    if let Ok(layout) = canvas.measure_text(0.0, 0.0, units, paint) {
         let _ = canvas.fill_text(x + w - h * 0.3, y + h * 0.5, units, paint);
 
         paint.set_font_size(16);
@@ -684,7 +684,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Middle);
 
-    let tw = if let Ok(layout) = canvas.layout_text(0.0, 0.0, text, paint) {
+    let tw = if let Ok(layout) = canvas.measure_text(0.0, 0.0, text, paint) {
         layout.width
     } else {
         0.0
@@ -696,7 +696,7 @@ fn draw_button<T: Renderer>(canvas: &mut Canvas<T>, preicon: Option<&str>, text:
         paint.set_font_family("Entypo");
         paint.set_font_size((h * 1.3) as u16);
 
-        if let Ok(layout) = canvas.layout_text(0.0, 0.0, icon, paint) {
+        if let Ok(layout) = canvas.measure_text(0.0, 0.0, icon, paint) {
             iw = layout.width + (h * 0.15);
         }
 
@@ -881,7 +881,7 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
             let mut paint = Paint::color(Color::rgba(0,0,0,160));
             paint.set_line_cap(*cap);
             paint.set_line_join(*join);
-            paint.set_stroke_width(s * 0.3);
+            paint.set_line_width(s * 0.3);
 
             let mut path = Path::new();
             path.move_to(fx+pts[0], fy+pts[1]);
@@ -892,7 +892,7 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
 
             paint.set_line_cap(LineCap::Butt);
             paint.set_line_join(LineJoin::Bevel);
-            paint.set_stroke_width(1.0);
+            paint.set_line_width(1.0);
             paint.set_color(Color::rgba(0,192,255,255));
 
             let mut path = Path::new();
@@ -957,7 +957,7 @@ fn draw_widths<T: Renderer>(canvas: &mut Canvas<T>, x: f32, mut y: f32, width: f
 
     for i in 0..20 {
         let w = (i as f32 + 0.5) * 0.1;
-        paint.set_stroke_width(w);
+        paint.set_line_width(w);
         let mut path = Path::new();
         path.move_to(x, y);
         path.line_to(x + width, y + width * 0.3);
@@ -983,7 +983,7 @@ fn draw_caps<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32) {
     canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 255, 255, 32)));
 
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
-    paint.set_stroke_width(line_width);
+    paint.set_line_width(line_width);
 
     for (i, cap) in caps.iter().enumerate() {
         paint.set_line_cap(*cap);

@@ -521,7 +521,7 @@ impl Game {
         paint.set_font_weight(Weight::Bold);
         paint.set_font_size(80);
 
-        paint.set_stroke_width(4.0);
+        paint.set_line_width(4.0);
         let _ = canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
@@ -686,7 +686,7 @@ impl Game {
 
         let offset = 30.0;
 
-        paint.set_stroke_width(4.0);
+        paint.set_line_width(4.0);
         let _ = canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
 
         paint.set_color(Color::rgb(143, 80, 49));

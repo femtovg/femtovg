@@ -86,10 +86,10 @@ pub struct Paint<'a> {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
     pub(crate) alpha_mask: Option<ImageId>,
-    pub(crate) stroke_width: f32, // TODO: consider renaming this to line width
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
+    pub(crate) line_width: f32,
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
@@ -113,8 +113,8 @@ impl Default for Paint<'_> {
             alpha_mask: Default::default(),
             shape_anti_alias: true,
             stencil_strokes: true,
-            stroke_width: 1.0,
             miter_limit: 10.0,
+            line_width: 1.0,
             line_cap_start: Default::default(),
             line_cap_end: Default::default(),
             line_join: Default::default(),
@@ -245,14 +245,14 @@ impl<'a> Paint<'a> {
         self.stencil_strokes = value;
     }
 
-    /// Returns the current stroke line width.
-    pub fn stroke_width(&self) -> f32 {
-        self.stroke_width
+    /// Returns the current line width.
+    pub fn line_width(&self) -> f32 {
+        self.line_width
     }
 
-    /// Sets the stroke width for shapes stroked with this paint.
-    pub fn set_stroke_width(&mut self, width: f32) {
-        self.stroke_width = width;
+    /// Sets the line width for shapes stroked with this paint.
+    pub fn set_line_width(&mut self, width: f32) {
+        self.line_width = width;
     }
 
     /// Getter for the miter limit

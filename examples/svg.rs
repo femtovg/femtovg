@@ -142,7 +142,7 @@ fn main() {
 
                     if canvas.contains_point(path, mousex, mousey, FillRule::NonZero) {
                         let mut paint = Paint::color(Color::rgb(32, 240, 32));
-                        paint.set_stroke_width(1.0);
+                        paint.set_line_width(1.0);
                         canvas.stroke_path(path, paint);
                     }
                 }
@@ -204,7 +204,7 @@ fn render_svg(svg: &str) -> Vec<(Path, Option<Paint<'static>>, Option<Paint<'sta
                         let mut stroke_paint = Paint::color(Color::hex(stroke));
 
                         if let Some(stroke_width) = attributes.get("stroke-width") {
-                            stroke_paint.set_stroke_width(stroke_width.parse().unwrap());
+                            stroke_paint.set_line_width(stroke_width.parse().unwrap());
                         }
 
                         Some(stroke_paint)
