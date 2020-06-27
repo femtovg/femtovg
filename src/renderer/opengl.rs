@@ -352,8 +352,6 @@ impl OpenGl {
         self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
 
-        // TODO: check that images are not MSAA
-
         let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
 
         unsafe {
