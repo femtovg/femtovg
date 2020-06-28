@@ -41,7 +41,8 @@ pub struct ShapedGlyph {
     pub x: f32,
     pub y: f32,
     pub c: char,
-    pub index: usize,
+    pub start_index: usize,
+    pub end_index: usize,
     pub font_id: FontId,
     pub codepoint: u32,
     pub width: f32,
@@ -99,7 +100,7 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str) -> Result<TextLayout, ErrorKind> {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<f32>) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -225,8 +226,13 @@ impl Shaper {
 
         let mut height = 0.0f32;
         let mut y = cursor_y;
+        let mut index = 0;
 
         for glyph in &mut res.glyphs {
+            glyph.start_index = index;
+            index += glyph.c.len_utf8();
+            glyph.end_index = index;
+            
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             
             // Baseline alignment
@@ -398,7 +404,7 @@ impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
     fn next(&mut self) -> Option<&'a str> {
         let mut res = None;
         
-        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
+        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_whitespace()) {
             res = Some(&self.string[self.start..index]);
             self.start = index;
         } else if self.start < self.end {
@@ -415,7 +421,7 @@ impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let mut res = None;
         
-        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_ascii_whitespace()) {
+        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_whitespace()) {
             res = Some(&self.string[index..self.end]);
             self.end = index;
         } else if self.start < self.end {

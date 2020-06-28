@@ -4,7 +4,6 @@ use rgb::RGBA8;
 use imgref::ImgVec;
 
 use crate::{
-    Result,
     ErrorKind,
     ImageInfo,
     ImageStore,
@@ -27,13 +26,13 @@ impl Renderer for Void {
 
     fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
 
-    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image> {
+    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Ok(VoidImage {
             info
         })
     }
 
-    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()> {
+    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
         let size = data.dimensions();
 
         if x + size.0 > image.info.width() {
@@ -51,7 +50,7 @@ impl Renderer for Void {
 
     fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize) {}
 
-    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         Ok(ImgVec::new(Vec::new(), 0, 0))
     }
 }

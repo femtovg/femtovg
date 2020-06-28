@@ -9,7 +9,7 @@ use fnv::FnvHashMap;
 
 use crate::{
     Color,
-    Result,
+    ErrorKind,
     ImageInfo,
     ImageStore,
     PixelFormat,
@@ -68,7 +68,7 @@ pub struct OpenGl {
 
 impl OpenGl {
 
-    pub fn new<F>(load_fn: F) -> Result<Self> where F: Fn(&'static str) -> *const c_void {
+    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind> where F: Fn(&'static str) -> *const c_void {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
@@ -94,7 +94,10 @@ impl OpenGl {
 
         unsafe {
             let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *mut i8);
-            opengl.is_opengles = version.to_str().ok().map_or(false, |str| str.starts_with("OpenGL ES"));
+            
+            opengl.is_opengles = version.to_str().ok().map_or(false, |str| {
+                str.starts_with("OpenGL ES")
+            });
 
             gl::GenVertexArrays(1, &mut opengl.vert_arr);
             gl::GenBuffers(1, &mut opengl.vert_buff);
@@ -497,11 +500,11 @@ impl Renderer for OpenGl {
         self.check_error("render done");
     }
 
-    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image> {
+    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Texture::new(info, self.is_opengles)
     }
 
-    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()> {
+    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
         image.update(data, x, y, self.is_opengles)
     }
 
@@ -620,7 +623,7 @@ impl Renderer for OpenGl {
         self.check_error("blur copy");
     }
 
-    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         //let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
         let w = self.view[0] as usize;
         let h = self.view[1] as usize;

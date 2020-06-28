@@ -20,6 +20,7 @@ TODO:
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
+        - Floating point font sizes
     - Fix blurring
     - Finish demo text
     - Integrate euclid
@@ -97,8 +98,6 @@ pub use path::{
     Path,
     Solidity
 };
-
-type Result<T> = std::result::Result<T, ErrorKind>;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
@@ -261,7 +260,7 @@ pub struct Canvas<T: Renderer> {
 
 impl<T> Canvas<T> where T: Renderer {
 
-    pub fn new(renderer: T) -> Result<Self> {
+    pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let fontdb = FontDb::new()?;
 
         let mut canvas = Self {
@@ -327,7 +326,7 @@ impl<T> Canvas<T> where T: Renderer {
         self.verts.clear();
     }
 
-    pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>> {
+    pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         self.flush();
         self.renderer.screenshot()
     }
@@ -397,13 +396,13 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Images
 
-    pub fn create_image_empty(&mut self, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<ImageId> {
+    pub fn create_image_empty(&mut self, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let info = ImageInfo::new(flags, width, height, format);
 
         self.images.alloc(&mut self.renderer, info)
     }
 
-    pub fn create_image<'a, S: Into<ImageSource<'a>>>(&mut self, src: S, flags: ImageFlags) -> Result<ImageId> {
+    pub fn create_image<'a, S: Into<ImageSource<'a>>>(&mut self, src: S, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
 
@@ -416,7 +415,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Decode an image from file
     #[cfg(feature = "image-loading")]
-    pub fn load_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId> {
+    pub fn load_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let image = ::image::open(filename)?;
 
         use std::convert::TryFrom;
@@ -428,7 +427,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Decode an image from memory
     #[cfg(feature = "image-loading")]
-    pub fn load_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId> {
+    pub fn load_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let image = ::image::load_from_memory(data)?;
 
         use std::convert::TryFrom;
@@ -439,7 +438,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image<'a, S: Into<ImageSource<'a>>>(&mut self, id: ImageId, src: S, x: usize, y: usize) -> Result<()> {
+    pub fn update_image<'a, S: Into<ImageSource<'a>>>(&mut self, id: ImageId, src: S, x: usize, y: usize) -> Result<(), ErrorKind> {
         self.images.update(&mut self.renderer, id, src.into(), x, y)
     }
 
@@ -457,7 +456,7 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Returns the size in pixels of the image for the specified id.
-    pub fn image_size(&self, id: ImageId) -> Result<(usize, usize)> {
+    pub fn image_size(&self, id: ImageId) -> Result<(usize, usize), ErrorKind> {
         if let Some(info) = self.images.info(id) {
             Ok((info.width(), info.height()))
         } else {
@@ -723,7 +722,7 @@ impl<T> Canvas<T> where T: Renderer {
         paint.transform = transform;
 
         // Scale stroke width by current transform scale.
-        // Note: I don't know why the original author clamped the max stroke width to 200, but it didn'
+        // Note: I don't know why the original author clamped the max stroke width to 200, but it didn't
         // look correct when zooming in. There was probably a good reson for doing so and I may have
         // introduced a bug by removing the upper bound.
         //paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0).min(200.0));
@@ -794,47 +793,63 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Text
 
-    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<()> {
+    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<(), ErrorKind> {
         self.fontdb.add_font_file(file_path)?;
         self.shaper.clear_cache();
         Ok(())
     }
 
-    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<()> {
+    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<(), ErrorKind> {
         self.fontdb.scan_dir(dir_path)?;
         self.shaper.clear_cache();
         Ok(())
     }
 
-    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<()> {
+    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<(), ErrorKind> {
         self.fontdb.add_font_mem(data)?;
         self.shaper.clear_cache();
         Ok(())
     }
 
-    pub fn measure_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout> {
+    pub fn measure_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text)?;
+        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         layout.width *= invscale;
         layout.height *= invscale;
 
         Ok(layout)
     }
 
-    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
+    /// Returns the maximum index-th byte of text that will fit inside max_width.
+    /// 
+    /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
+    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
+        self.transform_text_paint(&mut paint);
+
+        let text = text.as_ref();
+        //let scale = self.font_scale() * self.device_px_ratio;
+        //let invscale = 1.0 / scale;
+
+        //let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
+
+        //let index = layout.glyphs.last().map(|glyph| glyph.end_index).unwrap_or(0);
+
+        //Ok(index)
+        Ok(0)
+    }
+
+    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
-    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout> {
+    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
-
-    //pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> 
 
     // Private
 
@@ -846,14 +861,14 @@ impl<T> Canvas<T> where T: Renderer {
         paint.line_width = paint.line_width * scale;
     }
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout> {
+    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout, ErrorKind> {
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
         self.transform_text_paint(&mut paint);
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text)?;
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.

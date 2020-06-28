@@ -27,7 +27,7 @@ pub struct TextLayout {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub(crate) glyphs: Vec<ShapedGlyph>
+    pub glyphs: Vec<ShapedGlyph>
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

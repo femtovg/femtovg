@@ -2,7 +2,6 @@
 use std::ptr;
 
 use crate::{
-    Result,
     ErrorKind,
     ImageFlags,
     ImageInfo,
@@ -19,7 +18,7 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(info: ImageInfo, opengles: bool) -> Result<Self> {
+    pub fn new(info: ImageInfo, opengles: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
         let mut texture = Texture {
@@ -143,7 +142,7 @@ impl Texture {
         self.id
     }
 
-    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, opengles: bool) -> Result<()> {
+    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, opengles: bool) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
         if x + size.0 > self.info.width() {

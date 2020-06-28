@@ -12,7 +12,6 @@ use ::image::DynamicImage;
 use std::convert::TryFrom;
 
 use crate::{
-    Result,
     ErrorKind,
     Renderer
 };
@@ -87,7 +86,7 @@ impl<'a> From<ImgRef<'a, GRAY8>> for ImageSource<'a> {
 impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     type Error = ErrorKind;
 
-    fn try_from(src: &'a DynamicImage) -> Result<Self> {
+    fn try_from(src: &'a DynamicImage) -> Result<Self, ErrorKind> {
         match src {
             ::image::DynamicImage::ImageLuma8(img) => {
                 let src: Img<&[GRAY8]> = Img::new(
@@ -160,7 +159,7 @@ impl<T> ImageStore<T> {
         Self(Arena::new())
     }
 
-    pub fn alloc<R: Renderer<Image = T>>(&mut self, renderer: &mut R, info: ImageInfo) -> Result<ImageId> {
+    pub fn alloc<R: Renderer<Image = T>>(&mut self, renderer: &mut R, info: ImageInfo) -> Result<ImageId, ErrorKind> {
         let image = renderer.alloc_image(info)?;
 
         Ok(ImageId(self.0.insert((info, image))))
@@ -174,7 +173,7 @@ impl<T> ImageStore<T> {
         self.0.get_mut(id.0).map(|inner| &mut inner.1)
     }
 
-    pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, data: ImageSource, x: usize, y: usize) -> Result<()> {
+    pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(&mut image.1, data, x, y)?;
         } else {

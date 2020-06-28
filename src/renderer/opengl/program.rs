@@ -2,10 +2,7 @@
 use std::ptr;
 use std::ffi::{CStr, CString};
 
-use crate::{
-    Result,
-    ErrorKind
-};
+use crate::ErrorKind;
 
 use super::gl;
 use super::gl::types::*;
@@ -17,7 +14,7 @@ pub(crate) struct Shader {
 }
 
 impl Shader {
-    pub fn new(src: &CStr, kind: GLenum) -> Result<Self> {
+    pub fn new(src: &CStr, kind: GLenum) -> Result<Self, ErrorKind> {
         let id = unsafe { gl::CreateShader(kind) };
 
         // Compile
@@ -73,7 +70,7 @@ pub(crate) struct Program {
 
 impl Program {
 
-    pub fn new(shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self> {
+    pub fn new(shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self, ErrorKind> {
         let program = Self {
             id: unsafe { gl::CreateProgram() },
         };
@@ -126,7 +123,7 @@ impl Program {
         unsafe { gl::UseProgram(0); }
     }
 
-    fn uniform_location(&self, name: &str) -> Result<GLint> {
+    fn uniform_location(&self, name: &str) -> Result<GLint, ErrorKind> {
         unsafe {
             Ok(gl::GetUniformLocation(self.id, CString::new(name)?.as_ptr()))
         }
@@ -150,7 +147,7 @@ pub struct MainProgram {
 }
 
 impl MainProgram {
-    pub(crate) fn new(antialias: bool) -> Result<Self> {
+    pub(crate) fn new(antialias: bool) -> Result<Self, ErrorKind> {
         let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
         let frag_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-fs.glsl"));
@@ -212,7 +209,7 @@ pub struct BlurProgram {
 }
 
 impl BlurProgram {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, ErrorKind> {
         let vert_shader_src = format!("{}\n{}", GLSL_VERSION, include_str!("blur-vs.glsl"));
         let frag_shader_src = format!("{}\n{}", GLSL_VERSION, include_str!("blur-fs.glsl"));
 

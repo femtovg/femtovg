@@ -37,7 +37,7 @@ fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new().with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600)).with_title("gpucanvas demo");
 
-    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGl, (4, 4))).with_vsync(false).build_windowed(wb, &el).unwrap();
+    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
     //let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(8).build_windowed(wb, &el).unwrap();
     let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
@@ -173,6 +173,8 @@ fn main() {
 
                 draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
+                draw_paragraph(&mut canvas, width - 450.0, 50.0, 150.0, 100.0, mousex, mousey);
+
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
                 
@@ -255,6 +257,39 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
+
+    let text = "This is longer chunk of text.\n  \n  Would have used lorem ipsum but she    was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
+
+    canvas.save();
+
+    let mut paint = Paint::color(Color::rgba(255, 255, 255, 255));
+    paint.set_font_size(14);
+    paint.set_font_family("Roboto");
+    paint.set_text_align(Align::Left);
+    paint.set_text_baseline(Baseline::Top);
+
+    // let mut start = 0;
+
+    // let text = "Latin اللغة العربية Кирилица тест ";
+
+    // if let Ok(res) = canvas.fill_text(x, y, text, paint) {
+    //     dbg!(&res);
+
+    //     for glyph in &res.glyphs {
+    //         dbg!(&text[glyph.start_index..glyph.end_index]);
+    //     }
+    // }
+
+    
+
+    // if let Ok(index) = canvas.break_text(width, text, paint) {
+    //     let _ = canvas.fill_text(x, y, &text[0..index], paint);
+    // }
+
+    canvas.restore();
 }
 
 fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32, mx: f32, my: f32, t: f32) {

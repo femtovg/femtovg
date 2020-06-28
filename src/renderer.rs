@@ -5,7 +5,7 @@ use imgref::ImgVec;
 
 use crate::{
     Color,
-    Result,
+    ErrorKind,
     FillRule,
     ImageId,
     ImageInfo,
@@ -97,13 +97,13 @@ pub trait Renderer {
 
     fn render(&mut self, images: &ImageStore<Self::Image>, verts: &[Vertex], commands: &[Command]);
 
-    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image>;
-    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<()>;
+    fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;
+    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind>;
     fn delete_image(&mut self, image: Self::Image);
 
     fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize);
 
-    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>>;
+    fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;
 }
 
 /// Vertex struct for specifying triangle geometry
