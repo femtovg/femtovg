@@ -31,6 +31,7 @@ TODO:
     - Publish to crates.io
     - Emoji support
     - fn text_path -> Path
+    - Use https://github.com/grovesNL/glow
 */
 
 mod utils;

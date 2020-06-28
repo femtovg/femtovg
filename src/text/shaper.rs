@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::iter::{Peekable, DoubleEndedIterator};
 
 use unicode_script::{Script, UnicodeScript};
-use unicode_bidi::{bidi_class, BidiClass};
+use unicode_bidi::{bidi_class, BidiClass, BidiInfo};
 
 use harfbuzz_rs as hb;
 //use self::hb::hb as hb_sys;
@@ -28,6 +28,10 @@ use super::{
     FontId,
     TextLayout
 };
+
+// TODO: Cache entire runs of text, not words
+// For reference impl see:
+// https://github.com/RazrFalcon/resvg/blob/9a5f52bbec0555da584b44116e4c14b0cb88daf8/usvg/src/convert/text/shaper.rs#L278
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -108,6 +112,10 @@ impl Shaper {
             height: 0.0,
             glyphs: Vec::with_capacity(text.len())
         };
+
+        let bidi_info = BidiInfo::new(&text, None);
+
+        dbg!(bidi_info.paragraphs);
 
         // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
         for (script, direction, subtext) in text.unicode_scripts() {
