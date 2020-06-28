@@ -7,7 +7,6 @@ use unicode_script::{Script, UnicodeScript};
 use unicode_bidi::{bidi_class, BidiClass, BidiInfo};
 
 use harfbuzz_rs as hb;
-//use self::hb::hb as hb_sys;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
@@ -29,10 +28,6 @@ use super::{
     TextLayout
 };
 
-// TODO: Cache entire runs of text, not words
-// For reference impl see:
-// https://github.com/RazrFalcon/resvg/blob/9a5f52bbec0555da584b44116e4c14b0cb88daf8/usvg/src/convert/text/shaper.rs#L278
-
 const LRU_CACHE_CAPACITY: usize = 1000;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -45,8 +40,7 @@ pub struct ShapedGlyph {
     pub x: f32,
     pub y: f32,
     pub c: char,
-    pub start_index: usize,
-    pub end_index: usize,
+    pub byte_index: usize,
     pub font_id: FontId,
     pub codepoint: u32,
     pub width: f32,
@@ -83,7 +77,7 @@ impl ShapingId {
     }
 }
 
-type Cache<H> = LruCache<ShapingId, Result<Vec<ShapedGlyph>, ErrorKind>, H>;
+type Cache<H> = LruCache<ShapingId, Result<TextLayout, ErrorKind>, H>;
 
 pub struct Shaper {
     cache: Cache<FnvBuildHasher>,
@@ -105,6 +99,32 @@ impl Shaper {
     }
 
     pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<f32>) -> Result<TextLayout, ErrorKind> {
+
+        if false {
+            let mut res = Self::shape_internal(fontdb, paint, text)?;
+            Self::layout(x, y, fontdb, &mut res, paint)?;
+
+            Ok(res)
+        } else {
+            let id = ShapingId::new(paint, text);
+
+            if !self.cache.contains(&id) {
+                self.cache.put(id, Self::shape_internal(fontdb, paint, text));
+            }
+
+            let result = self.cache.get(&id).ok_or(ErrorKind::UnknownError)?;
+
+            if let Ok(layout) = result.as_ref() {
+                let mut layout = layout.clone();
+                Self::layout(x, y, fontdb, &mut layout, paint)?;
+                return Ok(layout);
+            }
+
+            Err(ErrorKind::UnknownError)
+        }
+    }
+
+    fn shape_internal(fontdb: &mut FontDb, paint: &Paint, text: &str) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -115,108 +135,100 @@ impl Shaper {
 
         let bidi_info = BidiInfo::new(&text, None);
 
-        dbg!(bidi_info.paragraphs);
+        for paragraph in &bidi_info.paragraphs {
+            let line = paragraph.range.clone();
 
-        // separate text in runs of the continuous script (Latin, Cyrillic, etc.)
-        for (script, direction, subtext) in text.unicode_scripts() {
-            // separate words in run
-            let mut words = subtext.split_whitespace_inclusive();
+            let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
+            
+            for run in runs.iter() {
+                let sub_text = &text[run.clone()];
 
-            // shape each word and cache the generated glyphs
-            loop {
-
-                let maybe_word = if direction == Direction::Rtl {
-                    words.next_back()
-                } else {
-                    words.next()
-                };
-
-                let word = match maybe_word {
-                    Some(word) => word,
-                    None => break
-                };
-
-                let shaping_id = ShapingId::new(paint, word);
-
-                if self.cache.peek(&shaping_id).is_none() {
-
-                    // find_font will call the closure with each font matching the provided style
-                    // until a font capable of shaping the word is found
-                    let ret = fontdb.find_font(&word, paint, |font| {
-
-                        // Call harfbuzz
-                        let output = {
-                            // TODO: It may be faster if this is created only once and stored inside the Font struct
-                            let hb_font = Self::hb_font(font);
-                            let buffer = Self::hb_buffer(&word, direction, script);
-
-                            hb::shape(&hb_font, buffer, &[])
-                        };
-
-                        // let output = {
-                        //     let rb_font = Self::rb_font(font);
-                        //     //rb_font.set_scale(style.size, style.size);
-                        //     let buffer = Self::rb_buffer(&word, direction, script);
-                        //
-                        //     rustybuzz::shape(&rb_font, buffer, &[])
-                        // };
-
-                        let positions = output.get_glyph_positions();
-                        let infos = output.get_glyph_infos();
-
-                        let mut items = Vec::with_capacity(positions.len());
-
-                        let mut has_missing = false;
-
-                        for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
-                            if info.codepoint == 0 {
-                                has_missing = true;
-                            }
-
-                            let scale = font.scale(paint.font_size as f32);
-
-                            let mut g = ShapedGlyph {
-                                c: c,
-                                font_id: font.id,
-                                codepoint: info.codepoint,
-                                advance_x: position.x_advance as f32 * scale,
-                                advance_y: position.y_advance as f32 * scale,
-                                offset_x: position.x_offset as f32 * scale,
-                                offset_y: position.y_offset as f32 * scale,
-                                ..Default::default()
-                            };
-
-                            if let Some(glyph) = font.glyph(info.codepoint as u16) {
-                                g.width = glyph.metrics.width * scale;
-                                g.height = glyph.metrics.height * scale;
-                                g.bearing_x = glyph.metrics.bearing_x * scale;
-                                g.bearing_y = glyph.metrics.bearing_y * scale;
-                            }
-
-                            items.push(g);
-                        }
-
-                        (has_missing, items)
-                    });
-
-                    self.cache.put(shaping_id, ret);
+                if sub_text.is_empty() {
+                    continue;
                 }
 
-                if let Some(shape_result) = self.cache.get(&shaping_id) {
-                    if let Ok(items) = shape_result {
-                        result.glyphs.extend(items);
+                let hb_direction = if levels[run.start].is_rtl() {
+                    hb::Direction::Rtl
+                } else {
+                    hb::Direction::Ltr
+                };
+
+                // find_font will call the closure with each font matching the provided style
+                // until a font capable of shaping the word is found
+                let ret = fontdb.find_font(&sub_text, paint, |font| {
+
+                    // Call harfbuzz
+                    let output = {
+                        // TODO: It may be faster if this is created only once and stored inside the Font struct
+                        let hb_font = Self::hb_font(font);
+                        let buffer = hb::UnicodeBuffer::new()
+                            .add_str(sub_text)
+                            .set_direction(hb_direction);
+
+                        hb::shape(&hb_font, buffer, &[])
+                    };
+
+                    // let output = {
+                    //     let rb_font = Self::rb_font(font);
+                    //     //rb_font.set_scale(style.size, style.size);
+                    //     let buffer = Self::rb_buffer(&word, direction, script);
+                    //
+                    //     rustybuzz::shape(&rb_font, buffer, &[])
+                    // };
+
+                    let positions = output.get_glyph_positions();
+                    let infos = output.get_glyph_infos();
+
+                    let mut items = Vec::with_capacity(positions.len());
+
+                    let mut has_missing = false;
+
+                    for (position, (info, c)) in positions.iter().zip(infos.iter().zip(sub_text.chars())) {
+                        if info.codepoint == 0 {
+                            has_missing = true;
+                        }
+
+                        let scale = font.scale(paint.font_size as f32);
+
+                        let start_index = run.start + info.cluster as usize;
+                        debug_assert!(text.get(start_index..).is_some());
+
+                        let mut g = ShapedGlyph {
+                            c: c,
+                            byte_index: start_index,
+                            font_id: font.id,
+                            codepoint: info.codepoint,
+                            advance_x: position.x_advance as f32 * scale,
+                            advance_y: position.y_advance as f32 * scale,
+                            offset_x: position.x_offset as f32 * scale,
+                            offset_y: position.y_offset as f32 * scale,
+                            ..Default::default()
+                        };
+
+                        if let Some(glyph) = font.glyph(info.codepoint as u16) {
+                            g.width = glyph.metrics.width * scale;
+                            g.height = glyph.metrics.height * scale;
+                            g.bearing_x = glyph.metrics.bearing_x * scale;
+                            g.bearing_y = glyph.metrics.bearing_y * scale;
+                        }
+
+                        items.push(g);
                     }
+
+                    (has_missing, items)
+                });
+
+                if let Ok(items) = ret {
+                    result.glyphs.extend(items);
                 }
             }
         }
-
-        self.layout(x, y, fontdb, &mut result, paint)?;
 
         Ok(result)
     }
 
     // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
-    fn layout(&mut self, x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, paint: &Paint) -> Result<(), ErrorKind> {
+    fn layout(x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, paint: &Paint) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -234,13 +246,8 @@ impl Shaper {
 
         let mut height = 0.0f32;
         let mut y = cursor_y;
-        let mut index = 0;
 
         for glyph in &mut res.glyphs {
-            glyph.start_index = index;
-            index += glyph.c.len_utf8();
-            glyph.end_index = index;
-            
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             
             // Baseline alignment

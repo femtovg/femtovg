@@ -271,19 +271,19 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Top);
 
-    // let mut start = 0;
+    let mut start = 0;
 
-    // let text = "Latin اللغة العربية Кирилица тест ";
+    let text = "Latin اللغة العربية Кирилица тест ";
 
-    // if let Ok(res) = canvas.fill_text(x, y, text, paint) {
-    //     dbg!(&res);
+    if let Ok(res) = canvas.fill_text(x, y, text, paint) {
+        //dbg!(&res);
 
-    //     for glyph in &res.glyphs {
-    //         dbg!(&text[glyph.start_index..glyph.end_index]);
-    //     }
-    // }
+        for glyph in &res.glyphs {
+            dbg!(&text[glyph.byte_index..]);
+        }
+    }
 
-    
+    dbg!("==");
 
     // if let Ok(index) = canvas.break_text(width, text, paint) {
     //     let _ = canvas.fill_text(x, y, &text[0..index], paint);

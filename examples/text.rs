@@ -116,28 +116,28 @@ fn main() {
 
                 perf.update(dt);
 
-                // draw_baselines(&mut canvas, 5.0, 50.0, font_size);
-                // draw_alignments(&mut canvas, 120.0, 200.0, font_size);
-                // draw_paragraph(&mut canvas, x, y, font_size, LOREM_TEXT);
-                // draw_inc_size(&mut canvas, 300.0, 10.0);
+                draw_baselines(&mut canvas, 5.0, 50.0, font_size);
+                draw_alignments(&mut canvas, 120.0, 200.0, font_size);
+                draw_paragraph(&mut canvas, x, y, font_size, LOREM_TEXT);
+                draw_inc_size(&mut canvas, 300.0, 10.0);
 
                 draw_complex(&mut canvas, 300.0, 340.0, font_size);
                 
-                // draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
-                // draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
-                // draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
+                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
-                // let mut paint = Paint::color(Color::hex("B7410E"));
-                // paint.set_font_family("Roboto");
-                // paint.set_font_weight(Weight::Bold);
-                // paint.set_text_baseline(Baseline::Top);
-                // paint.set_text_align(Align::Right);
-                // let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
+                let mut paint = Paint::color(Color::hex("B7410E"));
+                paint.set_font_family("Roboto");
+                paint.set_font_weight(Weight::Bold);
+                paint.set_text_baseline(Baseline::Top);
+                paint.set_text_align(Align::Right);
+                let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
 
-                // canvas.save();
-                // canvas.reset();
-                // perf.render(&mut canvas, 5.0, 5.0);
-                // canvas.restore();
+                canvas.save();
+                canvas.reset();
+                perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
@@ -384,7 +384,7 @@ Choice of typeface(s) is the primary aspect of text typography—prose fiction, 
 editorial, educational, religious, scientific, spiritual, and commercial writing all have differing
 characteristics and requirements of appropriate typefaces and their fonts or styles.
 
-اللُّغَة العَرَبِيّة هي أكثرُ اللغاتِ السامية
+مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار عائلة الخط وحجم وطول الخط والمسافة بين السطور
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
