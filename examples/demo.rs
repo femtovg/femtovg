@@ -279,11 +279,11 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
         //dbg!(&res);
 
         for glyph in &res.glyphs {
-            dbg!(&text[glyph.byte_index..]);
+            //dbg!(&text[glyph.byte_index..]);
         }
     }
 
-    dbg!("==");
+    //dbg!("==");
 
     // if let Ok(index) = canvas.break_text(width, text, paint) {
     //     let _ = canvas.fill_text(x, y, &text[0..index], paint);

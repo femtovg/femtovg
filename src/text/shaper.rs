@@ -1,15 +1,12 @@
 
-use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
-use std::iter::{Peekable, DoubleEndedIterator};
-
-use unicode_script::{Script, UnicodeScript};
-use unicode_bidi::{bidi_class, BidiClass, BidiInfo};
-
-use harfbuzz_rs as hb;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
+
+use harfbuzz_rs as hb;
+
+use unicode_bidi::BidiInfo;
 
 use crate::{
     Paint,
@@ -29,11 +26,6 @@ use super::{
 };
 
 const LRU_CACHE_CAPACITY: usize = 1000;
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum Direction {
-    Ltr, Rtl
-}
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ShapedGlyph {
@@ -302,149 +294,4 @@ impl Shaper {
         let face = hb::Face::new(font.data.clone(), 0);
 		hb::Font::new(face)
     }
-
-    fn hb_buffer(text: &str, direction: Direction, script: Script) -> hb::UnicodeBuffer {
-        let mut buffer = hb::UnicodeBuffer::new()
-            .add_str(text)
-            .set_direction(match direction {
-                Direction::Ltr => hb::Direction::Ltr,
-                Direction::Rtl => hb::Direction::Rtl,
-            });
-
-        let script_name = script.short_name();
-
-        if script_name.len() == 4 {
-            let script: Vec<char> = script_name.chars().collect();
-            buffer = buffer.set_script(hb::Tag::new(script[0], script[1], script[2], script[3]));
-        }
-
-        buffer
-    }
-}
-
-impl From<BidiClass> for Direction {
-    fn from(class: BidiClass) -> Self {
-        match class {
-            BidiClass::L => Direction::Ltr,
-            BidiClass::R => Direction::Rtl,
-            BidiClass::AL => Direction::Rtl,
-            _ => Direction::Ltr
-        }
-    }
-}
-
-pub trait UnicodeScripts<I: Iterator<Item=(usize, char)>> {
-    fn unicode_scripts(&self) -> UnicodeScriptIterator<I>;
-}
-
-impl<'a> UnicodeScripts<CharIndices<'a>> for &'a str {
-    fn unicode_scripts(&self) -> UnicodeScriptIterator<CharIndices<'a>> {
-        UnicodeScriptIterator {
-            string: self,
-            iter: self.char_indices().peekable()
-        }
-    }
-}
-
-pub struct UnicodeScriptIterator<'a, I: Iterator<Item=(usize, char)>> {
-    string: &'a str,
-    iter: Peekable<I>
-}
-
-impl<'a, I: Iterator<Item=(usize, char)>> Iterator for UnicodeScriptIterator<'a, I> {
-    type Item = (Script, Direction, &'a str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some((first_index, first)) = self.iter.next() {
-            let direction = Direction::from(bidi_class(first));
-            let mut script = first.script();
-
-            let mut last_index = self.string.len();
-
-            while let Some((next_index, next)) = self.iter.peek() {
-                let next_script = next.script();
-
-                let next_script = match next_script {
-                    Script::Common => script,
-                    Script::Inherited => script,
-                    _ => next_script
-                };
-
-                script = match script {
-                    Script::Common => next_script,
-                    Script::Inherited => next_script,
-                    _ => script
-                };
-
-                if next_script == script {
-                    self.iter.next();
-                } else {
-                    last_index = *next_index;
-                    break;
-                }
-            }
-
-            return Some((script, direction, &self.string[first_index..last_index]));
-        }
-
-        None
-    }
-}
-
-trait SplitWhitespaceInclusive {
-    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter;
-}
-
-impl SplitWhitespaceInclusive for &str {
-    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter {
-        SplitWhitespaceInclusiveIter {
-            start: 0,
-            end: self.len(),
-            string: self,
-            char_indices: self.char_indices()
-        }
-    }
-}
-
-struct SplitWhitespaceInclusiveIter<'a> {
-    start: usize,
-    end: usize,
-    string: &'a str,
-    char_indices: CharIndices<'a>
-}
-
-impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
-    type Item = &'a str;
-    
-    fn next(&mut self) -> Option<&'a str> {
-        let mut res = None;
-        
-        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_whitespace()) {
-            res = Some(&self.string[self.start..index]);
-            self.start = index;
-        } else if self.start < self.end {
-            res = Some(&self.string[self.start..self.end]);
-            self.start = self.end;
-        }
-        
-        res
-    }
-}
-
-impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
-
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let mut res = None;
-        
-        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_whitespace()) {
-            res = Some(&self.string[index..self.end]);
-            self.end = index;
-        } else if self.start < self.end {
-            res = Some(&self.string[self.start..self.end]);
-            self.start = self.end;
-        }
-        
-        res
-    }
-
 }

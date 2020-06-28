@@ -21,7 +21,6 @@ bitflags = "1.2.1"
 owned_ttf_parser = "0.6.0"
 harfbuzz_rs = "1.1.1"
 unicode-bidi = "0.3.4"
-unicode-script = "0.5.2"
 generational-arena = "0.2.8"
 #rustybuzz = { git = "https://github.com/RazrFalcon/rustybuzz.git" }
 lru = { version = "0.5.2", default-features = false }
