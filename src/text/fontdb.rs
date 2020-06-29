@@ -162,7 +162,7 @@ impl FontDb {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, callback: F) -> Result<T, ErrorKind> where F: Fn(&mut Font) -> (bool, T) {
+    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind> where F: FnMut(&mut Font) -> (bool, T) {
         let mut description = FontDescription::from(paint);
 
         loop {

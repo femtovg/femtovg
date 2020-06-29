@@ -1,5 +1,7 @@
 
+use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
+use std::iter::DoubleEndedIterator;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
@@ -45,23 +47,29 @@ pub struct ShapedGlyph {
     pub bearing_y: f32,
 }
 
+#[derive(Clone, Debug, Default)]
+struct ShapedWord {
+    glyphs: Vec<ShapedGlyph>,
+    width: f32,
+}
+
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct ShapingId {
     size: u16,
-    text_hash: u64,
+    word_hash: u64,
     weight: Weight,
     width_class: WidthClass,
-    font_style: FontStyle,
+    font_style: FontStyle
 }
 
 impl ShapingId {
-    pub fn new(paint: &Paint, text: &str) -> Self {
+    pub fn new(paint: &Paint, word: &str) -> Self {
         let mut hasher = FnvHasher::default();
-        text.hash(&mut hasher);
+        word.hash(&mut hasher);
 
         ShapingId {
             size: paint.font_size(),
-            text_hash: hasher.finish(),
+            word_hash: hasher.finish(),
             weight: paint.font_weight,
             width_class: paint.font_width_class,
             font_style: paint.font_style,
@@ -69,7 +77,7 @@ impl ShapingId {
     }
 }
 
-type Cache<H> = LruCache<ShapingId, Result<TextLayout, ErrorKind>, H>;
+type Cache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
 
 pub struct Shaper {
     cache: Cache<FnvBuildHasher>,
@@ -90,33 +98,7 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<f32>) -> Result<TextLayout, ErrorKind> {
-
-        if false {
-            let mut res = Self::shape_internal(fontdb, paint, text)?;
-            Self::layout(x, y, fontdb, &mut res, paint)?;
-
-            Ok(res)
-        } else {
-            let id = ShapingId::new(paint, text);
-
-            if !self.cache.contains(&id) {
-                self.cache.put(id, Self::shape_internal(fontdb, paint, text));
-            }
-
-            let result = self.cache.get(&id).ok_or(ErrorKind::UnknownError)?;
-
-            if let Ok(layout) = result.as_ref() {
-                let mut layout = layout.clone();
-                Self::layout(x, y, fontdb, &mut layout, paint)?;
-                return Ok(layout);
-            }
-
-            Err(ErrorKind::UnknownError)
-        }
-    }
-
-    fn shape_internal(fontdb: &mut FontDb, paint: &Paint, text: &str) -> Result<TextLayout, ErrorKind> {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<u32>) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -127,7 +109,7 @@ impl Shaper {
 
         let bidi_info = BidiInfo::new(&text, None);
 
-        for paragraph in &bidi_info.paragraphs {
+        'outer: for paragraph in &bidi_info.paragraphs {
             let line = paragraph.range.clone();
 
             let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
@@ -145,87 +127,126 @@ impl Shaper {
                     hb::Direction::Ltr
                 };
 
-                // find_font will call the closure with each font matching the provided style
-                // until a font capable of shaping the word is found
-                let ret = fontdb.find_font(&sub_text, paint, |font| {
+                let mut words = sub_text.split_whitespace_inclusive();
 
-                    // Call harfbuzz
-                    let output = {
-                        // TODO: It may be faster if this is created only once and stored inside the Font struct
-                        let hb_font = Self::hb_font(font);
-                        let buffer = hb::UnicodeBuffer::new()
-                            .add_str(sub_text)
-                            .set_direction(hb_direction);
-
-                        hb::shape(&hb_font, buffer, &[])
+                loop {
+                    let maybe_word = if hb_direction == hb::Direction::Rtl {
+                        words.next_back()
+                    } else {
+                        words.next()
+                    };
+    
+                    let word = match maybe_word {
+                        Some(word) => word,
+                        None => break
                     };
 
-                    // let output = {
-                    //     let rb_font = Self::rb_font(font);
-                    //     //rb_font.set_scale(style.size, style.size);
-                    //     let buffer = Self::rb_buffer(&word, direction, script);
-                    //
-                    //     rustybuzz::shape(&rb_font, buffer, &[])
-                    // };
+                    let id = ShapingId::new(paint, word);
 
-                    let positions = output.get_glyph_positions();
-                    let infos = output.get_glyph_infos();
-
-                    let mut items = Vec::with_capacity(positions.len());
-
-                    let mut has_missing = false;
-
-                    for (position, (info, c)) in positions.iter().zip(infos.iter().zip(sub_text.chars())) {
-                        if info.codepoint == 0 {
-                            has_missing = true;
-                        }
-
-                        let scale = font.scale(paint.font_size as f32);
-
-                        let start_index = run.start + info.cluster as usize;
-                        debug_assert!(text.get(start_index..).is_some());
-
-                        let mut g = ShapedGlyph {
-                            c: c,
-                            byte_index: start_index,
-                            font_id: font.id,
-                            codepoint: info.codepoint,
-                            advance_x: position.x_advance as f32 * scale,
-                            advance_y: position.y_advance as f32 * scale,
-                            offset_x: position.x_offset as f32 * scale,
-                            offset_y: position.y_offset as f32 * scale,
-                            ..Default::default()
-                        };
-
-                        if let Some(glyph) = font.glyph(info.codepoint as u16) {
-                            g.width = glyph.metrics.width * scale;
-                            g.height = glyph.metrics.height * scale;
-                            g.bearing_x = glyph.metrics.bearing_x * scale;
-                            g.bearing_y = glyph.metrics.bearing_y * scale;
-                        }
-
-                        items.push(g);
+                    if !self.cache.contains(&id) {
+                        let word = Self::shape_word(word, hb_direction, fontdb, paint);
+                        self.cache.put(id, word);
                     }
 
-                    (has_missing, items)
-                });
-
-                if let Ok(items) = ret {
-                    result.glyphs.extend(items);
+                    if let Some(Ok(word)) = self.cache.get(&id) {
+                        if let Some(max_width) = max_width {
+                            if result.width + word.width > max_width as f32 {
+                                break 'outer;
+                            }
+                        }
+                        
+                        result.width += word.width;
+                        result.glyphs.extend(word.glyphs.clone());
+                    }
                 }
+
             }
         }
 
+        Self::layout(x, y, fontdb, &mut result, paint)?;
+
         Ok(result)
+    }
+
+    fn shape_word(word: &str, hb_direction: hb::Direction, fontdb: &mut FontDb, paint: &Paint) -> Result<ShapedWord, ErrorKind> {
+        // find_font will call the closure with each font matching the provided style
+        // until a font capable of shaping the word is found
+        let ret = fontdb.find_font(&word, paint, |font| {
+
+            // Call harfbuzz
+            let output = {
+                // TODO: It may be faster if this is created only once and stored inside the Font struct
+                let face = hb::Face::new(font.data.clone(), 0);
+                let hb_font = hb::Font::new(face);
+                
+                let buffer = hb::UnicodeBuffer::new()
+                    .add_str(word)
+                    .set_direction(hb_direction);
+
+                hb::shape(&hb_font, buffer, &[])
+            };
+
+            // let output = {
+            //     let rb_font = Self::rb_font(font);
+            //     //rb_font.set_scale(style.size, style.size);
+            //     let buffer = Self::rb_buffer(&word, direction, script);
+            //
+            //     rustybuzz::shape(&rb_font, buffer, &[])
+            // };
+
+            let positions = output.get_glyph_positions();
+            let infos = output.get_glyph_infos();
+
+            let mut shaped_word = ShapedWord {
+                glyphs: Vec::with_capacity(positions.len()),
+                width: 0.0
+            };
+
+            let mut has_missing = false;
+
+            for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
+                if info.codepoint == 0 {
+                    has_missing = true;
+                }
+
+                let scale = font.scale(paint.font_size as f32);
+
+                //let start_index = run.start + info.cluster as usize;
+                //debug_assert!(text.get(start_index..).is_some());
+
+                let mut g = ShapedGlyph {
+                    c: c,
+                    byte_index: 0, // TODO
+                    font_id: font.id,
+                    codepoint: info.codepoint,
+                    advance_x: position.x_advance as f32 * scale,
+                    advance_y: position.y_advance as f32 * scale,
+                    offset_x: position.x_offset as f32 * scale,
+                    offset_y: position.y_offset as f32 * scale,
+                    ..Default::default()
+                };
+
+                if let Some(glyph) = font.glyph(info.codepoint as u16) {
+                    g.width = glyph.metrics.width * scale;
+                    g.height = glyph.metrics.height * scale;
+                    g.bearing_x = glyph.metrics.bearing_x * scale;
+                    g.bearing_y = glyph.metrics.bearing_y * scale;
+                }
+
+                shaped_word.width += g.advance_x + paint.letter_spacing;
+                shaped_word.glyphs.push(g);
+            }
+
+            (has_missing, shaped_word)
+        });
+
+        ret
     }
 
     // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
     fn layout(x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, paint: &Paint) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
-
-        // Calculate total advance for correct horizontal alignment
-        res.width = res.glyphs.iter().fold(0.0, |width, glyph| width + glyph.advance_x + paint.letter_spacing);
 
         // Horizontal alignment
         match paint.text_align {
@@ -289,9 +310,62 @@ impl Shaper {
     //
     //     buffer
     // }
+}
 
-    fn hb_font(font: &mut Font) -> hb::Owned<hb::Font> {
-        let face = hb::Face::new(font.data.clone(), 0);
-		hb::Font::new(face)
+trait SplitWhitespaceInclusive {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter;
+}
+
+impl SplitWhitespaceInclusive for &str {
+    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter {
+        SplitWhitespaceInclusiveIter {
+            start: 0,
+            end: self.len(),
+            string: self,
+            char_indices: self.char_indices()
+        }
     }
+}
+
+struct SplitWhitespaceInclusiveIter<'a> {
+    start: usize,
+    end: usize,
+    string: &'a str,
+    char_indices: CharIndices<'a>
+}
+
+impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let mut res = None;
+
+        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[self.start..index]);
+            self.start = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
+        }
+
+        res
+    }
+}
+
+impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
+
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let mut res = None;
+
+        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_ascii_whitespace()) {
+            res = Some(&self.string[index..self.end]);
+            self.end = index;
+        } else if self.start < self.end {
+            res = Some(&self.string[self.start..self.end]);
+            self.start = self.end;
+        }
+
+        res
+    }
+
 }

@@ -829,19 +829,18 @@ impl<T> Canvas<T> where T: Renderer {
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     /// 
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
-    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
+    pub fn break_text<S: AsRef<str>>(&mut self, max_width: u32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
         //let scale = self.font_scale() * self.device_px_ratio;
         //let invscale = 1.0 / scale;
 
-        //let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
+        let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
 
-        //let index = layout.glyphs.last().map(|glyph| glyph.end_index).unwrap_or(0);
+        let index = layout.glyphs.last().map(|glyph| glyph.byte_index).unwrap_or(0);
 
-        //Ok(index)
-        Ok(0)
+        Ok(index)
     }
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
@@ -869,7 +868,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         self.transform_text_paint(&mut paint);
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, Some(self.width as u32))?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.

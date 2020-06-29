@@ -205,6 +205,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let mut paint = Paint::color(Color::black());
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Light);
+    paint.set_text_align(Align::Right);
     paint.set_font_size(font_size);
 
     let mut cursor_y = y;
@@ -212,7 +213,8 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let linegap = 3.0;
 
     for line in text.lines() {
-        if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
+        //if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
+        if let Ok(res) = canvas.fill_text(canvas.width(), cursor_y, line, paint) {
             cursor_y += res.height + linegap;
         }
     }
