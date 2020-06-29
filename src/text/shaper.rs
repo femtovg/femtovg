@@ -9,6 +9,7 @@ use fnv::{FnvHasher, FnvBuildHasher};
 use harfbuzz_rs as hb;
 
 use unicode_bidi::BidiInfo;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     Paint,
@@ -109,7 +110,7 @@ impl Shaper {
 
         let bidi_info = BidiInfo::new(&text, None);
 
-        'outer: for paragraph in &bidi_info.paragraphs {
+        for paragraph in &bidi_info.paragraphs {
             let line = paragraph.range.clone();
 
             let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
@@ -127,20 +128,10 @@ impl Shaper {
                     hb::Direction::Ltr
                 };
 
-                let mut words = sub_text.split_whitespace_inclusive();
+                let mut words = Vec::new();
+                let mut word_break_reached = false;
 
-                loop {
-                    let maybe_word = if hb_direction == hb::Direction::Rtl {
-                        words.next_back()
-                    } else {
-                        words.next()
-                    };
-    
-                    let word = match maybe_word {
-                        Some(word) => word,
-                        None => break
-                    };
-
+                for word in sub_text.split_word_bounds() {
                     let id = ShapingId::new(paint, word);
 
                     if !self.cache.contains(&id) {
@@ -151,15 +142,27 @@ impl Shaper {
                     if let Some(Ok(word)) = self.cache.get(&id) {
                         if let Some(max_width) = max_width {
                             if result.width + word.width > max_width as f32 {
-                                break 'outer;
+                                word_break_reached = true;
+                                break;
                             }
                         }
                         
                         result.width += word.width;
-                        result.glyphs.extend(word.glyphs.clone());
+                        words.push(word.clone());
                     }
                 }
 
+                if levels[run.start].is_rtl() {
+                    words.reverse();
+                }
+
+                for word in words {
+                    result.glyphs.extend(word.glyphs.clone());
+                }
+
+                if word_break_reached {
+                    break;
+                }
             }
         }
 

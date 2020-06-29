@@ -205,7 +205,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let mut paint = Paint::color(Color::black());
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Light);
-    paint.set_text_align(Align::Right);
+    //paint.set_text_align(Align::Right);
     paint.set_font_size(font_size);
 
     let mut cursor_y = y;
@@ -213,8 +213,8 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let linegap = 3.0;
 
     for line in text.lines() {
-        //if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
-        if let Ok(res) = canvas.fill_text(canvas.width(), cursor_y, line, paint) {
+        if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
+        //if let Ok(res) = canvas.fill_text(canvas.width(), cursor_y, line, paint) {
             cursor_y += res.height + linegap;
         }
     }
@@ -387,6 +387,8 @@ editorial, educational, religious, scientific, spiritual, and commercial writing
 characteristics and requirements of appropriate typefaces and their fonts or styles.
 
 مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار عائلة الخط وحجم وطول الخط والمسافة بين السطور
+
+مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
