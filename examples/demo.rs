@@ -261,8 +261,8 @@ fn main() {
 
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
 
-    let text = "This is longer chunk of text.\n  \n  Would have used lorem ipsum but she    was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
-
+    let text = "This is longer chunk of text.\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
+    
     canvas.save();
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 255));
@@ -271,23 +271,27 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Top);
 
-    let mut start = 0;
+    let mut y = y;
 
-    let text = "Latin اللغة العربية Кирилица тест ";
+    for line in text.lines() {
+        let mut start = 0;
 
-    if let Ok(res) = canvas.fill_text(x, y, text, paint) {
-        //dbg!(&res);
-
-        for glyph in &res.glyphs {
-            //dbg!(&text[glyph.byte_index..]);
+        while start < line.len() {
+            let substr = &line[start..];
+            
+            if let Ok(index) = canvas.break_text(width as u32, substr, paint) {
+                if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
+                    y += res.height;
+                }
+    
+                start += &substr[0..index].len();
+            } else {
+                break;
+            }
         }
+
+        y += 14.0;
     }
-
-    //dbg!("==");
-
-    // if let Ok(index) = canvas.break_text(width, text, paint) {
-    //     let _ = canvas.fill_text(x, y, &text[0..index], paint);
-    // }
 
     canvas.restore();
 }

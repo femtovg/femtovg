@@ -208,16 +208,36 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     //paint.set_text_align(Align::Right);
     paint.set_font_size(font_size);
 
-    let mut cursor_y = y;
+    let width = canvas.width();
+    let mut y = y;
 
-    let linegap = 3.0;
+    // let linegap = 3.0;
+
+    // for line in text.lines() {
+    //     if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
+    //     //if let Ok(res) = canvas.fill_text(canvas.width(), cursor_y, line, paint) {
+    //         cursor_y += res.height + linegap;
+    //     }
+    // }
 
     for line in text.lines() {
-        if let Ok(res) = canvas.fill_text(x, cursor_y, line, paint) {
-        //if let Ok(res) = canvas.fill_text(canvas.width(), cursor_y, line, paint) {
-            cursor_y += res.height + linegap;
+        let mut start = 0;
+
+        while start < line.len() {
+            let substr = &line[start..];
+            
+            if let Ok(index) = canvas.break_text(width as u32, substr, paint) {
+                if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
+                    y += res.height;
+                }
+    
+                start += &substr[0..index].len();
+            } else {
+                break;
+            }
         }
     }
+    
 }
 
 fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {

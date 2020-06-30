@@ -15,8 +15,8 @@ TODO:
     - Text todos:
         - Review if TextStyle struct is even needed - it's best to use paint itself
         - Review Font api and move shared functionality from the shaper & renderer to it
-        
         - Laying out paragraphs - iterator design + correct breaking
+        
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
@@ -838,9 +838,9 @@ impl<T> Canvas<T> where T: Renderer {
 
         let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
 
-        let index = layout.glyphs.last().map(|glyph| glyph.byte_index).unwrap_or(0);
+        //let index = layout.glyphs.last().map(|glyph| glyph.byte_index).unwrap_or(0);
 
-        Ok(index)
+        Ok(layout.final_byte_index)
     }
 
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
@@ -868,7 +868,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         self.transform_text_paint(&mut paint);
 
-        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, Some(self.width as u32))?;
+        let layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.

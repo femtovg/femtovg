@@ -1,7 +1,5 @@
 
-use std::str::CharIndices;
 use std::hash::{Hash, Hasher};
-use std::iter::DoubleEndedIterator;
 
 use lru::LruCache;
 use fnv::{FnvHasher, FnvBuildHasher};
@@ -105,12 +103,14 @@ impl Shaper {
             y: 0.0,
             width: 0.0,
             height: 0.0,
-            glyphs: Vec::with_capacity(text.len())
+            glyphs: Vec::with_capacity(text.len()),
+            final_byte_index: 0
         };
 
         let bidi_info = BidiInfo::new(&text, Some(unicode_bidi::Level::ltr()));
+        let paragraph = &bidi_info.paragraphs[0];
 
-        'outer: for paragraph in &bidi_info.paragraphs {
+        //'outer: for paragraph in &bidi_info.paragraphs {
             let line = paragraph.range.clone();
 
             let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
@@ -130,6 +130,7 @@ impl Shaper {
 
                 let mut words = Vec::new();
                 let mut word_break_reached = false;
+                let mut byte_index = run.start;
 
                 for word in sub_text.split_word_bounds() {
                     let id = ShapingId::new(paint, word);
@@ -140,6 +141,8 @@ impl Shaper {
                     }
 
                     if let Some(Ok(word)) = self.cache.get(&id) {
+                        let mut word = word.clone();
+
                         if let Some(max_width) = max_width {
                             if result.width + word.width > max_width as f32 {
                                 word_break_reached = true;
@@ -148,8 +151,15 @@ impl Shaper {
                         }
                         
                         result.width += word.width;
-                        words.push(word.clone());
+
+                        for glyph in &mut word.glyphs {
+                            glyph.byte_index = byte_index + glyph.byte_index;
+                        }
+
+                        words.push(word);
                     }
+
+                    byte_index += word.len();
                 }
 
                 if levels[run.start].is_rtl() {
@@ -160,11 +170,13 @@ impl Shaper {
                     result.glyphs.extend(word.glyphs.clone());
                 }
 
+                result.final_byte_index = byte_index;
+
                 if word_break_reached {
-                    break 'outer;
+                    break;
                 }
             }
-        }
+        //}
 
         Self::layout(x, y, fontdb, &mut result, paint)?;
 
@@ -216,10 +228,10 @@ impl Shaper {
 
                 //let start_index = run.start + info.cluster as usize;
                 //debug_assert!(text.get(start_index..).is_some());
-
+                
                 let mut g = ShapedGlyph {
                     c: c,
-                    byte_index: 0, // TODO
+                    byte_index: info.cluster as usize,
                     font_id: font.id,
                     codepoint: info.codepoint,
                     advance_x: position.x_advance as f32 * scale,
@@ -313,62 +325,4 @@ impl Shaper {
     //
     //     buffer
     // }
-}
-
-trait SplitWhitespaceInclusive {
-    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter;
-}
-
-impl SplitWhitespaceInclusive for &str {
-    fn split_whitespace_inclusive(&self) -> SplitWhitespaceInclusiveIter {
-        SplitWhitespaceInclusiveIter {
-            start: 0,
-            end: self.len(),
-            string: self,
-            char_indices: self.char_indices()
-        }
-    }
-}
-
-struct SplitWhitespaceInclusiveIter<'a> {
-    start: usize,
-    end: usize,
-    string: &'a str,
-    char_indices: CharIndices<'a>
-}
-
-impl<'a> Iterator for SplitWhitespaceInclusiveIter<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<&'a str> {
-        let mut res = None;
-
-        if let Some((index, _)) = self.char_indices.find(|(_, c)| c.is_ascii_whitespace()) {
-            res = Some(&self.string[self.start..index]);
-            self.start = index;
-        } else if self.start < self.end {
-            res = Some(&self.string[self.start..self.end]);
-            self.start = self.end;
-        }
-
-        res
-    }
-}
-
-impl<'a> DoubleEndedIterator for SplitWhitespaceInclusiveIter<'a> {
-
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let mut res = None;
-
-        if let Some((index, _)) = self.char_indices.rfind(|(_, c)| c.is_ascii_whitespace()) {
-            res = Some(&self.string[index..self.end]);
-            self.end = index;
-        } else if self.start < self.end {
-            res = Some(&self.string[self.start..self.end]);
-            self.start = self.end;
-        }
-
-        res
-    }
-
 }
