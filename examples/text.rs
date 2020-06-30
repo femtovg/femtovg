@@ -394,3 +394,7 @@ Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at li
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
 Etiam non malesuada felis, nec fringilla quam.
 "#;
+
+// const LOREM_TEXT: &str = r#"
+// مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
+// "#;

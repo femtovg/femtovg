@@ -108,13 +108,13 @@ impl Shaper {
             glyphs: Vec::with_capacity(text.len())
         };
 
-        let bidi_info = BidiInfo::new(&text, None);
+        let bidi_info = BidiInfo::new(&text, Some(unicode_bidi::Level::ltr()));
 
-        for paragraph in &bidi_info.paragraphs {
+        'outer: for paragraph in &bidi_info.paragraphs {
             let line = paragraph.range.clone();
 
             let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
-            
+
             for run in runs.iter() {
                 let sub_text = &text[run.clone()];
 
@@ -161,7 +161,7 @@ impl Shaper {
                 }
 
                 if word_break_reached {
-                    break;
+                    break 'outer;
                 }
             }
         }
