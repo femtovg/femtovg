@@ -226,7 +226,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
         while start < line.len() {
             let substr = &line[start..];
             
-            if let Ok(index) = canvas.break_text(width as u32, substr, paint) {
+            if let Ok(index) = canvas.break_text(width, substr, paint) {
                 if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
                     y += res.height;
                 }

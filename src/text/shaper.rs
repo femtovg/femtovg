@@ -97,7 +97,7 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<u32>) -> Result<TextLayout, ErrorKind> {
+    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<f32>) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
@@ -108,9 +108,8 @@ impl Shaper {
         };
 
         let bidi_info = BidiInfo::new(&text, Some(unicode_bidi::Level::ltr()));
-        let paragraph = &bidi_info.paragraphs[0];
 
-        //'outer: for paragraph in &bidi_info.paragraphs {
+        if let Some(paragraph) = bidi_info.paragraphs.get(0) {
             let line = paragraph.range.clone();
 
             let (levels, runs) = bidi_info.visual_runs(&paragraph, line);
@@ -144,7 +143,7 @@ impl Shaper {
                         let mut word = word.clone();
 
                         if let Some(max_width) = max_width {
-                            if result.width + word.width > max_width as f32 {
+                            if result.width + word.width >= max_width {
                                 word_break_reached = true;
                                 break;
                             }
@@ -154,6 +153,7 @@ impl Shaper {
 
                         for glyph in &mut word.glyphs {
                             glyph.byte_index = byte_index + glyph.byte_index;
+                            debug_assert!(text.get(glyph.byte_index..).is_some());
                         }
 
                         words.push(word);
@@ -176,7 +176,7 @@ impl Shaper {
                     break;
                 }
             }
-        //}
+        }
 
         Self::layout(x, y, fontdb, &mut result, paint)?;
 
