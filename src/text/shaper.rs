@@ -67,7 +67,7 @@ impl ShapingId {
         word.hash(&mut hasher);
 
         ShapingId {
-            size: (paint.font_size() * 10.0).trunc() as u32,
+            size: (paint.font_size * 10.0).trunc() as u32,
             word_hash: hasher.finish(),
             weight: paint.font_weight,
             width_class: paint.font_width_class,
@@ -224,7 +224,7 @@ impl Shaper {
                     has_missing = true;
                 }
 
-                let scale = font.scale(paint.font_size as f32);
+                let scale = font.scale(paint.font_size);
 
                 //let start_index = run.start + info.cluster as usize;
                 //debug_assert!(text.get(start_index..).is_some());
@@ -279,8 +279,8 @@ impl Shaper {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             
             // Baseline alignment
-            let ascender = font.ascender(paint.font_size as f32);
-            let descender = font.descender(paint.font_size as f32);
+            let ascender = font.ascender(paint.font_size);
+            let descender = font.descender(paint.font_size);
 
             let alignment_offset_y = match paint.text_baseline {
                 Baseline::Top => ascender,
@@ -292,7 +292,7 @@ impl Shaper {
             glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
             glyph.y = cursor_y + glyph.offset_y - glyph.bearing_y + alignment_offset_y;
 
-            height = height.max(font.height(paint.font_size as f32));
+            height = height.max(font.height(paint.font_size));
             y = y.min(glyph.y);
 
             cursor_x += glyph.advance_x + paint.letter_spacing;

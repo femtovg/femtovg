@@ -272,28 +272,23 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     paint.set_text_baseline(Baseline::Top);
 
     let mut y = y;
-    let mut height = 14.0;
 
-    for line in text.lines() {
-        let mut start = 0;
+    let mut start = 0;
 
-        while start < line.len() {
-            let substr = &line[start..];
-            
-            if let Ok(index) = canvas.break_text(width, substr, paint) {
-                if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
-                    y += res.height;
-                    height = res.height;
-                }
-    
-                start += &substr[0..index].len();
-            } else {
-                break;
+    while start < text.len() {
+        let substr = &text[start..];
+        
+        if let Ok(index) = canvas.break_text(width, substr, paint) {
+            if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
+                y += res.height;
             }
-        }
 
-        y += height;
+            start += &substr[0..index].len();
+        } else {
+            break;
+        }
     }
+
 
     canvas.restore();
 }

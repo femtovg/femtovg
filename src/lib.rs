@@ -16,11 +16,11 @@ TODO:
         - Review if TextStyle struct is even needed - it's best to use paint itself
         - Review Font api and move shared functionality from the shaper & renderer to it
         - Laying out paragraphs - iterator design + correct breaking
+        - Floating point font sizes
         
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
-        - Floating point font sizes
     - Fix blurring
     - Finish demo text
     - Integrate euclid

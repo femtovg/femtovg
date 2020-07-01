@@ -25,7 +25,7 @@ use super::{
     ShapedGlyph,
 };
 
-const GLYPH_PADDING: u32 = 1;
+const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
 const MAX_TEXTURE_SIZE: usize = 4096;
 
@@ -194,7 +194,7 @@ fn render_glyph<T: Renderer>(
 
     let (mut path, scale) = {
         let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let scale = font.scale(paint.font_size as f32);
+        let scale = font.scale(paint.font_size);
 
         let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
             font_glyph.path.clone()
@@ -353,7 +353,7 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
     for glyph in &text_layout.glyphs {
         let (mut path, scale) = {
             let font = canvas.fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let scale = font.scale(paint.font_size as f32);
+            let scale = font.scale(paint.font_size);
 
             let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
                 font_glyph.path.clone()
