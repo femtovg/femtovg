@@ -60,7 +60,7 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
-    let mut font_size = 18;
+    let mut font_size = 18.0;
 
     let mut x = 5.0;
     let mut y = 380.0;
@@ -96,8 +96,8 @@ fn main() {
                 }
                 WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
-                        font_size = (font_size as i32 + *y as i32) as u16;
-                        font_size = font_size.max(2);
+                        font_size = font_size + *y / 2.0;
+                        font_size = font_size.max(2.0);
                     },
                     _ => ()
                 }
@@ -150,7 +150,7 @@ fn main() {
     });
 }
 
-fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
+fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
@@ -177,7 +177,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     }
 }
 
-fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
+fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
     let alignments = [Align::Left, Align::Center, Align::Right];
 
     let mut path = Path::new();
@@ -200,7 +200,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     }
 }
 
-fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16, text: &str) {
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32, text: &str) {
 
     let mut paint = Paint::color(Color::black());
     paint.set_font_family("Roboto");
@@ -246,7 +246,7 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     for i in 4..23 {
         let mut paint = Paint::color(Color::black());
         paint.set_font_family("Roboto");
-        paint.set_font_size(i);
+        paint.set_font_size(i as f32);
 
         if let Ok(res) = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint) {
             cursor_y += res.height;
@@ -259,7 +259,7 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_line_width(12.0);
-    paint.set_font_size(72);
+    paint.set_font_size(72.0);
     paint.set_font_blur(2);
     let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
 
@@ -281,13 +281,13 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_line_width(6.0);
-    paint.set_font_size(72);
+    paint.set_font_size(72.0);
     let _ = canvas.stroke_text(x, y, "RUST", paint);
 
     let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
-    paint.set_font_size(72);
+    paint.set_font_size(72.0);
     let _ = canvas.fill_text(x, y, "RUST", paint);
 }
 
@@ -306,18 +306,18 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_line_width(4.0);
-    paint.set_font_size(72);
+    paint.set_font_size(72.0);
     let _ = canvas.stroke_text(x, y, text, paint);
 
     let mut paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50);
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
-    paint.set_font_size(72);
+    paint.set_font_size(72.0);
     let _ = canvas.fill_text(x, y, text, paint);
 }
 
-fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: u16) {
+fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
     let mut paint = Paint::color(Color::rgb(34, 34, 34));
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
@@ -376,20 +376,20 @@ impl PerfGraph {
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(12);
+        text_paint.set_font_size(12.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
     	let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(14);
+        text_paint.set_font_size(14.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
     	let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
-        text_paint.set_font_size(12);
+        text_paint.set_font_size(12.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);

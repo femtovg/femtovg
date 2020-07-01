@@ -33,7 +33,7 @@ const MAX_TEXTURE_SIZE: usize = 4096;
 pub struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
-    size: u16,
+    size: u32,
     blur: u8,
     line_width: u32,
     render_mode: RenderMode
@@ -44,9 +44,9 @@ impl RenderedGlyphId {
         RenderedGlyphId {
             glyph_index,
             font_id,
-            size: paint.font_size,
+            size: (paint.font_size * 10.0).trunc() as u32,
             blur: paint.font_blur,
-            line_width: (paint.line_width * 100.0) as u32,
+            line_width: (paint.line_width * 10.0).trunc() as u32,
             render_mode: mode
         }
     }

@@ -273,20 +273,20 @@ impl PerfGraph {
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(12);
+        text_paint.set_font_size(12.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
     	let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(14);
+        text_paint.set_font_size(14.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
     	let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
-        text_paint.set_font_size(12);
+        text_paint.set_font_size(12.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);

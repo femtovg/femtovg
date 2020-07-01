@@ -519,7 +519,7 @@ impl Game {
         paint.set_text_align(Align::Center);
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
-        paint.set_font_size(80);
+        paint.set_font_size(80.0);
 
         paint.set_line_width(4.0);
         let _ = canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
@@ -531,7 +531,7 @@ impl Game {
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
         paint.set_font_family("Roboto");
-        paint.set_font_size(16);
+        paint.set_font_size(16.0);
         let text = "Click anywhere to START.";
         let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
     }
@@ -627,14 +627,14 @@ impl Game {
         paint.set_text_align(Align::Right);
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
-        paint.set_font_size(22);
+        paint.set_font_size(22.0);
         let _ = canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), paint);
 
         // score
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
-        paint.set_font_size(22);
+        paint.set_font_size(22.0);
         let _ = canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), paint);
     }
 
@@ -682,7 +682,7 @@ impl Game {
         paint.set_text_align(Align::Center);
         paint.set_font_family("Roboto");
         paint.set_font_weight(Weight::Bold);
-        paint.set_font_size(80);
+        paint.set_font_size(80.0);
 
         let offset = 30.0;
 
@@ -696,7 +696,7 @@ impl Game {
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
         paint.set_text_align(Align::Center);
         paint.set_font_family("Roboto");
-        paint.set_font_size(16);
+        paint.set_font_size(16.0);
         let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset * 2.0, subtext, paint);
     }
 }
@@ -748,7 +748,7 @@ impl Powerup {
         text_paint.set_text_baseline(Baseline::Middle);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
-        text_paint.set_font_size(16);
+        text_paint.set_font_size(16.0);
         let _ = canvas.fill_text(self.rect.center().x, self.rect.center().y, &format!("{:?}", self.ty), text_paint);
     }
 }

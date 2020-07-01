@@ -94,7 +94,7 @@ pub struct Paint<'a> {
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
     pub(crate) font_family: &'a str,
-    pub(crate) font_size: u16,
+    pub(crate) font_size: f32,
     pub(crate) font_blur: u8,
     pub(crate) font_weight: Weight,
     pub(crate) font_width_class: WidthClass,
@@ -119,7 +119,7 @@ impl Default for Paint<'_> {
             line_cap_end: Default::default(),
             line_join: Default::default(),
             font_family: "NotoSans",
-            font_size: 16,
+            font_size: 16.0,
             font_blur: 0,
             font_weight: Weight::Normal,
             font_width_class: WidthClass::Normal,
@@ -327,14 +327,14 @@ impl<'a> Paint<'a> {
     /// Returns the current font size
     ///
     /// Only has effect on canvas text operations
-    pub fn font_size(&self) -> u16 {
+    pub fn font_size(&self) -> f32 {
         self.font_size
     }
 
     /// Sets the font size.
     ///
     /// Only has effect on canvas text operations
-    pub fn set_font_size(&mut self, size: u16) {
+    pub fn set_font_size(&mut self, size: f32) {
         self.font_size = size;
     }
 

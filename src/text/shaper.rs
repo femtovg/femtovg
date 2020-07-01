@@ -54,7 +54,7 @@ struct ShapedWord {
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct ShapingId {
-    size: u16,
+    size: u32,
     word_hash: u64,
     weight: Weight,
     width_class: WidthClass,
@@ -67,7 +67,7 @@ impl ShapingId {
         word.hash(&mut hasher);
 
         ShapingId {
-            size: paint.font_size(),
+            size: (paint.font_size() * 10.0).trunc() as u32,
             word_hash: hasher.finish(),
             weight: paint.font_weight,
             width_class: paint.font_width_class,

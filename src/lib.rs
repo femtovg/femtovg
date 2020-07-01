@@ -857,7 +857,7 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn transform_text_paint(&self, paint: &mut Paint) {
         let scale = self.font_scale() * self.device_px_ratio;
-        paint.font_size = (paint.font_size as f32 * scale) as u16;
+        paint.font_size = paint.font_size * scale;
         paint.letter_spacing = paint.letter_spacing * scale;
         paint.font_blur = (paint.font_blur as f32 * scale) as u8;
         paint.line_width = paint.line_width * scale;
@@ -875,7 +875,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if false && paint.font_size > 40 {
+        if false && paint.font_size > 40.0 {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
             let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
