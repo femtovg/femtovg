@@ -1,9 +1,8 @@
-
-use rgb::*;
-use rgb::alt::GRAY8;
-use imgref::*;
 use bitflags::bitflags;
 use generational_arena::{Arena, Index};
+use imgref::*;
+use rgb::alt::GRAY8;
+use rgb::*;
 
 #[cfg(feature = "image-loading")]
 use ::image::DynamicImage;
@@ -11,10 +10,7 @@ use ::image::DynamicImage;
 #[cfg(feature = "image-loading")]
 use std::convert::TryFrom;
 
-use crate::{
-    ErrorKind,
-    Renderer
-};
+use crate::{ErrorKind, Renderer};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub Index);
@@ -23,7 +19,7 @@ pub struct ImageId(pub Index);
 pub enum PixelFormat {
     Rgb8,
     Rgba8,
-    Gray8
+    Gray8,
 }
 
 bitflags! {
@@ -89,25 +85,22 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     fn try_from(src: &'a DynamicImage) -> Result<Self, ErrorKind> {
         match src {
             ::image::DynamicImage::ImageLuma8(img) => {
-                let src: Img<&[GRAY8]> = Img::new(
-                    img.as_ref().as_pixels(),
-                    img.width() as usize,
-                    img.height() as usize
-                );
+                let src: Img<&[GRAY8]> =
+                    Img::new(img.as_ref().as_pixels(), img.width() as usize, img.height() as usize);
 
                 Ok(ImageSource::from(src))
-            },
+            }
             ::image::DynamicImage::ImageRgb8(img) => {
                 let src = Img::new(img.as_ref().as_rgb(), img.width() as usize, img.height() as usize);
                 Ok(ImageSource::from(src))
-            },
+            }
             ::image::DynamicImage::ImageRgba8(img) => {
                 let src = Img::new(img.as_ref().as_rgba(), img.width() as usize, img.height() as usize);
                 Ok(ImageSource::from(src))
-            },
+            }
             // TODO: if format is not supported maybe we should convert it here,
             // Buut that is an expensive operation on the render thread that will remain hidden from the user
-            _ => Err(ErrorKind::UnsuportedImageFromat)
+            _ => Err(ErrorKind::UnsuportedImageFromat),
         }
     }
 }
@@ -117,12 +110,17 @@ pub struct ImageInfo {
     flags: ImageFlags,
     width: usize,
     height: usize,
-    format: PixelFormat
+    format: PixelFormat,
 }
 
 impl ImageInfo {
     pub fn new(flags: ImageFlags, width: usize, height: usize, format: PixelFormat) -> Self {
-        Self { flags, width, height, format }
+        Self {
+            flags,
+            width,
+            height,
+            format,
+        }
     }
 
     pub fn flags(&self) -> ImageFlags {
@@ -173,7 +171,14 @@ impl<T> ImageStore<T> {
         self.0.get_mut(id.0).map(|inner| &mut inner.1)
     }
 
-    pub fn update<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
+    pub fn update<R: Renderer<Image = T>>(
+        &mut self,
+        renderer: &mut R,
+        id: ImageId,
+        data: ImageSource,
+        x: usize,
+        y: usize,
+    ) -> Result<(), ErrorKind> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(&mut image.1, data, x, y)?;
         } else {

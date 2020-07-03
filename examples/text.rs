@@ -1,34 +1,13 @@
 use std::time::Instant;
 
 use glutin::{
-    ContextBuilder,
+    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
-    event_loop::{
-        ControlFlow, 
-        EventLoop
-    },
-    event::{
-        Event,
-        WindowEvent,
-        ElementState,
-        VirtualKeyCode,
-        KeyboardInput
-    }
+    ContextBuilder,
 };
 
-use gpucanvas::{
-    Renderer,
-    Canvas,
-    Color,
-    Paint,
-    Align,
-    Baseline,
-    Path,
-    ImageId,
-    ImageFlags,
-    Weight,
-    renderer::OpenGl
-};
+use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, ImageFlags, ImageId, Paint, Path, Renderer, Weight};
 
 fn main() {
     let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
@@ -43,7 +22,11 @@ fn main() {
 
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(window_size.width as u32, window_size.height as u32, windowed_context.window().scale_factor() as f32);
+    canvas.set_size(
+        window_size.width as u32,
+        window_size.height as u32,
+        windowed_context.window().scale_factor() as f32,
+    );
 
     let _ = canvas.add_font("examples/assets/NotoSans-Regular.ttf");
     let _ = canvas.add_font("examples/assets/Roboto-Regular.ttf");
@@ -52,7 +35,9 @@ fn main() {
     let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
-    let image_id = canvas.load_image_file("examples/assets/pattern.jpg", flags).expect("Cannot create image");
+    let image_id = canvas
+        .load_image_file("examples/assets/pattern.jpg", flags)
+        .expect("Cannot create image");
 
     let start = Instant::now();
     let mut prevt = start;
@@ -73,10 +58,16 @@ fn main() {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit
-                }
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode: Some(keycode), state: ElementState::Pressed, .. }, .. } => {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            virtual_keycode: Some(keycode),
+                            state: ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => {
                     if *keycode == VirtualKeyCode::W {
                         y -= 0.1;
                     }
@@ -93,15 +84,17 @@ fn main() {
                         x += 0.1;
                     }
                 }
-                WindowEvent::MouseWheel { device_id: _, delta, .. } => match delta {
+                WindowEvent::MouseWheel {
+                    device_id: _, delta, ..
+                } => match delta {
                     glutin::event::MouseScrollDelta::LineDelta(_, y) => {
                         font_size = font_size + *y / 2.0;
                         font_size = font_size.max(2.0);
-                    },
-                    _ => ()
-                }
+                    }
+                    _ => (),
+                },
                 _ => (),
-            }
+            },
             Event::RedrawRequested(_) => {
                 let dpi_factor = windowed_context.window().scale_factor();
                 let size = windowed_context.window().inner_size();
@@ -121,7 +114,7 @@ fn main() {
                 draw_inc_size(&mut canvas, 300.0, 10.0);
 
                 draw_complex(&mut canvas, 300.0, 340.0, font_size);
-                
+
                 draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
                 draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
                 draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
@@ -131,7 +124,12 @@ fn main() {
                 paint.set_font_weight(Weight::Bold);
                 paint.set_text_baseline(Baseline::Top);
                 paint.set_text_align(Align::Right);
-                let _ = canvas.fill_text(size.width as f32 - 10.0, 10.0, format!("Scroll to increase / decrease font size. Current: {}", font_size), paint);
+                let _ = canvas.fill_text(
+                    size.width as f32 - 10.0,
+                    10.0,
+                    format!("Scroll to increase / decrease font size. Current: {}", font_size),
+                    paint,
+                );
 
                 canvas.save();
                 canvas.reset();
@@ -141,9 +139,7 @@ fn main() {
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => {
-                windowed_context.window().request_redraw()
-            }
+            Event::MainEventsCleared => windowed_context.window().request_redraw(),
             _ => (),
         }
     });
@@ -209,7 +205,9 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let width = canvas.width();
     let mut y = y;
 
-    let lines = canvas.break_text_vec(width, text, paint).expect("Error while breaking text");
+    let lines = canvas
+        .break_text_vec(width, text, paint)
+        .expect("Error while breaking text");
 
     for line_range in lines {
         if let Ok(res) = canvas.fill_text(x, y, &text[line_range], paint) {
@@ -221,7 +219,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
 
     // while start < text.len() {
     //     let substr = &text[start..];
-        
+
     //     if let Ok(index) = canvas.break_text(width, substr, paint) {
     //         if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
     //             y += res.height;
@@ -278,7 +276,14 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     paint.set_font_size(72.0);
     let _ = canvas.stroke_text(x, y, "RUST", paint);
 
-    let mut paint = Paint::linear_gradient(x, y - 60.0, x, y, Color::rgba(225, 133, 82, 255), Color::rgba(93, 55, 70, 255));
+    let mut paint = Paint::linear_gradient(
+        x,
+        y - 60.0,
+        x,
+        y,
+        Color::rgba(225, 133, 82, 255),
+        Color::rgba(93, 55, 70, 255),
+    );
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Bold);
     paint.set_font_size(72.0);
@@ -286,7 +291,6 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
 }
 
 fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
-
     let mut paint = Paint::color(Color::hex("#7300AB"));
     paint.set_line_width(3.0);
     let mut path = Path::new();
@@ -316,7 +320,12 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
-    let _ = canvas.fill_text(x, y, "Latin اللغة العربية Кирилица тест iiiiiiiiiiiiiiiiiiiiiiiiiiiii\nasdasd", paint);
+    let _ = canvas.fill_text(
+        x,
+        y,
+        "Latin اللغة العربية Кирилица тест iiiiiiiiiiiiiiiiiiiiiiiiiiiii\nasdasd",
+        paint,
+    );
     //let _ = canvas.fill_text(x, y, "اللغة العربية", paint);
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", paint);
 }
@@ -324,7 +333,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
 struct PerfGraph {
     history_count: usize,
     values: Vec<f32>,
-    head: usize
+    head: usize,
 }
 
 impl PerfGraph {
@@ -332,7 +341,7 @@ impl PerfGraph {
         Self {
             history_count: 100,
             values: vec![0.0; 100],
-            head: Default::default()
+            head: Default::default(),
         }
     }
 
@@ -359,28 +368,30 @@ impl PerfGraph {
         path.move_to(x, y + h);
 
         for i in 0..self.history_count {
-            let mut v = 1.0 / (0.00001 + self.values[(self.head+i) % self.history_count]);
-            if v > 80.0 { v = 80.0; }
-            let vx = x + (i as f32 / (self.history_count-1) as f32) * w;
+            let mut v = 1.0 / (0.00001 + self.values[(self.head + i) % self.history_count]);
+            if v > 80.0 {
+                v = 80.0;
+            }
+            let vx = x + (i as f32 / (self.history_count - 1) as f32) * w;
             let vy = y + h - ((v / 80.0) * h);
             path.line_to(vx, vy);
         }
 
-        path.line_to(x+w, y+h);
+        path.line_to(x + w, y + h);
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_font_weight(Weight::Light);
-    	let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
+        let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14.0);
         text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
-    	let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
+        let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12.0);
@@ -388,7 +399,7 @@ impl PerfGraph {
         text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
-    	let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
+        let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
     }
 }
 

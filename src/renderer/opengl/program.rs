@@ -1,6 +1,5 @@
-
-use std::ptr;
 use std::ffi::{CStr, CString};
+use std::ptr;
 
 use crate::ErrorKind;
 
@@ -10,7 +9,7 @@ use super::gl::types::*;
 const GLSL_VERSION: &str = "#version 100";
 
 pub(crate) struct Shader {
-    id: GLuint
+    id: GLuint,
 }
 
 impl Shader {
@@ -25,11 +24,15 @@ impl Shader {
 
         // Validate
         let mut success: GLint = 1;
-        unsafe { gl::GetShaderiv(id, gl::COMPILE_STATUS, &mut success); }
+        unsafe {
+            gl::GetShaderiv(id, gl::COMPILE_STATUS, &mut success);
+        }
 
         if success == 0 {
             let mut len = 0;
-            unsafe { gl::GetShaderiv(id, gl::INFO_LOG_LENGTH, &mut len); }
+            unsafe {
+                gl::GetShaderiv(id, gl::INFO_LOG_LENGTH, &mut len);
+            }
 
             let error = create_whitespace_cstring_with_len(len as usize);
 
@@ -40,15 +43,17 @@ impl Shader {
             let name = match kind {
                 gl::VERTEX_SHADER => "Vertex stage",
                 gl::FRAGMENT_SHADER => "Fragment stage",
-                _ => "Shader stage"
+                _ => "Shader stage",
             };
 
-            return Err(ErrorKind::ShaderCompileError(format!("{}: {}", name, error.to_string_lossy())));
+            return Err(ErrorKind::ShaderCompileError(format!(
+                "{}: {}",
+                name,
+                error.to_string_lossy()
+            )));
         }
 
-        Ok(Shader {
-            id
-        })
+        Ok(Shader { id })
     }
 
     pub fn id(&self) -> GLuint {
@@ -69,22 +74,23 @@ pub(crate) struct Program {
 }
 
 impl Program {
-
     pub fn new(shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self, ErrorKind> {
         let program = Self {
             id: unsafe { gl::CreateProgram() },
         };
-        
+
         // Attach stages
         for shader in shaders {
-            unsafe { gl::AttachShader(program.id, shader.id()); }
+            unsafe {
+                gl::AttachShader(program.id, shader.id());
+            }
         }
-        
+
         for (i, loc) in attrib_locations.iter().enumerate() {
-			unsafe {
-				gl::BindAttribLocation(program.id, i as u32, CString::new(*loc)?.as_ptr());
-			}
-		}
+            unsafe {
+                gl::BindAttribLocation(program.id, i as u32, CString::new(*loc)?.as_ptr());
+            }
+        }
 
         unsafe {
             gl::LinkProgram(program.id);
@@ -92,11 +98,15 @@ impl Program {
 
         // Check for error
         let mut success: GLint = 1;
-        unsafe { gl::GetProgramiv(program.id, gl::LINK_STATUS, &mut success); }
+        unsafe {
+            gl::GetProgramiv(program.id, gl::LINK_STATUS, &mut success);
+        }
 
         if success == 0 {
             let mut len: GLint = 0;
-            unsafe { gl::GetProgramiv(program.id, gl::INFO_LOG_LENGTH, &mut len); }
+            unsafe {
+                gl::GetProgramiv(program.id, gl::INFO_LOG_LENGTH, &mut len);
+            }
 
             let error = create_whitespace_cstring_with_len(len as usize);
 
@@ -109,24 +119,28 @@ impl Program {
 
         // Detach stages
         for shader in shaders {
-            unsafe { gl::DetachShader(program.id, shader.id()); }
+            unsafe {
+                gl::DetachShader(program.id, shader.id());
+            }
         }
-        
+
         Ok(program)
     }
 
     pub(crate) fn bind(&self) {
-        unsafe { gl::UseProgram(self.id); }
+        unsafe {
+            gl::UseProgram(self.id);
+        }
     }
 
     pub(crate) fn unbind(&self) {
-        unsafe { gl::UseProgram(0); }
+        unsafe {
+            gl::UseProgram(0);
+        }
     }
 
     fn uniform_location(&self, name: &str) -> Result<GLint, ErrorKind> {
-        unsafe {
-            Ok(gl::GetUniformLocation(self.id, CString::new(name)?.as_ptr()))
-        }
+        unsafe { Ok(gl::GetUniformLocation(self.id, CString::new(name)?.as_ptr())) }
     }
 }
 
@@ -155,10 +169,7 @@ impl MainProgram {
         let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
         let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
 
-        let program = Program::new(
-			&[vert_shader, frag_shader],
-			&["vertex", "tcoord"]
-		)?;
+        let program = Program::new(&[vert_shader, frag_shader], &["vertex", "tcoord"])?;
 
         let loc_viewsize = program.uniform_location("viewSize")?;
         let loc_tex = program.uniform_location("tex")?;
@@ -175,15 +186,21 @@ impl MainProgram {
     }
 
     pub(crate) fn set_tex(&self, tex: GLint) {
-        unsafe { gl::Uniform1i(self.loc_tex, tex); }
+        unsafe {
+            gl::Uniform1i(self.loc_tex, tex);
+        }
     }
 
     pub(crate) fn set_masktex(&self, tex: GLint) {
-        unsafe { gl::Uniform1i(self.loc_masktex, tex); }
+        unsafe {
+            gl::Uniform1i(self.loc_masktex, tex);
+        }
     }
 
     pub(crate) fn set_view(&self, view: [f32; 2]) {
-        unsafe { gl::Uniform2fv(self.loc_viewsize, 1, view.as_ptr()); }
+        unsafe {
+            gl::Uniform2fv(self.loc_viewsize, 1, view.as_ptr());
+        }
     }
 
     pub(crate) fn set_config(&self, count: i32, ptr: *const f32) {
@@ -216,10 +233,7 @@ impl BlurProgram {
         let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
         let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
 
-        let program = Program::new(
-			&[vert_shader, frag_shader],
-			&["vertex", "tcoord"]
-		)?;
+        let program = Program::new(&[vert_shader, frag_shader], &["vertex", "tcoord"])?;
 
         let loc_image = program.uniform_location("image")?;
         let loc_horizontal = program.uniform_location("horizontal")?;
@@ -229,20 +243,26 @@ impl BlurProgram {
             program,
             loc_image,
             loc_horizontal,
-            loc_image_size
+            loc_image_size,
         })
     }
 
     pub(crate) fn set_image(&self, image: GLint) {
-        unsafe { gl::Uniform1i(self.loc_image, image); }
+        unsafe {
+            gl::Uniform1i(self.loc_image, image);
+        }
     }
 
     pub(crate) fn set_horizontal(&self, horizontal: bool) {
-        unsafe { gl::Uniform1i(self.loc_horizontal, horizontal as i32); }
+        unsafe {
+            gl::Uniform1i(self.loc_horizontal, horizontal as i32);
+        }
     }
 
     pub(crate) fn set_image_size(&self, size: [f32; 2]) {
-        unsafe { gl::Uniform2fv(self.loc_image_size, 1, size.as_ptr()); }
+        unsafe {
+            gl::Uniform2fv(self.loc_image_size, 1, size.as_ptr());
+        }
     }
 
     pub(crate) fn bind(&self) {

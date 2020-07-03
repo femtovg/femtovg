@@ -1,9 +1,8 @@
-
 use std::ops::Range;
 use std::path::Path as FilePath;
 
-use rgb::RGBA8;
 use imgref::ImgVec;
+use rgb::RGBA8;
 
 /*
 HTML5 Canvas API:
@@ -31,53 +30,24 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{
-    Weight,
-    WidthClass,
-    FontStyle,
-    Baseline,
-    Align,
-    TextLayout
-};
+pub use text::{Align, Baseline, FontStyle, TextLayout, Weight, WidthClass};
 
-use text::{
-    FontDb,
-    Shaper,
-    RenderMode,
-    TextRendererContext
-};
+use text::{FontDb, RenderMode, Shaper, TextRendererContext};
 
 mod image;
-pub use crate::image::{
-    ImageId,
-    ImageInfo,
-    ImageFlags,
-    ImageStore,
-    PixelFormat,
-    ImageSource,
-};
+pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, ImageStore, PixelFormat};
 
 mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{
-    Renderer,
-    RenderTarget
-};
+pub use renderer::{RenderTarget, Renderer};
 
-use renderer::{
-    Vertex,
-    Params,
-    Command,
-    CommandType,
-    ShaderType,
-    Drawable,
-};
+use renderer::{Command, CommandType, Drawable, Params, ShaderType, Vertex};
 
 pub(crate) mod geometry;
-use geometry::*;
 pub use geometry::Transform2D;
+use geometry::*;
 
 mod paint;
 pub use paint::Paint;
@@ -85,15 +55,12 @@ use paint::PaintFlavor;
 
 mod path;
 use path::Convexity;
-pub use path::{
-    Path,
-    Solidity
-};
+pub use path::{Path, Solidity};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FillRule {
     EvenOdd,
-    NonZero
+    NonZero,
 }
 
 impl Default for FillRule {
@@ -114,7 +81,7 @@ pub enum BlendFactor {
     OneMinusSrcAlpha,
     DstAlpha,
     OneMinusDstAlpha,
-    SrcAlphaSaturate
+    SrcAlphaSaturate,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -129,7 +96,7 @@ pub enum CompositeOperation {
     DestinationAtop,
     Lighter,
     Copy,
-    Xor
+    Xor,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -153,7 +120,7 @@ impl CompositeOperationState {
             CompositeOperation::DestinationAtop => (BlendFactor::OneMinusDstAlpha, BlendFactor::SrcAlpha),
             CompositeOperation::Lighter => (BlendFactor::One, BlendFactor::One),
             CompositeOperation::Copy => (BlendFactor::One, BlendFactor::Zero),
-            CompositeOperation::Xor => (BlendFactor::OneMinusDstAlpha, BlendFactor::OneMinusSrcAlpha)
+            CompositeOperation::Xor => (BlendFactor::OneMinusDstAlpha, BlendFactor::OneMinusSrcAlpha),
         };
 
         Self {
@@ -181,7 +148,7 @@ impl Default for Scissor {
     fn default() -> Self {
         Self {
             transform: Default::default(),
-            extent: None
+            extent: None,
         }
     }
 }
@@ -203,7 +170,7 @@ impl Default for LineCap {
 pub enum LineJoin {
     Miter,
     Round,
-    Bevel
+    Bevel,
 }
 
 impl Default for LineJoin {
@@ -246,11 +213,13 @@ pub struct Canvas<T: Renderer> {
     fringe_width: f32,
     device_px_ratio: f32,
     tess_tol: f32,
-    dist_tol: f32
+    dist_tol: f32,
 }
 
-impl<T> Canvas<T> where T: Renderer {
-
+impl<T> Canvas<T>
+where
+    T: Renderer,
+{
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let fontdb = FontDb::new()?;
 
@@ -269,7 +238,7 @@ impl<T> Canvas<T> where T: Renderer {
             fringe_width: 1.0,
             device_px_ratio: 1.0,
             tess_tol: 0.25,
-            dist_tol: 0.01
+            dist_tol: 0.01,
         };
 
         canvas.save();
@@ -284,15 +253,19 @@ impl<T> Canvas<T> where T: Renderer {
         self.tess_tol = 0.25 / dpi;
         self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
-        
+
         self.renderer.set_size(width, height, dpi);
-        
+
         self.append_cmd(Command::new(CommandType::SetRenderTarget(RenderTarget::Screen)));
     }
 
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         let cmd = Command::new(CommandType::ClearRect {
-            x, y, width, height, color
+            x,
+            y,
+            width,
+            height,
+            color,
         });
 
         self.append_cmd(cmd);
@@ -369,8 +342,19 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Sets the composite operation with custom pixel arithmetic for RGB and alpha components separately.
-    pub fn global_composite_blend_func_separate(&mut self, src_rgb: BlendFactor, dst_rgb: BlendFactor, src_alpha: BlendFactor, dst_alpha: BlendFactor) {
-        self.state_mut().composite_operation = CompositeOperationState { src_rgb, src_alpha, dst_rgb, dst_alpha }
+    pub fn global_composite_blend_func_separate(
+        &mut self,
+        src_rgb: BlendFactor,
+        dst_rgb: BlendFactor,
+        src_alpha: BlendFactor,
+        dst_alpha: BlendFactor,
+    ) {
+        self.state_mut().composite_operation = CompositeOperationState {
+            src_rgb,
+            src_alpha,
+            dst_rgb,
+            dst_alpha,
+        }
     }
 
     /// Sets a new render target. All drawing operations after this call will happen on the provided render target
@@ -387,13 +371,23 @@ impl<T> Canvas<T> where T: Renderer {
 
     // Images
 
-    pub fn create_image_empty(&mut self, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
+    pub fn create_image_empty(
+        &mut self,
+        width: usize,
+        height: usize,
+        format: PixelFormat,
+        flags: ImageFlags,
+    ) -> Result<ImageId, ErrorKind> {
         let info = ImageInfo::new(flags, width, height, format);
 
         self.images.alloc(&mut self.renderer, info)
     }
 
-    pub fn create_image<'a, S: Into<ImageSource<'a>>>(&mut self, src: S, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
+    pub fn create_image<'a, S: Into<ImageSource<'a>>>(
+        &mut self,
+        src: S,
+        flags: ImageFlags,
+    ) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
 
@@ -406,7 +400,11 @@ impl<T> Canvas<T> where T: Renderer {
 
     /// Decode an image from file
     #[cfg(feature = "image-loading")]
-    pub fn load_image_file<P: AsRef<FilePath>>(&mut self, filename: P, flags: ImageFlags) -> Result<ImageId, ErrorKind> {
+    pub fn load_image_file<P: AsRef<FilePath>>(
+        &mut self,
+        filename: P,
+        flags: ImageFlags,
+    ) -> Result<ImageId, ErrorKind> {
         let image = ::image::open(filename)?;
 
         use std::convert::TryFrom;
@@ -429,7 +427,13 @@ impl<T> Canvas<T> where T: Renderer {
     }
 
     /// Updates image data specified by image handle.
-    pub fn update_image<'a, S: Into<ImageSource<'a>>>(&mut self, id: ImageId, src: S, x: usize, y: usize) -> Result<(), ErrorKind> {
+    pub fn update_image<'a, S: Into<ImageSource<'a>>>(
+        &mut self,
+        id: ImageId,
+        src: S,
+        x: usize,
+        y: usize,
+    ) -> Result<(), ErrorKind> {
         self.images.update(&mut self.renderer, id, src.into(), x, y)
     }
 
@@ -563,10 +567,10 @@ impl<T> Canvas<T> where T: Renderer {
         let ex = extent[0];
         let ey = extent[1];
 
-        let tex = ex*pxform[0].abs() + ey*pxform[2].abs();
-        let tey = ex*pxform[1].abs() + ey*pxform[3].abs();
+        let tex = ex * pxform[0].abs() + ey * pxform[2].abs();
+        let tey = ex * pxform[1].abs() + ey * pxform[3].abs();
 
-        let rect = Rect::new(pxform[4]-tex, pxform[5]-tey, tex*2.0, tey*2.0);
+        let rect = Rect::new(pxform[4] - tex, pxform[5] - tey, tex * 2.0, tey * 2.0);
         let res = rect.intersect(Rect::new(x, y, w, h));
 
         self.scissor(res.x, res.y, res.w, res.h);
@@ -586,8 +590,11 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
+        if path_cache.bounds.maxx < 0.0
+            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.maxy < 0.0
+            || path_cache.bounds.miny > self.height()
+        {
             return false;
         }
 
@@ -611,8 +618,11 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
+        if path_cache.bounds.maxx < 0.0
+            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.maxy < 0.0
+            || path_cache.bounds.miny > self.height()
+        {
             return;
         }
 
@@ -632,7 +642,14 @@ impl<T> Canvas<T> where T: Renderer {
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
-            let params = Params::new(&self.images, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let params = Params::new(
+                &self.images,
+                &paint,
+                &scissor,
+                self.fringe_width,
+                self.fringe_width,
+                -1.0,
+            );
 
             CommandType::ConvexFill { params }
         } else {
@@ -640,9 +657,19 @@ impl<T> Canvas<T> where T: Renderer {
             stencil_params.stroke_thr = -1.0;
             stencil_params.shader_type = ShaderType::Stencil.to_f32();
 
-            let fill_params = Params::new(&self.images, &paint, &scissor, self.fringe_width, self.fringe_width, -1.0);
+            let fill_params = Params::new(
+                &self.images,
+                &paint,
+                &scissor,
+                self.fringe_width,
+                self.fringe_width,
+                -1.0,
+            );
 
-            CommandType::ConcaveFill { stencil_params, fill_params }
+            CommandType::ConcaveFill {
+                stencil_params,
+                fill_params,
+            }
         };
 
         // GPU command
@@ -679,14 +706,18 @@ impl<T> Canvas<T> where T: Renderer {
             cmd.drawables.push(drawable);
         }
 
-        if let CommandType::ConcaveFill {..} = cmd.cmd_type {
+        if let CommandType::ConcaveFill { .. } = cmd.cmd_type {
             // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
             // over the shape area with stencil test enabled to produce the final fill. These are
             // the verts needed for the covering quad
-            self.verts.push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts.push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.miny, 0.5, 1.0));
-            self.verts.push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts.push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.miny, 0.5, 1.0));
+            self.verts
+                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.maxy, 0.5, 1.0));
+            self.verts
+                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.miny, 0.5, 1.0));
+            self.verts
+                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.maxy, 0.5, 1.0));
+            self.verts
+                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.miny, 0.5, 1.0));
 
             cmd.triangles_verts = Some((offset, 4));
         }
@@ -702,8 +733,11 @@ impl<T> Canvas<T> where T: Renderer {
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0 || path_cache.bounds.minx > self.width() ||
-            path_cache.bounds.maxy < 0.0 || path_cache.bounds.miny > self.height() {
+        if path_cache.bounds.maxx < 0.0
+            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.maxy < 0.0
+            || path_cache.bounds.miny > self.height()
+        {
             return;
         }
 
@@ -724,7 +758,7 @@ impl<T> Canvas<T> where T: Renderer {
             // Since coverage is area, scale by alpha*alpha.
             let alpha = (paint.line_width / self.fringe_width).max(0.0).min(1.0);
 
-            paint.mul_alpha(alpha*alpha);
+            paint.mul_alpha(alpha * alpha);
             paint.line_width = self.fringe_width;
         }
 
@@ -741,16 +775,33 @@ impl<T> Canvas<T> where T: Renderer {
             paint.line_cap_end,
             paint.line_join,
             paint.miter_limit,
-            self.tess_tol
+            self.tess_tol,
         );
 
         // GPU uniforms
-        let params = Params::new(&self.images, &paint, &scissor, paint.line_width, self.fringe_width, -1.0);
+        let params = Params::new(
+            &self.images,
+            &paint,
+            &scissor,
+            paint.line_width,
+            self.fringe_width,
+            -1.0,
+        );
 
         let flavor = if paint.stencil_strokes() {
-            let params2 = Params::new(&self.images, &paint, &scissor, paint.line_width, self.fringe_width, 1.0 - 0.5/255.0);
+            let params2 = Params::new(
+                &self.images,
+                &paint,
+                &scissor,
+                paint.line_width,
+                self.fringe_width,
+                1.0 - 0.5 / 255.0,
+            );
 
-            CommandType::StencilStroke { params1: params, params2 }
+            CommandType::StencilStroke {
+                params1: params,
+                params2,
+            }
         } else {
             CommandType::Stroke { params }
         };
@@ -802,21 +853,29 @@ impl<T> Canvas<T> where T: Renderer {
         Ok(())
     }
 
-    pub fn measure_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, mut paint: Paint) -> Result<TextLayout, ErrorKind> {
+    pub fn measure_text<S: AsRef<str>>(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: S,
+        mut paint: Paint,
+    ) -> Result<TextLayout, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
+        let mut layout = self
+            .shaper
+            .shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         layout.scale(invscale);
 
         Ok(layout)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
-    /// 
+    ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
         self.transform_text_paint(&mut paint);
@@ -825,12 +884,19 @@ impl<T> Canvas<T> where T: Renderer {
         let scale = self.font_scale() * self.device_px_ratio;
         let max_width = max_width * scale;
 
-        let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
+        let layout = self
+            .shaper
+            .shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
 
         Ok(layout.final_byte_index)
     }
 
-    pub fn break_text_vec<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> Result<Vec<Range<usize>>, ErrorKind> {
+    pub fn break_text_vec<S: AsRef<str>>(
+        &mut self,
+        max_width: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let text = text.as_ref();
 
         let mut res = Vec::new();
@@ -857,7 +923,13 @@ impl<T> Canvas<T> where T: Renderer {
         self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Fill)
     }
 
-    pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
+    pub fn stroke_text<S: AsRef<str>>(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<TextLayout, ErrorKind> {
         self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Stroke)
     }
 
@@ -871,14 +943,23 @@ impl<T> Canvas<T> where T: Renderer {
         paint.line_width *= scale;
     }
 
-    fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout, ErrorKind> {
+    fn draw_text(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: &str,
+        mut paint: Paint,
+        render_mode: RenderMode,
+    ) -> Result<TextLayout, ErrorKind> {
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
         self.transform_text_paint(&mut paint);
 
-        let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
+        let mut layout = self
+            .shaper
+            .shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
@@ -893,10 +974,10 @@ impl<T> Canvas<T> where T: Renderer {
                 let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
 
                 for quad in &cmd.quads {
-                    let (p0, p1) = transform.transform_point(quad.x0*invscale, quad.y0*invscale);
-                    let (p2, p3) = transform.transform_point(quad.x1*invscale, quad.y0*invscale);
-                    let (p4, p5) = transform.transform_point(quad.x1*invscale, quad.y1*invscale);
-                    let (p6, p7) = transform.transform_point(quad.x0*invscale, quad.y1*invscale);
+                    let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
+                    let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
+                    let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
+                    let (p6, p7) = transform.transform_point(quad.x0 * invscale, quad.y1 * invscale);
 
                     verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                     verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
@@ -914,7 +995,7 @@ impl<T> Canvas<T> where T: Renderer {
                 self.render_triangles(&verts, &paint);
             }
         }
-        
+
         layout.scale(invscale);
 
         Ok(layout)

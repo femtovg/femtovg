@@ -1,16 +1,17 @@
-
 // TODO: Remove this when drain_filter comes to stable rust
 
 pub(crate) trait VecRetainMut<T> {
     fn retain_mut<F>(&mut self, f: F)
-        where F: FnMut(&mut T) -> bool;
+    where
+        F: FnMut(&mut T) -> bool;
 }
 
 impl<T> VecRetainMut<T> for Vec<T> {
     // Adapted from libcollections/vec.rs in Rust
     // Primary author in Rust: Michael Darakananda
     fn retain_mut<F>(&mut self, mut f: F)
-        where F: FnMut(&mut T) -> bool
+    where
+        F: FnMut(&mut T) -> bool,
     {
         let len = self.len();
         let mut del = 0;

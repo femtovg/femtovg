@@ -1,8 +1,7 @@
-
-use std::io;
 use std::error::Error;
 use std::ffi::NulError;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 
 /// Enum with all possible canvas errors that could occur.
 #[derive(Debug)]

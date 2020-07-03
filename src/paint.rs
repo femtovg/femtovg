@@ -1,20 +1,8 @@
-
-// TODO: prefix paint creation functions with make_ or new_ 
+// TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
 use crate::geometry::Transform2D;
-use crate::{
-    Color,
-    ImageId,
-    LineCap,
-    LineJoin,
-    Baseline,
-    FillRule,
-    Align,
-    Weight,
-    WidthClass,
-    FontStyle
-};
+use crate::{Align, Baseline, Color, FillRule, FontStyle, ImageId, LineCap, LineJoin, Weight, WidthClass};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {
@@ -26,7 +14,7 @@ pub(crate) enum PaintFlavor {
         width: f32,
         height: f32,
         angle: f32,
-        alpha: f32
+        alpha: f32,
     },
     LinearGradient {
         start_x: f32,
@@ -34,7 +22,7 @@ pub(crate) enum PaintFlavor {
         end_x: f32,
         end_y: f32,
         start_color: Color,
-        end_color: Color
+        end_color: Color,
     },
     BoxGradient {
         x: f32,
@@ -44,7 +32,7 @@ pub(crate) enum PaintFlavor {
         radius: f32,
         feather: f32,
         inner_color: Color,
-        outer_color: Color
+        outer_color: Color,
     },
     RadialGradient {
         cx: f32,
@@ -52,8 +40,8 @@ pub(crate) enum PaintFlavor {
         in_radius: f32,
         out_radius: f32,
         inner_color: Color,
-        outer_color: Color
-    }
+        outer_color: Color,
+    },
 }
 
 /// Struct controlling how graphical shapes are rendered.
@@ -102,7 +90,7 @@ pub struct Paint<'a> {
     pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
-    pub(crate) fill_rule: FillRule
+    pub(crate) fill_rule: FillRule,
 }
 
 impl Default for Paint<'_> {
@@ -127,7 +115,7 @@ impl Default for Paint<'_> {
             letter_spacing: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
-            fill_rule: Default::default()
+            fill_rule: Default::default(),
         }
     }
 }
@@ -163,18 +151,38 @@ impl<'a> Paint<'a> {
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
-        new.flavor = PaintFlavor::Image { id, cx, cy, width, height, angle, alpha };
+        new.flavor = PaintFlavor::Image {
+            id,
+            cx,
+            cy,
+            width,
+            height,
+            angle,
+            alpha,
+        };
         new
     }
 
     /// Creates and returns a linear gradient paint.
     ///
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-    pub fn linear_gradient(start_x: f32, start_y: f32, end_x: f32, end_y: f32, start_color: Color, end_color: Color) -> Self {
+    pub fn linear_gradient(
+        start_x: f32,
+        start_y: f32,
+        end_x: f32,
+        end_y: f32,
+        start_color: Color,
+        end_color: Color,
+    ) -> Self {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start_x, start_y, end_x, end_y, start_color, end_color
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            start_color,
+            end_color,
         };
 
         new
@@ -187,11 +195,27 @@ impl<'a> Paint<'a> {
     /// (w,h) define the size of the rectangle, r defines the corner radius, and f feather. Feather defines how blurry
     /// the border of the rectangle is. Parameter inner_color specifies the inner color and outer_color the outer color of the gradient.
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-    pub fn box_gradient(x: f32, y: f32, width: f32, height: f32, radius: f32, feather: f32, inner_color: Color, outer_color: Color) -> Self {
+    pub fn box_gradient(
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        radius: f32,
+        feather: f32,
+        inner_color: Color,
+        outer_color: Color,
+    ) -> Self {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::BoxGradient {
-            x, y, width, height, radius, feather, inner_color, outer_color
+            x,
+            y,
+            width,
+            height,
+            radius,
+            feather,
+            inner_color,
+            outer_color,
         };
 
         new
@@ -202,11 +226,23 @@ impl<'a> Paint<'a> {
     /// Parameters (cx,cy) specify the center, inr and outr specify
     /// the inner and outer radius of the gradient, icol specifies the start color and ocol the end color.
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
-    pub fn radial_gradient(cx: f32, cy: f32, in_radius: f32, out_radius: f32, inner_color: Color, outer_color: Color) -> Self {
+    pub fn radial_gradient(
+        cx: f32,
+        cy: f32,
+        in_radius: f32,
+        out_radius: f32,
+        inner_color: Color,
+        outer_color: Color,
+    ) -> Self {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            cx, cy, in_radius, out_radius, inner_color, outer_color
+            cx,
+            cy,
+            in_radius,
+            out_radius,
+            inner_color,
+            outer_color,
         };
 
         new
@@ -427,18 +463,28 @@ impl<'a> Paint<'a> {
             PaintFlavor::Color(color) => {
                 color.a *= a;
             }
-            PaintFlavor::Image { alpha, ..} => {
+            PaintFlavor::Image { alpha, .. } => {
                 *alpha *= a;
             }
-            PaintFlavor::LinearGradient { start_color, end_color, ..} => {
+            PaintFlavor::LinearGradient {
+                start_color, end_color, ..
+            } => {
                 start_color.a *= a;
                 end_color.a *= a;
             }
-            PaintFlavor::BoxGradient { inner_color, outer_color, ..} => {
+            PaintFlavor::BoxGradient {
+                inner_color,
+                outer_color,
+                ..
+            } => {
                 inner_color.a *= a;
                 outer_color.a *= a;
             }
-            PaintFlavor::RadialGradient { inner_color, outer_color, ..} => {
+            PaintFlavor::RadialGradient {
+                inner_color,
+                outer_color,
+                ..
+            } => {
                 inner_color.a *= a;
                 outer_color.a *= a;
             }

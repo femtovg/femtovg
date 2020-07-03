@@ -1,4 +1,3 @@
-
 use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
 
@@ -14,42 +13,47 @@ pub fn triarea2(ax: f32, ay: f32, bx: f32, by: f32, cx: f32, cy: f32) -> f32 {
     let acx = cx - ax;
     let acy = cy - ay;
 
-    acx*aby - abx*acy
+    acx * aby - abx * acy
 }
 
 pub fn pt_equals(x1: f32, y1: f32, x2: f32, y2: f32, tol: f32) -> bool {
     let dx = x2 - x1;
     let dy = y2 - y1;
 
-    dx*dx + dy*dy < tol*tol
+    dx * dx + dy * dy < tol * tol
 }
 
 pub fn cross(dx0: f32, dy0: f32, dx1: f32, dy1: f32) -> f32 {
-    dx1*dy0 - dx0*dy1
+    dx1 * dy0 - dx0 * dy1
 }
 
 pub fn dist_pt_segment(x: f32, y: f32, px: f32, py: f32, qx: f32, qy: f32) -> f32 {
-    let pqx = qx-px;
-    let pqy = qy-py;
-    let dx = x-px;
-    let dy = y-py;
-    let d = pqx*pqx + pqy*pqy;
-    let mut t = pqx*dx + pqy*dy;
+    let pqx = qx - px;
+    let pqy = qy - py;
+    let dx = x - px;
+    let dy = y - py;
+    let d = pqx * pqx + pqy * pqy;
+    let mut t = pqx * dx + pqy * dy;
 
-    if d > 0.0 { t /= d; }
+    if d > 0.0 {
+        t /= d;
+    }
 
-    if t < 0.0 { t = 0.0; }
-    else if t > 1.0 { t = 1.0; }
+    if t < 0.0 {
+        t = 0.0;
+    } else if t > 1.0 {
+        t = 1.0;
+    }
 
-    let dx = px + t*pqx - x;
-    let dy = py + t*pqy - y;
+    let dx = px + t * pqx - x;
+    let dy = py + t * pqy - y;
 
-    dx*dx + dy*dy
+    dx * dx + dy * dy
 }
 
 // TODO: fix this.. move it to point
 pub fn normalize(x: &mut f32, y: &mut f32) -> f32 {
-    let d = ((*x)*(*x) + (*y)*(*y)).sqrt();
+    let d = ((*x) * (*x) + (*y) * (*y)).sqrt();
 
     if d > 1e-6 {
         let id = 1.0 / d;
@@ -65,13 +69,8 @@ pub struct Transform2D(pub [f32; 6]);
 
 // TODO: Implement std::ops::* on this
 impl Transform2D {
-
     pub fn identity() -> Self {
-        Self([
-            1.0, 0.0,
-            0.0, 1.0,
-            0.0, 0.0
-        ])
+        Self([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }
 
     pub fn new_translation(x: f32, y: f32) -> Self {
@@ -83,34 +82,47 @@ impl Transform2D {
     pub fn translate(&mut self, tx: f32, ty: f32) {
         // self[0] = 1.0; self[1] = 0.0;
         // self[2] = 0.0; self[3] = 1.0;
-        self[4] = tx; self[5] = ty;
+        self[4] = tx;
+        self[5] = ty;
     }
 
     pub fn scale(&mut self, sx: f32, sy: f32) {
-        self[0] = sx; self[1] = 0.0;
-        self[2] = 0.0; self[3] = sy;
-        self[4] = 0.0; self[5] = 0.0;
+        self[0] = sx;
+        self[1] = 0.0;
+        self[2] = 0.0;
+        self[3] = sy;
+        self[4] = 0.0;
+        self[5] = 0.0;
     }
 
     pub fn rotate(&mut self, a: f32) {
         let cs = a.cos();
         let sn = a.sin();
 
-        self[0] = cs; self[1] = sn;
-        self[2] = -sn; self[3] = cs;
-        self[4] = 0.0; self[5] = 0.0;
+        self[0] = cs;
+        self[1] = sn;
+        self[2] = -sn;
+        self[3] = cs;
+        self[4] = 0.0;
+        self[5] = 0.0;
     }
 
     pub fn skew_x(&mut self, a: f32) {
-        self[0] = 1.0; self[1] = 0.0;
-        self[2] = a.tan(); self[3] = 1.0;
-        self[4] = 0.0; self[5] = 0.0;
+        self[0] = 1.0;
+        self[1] = 0.0;
+        self[2] = a.tan();
+        self[3] = 1.0;
+        self[4] = 0.0;
+        self[5] = 0.0;
     }
 
     pub fn skew_y(&mut self, a: f32) {
-        self[0] = 1.0; self[1] = a.tan();
-        self[2] = 0.0; self[3] = 1.0;
-        self[4] = 0.0; self[5] = 0.0;
+        self[0] = 1.0;
+        self[1] = a.tan();
+        self[2] = 0.0;
+        self[3] = 1.0;
+        self[4] = 0.0;
+        self[5] = 0.0;
     }
 
     pub fn multiply(&mut self, other: &Self) {
@@ -156,23 +168,21 @@ impl Transform2D {
     }
 
     pub fn transform_point(&self, sx: f32, sy: f32) -> (f32, f32) {
-        let dx = sx*self[0] + sy*self[2] + self[4];
-        let dy = sx*self[1] + sy*self[3] + self[5];
+        let dx = sx * self[0] + sy * self[2] + self[4];
+        let dy = sx * self[1] + sy * self[3] + self[5];
         (dx, dy)
     }
 
     pub fn average_scale(&self) -> f32 {
-        let sx = (self[0]*self[0] + self[2]*self[2]).sqrt();
-        let sy = (self[1]*self[1] + self[3]*self[3]).sqrt();
+        let sx = (self[0] * self[0] + self[2] * self[2]).sqrt();
+        let sy = (self[1] * self[1] + self[3] * self[3]).sqrt();
 
         (sx + sy) * 0.5
     }
 
     pub fn to_mat3x4(self) -> [f32; 12] {
         [
-            self[0], self[1], 0.0, 0.0,
-            self[2], self[3], 0.0, 0.0,
-            self[4], self[5], 1.0, 0.0,
+            self[0], self[1], 0.0, 0.0, self[2], self[3], 0.0, 0.0, self[4], self[5], 1.0, 0.0,
         ]
     }
 
@@ -212,7 +222,7 @@ pub struct Rect {
     pub x: f32,
     pub y: f32,
     pub w: f32,
-    pub h: f32
+    pub h: f32,
 }
 
 impl Rect {
@@ -223,8 +233,8 @@ impl Rect {
     pub fn intersect(&self, other: Rect) -> Rect {
         let minx = self.x.max(other.x);
         let miny = self.y.max(other.y);
-        let maxx = (self.x+self.w).min(other.x+other.w);
-        let maxy = (self.y+self.h).min(other.y+other.h);
+        let maxx = (self.x + self.w).min(other.x + other.w);
+        let maxy = (self.y + self.h).min(other.y + other.h);
 
         Rect::new(minx, miny, 0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny))
     }
@@ -235,7 +245,7 @@ pub struct Bounds {
     pub minx: f32,
     pub miny: f32,
     pub maxx: f32,
-    pub maxy: f32
+    pub maxy: f32,
 }
 
 impl Default for Bounds {
@@ -244,7 +254,7 @@ impl Default for Bounds {
             minx: 1e6,
             miny: 1e6,
             maxx: -1e6,
-            maxy: -1e6
+            maxy: -1e6,
         }
     }
 }

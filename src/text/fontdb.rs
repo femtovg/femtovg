@@ -1,29 +1,19 @@
-
+use std::convert::TryFrom;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::ffi::OsStr;
-use std::convert::TryFrom;
 
 use fnv::FnvHashMap;
 use owned_ttf_parser as ttf;
 
-use crate::{
-    Paint,
-    ErrorKind
-};
+use crate::{ErrorKind, Paint};
 
-use super::{
-    Font,
-    Weight,
-    FontStyle,
-    WidthClass
-};
+use super::{Font, FontStyle, Weight, WidthClass};
 
 // TODO: use generational arena for font_ids
 
 #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FontId(usize);
-
 
 // TODO: this may not be needed. "degrade" can be a method on the Paint
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -68,11 +58,10 @@ impl From<&Paint<'_>> for FontDescription {
             family_name: paint.font_family.to_owned(), // TODO: remove this to_owned
             weight: paint.font_weight,
             font_style: paint.font_style,
-            width_class: paint.font_width_class
+            width_class: paint.font_width_class,
         }
     }
 }
-
 
 impl TryFrom<ttf::Font<'_>> for FontDescription {
     type Error = ErrorKind;
@@ -101,11 +90,10 @@ impl TryFrom<ttf::Font<'_>> for FontDescription {
 
 pub struct FontDb {
     fonts: Vec<Font>,
-    font_descr: FnvHashMap<FontDescription, FontId>
+    font_descr: FnvHashMap<FontDescription, FontId>,
 }
 
 impl FontDb {
-
     pub fn new() -> Result<Self, ErrorKind> {
         Ok(Self {
             fonts: Default::default(),
@@ -162,7 +150,10 @@ impl FontDb {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind> where F: FnMut(&mut Font) -> (bool, T) {
+    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
+    where
+        F: FnMut(&mut Font) -> (bool, T),
+    {
         let mut description = FontDescription::from(paint);
 
         loop {
@@ -195,5 +186,4 @@ impl FontDb {
 
         Err(ErrorKind::NoFontFound)
     }
-
 }

@@ -1,39 +1,20 @@
-
-use std::ptr;
+use std::ffi::{c_void, CStr};
 use std::mem;
-use std::ffi::{CStr, c_void};
+use std::ptr;
 
-use rgb::RGBA8;
-use imgref::ImgVec;
 use fnv::FnvHashMap;
+use imgref::ImgVec;
+use rgb::RGBA8;
 
 use crate::{
-    Color,
-    ErrorKind,
-    ImageInfo,
-    ImageStore,
-    PixelFormat,
-    ImageSource,
-    FillRule,
-    CompositeOperationState,
-    BlendFactor,
-    renderer::{Vertex, ImageId}
+    renderer::{ImageId, Vertex},
+    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageInfo, ImageSource, ImageStore, PixelFormat,
 };
 
-use super::{
-    Params,
-    Renderer,
-    Command,
-    CommandType,
-    ImageFlags,
-    RenderTarget
-};
+use super::{Command, CommandType, ImageFlags, Params, RenderTarget, Renderer};
 
 mod program;
-use program::{
-    MainProgram,
-    BlurProgram
-};
+use program::{BlurProgram, MainProgram};
 
 mod texture;
 use texture::Texture;
@@ -63,12 +44,14 @@ pub struct OpenGl {
     vert_buff: GLuint,
     quad_vao: GLuint,
     quad_vbo: GLuint,
-    framebuffers: FnvHashMap<ImageId, Framebuffer>
+    framebuffers: FnvHashMap<ImageId, Framebuffer>,
 }
 
 impl OpenGl {
-
-    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind> where F: Fn(&'static str) -> *const c_void {
+    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
+    where
+        F: Fn(&'static str) -> *const c_void,
+    {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
@@ -89,15 +72,13 @@ impl OpenGl {
             vert_buff: Default::default(),
             quad_vao: Default::default(),
             quad_vbo: Default::default(),
-            framebuffers: Default::default()
+            framebuffers: Default::default(),
         };
 
         unsafe {
             let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *mut i8);
-            
-            opengl.is_opengles = version.to_str().ok().map_or(false, |str| {
-                str.starts_with("OpenGL ES")
-            });
+
+            opengl.is_opengles = version.to_str().ok().map_or(false, |str| str.starts_with("OpenGL ES"));
 
             gl::GenVertexArrays(1, &mut opengl.vert_arr);
             gl::GenBuffers(1, &mut opengl.vert_buff);
@@ -114,10 +95,7 @@ impl OpenGl {
 
     fn create_quad(&mut self) {
         let verts: [f32; 16] = [
-            -1.0,  1.0, 0.0, 1.0,
-            -1.0, -1.0, 0.0, 0.0,
-             1.0,  1.0, 1.0, 1.0,
-             1.0, -1.0, 1.0, 0.0,
+            -1.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 0.0,
         ];
 
         unsafe {
@@ -127,13 +105,32 @@ impl OpenGl {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.quad_vbo);
 
             let size = verts.len() * mem::size_of::<f32>();
-            gl::BufferData(gl::ARRAY_BUFFER, size as isize, verts.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                size as isize,
+                verts.as_ptr() as *const GLvoid,
+                gl::STREAM_DRAW,
+            );
 
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
 
-            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, ptr::null::<c_void>());
-            gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, (2 * mem::size_of::<f32>()) as *const c_void);
+            gl::VertexAttribPointer(
+                0,
+                2,
+                gl::FLOAT,
+                gl::FALSE,
+                4 * mem::size_of::<f32>() as i32,
+                ptr::null::<c_void>(),
+            );
+            gl::VertexAttribPointer(
+                1,
+                2,
+                gl::FLOAT,
+                gl::FALSE,
+                4 * mem::size_of::<f32>() as i32,
+                (2 * mem::size_of::<f32>()) as *const c_void,
+            );
         }
     }
 
@@ -146,11 +143,15 @@ impl OpenGl {
     }
 
     fn check_error(&self, label: &str) {
-        if !self.debug { return }
+        if !self.debug {
+            return;
+        }
 
         let err = unsafe { gl::GetError() };
 
-        if err == gl::NO_ERROR { return; }
+        if err == gl::NO_ERROR {
+            return;
+        }
 
         let message = match err {
             gl::INVALID_ENUM => "Invalid enum",
@@ -158,7 +159,7 @@ impl OpenGl {
             gl::INVALID_OPERATION => "Invalid operation",
             gl::OUT_OF_MEMORY => "Out of memory",
             gl::INVALID_FRAMEBUFFER_OPERATION => "Invalid framebuffer operation",
-            _ => "Unknown error"
+            _ => "Unknown error",
         };
 
         eprintln!("({}) Error on {} - {}", err, label, message);
@@ -186,7 +187,7 @@ impl OpenGl {
                 Self::gl_factor(blend_state.src_rgb),
                 Self::gl_factor(blend_state.dst_rgb),
                 Self::gl_factor(blend_state.src_alpha),
-                Self::gl_factor(blend_state.dst_alpha)
+                Self::gl_factor(blend_state.dst_alpha),
             );
         }
     }
@@ -196,11 +197,15 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32);
+                }
             }
 
             if let Some((start, count)) = drawable.stroke_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                }
             }
         }
 
@@ -226,7 +231,9 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32);
+                }
             }
         }
 
@@ -243,7 +250,7 @@ impl OpenGl {
             unsafe {
                 match cmd.fill_rule {
                     FillRule::NonZero => gl::StencilFunc(gl::EQUAL, 0x0, 0xff),
-                    FillRule::EvenOdd => gl::StencilFunc(gl::EQUAL, 0x0, 0x1)
+                    FillRule::EvenOdd => gl::StencilFunc(gl::EQUAL, 0x0, 0x1),
                 }
 
                 gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
@@ -252,7 +259,9 @@ impl OpenGl {
             // draw fringes
             for drawable in &cmd.drawables {
                 if let Some((start, count)) = drawable.stroke_verts {
-                    unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                    unsafe {
+                        gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    }
                 }
             }
         }
@@ -260,7 +269,7 @@ impl OpenGl {
         unsafe {
             match cmd.fill_rule {
                 FillRule::NonZero => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0xff),
-                FillRule::EvenOdd => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0x1)
+                FillRule::EvenOdd => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0x1),
             }
 
             gl::StencilOp(gl::ZERO, gl::ZERO, gl::ZERO);
@@ -280,7 +289,9 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                }
             }
         }
 
@@ -301,7 +312,9 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                }
             }
         }
 
@@ -315,7 +328,9 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                }
             }
         }
 
@@ -328,7 +343,9 @@ impl OpenGl {
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
-                unsafe { gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32); }
+                unsafe {
+                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                }
             }
         }
 
@@ -344,13 +361,21 @@ impl OpenGl {
         self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         if let Some((start, count)) = cmd.triangles_verts {
-            unsafe { gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32); }
+            unsafe {
+                gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32);
+            }
         }
 
         self.check_error("triangles");
     }
 
-    fn set_uniforms(&self, images: &ImageStore<Texture>, paint: Params, image_tex: Option<ImageId>, alpha_tex: Option<ImageId>) {
+    fn set_uniforms(
+        &self,
+        images: &ImageStore<Texture>,
+        paint: Params,
+        image_tex: Option<ImageId>,
+        alpha_tex: Option<ImageId>,
+    ) {
         let arr = UniformArray::from(paint);
         self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
         self.check_error("set_uniforms uniforms");
@@ -375,7 +400,12 @@ impl OpenGl {
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             gl::Enable(gl::SCISSOR_TEST);
-            gl::Scissor(x as i32, self.view[1] as i32 - (height as i32 + y as i32), width as i32, height as i32);
+            gl::Scissor(
+                x as i32,
+                self.view[1] as i32 - (height as i32 + y as i32),
+                width as i32,
+                height as i32,
+            );
             gl::ClearColor(color.r, color.g, color.b, color.a);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
             gl::Disable(gl::SCISSOR_TEST);
@@ -391,9 +421,7 @@ impl OpenGl {
             },
             RenderTarget::Image(id) => {
                 if let Some(texture) = images.get(id) {
-                    let fb = self.framebuffers.entry(id).or_insert_with(|| {
-                        Framebuffer::new(texture)
-                    });
+                    let fb = self.framebuffers.entry(id).or_insert_with(|| Framebuffer::new(texture));
 
                     fb.bind();
 
@@ -451,19 +479,31 @@ impl Renderer for OpenGl {
 
             gl::BindBuffer(gl::ARRAY_BUFFER, self.vert_buff);
             let size = verts.len() * vertex_size;
-            gl::BufferData(gl::ARRAY_BUFFER, size as isize, verts.as_ptr() as *const GLvoid, gl::STREAM_DRAW);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                size as isize,
+                verts.as_ptr() as *const GLvoid,
+                gl::STREAM_DRAW,
+            );
 
             gl::EnableVertexAttribArray(0);
             gl::EnableVertexAttribArray(1);
 
             gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, ptr::null::<c_void>());
-            gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, (2 * mem::size_of::<f32>()) as *const c_void);
+            gl::VertexAttribPointer(
+                1,
+                2,
+                gl::FLOAT,
+                gl::FALSE,
+                vertex_size as i32,
+                (2 * mem::size_of::<f32>()) as *const c_void,
+            );
         }
 
         // Bind the two uniform samplers to texture units
         self.main_program.set_tex(0);
         self.main_program.set_masktex(1);
-        
+
         self.check_error("render prepare");
 
         for cmd in commands {
@@ -471,13 +511,22 @@ impl Renderer for OpenGl {
 
             match cmd.cmd_type {
                 CommandType::ConvexFill { params } => self.convex_fill(images, cmd, params),
-                CommandType::ConcaveFill { stencil_params, fill_params } => self.concave_fill(images, cmd, stencil_params, fill_params),
+                CommandType::ConcaveFill {
+                    stencil_params,
+                    fill_params,
+                } => self.concave_fill(images, cmd, stencil_params, fill_params),
                 CommandType::Stroke { params } => self.stroke(images, cmd, params),
                 CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(images, cmd, params1, params2),
                 CommandType::Triangles { params } => self.triangles(images, cmd, params),
-                CommandType::ClearRect { x, y, width, height, color } => {
+                CommandType::ClearRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                    color,
+                } => {
                     self.clear_rect(x, y, width, height, color);
-                },
+                }
                 CommandType::SetRenderTarget(target) => {
                     self.set_target(images, target);
                     self.main_program.set_view(self.view);
@@ -504,7 +553,13 @@ impl Renderer for OpenGl {
         Texture::new(info, self.is_opengles)
     }
 
-    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
+    fn update_image(
+        &mut self,
+        image: &mut Self::Image,
+        data: ImageSource,
+        x: usize,
+        y: usize,
+    ) -> Result<(), ErrorKind> {
         image.update(data, x, y, self.is_opengles)
     }
 
@@ -514,7 +569,7 @@ impl Renderer for OpenGl {
 
     fn blur(&mut self, texture: &mut Texture, amount: u8, x: usize, y: usize, width: usize, height: usize) {
         // TODO: validate that the blur region is inside the texture
-        
+
         let pingpong_fbo = [0; 2];
         let pingpong_tex = [0; 2];
 
@@ -533,7 +588,7 @@ impl Renderer for OpenGl {
                 x as i32 - padding,
                 y as i32 - padding,
                 width as i32 + padding * 2,
-                height as i32 + padding * 2
+                height as i32 + padding * 2,
             );
         }
 
@@ -547,15 +602,23 @@ impl Renderer for OpenGl {
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, *fbo);
                 gl::BindTexture(gl::TEXTURE_2D, *tex);
-                gl::TexImage2D(gl::TEXTURE_2D, 0, gl_format as i32, texture.info().width() as i32, texture.info().height() as i32, 0, gl_format, gl::UNSIGNED_BYTE, ptr::null());
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl_format as i32,
+                    texture.info().width() as i32,
+                    texture.info().height() as i32,
+                    0,
+                    gl_format,
+                    gl::UNSIGNED_BYTE,
+                    ptr::null(),
+                );
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
                 gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
 
-                gl::FramebufferTexture2D(
-                    gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, *tex, 0
-                );
+                gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, *tex, 0);
 
                 if gl::CheckFramebufferStatus(gl::FRAMEBUFFER) != gl::FRAMEBUFFER_COMPLETE {
                     panic!("Framebuffer not complete!");
@@ -572,16 +635,21 @@ impl Renderer for OpenGl {
         self.blur_program.bind();
         self.blur_program.set_image(0);
         // TODO: depending on the final glsl version, we may be able to use textureSize inside the shader
-        self.blur_program.set_image_size([
-            texture.info().width() as f32,
-            texture.info().height() as f32
-        ]);
+        self.blur_program
+            .set_image_size([texture.info().width() as f32, texture.info().height() as f32]);
 
         for i in 0..passes {
             unsafe {
                 gl::BindFramebuffer(gl::FRAMEBUFFER, pingpong_fbo[horizontal as usize]);
                 self.blur_program.set_horizontal(horizontal);
-                gl::BindTexture(gl::TEXTURE_2D, if i == 0 { texture.id() } else { pingpong_tex[!horizontal as usize] });
+                gl::BindTexture(
+                    gl::TEXTURE_2D,
+                    if i == 0 {
+                        texture.id()
+                    } else {
+                        pingpong_tex[!horizontal as usize]
+                    },
+                );
             }
 
             self.render_quad();
@@ -603,7 +671,7 @@ impl Renderer for OpenGl {
                 x as i32,
                 y as i32,
                 width as i32,
-                height as i32
+                height as i32,
             );
 
             if texture.info().flags().contains(ImageFlags::GENERATE_MIPMAPS) {
@@ -628,10 +696,30 @@ impl Renderer for OpenGl {
         let w = self.view[0] as usize;
         let h = self.view[1] as usize;
 
-        let mut image = ImgVec::new(vec![RGBA8 {r:255, g:255, b:255, a: 255}; w*h], w, h);
+        let mut image = ImgVec::new(
+            vec![
+                RGBA8 {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                    a: 255
+                };
+                w * h
+            ],
+            w,
+            h,
+        );
 
         unsafe {
-            gl::ReadPixels(0, 0, self.view[0] as i32, self.view[1] as i32, gl::RGBA, gl::UNSIGNED_BYTE, image.buf_mut().as_ptr() as *mut GLvoid);
+            gl::ReadPixels(
+                0,
+                0,
+                self.view[0] as i32,
+                self.view[1] as i32,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
+                image.buf_mut().as_ptr() as *mut GLvoid,
+            );
         }
 
         // TODO: flip image
@@ -644,19 +732,27 @@ impl Renderer for OpenGl {
 impl Drop for OpenGl {
     fn drop(&mut self) {
         if self.vert_arr != 0 {
-            unsafe { gl::DeleteVertexArrays(1, &self.vert_arr); }
+            unsafe {
+                gl::DeleteVertexArrays(1, &self.vert_arr);
+            }
         }
 
         if self.vert_buff != 0 {
-            unsafe { gl::DeleteBuffers(1, &self.vert_buff); }
+            unsafe {
+                gl::DeleteBuffers(1, &self.vert_buff);
+            }
         }
 
         if self.quad_vao != 0 {
-            unsafe { gl::DeleteVertexArrays(1, &self.quad_vao); }
+            unsafe {
+                gl::DeleteVertexArrays(1, &self.quad_vao);
+            }
         }
 
         if self.quad_vbo != 0 {
-            unsafe { gl::DeleteBuffers(1, &self.quad_vbo); }
+            unsafe {
+                gl::DeleteBuffers(1, &self.quad_vbo);
+            }
         }
     }
 }

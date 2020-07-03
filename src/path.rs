@@ -1,10 +1,9 @@
-
 use std::f32::consts::PI;
 
 use crate::geometry::{self, Transform2D};
 
 mod cache;
-pub use cache::{PathCache, Convexity};
+pub use cache::{Convexity, PathCache};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
@@ -12,7 +11,7 @@ const KAPPA90: f32 = 0.5522847493;
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum Solidity {
     Solid = 1,
-    Hole = 2
+    Hole = 2,
 }
 
 impl Default for Solidity {
@@ -29,7 +28,7 @@ pub enum Verb {
     LineTo(f32, f32),
     BezierTo(f32, f32, f32, f32, f32, f32),
     Close,
-    Solidity(Solidity)
+    Solidity(Solidity),
 }
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
@@ -112,13 +111,14 @@ impl Path {
         let x0 = self.lastx;
         let y0 = self.lasty;
 
-        self.append(&[
-            Verb::BezierTo(
-                x0 + 2.0/3.0*(cx - x0), y0 + 2.0/3.0*(cy - y0),
-                x + 2.0/3.0*(cx - x), y + 2.0/3.0*(cy - y),
-                x, y
-            )
-        ]);
+        self.append(&[Verb::BezierTo(
+            x0 + 2.0 / 3.0 * (cx - x0),
+            y0 + 2.0 / 3.0 * (cy - y0),
+            x + 2.0 / 3.0 * (cx - x),
+            y + 2.0 / 3.0 * (cy - y),
+            x,
+            y,
+        )]);
     }
 
     /// Closes current sub-path with a line segment.
@@ -141,12 +141,16 @@ impl Path {
             if da.abs() >= PI * 2.0 {
                 da = PI * 2.0;
             } else {
-                while da < 0.0 { da += PI * 2.0 }
+                while da < 0.0 {
+                    da += PI * 2.0
+                }
             }
         } else if da.abs() >= PI * 2.0 {
             da = -PI * 2.0;
         } else {
-            while da > 0.0 { da -= PI * 2.0 }
+            while da > 0.0 {
+                da -= PI * 2.0
+            }
         }
 
         // Split arc into max 90 degree segments.
@@ -167,16 +171,20 @@ impl Path {
             let a = a0 + da * (i as f32 / ndivs as f32);
             let dx = a.cos();
             let dy = a.sin();
-            let x = cx + dx*r;
-            let y = cy + dy*r;
-            let tanx = -dy*r*kappa;
-            let tany = dx*r*kappa;
+            let x = cx + dx * r;
+            let y = cy + dy * r;
+            let tanx = -dy * r * kappa;
+            let tany = dx * r * kappa;
 
             if i == 0 {
-                let first_move = if !self.verbs.is_empty() { Verb::LineTo(x, y) } else { Verb::MoveTo(x, y) };
+                let first_move = if !self.verbs.is_empty() {
+                    Verb::LineTo(x, y)
+                } else {
+                    Verb::MoveTo(x, y)
+                };
                 commands.push(first_move);
             } else {
-                commands.push(Verb::BezierTo(px+ptanx, py+ptany, x-tanx, y-tany, x, y));
+                commands.push(Verb::BezierTo(px + ptanx, py + ptany, x - tanx, y - tany, x, y));
             }
 
             px = x;
@@ -198,10 +206,11 @@ impl Path {
         let y0 = self.lasty;
 
         // Handle degenerate cases.
-        if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol) ||
-            geometry::pt_equals(x1, y1, x2, y2, self.dist_tol) ||
-            geometry::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol ||
-            radius < self.dist_tol {
+        if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol)
+            || geometry::pt_equals(x1, y1, x2, y2, self.dist_tol)
+            || geometry::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol
+            || radius < self.dist_tol
+        {
             self.line_to(x1, y1);
         }
 
@@ -213,8 +222,8 @@ impl Path {
         geometry::normalize(&mut dx0, &mut dy0);
         geometry::normalize(&mut dx1, &mut dy1);
 
-        let a = (dx0*dx1 + dy0*dy1).acos();
-        let d = radius / (a/2.0).tan();
+        let a = (dx0 * dx1 + dy0 * dy1).acos();
+        let d = radius / (a / 2.0).tan();
 
         if d > 10000.0 {
             return self.line_to(x1, y1);
@@ -223,14 +232,14 @@ impl Path {
         let (cx, cy, a0, a1, dir);
 
         if geometry::cross(dx0, dy0, dx1, dy1) > 0.0 {
-            cx = x1 + dx0*d + dy0*radius;
-            cy = y1 + dy0*d + -dx0*radius;
+            cx = x1 + dx0 * d + dy0 * radius;
+            cy = y1 + dy0 * d + -dx0 * radius;
             a0 = dx0.atan2(-dy0);
             a1 = -dx1.atan2(dy1);
             dir = Solidity::Hole;
         } else {
-            cx = x1 + dx0*d + -dy0*radius;
-            cy = y1 + dy0*d + dx0*radius;
+            cx = x1 + dx0 * d + -dy0 * radius;
+            cy = y1 + dy0 * d + dx0 * radius;
             a0 = -dx0.atan2(dy0);
             a1 = dx1.atan2(-dy1);
             dir = Solidity::Solid;
@@ -246,7 +255,7 @@ impl Path {
             Verb::LineTo(x, y + h),
             Verb::LineTo(x + w, y + h),
             Verb::LineTo(x + w, y),
-            Verb::Close
+            Verb::Close,
         ]);
     }
 
@@ -256,12 +265,22 @@ impl Path {
     }
 
     /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
-    pub fn rounded_rect_varying(&mut self, x: f32, y: f32, w: f32, h: f32, rad_top_left: f32, rad_top_right: f32, rad_bottom_right: f32, rad_bottom_left: f32) {
+    pub fn rounded_rect_varying(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        rad_top_left: f32,
+        rad_top_right: f32,
+        rad_bottom_right: f32,
+        rad_bottom_left: f32,
+    ) {
         if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {
             self.rect(x, y, w, h);
         } else {
-            let halfw = w.abs()*0.5;
-            let halfh = h.abs()*0.5;
+            let halfw = w.abs() * 0.5;
+            let halfh = h.abs() * 0.5;
 
             let rx_bl = rad_bottom_left.min(halfw) * w.signum();
             let ry_bl = rad_bottom_left.min(halfh) * h.signum();
@@ -278,14 +297,42 @@ impl Path {
             self.append(&[
                 Verb::MoveTo(x, y + ry_tl),
                 Verb::LineTo(x, y + h - ry_bl),
-                Verb::BezierTo(x, y + h - ry_bl*(1.0 - KAPPA90), x + rx_bl*(1.0 - KAPPA90), y + h, x + rx_bl, y + h),
+                Verb::BezierTo(
+                    x,
+                    y + h - ry_bl * (1.0 - KAPPA90),
+                    x + rx_bl * (1.0 - KAPPA90),
+                    y + h,
+                    x + rx_bl,
+                    y + h,
+                ),
                 Verb::LineTo(x + w - rx_br, y + h),
-                Verb::BezierTo(x + w - rx_br*(1.0 - KAPPA90), y + h, x + w, y + h - ry_br*(1.0 - KAPPA90), x + w, y + h - ry_br),
+                Verb::BezierTo(
+                    x + w - rx_br * (1.0 - KAPPA90),
+                    y + h,
+                    x + w,
+                    y + h - ry_br * (1.0 - KAPPA90),
+                    x + w,
+                    y + h - ry_br,
+                ),
                 Verb::LineTo(x + w, y + ry_tr),
-                Verb::BezierTo(x + w, y + ry_tr*(1.0 - KAPPA90), x + w - rx_tr*(1.0 - KAPPA90), y, x + w - rx_tr, y),
+                Verb::BezierTo(
+                    x + w,
+                    y + ry_tr * (1.0 - KAPPA90),
+                    x + w - rx_tr * (1.0 - KAPPA90),
+                    y,
+                    x + w - rx_tr,
+                    y,
+                ),
                 Verb::LineTo(x + rx_tl, y),
-                Verb::BezierTo(x + rx_tl*(1.0 - KAPPA90), y, x, y + ry_tl*(1.0 - KAPPA90), x, y + ry_tl),
-                Verb::Close
+                Verb::BezierTo(
+                    x + rx_tl * (1.0 - KAPPA90),
+                    y,
+                    x,
+                    y + ry_tl * (1.0 - KAPPA90),
+                    x,
+                    y + ry_tl,
+                ),
+                Verb::Close,
             ]);
         }
     }
@@ -293,12 +340,12 @@ impl Path {
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
         self.append(&[
-            Verb::MoveTo(cx-rx, cy),
-            Verb::BezierTo(cx-rx, cy+ry*KAPPA90, cx-rx*KAPPA90, cy+ry, cx, cy+ry),
-            Verb::BezierTo(cx+rx*KAPPA90, cy+ry, cx+rx, cy+ry*KAPPA90, cx+rx, cy),
-            Verb::BezierTo(cx+rx, cy-ry*KAPPA90, cx+rx*KAPPA90, cy-ry, cx, cy-ry),
-            Verb::BezierTo(cx-rx*KAPPA90, cy-ry, cx-rx, cy-ry*KAPPA90, cx-rx, cy),
-            Verb::Close
+            Verb::MoveTo(cx - rx, cy),
+            Verb::BezierTo(cx - rx, cy + ry * KAPPA90, cx - rx * KAPPA90, cy + ry, cx, cy + ry),
+            Verb::BezierTo(cx + rx * KAPPA90, cy + ry, cx + rx, cy + ry * KAPPA90, cx + rx, cy),
+            Verb::BezierTo(cx + rx, cy - ry * KAPPA90, cx + rx * KAPPA90, cy - ry, cx, cy - ry),
+            Verb::BezierTo(cx - rx * KAPPA90, cy - ry, cx - rx, cy - ry * KAPPA90, cx - rx, cy),
+            Verb::Close,
         ]);
     }
 
@@ -326,7 +373,7 @@ impl Path {
                     self.lasty = *y;
                     break;
                 }
-                _ => ()
+                _ => (),
             }
         }
 

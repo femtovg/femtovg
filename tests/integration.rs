@@ -1,14 +1,4 @@
-
-use gpucanvas::{
-    Canvas,
-    Path,
-    Paint,
-    Color,
-    Solidity,
-    FillRule,
-    Baseline,
-    renderer::Void
-};
+use gpucanvas::{renderer::Void, Baseline, Canvas, Color, FillRule, Paint, Path, Solidity};
 
 #[test]
 fn path_with_single_move_to() {
@@ -53,10 +43,14 @@ fn path_with_points_at_limits() {
     path.quad_to(10.0, 10.0, -std::f32::MAX, std::f32::MAX);
     path.bezier_to(10.0, 10.0, std::f32::MAX, 5000.0, -std::f32::MAX, -std::f32::MAX);
     path.rounded_rect_varying(
-        -std::f32::MAX, -std::f32::MAX,
-        std::f32::MAX, std::f32::MAX,
-        std::f32::MAX, std::f32::MAX,
-        std::f32::MAX, std::f32::MAX
+        -std::f32::MAX,
+        -std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
     );
     path.close();
 
@@ -75,10 +69,14 @@ fn path_with_points_around_zero() {
     path.quad_to(0.002, 0.0001, -0.002, 0.0001);
     path.bezier_to(0.0001, 0.002, -0.002, 0.0001, -0.002, 0.0001);
     path.rounded_rect_varying(
-        -std::f32::MAX, -std::f32::MAX,
-        std::f32::MAX, std::f32::MAX,
-        std::f32::MAX, 0.0001,
-        0.0001, 0.0001
+        -std::f32::MAX,
+        -std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        std::f32::MAX,
+        0.0001,
+        0.0001,
+        0.0001,
     );
 
     path.close();
@@ -150,7 +148,9 @@ fn path_contains_point() {
 fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
 
-    canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Font not found");
+    canvas
+        .add_font("examples/assets/Roboto-Regular.ttf")
+        .expect("Font not found");
 
     let mut paint = Paint::color(Color::black());
     paint.set_text_baseline(Baseline::Top);

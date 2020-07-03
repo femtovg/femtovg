@@ -1,16 +1,8 @@
-
 mod renderer;
-pub use renderer::{
-    render_atlas,
-    render_direct,
-    TextRendererContext
-};
+pub use renderer::{render_atlas, render_direct, TextRendererContext};
 
 mod shaper;
-pub use shaper::{
-    Shaper,
-    ShapedGlyph
-};
+pub use shaper::{ShapedGlyph, Shaper};
 
 mod atlas;
 pub use atlas::Atlas;
@@ -28,7 +20,7 @@ pub struct TextLayout {
     pub width: f32,
     pub height: f32,
     pub glyphs: Vec<ShapedGlyph>,
-    pub(crate) final_byte_index: usize
+    pub(crate) final_byte_index: usize,
 }
 
 impl TextLayout {
@@ -56,7 +48,7 @@ pub enum Baseline {
     /// The text baseline is the normal alphabetic baseline. Default value.
     Alphabetic,
     // The text baseline is the bottom of the bounding box.
-    Bottom
+    Bottom,
 }
 
 impl Default for Baseline {
@@ -84,7 +76,7 @@ impl Default for Align {
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum RenderMode {
     Fill,
-    Stroke
+    Stroke,
 }
 
 impl Default for RenderMode {
@@ -97,7 +89,7 @@ impl Default for RenderMode {
 pub enum FontStyle {
     Normal,
     Italic,
-    Oblique
+    Oblique,
 }
 
 impl Default for FontStyle {
@@ -119,7 +111,7 @@ pub enum Weight {
     ExtraBold,  // 800
     Black,      // 900
     ExtraBlack, // 950
-    Value(u16)
+    Value(u16),
 }
 
 impl Weight {
@@ -135,23 +127,23 @@ impl Weight {
             800 => Self::ExtraBold,
             900 => Self::Black,
             950 => Self::ExtraBlack,
-            _ => Weight::Value(value)
+            _ => Weight::Value(value),
         }
     }
 
     pub fn value(self) -> u16 {
         match self {
-            Self::Thin          => 100,
-            Self::ExtraLight    => 200,
-            Self::Light         => 300,
-            Self::Normal        => 400,
-            Self::Medium        => 500,
-            Self::SemiBold      => 600,
-            Self::Bold          => 700,
-            Self::ExtraBold     => 800,
-            Self::Black         => 900,
-            Self::ExtraBlack    => 950,
-            Self::Value(value)  => value,
+            Self::Thin => 100,
+            Self::ExtraLight => 200,
+            Self::Light => 300,
+            Self::Normal => 400,
+            Self::Medium => 500,
+            Self::SemiBold => 600,
+            Self::Bold => 700,
+            Self::ExtraBold => 800,
+            Self::Black => 900,
+            Self::ExtraBlack => 950,
+            Self::Value(value) => value,
         }
     }
 
@@ -191,21 +183,21 @@ impl WidthClass {
             7 => Self::Expanded,
             8 => Self::ExtraExpanded,
             9 => Self::UltraExpanded,
-            _ => Self::Normal
+            _ => Self::Normal,
         }
     }
 
     pub fn value(self) -> u16 {
         match self {
-            Self::UltraCondensed   => 1,
-            Self::ExtraCondensed   => 2,
-            Self::Condensed        => 3,
-            Self::SemiCondensed    => 4,
-            Self::Normal           => 5,
-            Self::SemiExpanded     => 6,
-            Self::Expanded         => 7,
-            Self::ExtraExpanded    => 8,
-            Self::UltraExpanded    => 9,
+            Self::UltraCondensed => 1,
+            Self::ExtraCondensed => 2,
+            Self::Condensed => 3,
+            Self::SemiCondensed => 4,
+            Self::Normal => 5,
+            Self::SemiExpanded => 6,
+            Self::Expanded => 7,
+            Self::ExtraExpanded => 8,
+            Self::UltraExpanded => 9,
         }
     }
 }

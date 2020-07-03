@@ -1,20 +1,11 @@
 #![allow(unused_variables)]
 
-use rgb::RGBA8;
 use imgref::ImgVec;
+use rgb::RGBA8;
 
-use crate::{
-    ErrorKind,
-    ImageInfo,
-    ImageStore,
-    ImageSource,
-};
+use crate::{ErrorKind, ImageInfo, ImageSource, ImageStore};
 
-use super::{
-    Renderer,
-    Command,
-    Vertex
-};
+use super::{Command, Renderer, Vertex};
 
 /// Void renderer used for testing
 pub struct Void;
@@ -27,12 +18,16 @@ impl Renderer for Void {
     fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
-        Ok(VoidImage {
-            info
-        })
+        Ok(VoidImage { info })
     }
 
-    fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
+    fn update_image(
+        &mut self,
+        image: &mut Self::Image,
+        data: ImageSource,
+        x: usize,
+        y: usize,
+    ) -> Result<(), ErrorKind> {
         let size = data.dimensions();
 
         if x + size.0 > image.info.width() {
@@ -56,5 +51,5 @@ impl Renderer for Void {
 }
 
 pub struct VoidImage {
-    info: ImageInfo
+    info: ImageInfo,
 }

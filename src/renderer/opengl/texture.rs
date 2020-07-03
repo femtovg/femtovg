@@ -1,30 +1,20 @@
-
 use std::ptr;
 
-use crate::{
-    ErrorKind,
-    ImageFlags,
-    ImageInfo,
-    ImageSource,
-    PixelFormat,
-};
+use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
 
 use super::gl;
 use super::gl::types::*;
 
 pub struct Texture {
     id: GLuint,
-    info: ImageInfo
+    info: ImageInfo,
 }
 
 impl Texture {
     pub fn new(info: ImageInfo, opengles: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
-        let mut texture = Texture {
-            id: 0,
-            info: info
-        };
+        let mut texture = Texture { id: 0, info: info };
 
         unsafe {
             gl::GenTextures(1, &mut texture.id);
@@ -49,8 +39,7 @@ impl Texture {
                     0,
                     gl::RED,
                     gl::UNSIGNED_BYTE,
-                    ptr::null()
-                    //data.buf().as_ptr() as *const GLvoid
+                    ptr::null(), //data.buf().as_ptr() as *const GLvoid
                 );
             },
             PixelFormat::Rgb8 => unsafe {
@@ -87,34 +76,58 @@ impl Texture {
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
             if flags.contains(ImageFlags::NEAREST) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST_MIPMAP_NEAREST as i32); }
+                unsafe {
+                    gl::TexParameteri(
+                        gl::TEXTURE_2D,
+                        gl::TEXTURE_MIN_FILTER,
+                        gl::NEAREST_MIPMAP_NEAREST as i32,
+                    );
+                }
             } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32); }
+                unsafe {
+                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as i32);
+                }
             }
         } else {
             if flags.contains(ImageFlags::NEAREST) {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32); }
+                unsafe {
+                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
+                }
             } else {
-                unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32); }
+                unsafe {
+                    gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as i32);
+                }
             }
         }
 
         if flags.contains(ImageFlags::NEAREST) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+            }
         } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+            }
         }
 
         if flags.contains(ImageFlags::REPEAT_X) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+            }
         } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            }
         }
 
         if flags.contains(ImageFlags::REPEAT_Y) {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+            }
         } else {
-            unsafe { gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32); }
+            unsafe {
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+            }
         }
 
         unsafe {
@@ -176,9 +189,9 @@ impl Texture {
                     size.1 as i32,
                     gl::R8,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    data.buf().as_ptr() as *const GLvoid,
                 );
-            }
+            },
             ImageSource::Rgb(data) => unsafe {
                 gl::TexSubImage2D(
                     gl::TEXTURE_2D,
@@ -189,9 +202,9 @@ impl Texture {
                     size.1 as i32,
                     gl::RGB,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    data.buf().as_ptr() as *const GLvoid,
                 );
-            }
+            },
             ImageSource::Rgba(data) => unsafe {
                 gl::TexSubImage2D(
                     gl::TEXTURE_2D,
@@ -202,9 +215,9 @@ impl Texture {
                     size.1 as i32,
                     gl::RGBA,
                     gl::UNSIGNED_BYTE,
-                    data.buf().as_ptr() as *const GLvoid
+                    data.buf().as_ptr() as *const GLvoid,
                 );
-            }
+            },
         }
 
         if self.info.flags().contains(ImageFlags::GENERATE_MIPMAPS) {

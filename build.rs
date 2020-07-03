@@ -1,9 +1,8 @@
-
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
 
-use gl_generator::{Api, Fallbacks, Profile, Registry, GlobalGenerator};
+use gl_generator::{Api, Fallbacks, GlobalGenerator, Profile, Registry};
 
 fn main() {
     let dest = PathBuf::from(&env::var("OUT_DIR").unwrap());

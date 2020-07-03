@@ -54,9 +54,7 @@ impl Atlas {
         // Bottom left fit heuristic.
         for i in 0..self.nodes.len() {
             if let Some(y) = self.rect_fits(i, rect_width, rect_height) {
-                if y + rect_height < besth
-                    || (y + rect_height == besth && self.nodes[i].width < bestw)
-                {
+                if y + rect_height < besth || (y + rect_height == besth && self.nodes[i].width < bestw) {
                     besti = Some(i);
                     bestw = self.nodes[i].width;
                     besth = y + rect_height;

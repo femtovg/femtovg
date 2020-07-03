@@ -1,30 +1,16 @@
-
 use std::hash::{Hash, Hasher};
 
+use fnv::{FnvBuildHasher, FnvHasher};
 use lru::LruCache;
-use fnv::{FnvHasher, FnvBuildHasher};
 
 use harfbuzz_rs as hb;
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    Paint,
-    ErrorKind
-};
+use crate::{ErrorKind, Paint};
 
-use super::{
-    Align,
-    Baseline,
-    Weight,
-    WidthClass,
-    FontStyle,
-    Font,
-    FontDb,
-    FontId,
-    TextLayout
-};
+use super::{Align, Baseline, Font, FontDb, FontId, FontStyle, TextLayout, Weight, WidthClass};
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -58,7 +44,7 @@ struct ShapingId {
     word_hash: u64,
     weight: Weight,
     width_class: WidthClass,
-    font_style: FontStyle
+    font_style: FontStyle,
 }
 
 impl ShapingId {
@@ -87,7 +73,7 @@ impl Default for Shaper {
         let fnv = FnvBuildHasher::default();
 
         Self {
-            cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv)
+            cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv),
         }
     }
 }
@@ -97,14 +83,22 @@ impl Shaper {
         self.cache.clear();
     }
 
-    pub fn shape(&mut self, x: f32, y: f32, fontdb: &mut FontDb, paint: &Paint, text: &str, max_width: Option<f32>) -> Result<TextLayout, ErrorKind> {
+    pub fn shape(
+        &mut self,
+        x: f32,
+        y: f32,
+        fontdb: &mut FontDb,
+        paint: &Paint,
+        text: &str,
+        max_width: Option<f32>,
+    ) -> Result<TextLayout, ErrorKind> {
         let mut result = TextLayout {
             x: 0.0,
             y: 0.0,
             width: 0.0,
             height: 0.0,
             glyphs: Vec::with_capacity(text.len()),
-            final_byte_index: 0
+            final_byte_index: 0,
         };
 
         let bidi_info = BidiInfo::new(&text, Some(unicode_bidi::Level::ltr()));
@@ -148,7 +142,7 @@ impl Shaper {
                                 break;
                             }
                         }
-                        
+
                         result.width += word.width;
 
                         for glyph in &mut word.glyphs {
@@ -183,20 +177,22 @@ impl Shaper {
         Ok(result)
     }
 
-    fn shape_word(word: &str, hb_direction: hb::Direction, fontdb: &mut FontDb, paint: &Paint) -> Result<ShapedWord, ErrorKind> {
+    fn shape_word(
+        word: &str,
+        hb_direction: hb::Direction,
+        fontdb: &mut FontDb,
+        paint: &Paint,
+    ) -> Result<ShapedWord, ErrorKind> {
         // find_font will call the closure with each font matching the provided style
         // until a font capable of shaping the word is found
         fontdb.find_font(&word, paint, |font| {
-
             // Call harfbuzz
             let output = {
                 // TODO: It may be faster if this is created only once and stored inside the Font struct
                 let face = hb::Face::new(font.data.clone(), 0);
                 let hb_font = hb::Font::new(face);
-                
-                let buffer = hb::UnicodeBuffer::new()
-                    .add_str(word)
-                    .set_direction(hb_direction);
+
+                let buffer = hb::UnicodeBuffer::new().add_str(word).set_direction(hb_direction);
 
                 hb::shape(&hb_font, buffer, &[])
             };
@@ -214,7 +210,7 @@ impl Shaper {
 
             let mut shaped_word = ShapedWord {
                 glyphs: Vec::with_capacity(positions.len()),
-                width: 0.0
+                width: 0.0,
             };
 
             let mut has_missing = false;
@@ -228,7 +224,7 @@ impl Shaper {
 
                 //let start_index = run.start + info.cluster as usize;
                 //debug_assert!(text.get(start_index..).is_some());
-                
+
                 let mut g = ShapedGlyph {
                     c: c,
                     byte_index: info.cluster as usize,
@@ -265,7 +261,7 @@ impl Shaper {
         match paint.text_align {
             Align::Center => cursor_x -= res.width / 2.0,
             Align::Right => cursor_x -= res.width,
-            _ => ()
+            _ => (),
         }
 
         res.x = cursor_x;
@@ -275,7 +271,7 @@ impl Shaper {
 
         for glyph in &mut res.glyphs {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            
+
             // Baseline alignment
             let ascender = font.ascender(paint.font_size);
             let descender = font.descender(paint.font_size);

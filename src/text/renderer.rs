@@ -1,29 +1,11 @@
-
 use fnv::FnvHashMap;
 
 use crate::{
-    Canvas,
-    Renderer,
-    Path,
-    Paint,
-    ErrorKind,
-    FillRule,
-    ImageId,
-    ImageFlags,
-    ImageStore,
-    PixelFormat,
-    ImageInfo,
-    RenderTarget,
-    Color
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, ImageStore, Paint, Path, PixelFormat,
+    RenderTarget, Renderer,
 };
 
-use super::{
-    TextLayout,
-    RenderMode,
-    Atlas,
-    FontId,
-    ShapedGlyph,
-};
+use super::{Atlas, FontId, RenderMode, ShapedGlyph, TextLayout};
 
 const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
@@ -36,7 +18,7 @@ pub struct RenderedGlyphId {
     size: u32,
     blur: u8,
     line_width: u32,
-    render_mode: RenderMode
+    render_mode: RenderMode,
 }
 
 impl RenderedGlyphId {
@@ -47,7 +29,7 @@ impl RenderedGlyphId {
             size: (paint.font_size * 10.0).trunc() as u32,
             blur: paint.font_blur,
             line_width: (paint.line_width * 10.0).trunc() as u32,
-            render_mode: mode
+            render_mode: mode,
         }
     }
 }
@@ -65,7 +47,7 @@ pub struct RenderedGlyph {
 #[derive(Clone)]
 pub struct DrawCmd {
     pub image_id: ImageId,
-    pub quads: Vec<Quad>
+    pub quads: Vec<Quad>,
 }
 
 #[derive(Copy, Clone, Default, Debug)]
@@ -77,21 +59,26 @@ pub struct Quad {
     pub x1: f32,
     pub y1: f32,
     pub s1: f32,
-    pub t1: f32
+    pub t1: f32,
 }
 
 pub struct FontTexture {
     atlas: Atlas,
-    image_id: ImageId
+    image_id: ImageId,
 }
 
 #[derive(Default)]
 pub struct TextRendererContext {
     textures: Vec<FontTexture>,
-    glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>
+    glyph_cache: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
 }
 
-pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, paint: &Paint, mode: RenderMode) -> Result<Vec<DrawCmd>, ErrorKind> {
+pub fn render_atlas<T: Renderer>(
+    canvas: &mut Canvas<T>,
+    text_layout: &TextLayout,
+    paint: &Paint,
+    mode: RenderMode,
+) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
     let half_line_width = if mode == RenderMode::Stroke {
@@ -121,7 +108,7 @@ pub fn render_atlas<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayou
 
             let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
                 image_id,
-                quads: Vec::new()
+                quads: Vec::new(),
             });
 
             let mut q = Quad::default();
@@ -166,7 +153,7 @@ fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     paint: &Paint,
     mode: RenderMode,
-    glyph: &ShapedGlyph
+    glyph: &ShapedGlyph,
 ) -> Result<RenderedGlyph, ErrorKind> {
     // TODO: this may be blur * 2 - fix it when blurring iss implemented
     let padding = GLYPH_PADDING + paint.font_blur as u32;
@@ -185,7 +172,7 @@ fn render_glyph<T: Renderer>(
         &mut canvas.images,
         &mut canvas.renderer,
         width as usize,
-        height as usize
+        height as usize,
     )?;
 
     // render glyph to image
@@ -209,11 +196,17 @@ fn render_glyph<T: Renderer>(
     let y = 512.0 - dst_y as f32 - glyph.bearing_y - (line_width / 2.0) - padding as f32;
 
     canvas.translate(x, y);
-    
-    canvas.set_render_target(RenderTarget::Image(dst_image_id));
-    canvas.clear_rect(dst_x as u32, 512 - dst_y as u32 - height as u32, width as u32, height as u32, Color::black());
 
-    let factor = 1.0/8.0;
+    canvas.set_render_target(RenderTarget::Image(dst_image_id));
+    canvas.clear_rect(
+        dst_x as u32,
+        512 - dst_y as u32 - height as u32,
+        width as u32,
+        height as u32,
+        Color::black(),
+    );
+
+    let factor = 1.0 / 8.0;
 
     let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
     mask_paint.set_fill_rule(FillRule::EvenOdd);
@@ -235,14 +228,14 @@ fn render_glyph<T: Renderer>(
 
     // 8x
     let points = [
-        (-7.0/16.0,-1.0/16.0),
-        (-1.0/16.0,-5.0/16.0),
-        ( 3.0/16.0,-7.0/16.0),
-        ( 5.0/16.0,-3.0/16.0),
-        ( 5.0/16.0, 1.0/16.0),
-        ( 1.0/16.0, 5.0/16.0),
-        (-3.0/16.0, 7.0/16.0),
-        (-5.0/16.0, 3.0/16.0),
+        (-7.0 / 16.0, -1.0 / 16.0),
+        (-1.0 / 16.0, -5.0 / 16.0),
+        (3.0 / 16.0, -7.0 / 16.0),
+        (5.0 / 16.0, -3.0 / 16.0),
+        (5.0 / 16.0, 1.0 / 16.0),
+        (1.0 / 16.0, 5.0 / 16.0),
+        (-3.0 / 16.0, 7.0 / 16.0),
+        (-5.0 / 16.0, 3.0 / 16.0),
     ];
 
     for point in &points {
@@ -284,16 +277,18 @@ fn render_glyph<T: Renderer>(
 }
 
 fn find_texture_or_alloc<T: Renderer>(
-    textures: &mut Vec<FontTexture>, 
-    images: &mut ImageStore<T::Image>, 
-    renderer: &mut T, 
-    width: usize, 
-    height: usize
+    textures: &mut Vec<FontTexture>,
+    images: &mut ImageStore<T::Image>,
+    renderer: &mut T,
+    width: usize,
+    height: usize,
 ) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
-
     // Find a free location in one of the the atlases
     let mut texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
-        texture.atlas.add_rect(width, height).map(|loc| (index, texture.image_id, loc))
+        texture
+            .atlas
+            .add_rect(width, height)
+            .map(|loc| (index, texture.image_id, loc))
     });
 
     if texture_search_result.is_none() {
@@ -330,10 +325,16 @@ fn find_texture_or_alloc<T: Renderer>(
     texture_search_result.ok_or(ErrorKind::UnknownError)
 }
 
-pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayout, paint: &Paint, mode: RenderMode, invscale: f32) -> Result<(), ErrorKind> {
+pub fn render_direct<T: Renderer>(
+    canvas: &mut Canvas<T>,
+    text_layout: &TextLayout,
+    paint: &Paint,
+    mode: RenderMode,
+    invscale: f32,
+) -> Result<(), ErrorKind> {
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
-    
+
     let mut scaled = false;
 
     for glyph in &text_layout.glyphs {
@@ -357,7 +358,10 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
             scaled = true;
         }
 
-        canvas.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
+        canvas.translate(
+            (glyph.x - glyph.bearing_x) * invscale,
+            (glyph.y + glyph.bearing_y) * invscale,
+        );
         canvas.scale(scale * invscale, -scale * invscale);
 
         if mode == RenderMode::Stroke {

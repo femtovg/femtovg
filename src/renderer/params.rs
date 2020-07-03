@@ -1,14 +1,4 @@
-
-use crate::{
-    PixelFormat,
-    ImageFlags,
-    ImageStore,
-    Scissor,
-    Color,
-    Paint,
-    PaintFlavor,
-    Transform2D,
-};
+use crate::{Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D};
 
 use super::ShaderType;
 
@@ -31,8 +21,14 @@ pub struct Params {
 }
 
 impl Params {
-
-    pub(crate) fn new<T>(images: &ImageStore<T>, paint: &Paint, scissor: &Scissor, stroke_width: f32, fringe_width: f32, stroke_thr: f32) -> Self {
+    pub(crate) fn new<T>(
+        images: &ImageStore<T>,
+        paint: &Paint,
+        scissor: &Scissor,
+        stroke_width: f32,
+        fringe_width: f32,
+        stroke_thr: f32,
+    ) -> Self {
         let mut params = Params::default();
 
         // Scissor
@@ -43,8 +39,10 @@ impl Params {
                 params.scissor_mat = scissor.transform.inversed().to_mat3x4();
 
                 let scissor_scale = [
-                    (scissor.transform[0]*scissor.transform[0] + scissor.transform[2]*scissor.transform[2]).sqrt() / fringe_width,
-                    (scissor.transform[1]*scissor.transform[1] + scissor.transform[3]*scissor.transform[3]).sqrt() / fringe_width
+                    (scissor.transform[0] * scissor.transform[0] + scissor.transform[2] * scissor.transform[2]).sqrt()
+                        / fringe_width,
+                    (scissor.transform[1] * scissor.transform[1] + scissor.transform[3] * scissor.transform[3]).sqrt()
+                        / fringe_width,
                 ];
 
                 (ext, scissor_scale)
@@ -56,7 +54,7 @@ impl Params {
         params.scissor_ext = scissor_ext;
         params.scissor_scale = scissor_scale;
 
-        params.stroke_mult = (stroke_width*0.5 + fringe_width*0.5) / fringe_width;
+        params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
 
         params.has_mask = if paint.alpha_mask().is_some() { 1.0 } else { 0.0 };
@@ -70,11 +68,19 @@ impl Params {
                 params.outer_col = color;
                 params.shader_type = ShaderType::FillGradient.to_f32();
                 inv_transform = paint.transform.inversed();
-            },
-            PaintFlavor::Image { id, cx, cy, width, height, angle, alpha } => {
+            }
+            PaintFlavor::Image {
+                id,
+                cx,
+                cy,
+                width,
+                height,
+                angle,
+                alpha,
+            } => {
                 let image_info = match images.info(id) {
                     Some(info) => info,
-                    None => return params
+                    None => return params,
                 };
 
                 params.extent[0] = width;
@@ -111,16 +117,29 @@ impl Params {
                 params.shader_type = ShaderType::FillImage.to_f32();
 
                 params.tex_type = match image_info.format() {
-                    PixelFormat::Rgba8 => if image_info.flags().contains(ImageFlags::PREMULTIPLIED) { 0.0 } else { 1.0 },
+                    PixelFormat::Rgba8 => {
+                        if image_info.flags().contains(ImageFlags::PREMULTIPLIED) {
+                            0.0
+                        } else {
+                            1.0
+                        }
+                    }
                     PixelFormat::Gray8 => 2.0,
-                    _ => 0.0
+                    _ => 0.0,
                 };
-            },
-            PaintFlavor::LinearGradient { start_x, start_y, end_x, end_y, start_color, end_color } => {
+            }
+            PaintFlavor::LinearGradient {
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+                start_color,
+                end_color,
+            } => {
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
                 let mut dy = end_y - start_y;
-                let d = (dx*dx + dy*dy).sqrt();
+                let d = (dx * dx + dy * dy).sqrt();
 
                 if d > 0.0001 {
                     dx /= d;
@@ -130,25 +149,30 @@ impl Params {
                     dy = 1.0;
                 }
 
-                let mut transform = Transform2D([
-                    dy, -dx,
-                    dx, dy,
-                    start_x - dx*large, start_y - dy*large
-                ]);
+                let mut transform = Transform2D([dy, -dx, dx, dy, start_x - dx * large, start_y - dy * large]);
 
                 transform.multiply(&paint.transform);
 
                 inv_transform = transform.inversed();
 
                 params.extent[0] = large;
-                params.extent[1] = large + d*0.5;
+                params.extent[1] = large + d * 0.5;
                 params.feather = 1.0f32.max(d);
 
                 params.inner_col = start_color.premultiplied().to_array();
                 params.outer_col = end_color.premultiplied().to_array();
                 params.shader_type = ShaderType::FillGradient.to_f32();
             }
-            PaintFlavor::BoxGradient { x, y, width, height, radius, feather, inner_color, outer_color } => {
+            PaintFlavor::BoxGradient {
+                x,
+                y,
+                width,
+                height,
+                radius,
+                feather,
+                inner_color,
+                outer_color,
+            } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform.multiply(&paint.transform);
                 inv_transform = transform.inversed();
@@ -161,7 +185,14 @@ impl Params {
                 params.outer_col = outer_color.premultiplied().to_array();
                 params.shader_type = ShaderType::FillGradient.to_f32();
             }
-            PaintFlavor::RadialGradient { cx, cy, in_radius, out_radius, inner_color, outer_color } => {
+            PaintFlavor::RadialGradient {
+                cx,
+                cy,
+                in_radius,
+                out_radius,
+                inner_color,
+                outer_color,
+            } => {
                 let r = (in_radius + out_radius) * 0.5;
                 let f = out_radius - in_radius;
 
@@ -183,5 +214,4 @@ impl Params {
 
         params
     }
-
 }
