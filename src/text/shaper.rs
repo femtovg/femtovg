@@ -152,7 +152,7 @@ impl Shaper {
                         result.width += word.width;
 
                         for glyph in &mut word.glyphs {
-                            glyph.byte_index = byte_index + glyph.byte_index;
+                            glyph.byte_index += byte_index;
                             debug_assert!(text.get(glyph.byte_index..).is_some());
                         }
 
@@ -186,7 +186,7 @@ impl Shaper {
     fn shape_word(word: &str, hb_direction: hb::Direction, fontdb: &mut FontDb, paint: &Paint) -> Result<ShapedWord, ErrorKind> {
         // find_font will call the closure with each font matching the provided style
         // until a font capable of shaping the word is found
-        let ret = fontdb.find_font(&word, paint, |font| {
+        fontdb.find_font(&word, paint, |font| {
 
             // Call harfbuzz
             let output = {
@@ -253,9 +253,7 @@ impl Shaper {
             }
 
             (has_missing, shaped_word)
-        });
-
-        ret
+        })
     }
 
     // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run

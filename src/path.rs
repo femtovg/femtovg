@@ -21,9 +21,6 @@ impl Default for Solidity {
     }
 }
 
-// TODO: Optimize path memory requirements by implementing the path more like in the original nanovg
-// ref https://people.gnome.org/~federico/blog/reducing-memory-consumption-in-librsvg-4.html 
-
 // TODO: Maybe to avoid confusion solid/hole should be true/false as a last param to rect, circle etc
 
 #[derive(Copy, Clone, Debug)]

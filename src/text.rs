@@ -31,6 +31,22 @@ pub struct TextLayout {
     pub(crate) final_byte_index: usize
 }
 
+impl TextLayout {
+    pub(crate) fn scale(&mut self, scale: f32) {
+        self.x *= scale;
+        self.y *= scale;
+        self.width *= scale;
+        self.height *= scale;
+
+        for glyph in &mut self.glyphs {
+            glyph.x *= scale;
+            glyph.y *= scale;
+            glyph.width *= scale;
+            glyph.height *= scale;
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Baseline {
     /// The text baseline is the top of the em square.

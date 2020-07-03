@@ -278,8 +278,8 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     let mut gutter_y = 0.0;
     let mut gutter = 0;
     let mut y = y;
-    let mut px = 0.0;
-    let mut caret_x = 0.0;
+    let mut px;
+    let mut caret_x;
 
     let lines = canvas.break_text_vec(width, text, paint).expect("Cannot break text");
 

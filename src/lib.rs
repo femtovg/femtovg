@@ -10,20 +10,11 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - Review text positioning mess
-        - evaluate all the maths that is happening from shaping to drawing
-        - arabic scripts need to get fixed
-    - Text todos:
-        - Review if TextStyle struct is even needed - it's best to use paint itself
-        - Review Font api and move shared functionality from the shaper & renderer to it
-        - Laying out paragraphs - iterator design + correct breaking
-        - Floating point font sizes
-
-        - Mapping from coordinates to character indices
-        - Mapping from character index to coordinates
-        - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
+    - TextLayout.height maybe incorrect since it returns the font max height, not the text bounding box height
+    - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
     - Fix blurring
-    - Finish demo text
+    - Optimise text rendering
+    - Optimize path memory requirements by implementing the path more like in the original nanovg (https://people.gnome.org/~federico/blog/reducing-memory-consumption-in-librsvg-4.html )
     - Canvas push state with callback auto pop
     - Documentation
     - Rename crate to femtovg
@@ -31,7 +22,6 @@ TODO:
     - Publish to crates.io
     - Emoji support
     - fn text_path -> Path
-    - Use https://github.com/grovesNL/glow
 */
 
 mod utils;
@@ -820,10 +810,7 @@ impl<T> Canvas<T> where T: Renderer {
         let invscale = 1.0 / scale;
 
         let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
-        layout.width *= invscale;
-        layout.height *= invscale;
-        layout.x *= invscale;
-        layout.y *= invscale;
+        layout.scale(invscale);
 
         Ok(layout)
     }
@@ -878,10 +865,10 @@ impl<T> Canvas<T> where T: Renderer {
 
     fn transform_text_paint(&self, paint: &mut Paint) {
         let scale = self.font_scale() * self.device_px_ratio;
-        paint.font_size = paint.font_size * scale;
-        paint.letter_spacing = paint.letter_spacing * scale;
+        paint.font_size *= scale;
+        paint.letter_spacing *= scale;
         paint.font_blur = (paint.font_blur as f32 * scale) as u8;
-        paint.line_width = paint.line_width * scale;
+        paint.line_width *= scale;
     }
 
     fn draw_text(&mut self, x: f32, y: f32, text: &str, mut paint: Paint, render_mode: RenderMode) -> Result<TextLayout, ErrorKind> {
@@ -928,10 +915,7 @@ impl<T> Canvas<T> where T: Renderer {
             }
         }
         
-        layout.width *= invscale;
-        layout.height *= invscale;
-        layout.x *= invscale;
-        layout.y *= invscale;
+        layout.scale(invscale);
 
         Ok(layout)
     }

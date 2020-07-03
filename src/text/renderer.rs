@@ -353,7 +353,7 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
         canvas.save();
 
         if mode == RenderMode::Stroke && !scaled {
-            paint.line_width = paint.line_width / scale;
+            paint.line_width /= scale;
             scaled = true;
         }
 
