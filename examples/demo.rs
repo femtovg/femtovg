@@ -144,6 +144,10 @@ fn main() {
                 let height = size.height as f32;
                 let width = size.width as f32;
 
+                let pt = canvas.transform().inversed().transform_point(mousex, mousey);
+                let mousex = pt.0;
+                let mousey = pt.1;
+
                 // draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
                 // {
@@ -261,7 +265,7 @@ fn main() {
 
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
 
-    let text = "This is longer chunk of text.\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
+    let text = "This is longer chunk of text.\n\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
     
     canvas.save();
 
@@ -271,23 +275,82 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Top);
 
+    let mut gutter_y = 0.0;
+    let mut gutter = 0;
     let mut y = y;
+    let mut px = 0.0;
+    let mut caret_x = 0.0;
 
-    let mut start = 0;
+    let lines = canvas.break_text_vec(width, text, paint).expect("Cannot break text");
 
-    while start < text.len() {
-        let substr = &text[start..];
-        
-        if let Ok(index) = canvas.break_text(width, substr, paint) {
-            if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
-                y += res.height;
+    for (line_num, line_range) in lines.into_iter().enumerate() {
+        if let Ok(res) = canvas.fill_text(x, y, &text[line_range], paint) {
+
+            let hit = mx > x && mx < (x + width) && my >= y && my < (y+res.height);
+
+            if hit {
+                caret_x = if mx < x + res.width / 2.0 { x } else { x + res.width };
+                px = x;
+
+                for glyph in &res.glyphs {
+                    let x0 = glyph.x;
+                    let x1 = x0 + glyph.width;
+                    let gx = x0 * 0.3 + x1 * 0.7;
+
+                    if mx >= px && mx < gx {
+                        caret_x = glyph.x;
+                    }
+
+                    px = gx;
+                }
+
+                let mut path = Path::new();
+                path.rect(caret_x, y, 1.0, res.height);
+                canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 255)));
+
+                gutter = line_num + 1;
+
+                gutter_y = y + 14.0 / 2.0;
             }
 
-            start += &substr[0..index].len();
-        } else {
-            break;
+            y += res.height;
         }
     }
+
+    if gutter > 0 {
+        let mut paint = Paint::color(Color::rgba(255, 192, 0, 255));
+        paint.set_font_size(12.0);
+        paint.set_font_family("Roboto");
+        paint.set_text_align(Align::Right);
+        paint.set_text_baseline(Baseline::Middle);
+
+        let text = format!("{}", gutter);
+
+        if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, paint) {
+            let mut path = Path::new();
+            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width + 8.0, 14.0, 6.0);
+            canvas.fill_path(&mut path, paint);
+
+            paint.set_color(Color::rgba(32, 32, 32, 255));
+            let _ = canvas.fill_text(x - 10.0, gutter_y, &text, paint);
+        }
+    }
+
+    // let mut start = 0;
+
+    // while start < text.len() {
+    //     let substr = &text[start..];
+        
+    //     if let Ok(index) = canvas.break_text(width, substr, paint) {
+    //         if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
+    //             y += res.height;
+    //         }
+
+    //         start += &substr[0..index].len();
+    //     } else {
+    //         break;
+    //     }
+    // }
 
 
     canvas.restore();

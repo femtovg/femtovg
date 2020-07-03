@@ -1,4 +1,5 @@
 
+use std::ops::Range;
 use std::path::Path as FilePath;
 
 use rgb::RGBA8;
@@ -17,13 +18,12 @@ TODO:
         - Review Font api and move shared functionality from the shaper & renderer to it
         - Laying out paragraphs - iterator design + correct breaking
         - Floating point font sizes
-        
+
         - Mapping from coordinates to character indices
         - Mapping from character index to coordinates
         - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
     - Fix blurring
     - Finish demo text
-    - Integrate euclid
     - Canvas push state with callback auto pop
     - Documentation
     - Rename crate to femtovg
@@ -822,6 +822,8 @@ impl<T> Canvas<T> where T: Renderer {
         let mut layout = self.shaper.shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
         layout.width *= invscale;
         layout.height *= invscale;
+        layout.x *= invscale;
+        layout.y *= invscale;
 
         Ok(layout)
     }
@@ -834,23 +836,42 @@ impl<T> Canvas<T> where T: Renderer {
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
-        //let invscale = 1.0 / scale;
-
         let max_width = max_width * scale;
 
         let layout = self.shaper.shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
 
-        //let index = layout.glyphs.last().map(|glyph| glyph.byte_index).unwrap_or(0);
-
         Ok(layout.final_byte_index)
     }
 
+    pub fn break_text_vec<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> Result<Vec<Range<usize>>, ErrorKind> {
+        let text = text.as_ref();
+
+        let mut res = Vec::new();
+        let mut start = 0;
+
+        while start < text.len() {
+            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
+                if index == 0 {
+                    break;
+                }
+
+                let index = start + index;
+                res.push(start..index);
+                start += &text[start..index].len();
+            } else {
+                break;
+            }
+        }
+
+        Ok(res)
+    }
+
     pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
+        self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Fill)
     }
 
     pub fn stroke_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
+        self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Stroke)
     }
 
     // Private
@@ -875,7 +896,7 @@ impl<T> Canvas<T> where T: Renderer {
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if false && paint.font_size > 40.0 {
+        if paint.font_size > 72.0 {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
             let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
@@ -909,6 +930,8 @@ impl<T> Canvas<T> where T: Renderer {
         
         layout.width *= invscale;
         layout.height *= invscale;
+        layout.x *= invscale;
+        layout.y *= invscale;
 
         Ok(layout)
     }

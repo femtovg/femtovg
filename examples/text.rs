@@ -31,7 +31,6 @@ use gpucanvas::{
 };
 
 fn main() {
-
     let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
@@ -201,7 +200,6 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
 }
 
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32, text: &str) {
-
     let mut paint = Paint::color(Color::black());
     paint.set_font_family("Roboto");
     paint.set_font_weight(Weight::Light);
@@ -211,21 +209,29 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     let width = canvas.width();
     let mut y = y;
 
-    let mut start = 0;
+    let lines = canvas.break_text_vec(width, text, paint).expect("Error while breaking text");
 
-    while start < text.len() {
-        let substr = &text[start..];
-        
-        if let Ok(index) = canvas.break_text(width, substr, paint) {
-            if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
-                y += res.height;
-            }
-
-            start += &substr[0..index].len();
-        } else {
-            break;
+    for line_range in lines {
+        if let Ok(res) = canvas.fill_text(x, y, &text[line_range], paint) {
+            y += res.height;
         }
     }
+
+    // let mut start = 0;
+
+    // while start < text.len() {
+    //     let substr = &text[start..];
+        
+    //     if let Ok(index) = canvas.break_text(width, substr, paint) {
+    //         if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
+    //             y += res.height;
+    //         }
+
+    //         start += &substr[0..index].len();
+    //     } else {
+    //         break;
+    //     }
+    // }
 }
 
 fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {

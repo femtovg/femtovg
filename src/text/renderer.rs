@@ -334,20 +334,6 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
     
-    //
-    paint.set_anti_alias(false);
-    canvas.save();
-    canvas.set_global_alpha(0.25);
-    canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
-
-    let points = [
-        (-3.0/8.0, 1.0/8.0),
-        (1.0/8.0, 3.0/8.0),
-        (3.0/8.0, -1.0/8.0),
-        (-1.0/8.0, -3.0/8.0),
-    ];
-    //
-    
     let mut scaled = false;
 
     for glyph in &text_layout.glyphs {
@@ -372,33 +358,16 @@ pub fn render_direct<T: Renderer>(canvas: &mut Canvas<T>, text_layout: &TextLayo
         }
 
         canvas.translate((glyph.x - glyph.bearing_x) * invscale, (glyph.y + glyph.bearing_y) * invscale);
-        
+        canvas.scale(scale * invscale, -scale * invscale);
 
-        // if mode == RenderMode::Stroke {
-        //     canvas.stroke_path(&mut path, paint);
-        // } else {
-        //     canvas.fill_path(&mut path, paint);
-        // }
-
-        for point in &points {
-            canvas.save();
-            canvas.translate(point.0, point.1);
-
-            canvas.scale(scale * invscale, -scale * invscale);
-    
-            if mode == RenderMode::Stroke {
-                canvas.stroke_path(&mut path, paint);
-            } else {
-                canvas.fill_path(&mut path, paint);
-            }
-    
-            canvas.restore();
+        if mode == RenderMode::Stroke {
+            canvas.stroke_path(&mut path, paint);
+        } else {
+            canvas.fill_path(&mut path, paint);
         }
 
         canvas.restore();
     }
-
-    canvas.restore();
 
     Ok(())
 }
