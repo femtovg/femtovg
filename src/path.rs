@@ -1,4 +1,5 @@
 use std::f32::consts::PI;
+use std::slice;
 
 use crate::geometry::{self, Transform2D};
 
@@ -23,19 +24,84 @@ impl Default for Solidity {
 // TODO: Maybe to avoid confusion solid/hole should be true/false as a last param to rect, circle etc
 
 #[derive(Copy, Clone, Debug)]
+#[repr(u8)]
+pub enum PackedVerb {
+    MoveTo,
+    LineTo,
+    BezierTo,
+    Solid,
+    Hole,
+    Close,
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum Verb {
     MoveTo(f32, f32),
     LineTo(f32, f32),
     BezierTo(f32, f32, f32, f32, f32, f32),
+    Solid,
+    Hole,
     Close,
-    Solidity(Solidity),
+}
+
+impl Verb {
+    fn num_coordinates(&self) -> usize {
+        match *self {
+            Self::MoveTo(..) => 2,
+            Self::LineTo(..) => 2,
+            Self::BezierTo(..) => 6,
+            Self::Solid => 0,
+            Self::Hole => 0,
+            Self::Close => 0,
+        }
+    }
+
+    fn to_packed(&self, coords: &mut [f32]) -> PackedVerb {
+        match *self {
+            Self::MoveTo(x, y) => {
+                coords[0] = x;
+                coords[1] = y;
+                PackedVerb::MoveTo
+            }
+            Self::LineTo(x, y) => {
+                coords[0] = x;
+                coords[1] = y;
+                PackedVerb::LineTo
+            }
+            Self::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                coords[0] = c1x;
+                coords[1] = c1y;
+                coords[2] = c2x;
+                coords[3] = c2y;
+                coords[4] = x;
+                coords[5] = y;
+
+                PackedVerb::BezierTo
+            }
+            Self::Solid => PackedVerb::Solid,
+            Self::Hole => PackedVerb::Hole,
+            Self::Close => PackedVerb::Close,
+        }
+    }
+
+    fn from_packed(packed: &PackedVerb, coords: &[f32]) -> Self {
+        match *packed {
+            PackedVerb::MoveTo => Self::MoveTo(coords[0], coords[1]),
+            PackedVerb::LineTo => Self::LineTo(coords[0], coords[1]),
+            PackedVerb::BezierTo => Self::BezierTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]),
+            PackedVerb::Solid => Self::Solid,
+            PackedVerb::Hole => Self::Hole,
+            PackedVerb::Close => Self::Close,
+        }
+    }
 }
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
 #[derive(Default, Clone, Debug)]
 pub struct Path {
     transform: Transform2D,
-    verbs: Vec<Verb>,
+    verbs: Vec<PackedVerb>,
+    coords: Vec<f32>,
     lastx: f32,
     lasty: f32,
     dist_tol: f32,
@@ -52,7 +118,7 @@ impl Path {
 
     /// Memory usage in bytes
     pub fn size(&self) -> usize {
-        std::mem::size_of::<Verb>() * self.verbs.len()
+        std::mem::size_of::<PackedVerb>() * self.verbs.len() + std::mem::size_of::<f32>() * self.coords.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -63,12 +129,11 @@ impl Path {
         self.dist_tol = value;
     }
 
-    pub fn verbs(&self) -> impl Iterator<Item = &Verb> {
-        self.verbs.iter()
-    }
-
-    pub fn verbs_mut(&mut self) -> impl Iterator<Item = &mut Verb> {
-        self.verbs.iter_mut()
+    pub fn verbs(&self) -> PathIter<'_> {
+        PathIter {
+            verbs: self.verbs.iter(),
+            coords: &self.coords,
+        }
     }
 
     pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> &'a mut PathCache {
@@ -87,7 +152,7 @@ impl Path {
         }
 
         if needs_rebuild {
-            let path_cache = PathCache::new(&self.verbs, &transform, tess_tol, dist_tol);
+            let path_cache = PathCache::new(self.verbs(), &transform, tess_tol, dist_tol);
             self.cache = Some((key, path_cache));
         }
 
@@ -133,7 +198,10 @@ impl Path {
 
     /// Sets the current sub-path winding, see Solidity
     pub fn solidity(&mut self, solidity: Solidity) {
-        self.append(&[Verb::Solidity(solidity)]);
+        match solidity {
+            Solidity::Solid => self.append(&[Verb::Solid]),
+            Solidity::Hole => self.append(&[Verb::Hole]),
+        }
     }
 
     /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
@@ -361,28 +429,50 @@ impl Path {
 
     /// Appends a slice of verbs to the path
     pub fn append(&mut self, verbs: &[Verb]) {
-        for cmd in verbs.iter().rev() {
-            match cmd {
+        for verb in verbs.iter() {
+            match verb {
                 Verb::MoveTo(x, y) => {
                     self.lastx = *x;
                     self.lasty = *y;
-                    break;
                 }
                 Verb::LineTo(x, y) => {
                     self.lastx = *x;
                     self.lasty = *y;
-                    break;
                 }
                 Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
                     self.lastx = *x;
                     self.lasty = *y;
-                    break;
                 }
                 _ => (),
             }
-        }
 
-        self.verbs.extend_from_slice(verbs);
+            let start = self.coords.len();
+            let num_coords = verb.num_coordinates();
+            self.coords
+                .resize_with(self.coords.len() + num_coords, Default::default);
+
+            self.verbs.push(verb.to_packed(&mut self.coords[start..]));
+        }
+    }
+}
+
+pub struct PathIter<'a> {
+    verbs: slice::Iter<'a, PackedVerb>,
+    coords: &'a [f32],
+}
+
+impl<'a> Iterator for PathIter<'a> {
+    type Item = Verb;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(verb) = self.verbs.next() {
+            let verb = Verb::from_packed(verb, self.coords);
+            let num_coords = verb.num_coordinates();
+            self.coords = &self.coords[num_coords..];
+            Some(verb)
+        } else {
+            None
+        }
     }
 }
 

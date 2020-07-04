@@ -151,7 +151,7 @@ pub struct PathCache {
 }
 
 impl PathCache {
-    pub fn new(verbs: &[Verb], transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
+    pub fn new(verbs: impl Iterator<Item = Verb>, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = Self::default();
 
         // Convert path verbs to a set of contours
@@ -159,18 +159,18 @@ impl PathCache {
             match verb {
                 Verb::MoveTo(x, y) => {
                     cache.add_contour();
-                    let (x, y) = transform.transform_point(*x, *y);
+                    let (x, y) = transform.transform_point(x, y);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    let (x, y) = transform.transform_point(*x, *y);
+                    let (x, y) = transform.transform_point(x, y);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.points.last().copied() {
-                        let (c1x, c1y) = transform.transform_point(*c1x, *c1y);
-                        let (c2x, c2y) = transform.transform_point(*c2x, *c2y);
-                        let (x, y) = transform.transform_point(*x, *y);
+                        let (c1x, c1y) = transform.transform_point(c1x, c1y);
+                        let (c2x, c2y) = transform.transform_point(c2x, c2y);
+                        let (x, y) = transform.transform_point(x, y);
                         cache.tesselate_bezier(
                             last.x,
                             last.y,
@@ -192,9 +192,14 @@ impl PathCache {
                         contour.closed = true;
                     }
                 }
-                Verb::Solidity(solidity) => {
+                Verb::Solid => {
                     if let Some(contour) = cache.contours.last_mut() {
-                        contour.solidity = *solidity;
+                        contour.solidity = Solidity::Solid;
+                    }
+                }
+                Verb::Hole => {
+                    if let Some(contour) = cache.contours.last_mut() {
+                        contour.solidity = Solidity::Hole;
                     }
                 }
             }
@@ -427,7 +432,7 @@ impl PathCache {
 
             // TODO: woff = 0.0 produces no artifaacts for small sizes
             let woff = 0.5 * fringe_width; // produces artifacts
-            //let woff = 0.0;//0.5 * fringe_width; // Makes everything thicker
+                                           //let woff = 0.0;//0.5 * fringe_width; // Makes everything thicker
 
             if has_fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {
@@ -1020,7 +1025,7 @@ mod tests {
 
         let transform = Transform2D::identity();
 
-        let mut path_cache = PathCache::new(&path.verbs, &transform, 0.25, 0.01);
+        let mut path_cache = PathCache::new(path.verbs(), &transform, 0.25, 0.01);
         path_cache.expand_fill(1.0, LineJoin::Miter, 10.0);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
