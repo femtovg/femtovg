@@ -50,6 +50,11 @@ impl Path {
         }
     }
 
+    /// Memory usage in bytes
+    pub fn size(&self) -> usize {
+        std::mem::size_of::<Verb>() * self.verbs.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.verbs.is_empty()
     }

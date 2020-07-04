@@ -59,6 +59,15 @@ fn main() {
 
     let mut paths = render_svg(&svg);
 
+    // print memory usage
+    let mut total_sisze_bytes = 0;
+
+    for path in &paths {
+        total_sisze_bytes += path.0.size();
+    }
+
+    println!("Path mem usage: {}kb", total_sisze_bytes / 1024);
+
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
