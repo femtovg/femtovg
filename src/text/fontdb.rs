@@ -1,108 +1,29 @@
-use std::convert::TryFrom;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
-use fnv::FnvHashMap;
-use owned_ttf_parser as ttf;
+use generational_arena::Arena;
 
 use crate::{ErrorKind, Paint};
 
-use super::{Font, FontStyle, Weight, WidthClass};
+use super::{Font, FontId};
 
 // TODO: use generational arena for font_ids
 
-#[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct FontId(usize);
-
-// TODO: this may not be needed. "degrade" can be a method on the Paint
-#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-pub struct FontDescription {
-    family_name: String,
-    weight: Weight,
-    font_style: FontStyle,
-    width_class: WidthClass,
-}
-
-impl FontDescription {
-    fn degrade(&mut self) -> bool {
-        if !self.family_name.is_empty() {
-            // if family_name is "Roboto Regular" or "Roboto-Regular" try to find font by only "Roboto"
-            let split: Vec<&str> = self.family_name.split(|c| c == ' ' || c == '-').collect();
-
-            if split.len() > 1 {
-                self.family_name = split[0].to_owned();
-            } else {
-                self.family_name.clear();
-            }
-
-            true
-        } else if self.weight != Weight::Normal {
-            self.weight = Weight::Normal;
-            true
-        } else if self.width_class != WidthClass::Normal {
-            self.width_class = WidthClass::Normal;
-            true
-        } else if self.font_style != FontStyle::Normal {
-            self.font_style = FontStyle::Normal;
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl From<&Paint<'_>> for FontDescription {
-    fn from(paint: &Paint) -> Self {
-        Self {
-            family_name: paint.font_family.to_owned(), // TODO: remove this to_owned
-            weight: paint.font_weight,
-            font_style: paint.font_style,
-            width_class: paint.font_width_class,
-        }
-    }
-}
-
-impl TryFrom<ttf::Font<'_>> for FontDescription {
-    type Error = ErrorKind;
-
-    fn try_from(font: ttf::Font<'_>) -> Result<Self, ErrorKind> {
-        let family_name = font.family_name().ok_or(ErrorKind::FontInfoExtracionError)?;
-        let weight = Weight::from_value(font.weight().to_number());
-        let width_class = WidthClass::from_value(font.width().to_number());
-
-        let font_style = if font.is_oblique() {
-            FontStyle::Oblique
-        } else if font.is_italic() {
-            FontStyle::Italic
-        } else {
-            FontStyle::Normal
-        };
-
-        Ok(Self {
-            family_name,
-            weight,
-            font_style,
-            width_class,
-        })
-    }
-}
-
 pub struct FontDb {
-    fonts: Vec<Font>,
-    font_descr: FnvHashMap<FontDescription, FontId>,
+    fonts: Arena<Font>,
 }
 
 impl FontDb {
     pub fn new() -> Result<Self, ErrorKind> {
         Ok(Self {
-            fonts: Default::default(),
-            font_descr: Default::default(),
+            fonts: Default::default()
         })
     }
 
-    pub fn scan_dir<T: AsRef<Path>>(&mut self, path: T) -> Result<(), ErrorKind> {
+    pub fn scan_dir<T: AsRef<Path>>(&mut self, path: T) -> Result<Vec<FontId>, ErrorKind> {
         let path = path.as_ref();
+        let mut fonts = Vec::new();
 
         if path.is_dir() {
             for entry in fs::read_dir(path)? {
@@ -113,13 +34,13 @@ impl FontDb {
                     self.scan_dir(&path)?;
                 } else {
                     if let Some("ttf") = path.extension().and_then(OsStr::to_str) {
-                        self.add_font_file(path)?;
+                        fonts.push(self.add_font_file(path)?);
                     }
                 }
             }
         }
 
-        Ok(())
+        Ok(fonts)
     }
 
     pub fn add_font_file<T: AsRef<Path>>(&mut self, path: T) -> Result<FontId, ErrorKind> {
@@ -129,59 +50,52 @@ impl FontDb {
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
-        let font = ttf::Font::from_data(&data, 0).ok_or(ErrorKind::FontParseError)?;
-        let description = FontDescription::try_from(font)?;
-
-        if let Some(id) = self.font_descr.get(&description).copied() {
-            Ok(id)
-        } else {
-            let id = FontId(self.fonts.len());
-            self.fonts.push(Font::new(id, data)?);
-            self.font_descr.insert(description, id);
-            Ok(id)
-        }
+        let font = Font::new(data)?;
+        Ok(FontId(self.fonts.insert(font)))
     }
 
-    pub fn get(&self, id: FontId) -> Option<&Font> {
-        self.fonts.get(id.0)
-    }
+    // pub fn get(&self, id: FontId) -> Option<&Font> {
+    //     self.fonts.get(id.0)
+    // }
 
     pub fn get_mut(&mut self, id: FontId) -> Option<&mut Font> {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
+    pub fn find_font<F, T>(&mut self, _text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
     where
-        F: FnMut(&mut Font) -> (bool, T),
+        F: FnMut((FontId, &mut Font)) -> (bool, T),
     {
-        let mut description = FontDescription::from(paint);
+        // Try each font in the paint
+        for maybe_font_id in paint.font_ids.iter() {
+            if let Some(font_id) = maybe_font_id {
+                if let Some(font) = self.fonts.get_mut(font_id.0) {
+                    let (has_missing, result) = callback((*font_id, font));
 
-        loop {
-            if let Some(font_id) = self.font_descr.get(&description) {
-                let font = self.fonts.get_mut(font_id.0).ok_or(ErrorKind::NoFontFound)?;
-
-                let (has_missing, result) = callback(font);
-
-                if !has_missing || !description.degrade() {
-                    return Ok(result);
+                    if !has_missing {
+                        return Ok(result);
+                    }
                 }
-            } else if !description.degrade() {
-                // cant degrade description any more
+            } else {
                 break;
             }
         }
 
-        // try every font
-        for font in &mut self.fonts {
-            if font.has_chars(text) {
-                let (_has_missing, result) = callback(font);
+        // Try each registered font
+        // An optimisation here would be to skip fonts that were tried by the paint
+        for (id, font) in &mut self.fonts {
+            let (has_missing, result) = callback((FontId(id), font));
+
+            if !has_missing {
                 return Ok(result);
             }
         }
 
-        // just return the first font at this point and let it render .nodef glyphs
-        if let Some(font) = self.fonts.first_mut() {
-            return Ok(callback(font).1);
+        // Just return the first font at this point and let it render .nodef glyphs
+        if let Some((id, font)) = self.fonts.iter_mut().next() {
+            return Ok(
+                callback((FontId(id), font)).1
+            );
         }
 
         Err(ErrorKind::NoFontFound)

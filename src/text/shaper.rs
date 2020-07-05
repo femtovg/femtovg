@@ -10,11 +10,11 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{ErrorKind, Paint};
 
-use super::{Align, Baseline, Font, FontDb, FontId, FontStyle, TextLayout, Weight, WidthClass};
+use super::{Align, Baseline, FontDb, FontId, TextLayout};
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 pub struct ShapedGlyph {
     pub x: f32,
     pub y: f32,
@@ -42,9 +42,7 @@ struct ShapedWord {
 struct ShapingId {
     size: u32,
     word_hash: u64,
-    weight: Weight,
-    width_class: WidthClass,
-    font_style: FontStyle,
+    font_ids: [Option<FontId>; 8],
 }
 
 impl ShapingId {
@@ -55,9 +53,7 @@ impl ShapingId {
         ShapingId {
             size: (paint.font_size * 10.0).trunc() as u32,
             word_hash: hasher.finish(),
-            weight: paint.font_weight,
-            width_class: paint.font_width_class,
-            font_style: paint.font_style,
+            font_ids: paint.font_ids,
         }
     }
 }
@@ -185,7 +181,7 @@ impl Shaper {
     ) -> Result<ShapedWord, ErrorKind> {
         // find_font will call the closure with each font matching the provided style
         // until a font capable of shaping the word is found
-        fontdb.find_font(&word, paint, |font| {
+        fontdb.find_font(&word, paint, |(font_id, font)| {
             // Call harfbuzz
             let output = {
                 // TODO: It may be faster if this is created only once and stored inside the Font struct
@@ -226,15 +222,20 @@ impl Shaper {
                 //debug_assert!(text.get(start_index..).is_some());
 
                 let mut g = ShapedGlyph {
+                    x: 0.0,
+                    y: 0.0,
                     c: c,
                     byte_index: info.cluster as usize,
-                    font_id: font.id,
+                    font_id: font_id,
                     codepoint: info.codepoint,
+                    width: 0.0,
+                    height: 0.0,
                     advance_x: position.x_advance as f32 * scale,
                     advance_y: position.y_advance as f32 * scale,
                     offset_x: position.x_offset as f32 * scale,
                     offset_y: position.y_offset as f32 * scale,
-                    ..Default::default()
+                    bearing_x: 0.0,
+                    bearing_y: 0.0,
                 };
 
                 if let Some(glyph) = font.glyph(info.codepoint as u16) {

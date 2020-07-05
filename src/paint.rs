@@ -2,7 +2,7 @@
 // so that they are easier to find when autocompleting
 
 use crate::geometry::Transform2D;
-use crate::{Align, Baseline, Color, FillRule, FontStyle, ImageId, LineCap, LineJoin, Weight, WidthClass};
+use crate::{Align, Baseline, Color, FillRule, ImageId, LineCap, LineJoin, FontId};
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum PaintFlavor {
@@ -70,7 +70,7 @@ pub(crate) enum PaintFlavor {
 /// canvas.stroke_path(&mut path, stroke_paint);
 /// ```
 #[derive(Copy, Clone, Debug)]
-pub struct Paint<'a> {
+pub struct Paint {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
     pub(crate) alpha_mask: Option<ImageId>,
@@ -81,19 +81,16 @@ pub struct Paint<'a> {
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
-    pub(crate) font_family: &'a str,
+    pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,
     pub(crate) font_blur: u8,
-    pub(crate) font_weight: Weight,
-    pub(crate) font_width_class: WidthClass,
-    pub(crate) font_style: FontStyle,
     pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
     pub(crate) fill_rule: FillRule,
 }
 
-impl Default for Paint<'_> {
+impl Default for Paint {
     fn default() -> Self {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
@@ -106,12 +103,9 @@ impl Default for Paint<'_> {
             line_cap_start: Default::default(),
             line_cap_end: Default::default(),
             line_join: Default::default(),
-            font_family: "NotoSans",
+            font_ids: Default::default(),
             font_size: 16.0,
             font_blur: 0,
-            font_weight: Weight::Normal,
-            font_width_class: WidthClass::Normal,
-            font_style: FontStyle::Normal,
             letter_spacing: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
@@ -120,7 +114,7 @@ impl Default for Paint<'_> {
     }
 }
 
-impl<'a> Paint<'a> {
+impl Paint {
     /// Creates a new solid color paint
     pub fn color(color: Color) -> Self {
         let mut new = Self::default();
@@ -347,17 +341,12 @@ impl<'a> Paint<'a> {
         self.line_join = join;
     }
 
-    /// Returns the font name that is used when drawing text with this paint
-    pub fn font_family(&self) -> &str {
-        &self.font_family
-    }
+    pub fn set_font(&mut self, font_ids: &[FontId]) {
+        self.font_ids = Default::default();
 
-    /// Sets the font name for text drawn with this paint
-    ///
-    /// This needs to be the font family name. Eg. "NotoSans" not the postscript name (NotoSans-Regular)
-    /// Only has effect on canvas text operations
-    pub fn set_font_family(&mut self, name: &'a str) {
-        self.font_family = name;
+        for (i, id) in font_ids.iter().take(8).enumerate() {
+            self.font_ids[i] = Some(*id);
+        }
     }
 
     /// Returns the current font size
@@ -420,30 +409,6 @@ impl<'a> Paint<'a> {
     /// Only has effect on canvas text operations
     pub fn set_text_align(&mut self, align: Align) {
         self.text_align = align;
-    }
-
-    pub fn font_weight(&self) -> Weight {
-        self.font_weight
-    }
-
-    pub fn set_font_weight(&mut self, weight: Weight) {
-        self.font_weight = weight;
-    }
-
-    pub fn font_width_class(&self) -> WidthClass {
-        self.font_width_class
-    }
-
-    pub fn set_font_width_class(&mut self, class: WidthClass) {
-        self.font_width_class = class;
-    }
-
-    pub fn font_style(&self) -> FontStyle {
-        self.font_style
-    }
-
-    pub fn set_font_style(&mut self, style: FontStyle) {
-        self.font_style = style;
     }
 
     /// Retrieves the current fill rule setting for this paint

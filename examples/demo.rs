@@ -25,11 +25,17 @@ use gpucanvas::{
     RenderTarget,
     Renderer,
     Solidity,
-    Weight,
+    FontId
 };
 
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
+}
+
+struct Fonts {
+    regular: FontId,
+    bold: FontId,
+    icons: FontId,
 }
 
 fn main() {
@@ -46,16 +52,12 @@ fn main() {
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
-    canvas
-        .add_font("examples/assets/Roboto-Bold.ttf")
-        .expect("Cannot add font");
-    canvas
-        .add_font("examples/assets/Roboto-Light.ttf")
-        .expect("Cannot add font");
-    canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
-        .expect("Cannot add font");
-    canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font");
+    let fonts = Fonts {
+        regular: canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font"),
+        bold: canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font"),
+        icons: canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font"),
+    };
+
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
 
     //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
@@ -207,7 +209,7 @@ fn main() {
 
                 draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
-                draw_paragraph(&mut canvas, width - 450.0, 50.0, 150.0, 100.0, mousex, mousey);
+                draw_paragraph(&mut canvas, fonts.regular, width - 450.0, 50.0, 150.0, 100.0, mousex, mousey);
 
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
@@ -219,26 +221,27 @@ fn main() {
 
                 draw_scissor(&mut canvas, 50.0, height - 80.0, t);
 
-                draw_window(&mut canvas, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+                draw_window(&mut canvas, &fonts, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
 
                 let x = 60.0;
                 let mut y = 95.0;
 
-                draw_search_box(&mut canvas, "Search", x, y, 280.0, 25.0);
+                draw_search_box(&mut canvas, &fonts, "Search", x, y, 280.0, 25.0);
                 y += 40.0;
-                draw_drop_down(&mut canvas, "Effects", 60.0, 135.0, 280.0, 28.0);
+                draw_drop_down(&mut canvas, &fonts, "Effects", 60.0, 135.0, 280.0, 28.0);
                 let popy = y + 14.0;
                 y += 45.0;
 
-                draw_label(&mut canvas, "Login", x, y, 280.0, 20.0);
+                draw_label(&mut canvas, &fonts, "Login", x, y, 280.0, 20.0);
                 y += 25.0;
-                draw_edit_box(&mut canvas, "Email", x, y, 280.0, 28.0);
+                draw_edit_box(&mut canvas, &fonts, "Email", x, y, 280.0, 28.0);
                 y += 35.0;
-                draw_edit_box(&mut canvas, "Password", x, y, 280.0, 28.0);
+                draw_edit_box(&mut canvas, &fonts, "Password", x, y, 280.0, 28.0);
                 y += 38.0;
-                draw_check_box(&mut canvas, "Remember me", x, y, 140.0, 28.0);
+                draw_check_box(&mut canvas, &fonts, "Remember me", x, y, 140.0, 28.0);
                 draw_button(
                     &mut canvas,
+                    &fonts,
                     Some("\u{E740}"),
                     "Sign in",
                     x + 138.0,
@@ -250,14 +253,15 @@ fn main() {
                 y += 45.0;
 
                 // Slider
-                draw_label(&mut canvas, "Diameter", x, y, 280.0, 20.0);
+                draw_label(&mut canvas, &fonts, "Diameter", x, y, 280.0, 20.0);
                 y += 25.0;
-                draw_edit_box_num(&mut canvas, "123.00", "px", x + 180.0, y, 100.0, 28.0);
+                draw_edit_box_num(&mut canvas, &fonts, "123.00", "px", x + 180.0, y, 100.0, 28.0);
                 draw_slider(&mut canvas, 0.4, x, y, 170.0, 28.0);
                 y += 55.0;
 
                 draw_button(
                     &mut canvas,
+                    &fonts,
                     Some("\u{E729}"),
                     "Delete",
                     x,
@@ -268,6 +272,7 @@ fn main() {
                 );
                 draw_button(
                     &mut canvas,
+                    &fonts,
                     None,
                     "Cancel",
                     x + 170.0,
@@ -319,14 +324,14 @@ fn main() {
     });
 }
 
-fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
     let text = "This is longer chunk of text.\n\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
 
     canvas.save();
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 255));
     paint.set_font_size(14.0);
-    paint.set_font_family("Roboto");
+    paint.set_font(&[font]);
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Top);
 
@@ -374,7 +379,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f3
     if gutter > 0 {
         let mut paint = Paint::color(Color::rgba(255, 192, 0, 255));
         paint.set_font_size(12.0);
-        paint.set_font_family("Roboto");
+        paint.set_font(&[font]);
         paint.set_text_align(Align::Right);
         paint.set_text_baseline(Baseline::Middle);
 
@@ -578,7 +583,7 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
     canvas.fill_path(&mut path, Paint::color(Color::rgba(220, 220, 220, 255)));
 }
 
-fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, w: f32, h: f32) {
     let corner_radius = 3.0;
 
     canvas.save();
@@ -627,8 +632,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32,
 
     let mut text_paint = Paint::color(Color::rgba(0, 0, 0, 32));
     text_paint.set_font_size(16.0);
-    text_paint.set_font_family("Roboto");
-    text_paint.set_font_weight(Weight::Bold);
+    text_paint.set_font(&[fonts.bold]);
     text_paint.set_text_align(Align::Center);
     text_paint.set_font_blur(2);
     let _ = canvas.fill_text(x + (w / 2.0), y + 19.0 + 1.0, title, text_paint);
@@ -773,7 +777,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     canvas.restore();
 }
 
-fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, w: f32, h: f32) {
     let corner_radius = (h / 2.0) - 1.0;
 
     let bg = Paint::box_gradient(
@@ -792,27 +796,27 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: 
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
     text_paint.set_font_size((h * 1.3).round());
-    text_paint.set_font_family("Entypo");
+    text_paint.set_font(&[fonts.icons]);
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + h * 0.55, y + h * 0.55, "\u{1F50D}", text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
     text_paint.set_font_size(16.0);
-    text_paint.set_font_family("Roboto");
+    text_paint.set_font(&[fonts.regular]);
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + h, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 32));
     text_paint.set_font_size((h * 1.3).round());
-    text_paint.set_font_family("Entypo");
+    text_paint.set_font(&[fonts.icons]);
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + w - h * 0.55, y + h * 0.45, "\u{2716}", text_paint);
 }
 
-fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, w: f32, h: f32) {
     let corner_radius = 4.0;
 
     let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
@@ -826,23 +830,23 @@ fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 160));
     text_paint.set_font_size(16.0);
-    text_paint.set_font_family("Roboto");
+    text_paint.set_font(&[fonts.regular]);
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + h * 0.3, y + h * 0.5, title, text_paint);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
     text_paint.set_font_size((h * 1.3).round());
-    text_paint.set_font_family("Entypo");
+    text_paint.set_font(&[fonts.icons]);
     text_paint.set_text_align(Align::Center);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + w - h * 0.5, y + h * 0.45, "\u{E75E}", text_paint);
 }
 
-fn draw_label<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, _w: f32, h: f32) {
+fn draw_label<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, _w: f32, h: f32) {
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 128));
     text_paint.set_font_size(14.0);
-    text_paint.set_font_family("Roboto");
+    text_paint.set_font(&[fonts.regular]);
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x, y + h * 0.5, title, text_paint);
@@ -869,23 +873,23 @@ fn draw_edit_box_base<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f3
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 48)));
 }
 
-fn draw_edit_box<T: Renderer>(canvas: &mut Canvas<T>, title: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_edit_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, w: f32, h: f32) {
     draw_edit_box_base(canvas, x, y, w, h);
 
     let mut text_paint = Paint::color(Color::rgba(255, 255, 255, 64));
     text_paint.set_font_size(16.0);
-    text_paint.set_font_family("Roboto");
+    text_paint.set_font(&[fonts.regular]);
     text_paint.set_text_align(Align::Left);
     text_paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + h * 0.5, y + h * 0.5, title, text_paint);
 }
 
-fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, title: &str, units: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, units: &str, x: f32, y: f32, w: f32, h: f32) {
     draw_edit_box_base(canvas, x, y, w, h);
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 64));
     paint.set_font_size(14.0);
-    paint.set_font_family("Roboto");
+    paint.set_font(&[fonts.regular]);
     paint.set_text_align(Align::Right);
     paint.set_text_baseline(Baseline::Middle);
 
@@ -899,10 +903,10 @@ fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, title: &str, units: &s
     }
 }
 
-fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, text: &str, x: f32, y: f32, _w: f32, h: f32) {
+fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, text: &str, x: f32, y: f32, _w: f32, h: f32) {
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 160));
     paint.set_font_size(14.0);
-    paint.set_font_family("Roboto");
+    paint.set_font(&[fonts.regular]);
     paint.set_text_baseline(Baseline::Middle);
 
     let _ = canvas.fill_text(x + 28.0, y + h * 0.5, text, paint);
@@ -923,7 +927,7 @@ fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, text: &str, x: f32, y: f3
 
     paint = Paint::color(Color::rgba(255, 255, 255, 128));
     paint.set_font_size(36.0);
-    paint.set_font_family("Entypo");
+    paint.set_font(&[fonts.icons]);
     paint.set_text_align(Align::Center);
     paint.set_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + 9.0 + 2.0, y + h * 0.5, "\u{2713}", paint);
@@ -931,6 +935,7 @@ fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, text: &str, x: f32, y: f3
 
 fn draw_button<T: Renderer>(
     canvas: &mut Canvas<T>,
+    fonts: &Fonts,
     preicon: Option<&str>,
     text: &str,
     x: f32,
@@ -960,8 +965,7 @@ fn draw_button<T: Renderer>(
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 96));
     paint.set_font_size(15.0);
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Middle);
 
@@ -974,7 +978,7 @@ fn draw_button<T: Renderer>(
     let mut iw = 0.0;
 
     if let Some(icon) = preicon {
-        paint.set_font_family("Entypo");
+        paint.set_font(&[fonts.icons]);
         paint.set_font_size(h * 1.3);
 
         if let Ok(layout) = canvas.measure_text(0.0, 0.0, icon, paint) {
@@ -985,7 +989,7 @@ fn draw_button<T: Renderer>(
     }
 
     paint.set_font_size(15.0);
-    paint.set_font_family("Roboto");
+    paint.set_font(&[fonts.regular]);
     paint.set_color(Color::rgba(0, 0, 0, 160));
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, paint);
     paint.set_color(Color::rgba(255, 255, 255, 160));
@@ -1446,21 +1450,16 @@ impl PerfGraph {
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
         let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14.0);
-        text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
         let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
         let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);

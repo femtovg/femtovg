@@ -3,8 +3,6 @@ use owned_ttf_parser::{AsFontRef, Font as TtfFont, GlyphId, OwnedFont};
 
 use crate::{ErrorKind, Path};
 
-use super::fontdb::FontId;
-
 pub struct Glyph {
     pub path: Path,
     pub metrics: Metrics,
@@ -18,7 +16,6 @@ pub struct Metrics {
 }
 
 pub struct Font {
-    pub(crate) id: FontId,
     pub(crate) data: Vec<u8>,
     pub(crate) owned_ttf_font: OwnedFont,
     pub(crate) units_per_em: u16,
@@ -26,7 +23,7 @@ pub struct Font {
 }
 
 impl Font {
-    pub fn new(id: FontId, data: Vec<u8>) -> Result<Self, ErrorKind> {
+    pub fn new(data: Vec<u8>) -> Result<Self, ErrorKind> {
         let owned_ttf_font = OwnedFont::from_vec(data.clone(), 0).unwrap();
 
         let units_per_em = owned_ttf_font
@@ -35,7 +32,6 @@ impl Font {
             .ok_or(ErrorKind::FontInfoExtracionError)?;
 
         Ok(Self {
-            id,
             data,
             owned_ttf_font,
             units_per_em,
@@ -47,12 +43,6 @@ impl Font {
     //     self.owned_ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
     //     //self.face.postscript_name().unwrap_or_else(String::new)
     // }
-
-    pub fn has_chars(&self, text: &str) -> bool {
-        let face = self.owned_ttf_font.as_font();
-
-        text.chars().all(|c| face.glyph_index(c).is_some())
-    }
 
     pub fn font_ref(&self) -> &TtfFont<'_> {
         self.owned_ttf_font.as_font()

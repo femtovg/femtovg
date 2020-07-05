@@ -11,7 +11,7 @@ use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
 use gpucanvas::{
-    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, ImageFlags, Paint, Path, Renderer, Weight,
+    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, ImageFlags, Paint, Path, Renderer, FontId
 };
 
 fn main() {
@@ -26,13 +26,11 @@ fn main() {
     let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
-    canvas
-        .add_font("examples/assets/Roboto-Bold.ttf")
-        .expect("Cannot add font");
-    canvas
+    let roboto_light = canvas
         .add_font("examples/assets/Roboto-Light.ttf")
         .expect("Cannot add font");
-    canvas
+    
+    let roboto_regular = canvas
         .add_font("examples/assets/Roboto-Regular.ttf")
         .expect("Cannot add font");
 
@@ -170,7 +168,7 @@ fn main() {
 
                 canvas.save();
                 canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
+                perf.render(&mut canvas, roboto_regular, roboto_light, 5.0, 5.0);
                 canvas.restore();
 
                 canvas.flush();
@@ -182,7 +180,7 @@ fn main() {
     });
 }
 
-fn render_svg(svg: &str) -> Vec<(Path, Option<Paint<'static>>, Option<Paint<'static>>)> {
+fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
     let svg = svg::read(std::io::Cursor::new(&svg)).unwrap();
 
     let mut paths = Vec::new();
@@ -264,7 +262,7 @@ impl PerfGraph {
         self.values.iter().map(|v| *v).sum::<f32>() / self.history_count as f32
     }
 
-    fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
+    fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, regular_font: FontId, light_font: FontId, x: f32, y: f32) {
         let avg = self.get_average();
 
         let w = 200.0;
@@ -292,21 +290,19 @@ impl PerfGraph {
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
+        text_paint.set_font(&[light_font]);
         let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14.0);
-        text_paint.set_font_family("Roboto");
+        text_paint.set_font(&[regular_font]);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
         let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
+        text_paint.set_font(&[light_font]);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
         let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);

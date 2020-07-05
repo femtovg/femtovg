@@ -10,10 +10,9 @@ https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
     - TextLayout.height maybe incorrect since it returns the font max height, not the text bounding box height
-    - Review font db design - do we need it in it's current form - a huge simplification would be for a paint to just accept an array of font ids
     - Fix blurring
     - Optimise text rendering
-    - Optimize path memory requirements by implementing the path more like in the original nanovg (https://people.gnome.org/~federico/blog/reducing-memory-consumption-in-librsvg-4.html )
+    - Move path methods back to canvas??
     - Canvas push state with callback auto pop
     - Documentation
     - Rename crate to femtovg
@@ -30,7 +29,7 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, FontStyle, TextLayout, Weight, WidthClass};
+pub use text::{Align, Baseline, TextLayout, FontId};
 
 use text::{FontDb, RenderMode, Shaper, TextRendererContext};
 
@@ -834,23 +833,21 @@ where
     }
 
     // Text
-
-    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<(), ErrorKind> {
-        self.fontdb.add_font_file(file_path)?;
+    
+    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
         self.shaper.clear_cache();
-        Ok(())
+        self.fontdb.add_font_file(file_path)
     }
 
-    pub fn scan_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<(), ErrorKind> {
-        self.fontdb.scan_dir(dir_path)?;
+    // TODO: use &[u8] for data
+    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
         self.shaper.clear_cache();
-        Ok(())
+        self.fontdb.add_font_mem(data)
     }
 
-    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<(), ErrorKind> {
-        self.fontdb.add_font_mem(data)?;
+    pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
         self.shaper.clear_cache();
-        Ok(())
+        self.fontdb.scan_dir(dir_path)
     }
 
     pub fn measure_text<S: AsRef<str>>(

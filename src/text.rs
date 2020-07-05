@@ -1,3 +1,5 @@
+use generational_arena::Index;
+
 mod renderer;
 pub use renderer::{render_atlas, render_direct, TextRendererContext};
 
@@ -11,7 +13,10 @@ mod font;
 pub use font::Font;
 
 mod fontdb;
-pub use fontdb::{FontDb, FontId};
+pub use fontdb::{FontDb};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct FontId(pub Index);
 
 #[derive(Clone, Default, Debug)]
 pub struct TextLayout {
@@ -82,128 +87,5 @@ pub enum RenderMode {
 impl Default for RenderMode {
     fn default() -> Self {
         Self::Fill
-    }
-}
-
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FontStyle {
-    Normal,
-    Italic,
-    Oblique,
-}
-
-impl Default for FontStyle {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
-
-//https://docs.microsoft.com/en-us/dotnet/api/system.windows.fontweights?view=netframework-4.8#remarks
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
-pub enum Weight {
-    Thin,       // 100
-    ExtraLight, // 200
-    Light,      // 300
-    Normal,     // 400
-    Medium,     // 500
-    SemiBold,   // 600
-    Bold,       // 700
-    ExtraBold,  // 800
-    Black,      // 900
-    ExtraBlack, // 950
-    Value(u16),
-}
-
-impl Weight {
-    pub fn from_value(value: u16) -> Self {
-        match value {
-            100 => Self::Thin,
-            200 => Self::ExtraLight,
-            300 => Self::Light,
-            400 => Self::Normal,
-            500 => Self::Medium,
-            600 => Self::SemiBold,
-            700 => Self::Bold,
-            800 => Self::ExtraBold,
-            900 => Self::Black,
-            950 => Self::ExtraBlack,
-            _ => Weight::Value(value),
-        }
-    }
-
-    pub fn value(self) -> u16 {
-        match self {
-            Self::Thin => 100,
-            Self::ExtraLight => 200,
-            Self::Light => 300,
-            Self::Normal => 400,
-            Self::Medium => 500,
-            Self::SemiBold => 600,
-            Self::Bold => 700,
-            Self::ExtraBold => 800,
-            Self::Black => 900,
-            Self::ExtraBlack => 950,
-            Self::Value(value) => value,
-        }
-    }
-
-    pub fn is_bold(self) -> bool {
-        self.value() > Self::Normal.value()
-    }
-}
-
-impl Default for Weight {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
-
-#[derive(Copy, Clone, Debug, Hash, Ord, PartialOrd, Eq, PartialEq)]
-pub enum WidthClass {
-    UltraCondensed,
-    ExtraCondensed,
-    Condensed,
-    SemiCondensed,
-    Normal,
-    SemiExpanded,
-    Expanded,
-    ExtraExpanded,
-    UltraExpanded,
-}
-
-impl WidthClass {
-    pub fn from_value(value: u16) -> Self {
-        match value {
-            1 => Self::UltraCondensed,
-            2 => Self::ExtraCondensed,
-            3 => Self::Condensed,
-            4 => Self::SemiCondensed,
-            5 => Self::Normal,
-            6 => Self::SemiExpanded,
-            7 => Self::Expanded,
-            8 => Self::ExtraExpanded,
-            9 => Self::UltraExpanded,
-            _ => Self::Normal,
-        }
-    }
-
-    pub fn value(self) -> u16 {
-        match self {
-            Self::UltraCondensed => 1,
-            Self::ExtraCondensed => 2,
-            Self::Condensed => 3,
-            Self::SemiCondensed => 4,
-            Self::Normal => 5,
-            Self::SemiExpanded => 6,
-            Self::Expanded => 7,
-            Self::ExtraExpanded => 8,
-            Self::UltraExpanded => 9,
-        }
-    }
-}
-
-impl Default for WidthClass {
-    fn default() -> Self {
-        Self::Normal
     }
 }

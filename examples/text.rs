@@ -7,7 +7,13 @@ use glutin::{
     ContextBuilder,
 };
 
-use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, ImageFlags, ImageId, Paint, Path, Renderer, Weight};
+use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, ImageFlags, ImageId, Paint, Path, Renderer, FontId};
+
+struct Fonts {
+    sans: FontId,
+    bold: FontId,
+    light: FontId,
+}
 
 fn main() {
     let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
@@ -28,10 +34,14 @@ fn main() {
         windowed_context.window().scale_factor() as f32,
     );
 
-    let _ = canvas.add_font("examples/assets/NotoSans-Regular.ttf");
-    let _ = canvas.add_font("examples/assets/Roboto-Regular.ttf");
-    let _ = canvas.add_font("examples/assets/Roboto-Bold.ttf");
-    let _ = canvas.add_font("examples/assets/Roboto-Light.ttf");
+    let fonts = Fonts {
+        sans: canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font"),
+        bold: canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font"),
+        light: canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font"),
+    };
+
+    // The fact that a font is added to the canvas is enough for it to be considered when
+    // searching for fallbacks
     let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
@@ -108,20 +118,19 @@ fn main() {
 
                 perf.update(dt);
 
-                draw_baselines(&mut canvas, 5.0, 50.0, font_size);
-                draw_alignments(&mut canvas, 120.0, 200.0, font_size);
-                draw_paragraph(&mut canvas, x, y, font_size, LOREM_TEXT);
-                draw_inc_size(&mut canvas, 300.0, 10.0);
+                draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size);
+                draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
+                draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
+                draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
 
                 draw_complex(&mut canvas, 300.0, 340.0, font_size);
 
-                draw_stroked(&mut canvas, size.width as f32 - 200.0, 100.0);
-                draw_gradient_fill(&mut canvas, size.width as f32 - 200.0, 180.0);
-                draw_image_fill(&mut canvas, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
+                draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
-                paint.set_font_family("Roboto");
-                paint.set_font_weight(Weight::Bold);
+                paint.set_font(&[fonts.bold]);
                 paint.set_text_baseline(Baseline::Top);
                 paint.set_text_align(Align::Right);
                 let _ = canvas.fill_text(
@@ -145,11 +154,11 @@ fn main() {
     });
 }
 
-fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
+fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, font_size: f32) {
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
-    paint.set_font_family("Roboto");
+    paint.set_font(&[fonts.sans]);
     paint.set_font_size(font_size);
 
     for (i, baseline) in baselines.iter().enumerate() {
@@ -172,7 +181,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     }
 }
 
-fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
+fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, font_size: f32) {
     let alignments = [Align::Left, Align::Center, Align::Right];
 
     let mut path = Path::new();
@@ -181,7 +190,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
-    paint.set_font_family("Roboto");
+    paint.set_font(&[fonts.sans]);
     paint.set_font_size(font_size);
 
     for (i, alignment) in alignments.iter().enumerate() {
@@ -195,10 +204,9 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_siz
     }
 }
 
-fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32, text: &str) {
+fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, font_size: f32, text: &str) {
     let mut paint = Paint::color(Color::black());
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Light);
+    paint.set_font(&[fonts.light]);
     //paint.set_text_align(Align::Right);
     paint.set_font_size(font_size);
 
@@ -232,12 +240,12 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size
     // }
 }
 
-fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32) {
     let mut cursor_y = y;
 
     for i in 4..23 {
         let mut paint = Paint::color(Color::black());
-        paint.set_font_family("Roboto");
+        paint.set_font(&[fonts.sans]);
         paint.set_font_size(i as f32);
 
         if let Ok(res) = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint) {
@@ -246,10 +254,9 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     }
 }
 
-fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32) {
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_line_width(12.0);
     paint.set_font_size(72.0);
     paint.set_font_blur(2);
@@ -268,10 +275,9 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
     let _ = canvas.fill_text(x, y, "RUST", paint);
 }
 
-fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
+fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32) {
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_line_width(6.0);
     paint.set_font_size(72.0);
     let _ = canvas.stroke_text(x, y, "RUST", paint);
@@ -284,13 +290,12 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32) {
         Color::rgba(225, 133, 82, 255),
         Color::rgba(93, 55, 70, 255),
     );
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_font_size(72.0);
     let _ = canvas.fill_text(x, y, "RUST", paint);
 }
 
-fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id: ImageId, t: f32) {
+fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, image_id: ImageId, t: f32) {
     let mut paint = Paint::color(Color::hex("#7300AB"));
     paint.set_line_width(3.0);
     let mut path = Path::new();
@@ -301,23 +306,20 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, image_id
     let text = "RUST";
 
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_line_width(4.0);
     paint.set_font_size(72.0);
     let _ = canvas.stroke_text(x, y, text, paint);
 
     let mut paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50);
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
-    paint.set_font_family("Roboto");
-    paint.set_font_weight(Weight::Bold);
+    paint.set_font(&[fonts.bold]);
     paint.set_font_size(72.0);
     let _ = canvas.fill_text(x, y, text, paint);
 }
 
 fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
     let mut paint = Paint::color(Color::rgb(34, 34, 34));
-    paint.set_font_family("Roboto");
     paint.set_font_size(font_size);
 
     let _ = canvas.fill_text(
@@ -382,21 +384,16 @@ impl PerfGraph {
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
         let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
         text_paint.set_font_size(14.0);
-        text_paint.set_font_family("Roboto");
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Top);
         let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), text_paint);
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
         text_paint.set_font_size(12.0);
-        text_paint.set_font_family("Roboto");
-        text_paint.set_font_weight(Weight::Light);
         text_paint.set_text_align(Align::Right);
         text_paint.set_text_baseline(Baseline::Alphabetic);
         let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, &format!("{:.2} ms", avg * 1000.0), text_paint);
