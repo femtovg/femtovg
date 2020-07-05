@@ -8,8 +8,6 @@ use crate::{ErrorKind, Paint};
 
 use super::{Font, FontId};
 
-// TODO: use generational arena for font_ids
-
 pub struct FontDb {
     fonts: Arena<Font>,
 }
