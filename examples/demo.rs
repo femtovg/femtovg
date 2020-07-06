@@ -15,6 +15,7 @@ use gpucanvas::{
     Canvas,
     Color,
     FillRule,
+    FontId,
     ImageFlags,
     ImageId,
     LineCap,
@@ -25,7 +26,6 @@ use gpucanvas::{
     RenderTarget,
     Renderer,
     Solidity,
-    FontId
 };
 
 pub fn quantize(a: f32, d: f32) -> f32 {
@@ -53,8 +53,12 @@ fn main() {
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
     let fonts = Fonts {
-        regular: canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font"),
-        bold: canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font"),
+        regular: canvas
+            .add_font("examples/assets/Roboto-Regular.ttf")
+            .expect("Cannot add font"),
+        bold: canvas
+            .add_font("examples/assets/Roboto-Light.ttf")
+            .expect("Cannot add font"),
         icons: canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font"),
     };
 
@@ -209,7 +213,16 @@ fn main() {
 
                 draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
-                draw_paragraph(&mut canvas, fonts.regular, width - 450.0, 50.0, 150.0, 100.0, mousex, mousey);
+                draw_paragraph(
+                    &mut canvas,
+                    fonts.regular,
+                    width - 450.0,
+                    50.0,
+                    150.0,
+                    100.0,
+                    mousex,
+                    mousey,
+                );
 
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
@@ -311,7 +324,7 @@ fn main() {
                     canvas.reset();
                     perf.render(canvas, 5.0, 5.0);
                 });
-                
+
                 //canvas.restore();
 
                 canvas.flush();
@@ -326,7 +339,16 @@ fn main() {
     });
 }
 
-fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f32, width: f32, height: f32, mx: f32, my: f32) {
+fn draw_paragraph<T: Renderer>(
+    canvas: &mut Canvas<T>,
+    font: FontId,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    mx: f32,
+    my: f32,
+) {
     let text = "This is longer chunk of text.\n\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
 
     canvas.save();
@@ -389,7 +411,13 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
 
         if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, paint) {
             let mut path = Path::new();
-            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width() + 8.0, res.height() + 4.0, (res.height() + 4.0)/2.0-1.0);
+            path.rounded_rect(
+                res.x - 4.0,
+                res.y - 2.0,
+                res.width() + 8.0,
+                res.height() + 4.0,
+                (res.height() + 4.0) / 2.0 - 1.0,
+            );
             canvas.fill_path(&mut path, paint);
 
             paint.set_color(Color::rgba(32, 32, 32, 255));
@@ -886,7 +914,16 @@ fn draw_edit_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str
     let _ = canvas.fill_text(x + h * 0.5, y + h * 0.5, title, text_paint);
 }
 
-fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, units: &str, x: f32, y: f32, w: f32, h: f32) {
+fn draw_edit_box_num<T: Renderer>(
+    canvas: &mut Canvas<T>,
+    fonts: &Fonts,
+    title: &str,
+    units: &str,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) {
     draw_edit_box_base(canvas, x, y, w, h);
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 64));

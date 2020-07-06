@@ -7,7 +7,7 @@ use glutin::{
     ContextBuilder,
 };
 
-use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, ImageFlags, ImageId, Paint, Path, Renderer, FontId};
+use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
 
 struct Fonts {
     sans: FontId,
@@ -35,9 +35,15 @@ fn main() {
     );
 
     let fonts = Fonts {
-        sans: canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font"),
-        bold: canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font"),
-        light: canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font"),
+        sans: canvas
+            .add_font("examples/assets/Roboto-Regular.ttf")
+            .expect("Cannot add font"),
+        bold: canvas
+            .add_font("examples/assets/Roboto-Bold.ttf")
+            .expect("Cannot add font"),
+        light: canvas
+            .add_font("examples/assets/Roboto-Light.ttf")
+            .expect("Cannot add font"),
     };
 
     // The fact that a font is added to the canvas is enough for it to be considered when

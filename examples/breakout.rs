@@ -10,17 +10,7 @@ use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::{Window, WindowBuilder};
 use glutin::ContextBuilder;
 
-use gpucanvas::{
-    renderer::OpenGl,
-    Align,
-    Baseline,
-    Color,
-    ImageFlags,
-    ImageId,
-    Paint,
-    Path,
-    FontId
-};
+use gpucanvas::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
 
 type Canvas = gpucanvas::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
@@ -100,9 +90,15 @@ impl Game {
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 
         let fonts = Fonts {
-            regular: canvas.add_font("examples/assets/Roboto-Regular.ttf").expect("Cannot add font"),
-            bold: canvas.add_font("examples/assets/Roboto-Bold.ttf").expect("Cannot add font"),
-            light: canvas.add_font("examples/assets/Roboto-Light.ttf").expect("Cannot add font"),
+            regular: canvas
+                .add_font("examples/assets/Roboto-Regular.ttf")
+                .expect("Cannot add font"),
+            bold: canvas
+                .add_font("examples/assets/Roboto-Bold.ttf")
+                .expect("Cannot add font"),
+            light: canvas
+                .add_font("examples/assets/Roboto-Light.ttf")
+                .expect("Cannot add font"),
         };
 
         let mut game = Self {

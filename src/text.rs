@@ -1,13 +1,13 @@
-use std::fs;
 use std::ffi::OsStr;
+use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::{Path as FilePath};
+use std::path::Path as FilePath;
 
-use lru::LruCache;
-use fnv::{FnvHashMap, FnvBuildHasher, FnvHasher};
-use owned_ttf_parser::{AsFontRef, Font as TtfFont, GlyphId, OwnedFont};
-use generational_arena::{Index, Arena};
+use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
+use generational_arena::{Arena, Index};
 use harfbuzz_rs as hb;
+use lru::LruCache;
+use owned_ttf_parser::{AsFontRef, Font as TtfFont, GlyphId, OwnedFont};
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -256,9 +256,7 @@ impl TextContext {
 
         // Just return the first font at this point and let it render .nodef glyphs
         if let Some((id, font)) = self.fonts.iter_mut().next() {
-            return Ok(
-                callback((FontId(id), font)).1
-            );
+            return Ok(callback((FontId(id), font)).1);
         }
 
         Err(ErrorKind::NoFontFound)
@@ -284,7 +282,7 @@ struct GlyphMetrics {
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,
-    height: f32
+    height: f32,
 }
 
 impl FontMetrics {
@@ -450,7 +448,7 @@ fn shape_run(
     context: &mut TextContext,
     paint: &Paint,
     text: &str,
-    max_width: Option<f32>
+    max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
     let mut result = TextMetrics {
         x: 0.0,
@@ -809,7 +807,10 @@ fn render_glyph<T: Renderer>(
     canvas.reset();
 
     let (mut path, scale) = {
-        let font = canvas.text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let font = canvas
+            .text_context
+            .font_mut(glyph.font_id)
+            .ok_or(ErrorKind::NoFontFound)?;
         let scale = font.scale(paint.font_size);
 
         let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
@@ -968,7 +969,10 @@ pub(crate) fn render_direct<T: Renderer>(
 
     for glyph in &text_layout.glyphs {
         let (mut path, scale) = {
-            let font = canvas.text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let font = canvas
+                .text_context
+                .font_mut(glyph.font_id)
+                .ok_or(ErrorKind::NoFontFound)?;
             let scale = font.scale(paint.font_size);
 
             let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {

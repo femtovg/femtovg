@@ -181,14 +181,17 @@ impl Path {
         let x0 = self.lastx;
         let y0 = self.lasty;
 
-        self.append(&[PackedVerb::BezierTo], &[
-            x0 + 2.0 / 3.0 * (cx - x0),
-            y0 + 2.0 / 3.0 * (cy - y0),
-            x + 2.0 / 3.0 * (cx - x),
-            y + 2.0 / 3.0 * (cy - y),
-            x,
-            y,
-        ]);
+        self.append(
+            &[PackedVerb::BezierTo],
+            &[
+                x0 + 2.0 / 3.0 * (cx - x0),
+                y0 + 2.0 / 3.0 * (cy - y0),
+                x + 2.0 / 3.0 * (cx - x),
+                y + 2.0 / 3.0 * (cy - y),
+                x,
+                y,
+            ],
+        );
     }
 
     /// Closes current sub-path with a line segment.
@@ -326,18 +329,16 @@ impl Path {
 
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.append(&[
-            PackedVerb::MoveTo,
-            PackedVerb::LineTo,
-            PackedVerb::LineTo,
-            PackedVerb::LineTo,
-            PackedVerb::Close,
-        ], &[
-            x, y,
-            x, y + h,
-            x + w, y + h,
-            x + w, y
-        ]);
+        self.append(
+            &[
+                PackedVerb::MoveTo,
+                PackedVerb::LineTo,
+                PackedVerb::LineTo,
+                PackedVerb::LineTo,
+                PackedVerb::Close,
+            ],
+            &[x, y, x, y + h, x + w, y + h, x + w, y],
+        );
     }
 
     /// Creates new rounded rectangle shaped sub-path.
@@ -375,74 +376,106 @@ impl Path {
             let rx_tl = rad_top_left.min(halfw) * w.signum();
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
-            self.append(&[
-                PackedVerb::MoveTo,
-                PackedVerb::LineTo,
-                PackedVerb::BezierTo,
-                PackedVerb::LineTo,
-                PackedVerb::BezierTo,
-                PackedVerb::LineTo,
-                PackedVerb::BezierTo,
-                PackedVerb::LineTo,
-                PackedVerb::BezierTo,
-                PackedVerb::Close,
-            ], &[
-                x, y + ry_tl,
-                x, y + h - ry_bl,
-                //
-                x,
-                y + h - ry_bl * (1.0 - KAPPA90),
-                x + rx_bl * (1.0 - KAPPA90),
-                y + h,
-                x + rx_bl,
-                y + h,
-                //
-                x + w - rx_br, y + h,
-                //
-                x + w - rx_br * (1.0 - KAPPA90),
-                y + h,
-                x + w,
-                y + h - ry_br * (1.0 - KAPPA90),
-                x + w,
-                y + h - ry_br,
-                //
-                x + w, y + ry_tr,
-                //
-                x + w,
-                y + ry_tr * (1.0 - KAPPA90),
-                x + w - rx_tr * (1.0 - KAPPA90),
-                y,
-                x + w - rx_tr,
-                y,
-                //
-                x + rx_tl, y,
-                //
-                x + rx_tl * (1.0 - KAPPA90),
-                y,
-                x,
-                y + ry_tl * (1.0 - KAPPA90),
-                x,
-                y + ry_tl
-            ]);
+            self.append(
+                &[
+                    PackedVerb::MoveTo,
+                    PackedVerb::LineTo,
+                    PackedVerb::BezierTo,
+                    PackedVerb::LineTo,
+                    PackedVerb::BezierTo,
+                    PackedVerb::LineTo,
+                    PackedVerb::BezierTo,
+                    PackedVerb::LineTo,
+                    PackedVerb::BezierTo,
+                    PackedVerb::Close,
+                ],
+                &[
+                    x,
+                    y + ry_tl,
+                    x,
+                    y + h - ry_bl,
+                    //
+                    x,
+                    y + h - ry_bl * (1.0 - KAPPA90),
+                    x + rx_bl * (1.0 - KAPPA90),
+                    y + h,
+                    x + rx_bl,
+                    y + h,
+                    //
+                    x + w - rx_br,
+                    y + h,
+                    //
+                    x + w - rx_br * (1.0 - KAPPA90),
+                    y + h,
+                    x + w,
+                    y + h - ry_br * (1.0 - KAPPA90),
+                    x + w,
+                    y + h - ry_br,
+                    //
+                    x + w,
+                    y + ry_tr,
+                    //
+                    x + w,
+                    y + ry_tr * (1.0 - KAPPA90),
+                    x + w - rx_tr * (1.0 - KAPPA90),
+                    y,
+                    x + w - rx_tr,
+                    y,
+                    //
+                    x + rx_tl,
+                    y,
+                    //
+                    x + rx_tl * (1.0 - KAPPA90),
+                    y,
+                    x,
+                    y + ry_tl * (1.0 - KAPPA90),
+                    x,
+                    y + ry_tl,
+                ],
+            );
         }
     }
 
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
-        self.append(&[
-            PackedVerb::MoveTo,
-            PackedVerb::BezierTo,
-            PackedVerb::BezierTo,
-            PackedVerb::BezierTo,
-            PackedVerb::BezierTo,
-            PackedVerb::Close,
-        ], &[
-            cx - rx, cy,
-            cx - rx, cy + ry * KAPPA90, cx - rx * KAPPA90, cy + ry, cx, cy + ry,
-            cx + rx * KAPPA90, cy + ry, cx + rx, cy + ry * KAPPA90, cx + rx, cy,
-            cx + rx, cy - ry * KAPPA90, cx + rx * KAPPA90, cy - ry, cx, cy - ry,
-            cx - rx * KAPPA90, cy - ry, cx - rx, cy - ry * KAPPA90, cx - rx, cy
-        ]);
+        self.append(
+            &[
+                PackedVerb::MoveTo,
+                PackedVerb::BezierTo,
+                PackedVerb::BezierTo,
+                PackedVerb::BezierTo,
+                PackedVerb::BezierTo,
+                PackedVerb::Close,
+            ],
+            &[
+                cx - rx,
+                cy,
+                cx - rx,
+                cy + ry * KAPPA90,
+                cx - rx * KAPPA90,
+                cy + ry,
+                cx,
+                cy + ry,
+                cx + rx * KAPPA90,
+                cy + ry,
+                cx + rx,
+                cy + ry * KAPPA90,
+                cx + rx,
+                cy,
+                cx + rx,
+                cy - ry * KAPPA90,
+                cx + rx * KAPPA90,
+                cy - ry,
+                cx,
+                cy - ry,
+                cx - rx * KAPPA90,
+                cy - ry,
+                cx - rx,
+                cy - ry * KAPPA90,
+                cx - rx,
+                cy,
+            ],
+        );
     }
 
     /// Creates new circle shaped sub-path.
@@ -452,7 +485,6 @@ impl Path {
 
     /// Appends a slice of verbs to the path
     fn append(&mut self, verbs: &[PackedVerb], coords: &[f32]) {
-
         if coords.len() > 1 {
             self.lastx = coords[coords.len() - 2];
             self.lasty = coords[coords.len() - 1];

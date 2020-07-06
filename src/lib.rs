@@ -28,7 +28,7 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, TextMetrics, FontId, FontMetrics};
+pub use text::{Align, Baseline, FontId, FontMetrics, TextMetrics};
 
 use text::{RenderMode, TextContext};
 
@@ -838,7 +838,7 @@ where
     }
 
     // Text
-    
+
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_file(file_path)
     }
@@ -925,7 +925,13 @@ where
         Ok(res)
     }
 
-    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
+    pub fn fill_text<S: AsRef<str>>(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<TextMetrics, ErrorKind> {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 

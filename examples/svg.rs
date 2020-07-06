@@ -11,7 +11,7 @@ use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
 use gpucanvas::{
-    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, ImageFlags, Paint, Path, Renderer, FontId
+    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer,
 };
 
 fn main() {
@@ -29,7 +29,7 @@ fn main() {
     let roboto_light = canvas
         .add_font("examples/assets/Roboto-Light.ttf")
         .expect("Cannot add font");
-    
+
     let roboto_regular = canvas
         .add_font("examples/assets/Roboto-Regular.ttf")
         .expect("Cannot add font");
