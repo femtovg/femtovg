@@ -387,7 +387,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
 
         if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, paint) {
             let mut path = Path::new();
-            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width() + 8.0, 14.0, 6.0);
+            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width() + 8.0, res.height() + 4.0, (res.height() + 4.0)/2.0-1.0);
             canvas.fill_path(&mut path, paint);
 
             paint.set_color(Color::rgba(32, 32, 32, 255));

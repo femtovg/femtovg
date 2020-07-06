@@ -428,7 +428,7 @@ impl Path {
     }
 
     /// Appends a slice of verbs to the path
-    pub fn append(&mut self, verbs: &[Verb]) {
+    fn append(&mut self, verbs: &[Verb]) {
         for verb in verbs.iter() {
             match verb {
                 Verb::MoveTo(x, y) => {

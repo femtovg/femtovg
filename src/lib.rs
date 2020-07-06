@@ -32,7 +32,7 @@ pub use error::ErrorKind;
 
 pub use text::{Align, Baseline, TextMetrics, FontId, FontMetrics};
 
-use text::{FontDb, RenderMode, Shaper, TextRendererContext};
+use text::{RenderMode, TextContext};
 
 mod image;
 pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, ImageStore, PixelFormat};
@@ -202,9 +202,7 @@ pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
     renderer: T,
-    fontdb: FontDb,
-    shaper: Shaper,
-    text_renderer_context: TextRendererContext,
+    text_context: TextContext,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -221,15 +219,11 @@ where
     T: Renderer,
 {
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
-        let fontdb = FontDb::new()?;
-
         let mut canvas = Self {
             width: 0,
             height: 0,
             renderer: renderer,
-            fontdb: fontdb,
-            shaper: Default::default(),
-            text_renderer_context: Default::default(),
+            text_context: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -837,18 +831,15 @@ where
     // Text
     
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
-        self.shaper.clear_cache();
-        self.fontdb.add_font_file(file_path)
+        self.text_context.add_font_file(file_path)
     }
 
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
-        self.shaper.clear_cache();
-        self.fontdb.add_font_mem(data)
+        self.text_context.add_font_mem(data)
     }
 
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
-        self.shaper.clear_cache();
-        self.fontdb.scan_dir(dir_path)
+        self.text_context.add_font_dir(dir_path)
     }
 
     pub fn measure_text<S: AsRef<str>>(
@@ -864,9 +855,7 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut layout = self
-            .shaper
-            .shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
+        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
         layout.scale(invscale);
 
         Ok(layout)
@@ -876,7 +865,7 @@ where
         self.transform_text_paint(&mut paint);
 
         if let Some(Some(id)) = paint.font_ids.get(0) {
-            if let Some(font) = self.fontdb.get(*id) {
+            if let Some(font) = self.text_context.font(*id) {
                 return Ok(font.metrics(paint.font_size));
             }
         }
@@ -894,9 +883,7 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let max_width = max_width * scale;
 
-        let layout = self
-            .shaper
-            .shape(0.0, 0.0, &mut self.fontdb, &paint, text, Some(max_width))?;
+        let layout = text::shape(0.0, 0.0, &mut self.text_context, &paint, text, Some(max_width))?;
 
         Ok(layout.final_byte_index)
     }
@@ -967,9 +954,7 @@ where
 
         self.transform_text_paint(&mut paint);
 
-        let mut layout = self
-            .shaper
-            .shape(x * scale, y * scale, &mut self.fontdb, &paint, text, None)?;
+        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
