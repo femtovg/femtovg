@@ -307,10 +307,12 @@ fn main() {
                 //     canvas.fill_path(&mut path, paint);
                 // }
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
+                canvas.save_with(|canvas| {
+                    canvas.reset();
+                    perf.render(canvas, 5.0, 5.0);
+                });
+                
+                //canvas.restore();
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();

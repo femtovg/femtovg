@@ -12,13 +12,13 @@ TODO:
     - Fix blurring
     - emoji support
     - Move path methods back to canvas??
-    - Canvas push state with callback auto pop
     - Documentation
     - Rename crate to femtovg
     - Tests
     - Publish to crates.io
     - Emoji support
     - fn text_path -> Path
+    - path effects - effects that work on the geometry of Path - dashes (https://github.com/jrmuizel/raqote/blob/master/src/dash.rs)
 */
 
 mod utils;
@@ -309,9 +309,20 @@ where
         }
     }
 
-    /// Resets current render state to default values. Does not affect the render state stack.
+    /// Resets current state to default values. Does not affect the state stack.
     pub fn reset(&mut self) {
         *self.state_mut() = Default::default();
+    }
+
+    /// Saves the current state before calling the callback and restores it afterwards
+    ///
+    /// This is less error prone than remembering to match save() -> restore() calls
+    pub fn save_with(&mut self, mut callback: impl FnMut(&mut Self)) {
+        self.save();
+
+        callback(self);
+
+        self.restore();
     }
 
     // Render styles
