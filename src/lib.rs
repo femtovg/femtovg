@@ -9,7 +9,6 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - TextLayout.height maybe incorrect since it returns the font max height, not the text bounding box height
     - Fix blurring
     - emoji support
     - Optimise text rendering
