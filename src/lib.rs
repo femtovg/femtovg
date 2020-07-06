@@ -11,7 +11,6 @@ https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 TODO:
     - Fix blurring
     - emoji support
-    - Optimise text rendering
     - Move path methods back to canvas??
     - Canvas push state with callback auto pop
     - Documentation
@@ -833,7 +832,7 @@ where
         self.text_context.add_font_file(file_path)
     }
 
-    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
+    pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_mem(data)
     }
 
@@ -962,7 +961,6 @@ where
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
             let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
-            //let cmds = self.text_renderer.render(&mut self.renderer, &mut self.images, &mut self.fontdb, &layout, &style).unwrap();
 
             for cmd in &cmds {
                 let mut verts = Vec::with_capacity(cmd.quads.len() * 6);

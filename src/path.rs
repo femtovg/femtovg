@@ -163,17 +163,17 @@ impl Path {
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
-        self.append(&[Verb::MoveTo(x, y)]);
+        self.append(&[PackedVerb::MoveTo], &[x, y]);
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
-        self.append(&[Verb::LineTo(x, y)]);
+        self.append(&[PackedVerb::LineTo], &[x, y]);
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
-        self.append(&[Verb::BezierTo(c1x, c1y, c2x, c2y, x, y)]);
+        self.append(&[PackedVerb::BezierTo], &[c1x, c1y, c2x, c2y, x, y]);
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
@@ -181,26 +181,26 @@ impl Path {
         let x0 = self.lastx;
         let y0 = self.lasty;
 
-        self.append(&[Verb::BezierTo(
+        self.append(&[PackedVerb::BezierTo], &[
             x0 + 2.0 / 3.0 * (cx - x0),
             y0 + 2.0 / 3.0 * (cy - y0),
             x + 2.0 / 3.0 * (cx - x),
             y + 2.0 / 3.0 * (cy - y),
             x,
             y,
-        )]);
+        ]);
     }
 
     /// Closes current sub-path with a line segment.
     pub fn close(&mut self) {
-        self.append(&[Verb::Close]);
+        self.append(&[PackedVerb::Close], &[]);
     }
 
     /// Sets the current sub-path winding, see Solidity
     pub fn solidity(&mut self, solidity: Solidity) {
         match solidity {
-            Solidity::Solid => self.append(&[Verb::Solid]),
-            Solidity::Hole => self.append(&[Verb::Hole]),
+            Solidity::Solid => self.append(&[PackedVerb::Solid], &[]),
+            Solidity::Hole => self.append(&[PackedVerb::Hole], &[]),
         }
     }
 
@@ -231,8 +231,8 @@ impl Path {
         let hda = (da / ndivs as f32) / 2.0;
         let mut kappa = (4.0 / 3.0 * (1.0 - hda.cos()) / hda.sin()).abs();
 
-        // TODO: Maybe use small stack vec here
         let mut commands = Vec::with_capacity(ndivs as usize);
+        let mut coords = Vec::with_capacity(ndivs as usize);
 
         if dir == Solidity::Solid {
             kappa = -kappa;
@@ -251,13 +251,16 @@ impl Path {
 
             if i == 0 {
                 let first_move = if !self.verbs.is_empty() {
-                    Verb::LineTo(x, y)
+                    PackedVerb::LineTo
                 } else {
-                    Verb::MoveTo(x, y)
+                    PackedVerb::MoveTo
                 };
+
                 commands.push(first_move);
+                coords.extend_from_slice(&[x, y]);
             } else {
-                commands.push(Verb::BezierTo(px + ptanx, py + ptany, x - tanx, y - tany, x, y));
+                commands.push(PackedVerb::BezierTo);
+                coords.extend_from_slice(&[px + ptanx, py + ptany, x - tanx, y - tany, x, y]);
             }
 
             px = x;
@@ -266,7 +269,7 @@ impl Path {
             ptany = tany;
         }
 
-        self.append(&commands);
+        self.append(&commands, &coords);
     }
 
     /// Adds an arc segment at the corner defined by the last path point, and two specified points.
@@ -324,11 +327,16 @@ impl Path {
     /// Creates new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.append(&[
-            Verb::MoveTo(x, y),
-            Verb::LineTo(x, y + h),
-            Verb::LineTo(x + w, y + h),
-            Verb::LineTo(x + w, y),
-            Verb::Close,
+            PackedVerb::MoveTo,
+            PackedVerb::LineTo,
+            PackedVerb::LineTo,
+            PackedVerb::LineTo,
+            PackedVerb::Close,
+        ], &[
+            x, y,
+            x, y + h,
+            x + w, y + h,
+            x + w, y
         ]);
     }
 
@@ -368,44 +376,53 @@ impl Path {
             let ry_tl = rad_top_left.min(halfh) * h.signum();
 
             self.append(&[
-                Verb::MoveTo(x, y + ry_tl),
-                Verb::LineTo(x, y + h - ry_bl),
-                Verb::BezierTo(
-                    x,
-                    y + h - ry_bl * (1.0 - KAPPA90),
-                    x + rx_bl * (1.0 - KAPPA90),
-                    y + h,
-                    x + rx_bl,
-                    y + h,
-                ),
-                Verb::LineTo(x + w - rx_br, y + h),
-                Verb::BezierTo(
-                    x + w - rx_br * (1.0 - KAPPA90),
-                    y + h,
-                    x + w,
-                    y + h - ry_br * (1.0 - KAPPA90),
-                    x + w,
-                    y + h - ry_br,
-                ),
-                Verb::LineTo(x + w, y + ry_tr),
-                Verb::BezierTo(
-                    x + w,
-                    y + ry_tr * (1.0 - KAPPA90),
-                    x + w - rx_tr * (1.0 - KAPPA90),
-                    y,
-                    x + w - rx_tr,
-                    y,
-                ),
-                Verb::LineTo(x + rx_tl, y),
-                Verb::BezierTo(
-                    x + rx_tl * (1.0 - KAPPA90),
-                    y,
-                    x,
-                    y + ry_tl * (1.0 - KAPPA90),
-                    x,
-                    y + ry_tl,
-                ),
-                Verb::Close,
+                PackedVerb::MoveTo,
+                PackedVerb::LineTo,
+                PackedVerb::BezierTo,
+                PackedVerb::LineTo,
+                PackedVerb::BezierTo,
+                PackedVerb::LineTo,
+                PackedVerb::BezierTo,
+                PackedVerb::LineTo,
+                PackedVerb::BezierTo,
+                PackedVerb::Close,
+            ], &[
+                x, y + ry_tl,
+                x, y + h - ry_bl,
+                //
+                x,
+                y + h - ry_bl * (1.0 - KAPPA90),
+                x + rx_bl * (1.0 - KAPPA90),
+                y + h,
+                x + rx_bl,
+                y + h,
+                //
+                x + w - rx_br, y + h,
+                //
+                x + w - rx_br * (1.0 - KAPPA90),
+                y + h,
+                x + w,
+                y + h - ry_br * (1.0 - KAPPA90),
+                x + w,
+                y + h - ry_br,
+                //
+                x + w, y + ry_tr,
+                //
+                x + w,
+                y + ry_tr * (1.0 - KAPPA90),
+                x + w - rx_tr * (1.0 - KAPPA90),
+                y,
+                x + w - rx_tr,
+                y,
+                //
+                x + rx_tl, y,
+                //
+                x + rx_tl * (1.0 - KAPPA90),
+                y,
+                x,
+                y + ry_tl * (1.0 - KAPPA90),
+                x,
+                y + ry_tl
             ]);
         }
     }
@@ -413,12 +430,18 @@ impl Path {
     /// Creates new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
         self.append(&[
-            Verb::MoveTo(cx - rx, cy),
-            Verb::BezierTo(cx - rx, cy + ry * KAPPA90, cx - rx * KAPPA90, cy + ry, cx, cy + ry),
-            Verb::BezierTo(cx + rx * KAPPA90, cy + ry, cx + rx, cy + ry * KAPPA90, cx + rx, cy),
-            Verb::BezierTo(cx + rx, cy - ry * KAPPA90, cx + rx * KAPPA90, cy - ry, cx, cy - ry),
-            Verb::BezierTo(cx - rx * KAPPA90, cy - ry, cx - rx, cy - ry * KAPPA90, cx - rx, cy),
-            Verb::Close,
+            PackedVerb::MoveTo,
+            PackedVerb::BezierTo,
+            PackedVerb::BezierTo,
+            PackedVerb::BezierTo,
+            PackedVerb::BezierTo,
+            PackedVerb::Close,
+        ], &[
+            cx - rx, cy,
+            cx - rx, cy + ry * KAPPA90, cx - rx * KAPPA90, cy + ry, cx, cy + ry,
+            cx + rx * KAPPA90, cy + ry, cx + rx, cy + ry * KAPPA90, cx + rx, cy,
+            cx + rx, cy - ry * KAPPA90, cx + rx * KAPPA90, cy - ry, cx, cy - ry,
+            cx - rx * KAPPA90, cy - ry, cx - rx, cy - ry * KAPPA90, cx - rx, cy
         ]);
     }
 
@@ -428,31 +451,39 @@ impl Path {
     }
 
     /// Appends a slice of verbs to the path
-    fn append(&mut self, verbs: &[Verb]) {
-        for verb in verbs.iter() {
-            match verb {
-                Verb::MoveTo(x, y) => {
-                    self.lastx = *x;
-                    self.lasty = *y;
-                }
-                Verb::LineTo(x, y) => {
-                    self.lastx = *x;
-                    self.lasty = *y;
-                }
-                Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
-                    self.lastx = *x;
-                    self.lasty = *y;
-                }
-                _ => (),
-            }
+    fn append(&mut self, verbs: &[PackedVerb], coords: &[f32]) {
 
-            let start = self.coords.len();
-            let num_coords = verb.num_coordinates();
-            self.coords
-                .resize_with(self.coords.len() + num_coords, Default::default);
-
-            self.verbs.push(verb.to_packed(&mut self.coords[start..]));
+        if coords.len() > 1 {
+            self.lastx = coords[coords.len() - 2];
+            self.lasty = coords[coords.len() - 1];
         }
+
+        self.verbs.extend_from_slice(verbs);
+        self.coords.extend_from_slice(coords);
+        // for verb in verbs.iter() {
+        //     match verb {
+        //         Verb::MoveTo(x, y) => {
+        //             self.lastx = *x;
+        //             self.lasty = *y;
+        //         }
+        //         Verb::LineTo(x, y) => {
+        //             self.lastx = *x;
+        //             self.lasty = *y;
+        //         }
+        //         Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
+        //             self.lastx = *x;
+        //             self.lasty = *y;
+        //         }
+        //         _ => (),
+        //     }
+
+        //     let start = self.coords.len();
+        //     let num_coords = verb.num_coordinates();
+        //     self.coords
+        //         .resize_with(self.coords.len() + num_coords, Default::default);
+
+        //     self.verbs.push(verb.to_packed(&mut self.coords[start..]));
+        // }
     }
 }
 

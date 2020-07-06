@@ -147,7 +147,8 @@ impl ShapingId {
     }
 }
 
-type ShaperCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
+type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
+type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
 struct FontTexture {
     atlas: Atlas,
@@ -159,18 +160,21 @@ pub struct FontId(Index);
 
 pub(crate) struct TextContext {
     fonts: Arena<Font>,
-    shaper_cache: ShaperCache<FnvBuildHasher>,
+    shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
+    shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
     textures: Vec<FontTexture>,
     rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
 }
 
 impl Default for TextContext {
     fn default() -> Self {
-        let fnv = FnvBuildHasher::default();
+        let fnv_run = FnvBuildHasher::default();
+        let fnv_words = FnvBuildHasher::default();
 
         Self {
             fonts: Default::default(),
-            shaper_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv),
+            shaping_run_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_run),
+            shaped_words_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_words),
             textures: Default::default(),
             rendered_glyphs: Default::default(),
         }
@@ -203,10 +207,10 @@ impl TextContext {
     pub fn add_font_file<T: AsRef<FilePath>>(&mut self, path: T) -> Result<FontId, ErrorKind> {
         let data = std::fs::read(path)?;
 
-        self.add_font_mem(data)
+        self.add_font_mem(&data)
     }
 
-    pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
+    pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
         let font = Font::new(data)?;
@@ -261,7 +265,7 @@ impl TextContext {
     }
 
     fn clear_caches(&mut self) {
-        self.shaper_cache.clear();
+        self.shaped_words_cache.clear();
     }
 }
 
@@ -311,8 +315,8 @@ pub(crate) struct Font {
 }
 
 impl Font {
-    fn new(data: Vec<u8>) -> Result<Self, ErrorKind> {
-        let owned_ttf_font = OwnedFont::from_vec(data.clone(), 0).unwrap();
+    fn new(data: &[u8]) -> Result<Self, ErrorKind> {
+        let owned_ttf_font = OwnedFont::from_vec(data.to_owned(), 0).ok_or(ErrorKind::FontParseError)?;
 
         let units_per_em = owned_ttf_font
             .as_font()
@@ -320,7 +324,7 @@ impl Font {
             .ok_or(ErrorKind::FontInfoExtracionError)?;
 
         Ok(Self {
-            data,
+            data: data.to_owned(),
             owned_ttf_font,
             units_per_em,
             glyphs: Default::default(),
@@ -424,6 +428,30 @@ pub(crate) fn shape(
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
+    let id = ShapingId::new(paint, text);
+
+    if !context.shaping_run_cache.contains(&id) {
+        let metrics = shape_run(x, y, context, paint, text, max_width)?;
+        context.shaping_run_cache.put(id, metrics);
+    }
+
+    if let Some(mut metrics) = context.shaping_run_cache.get(&id).cloned() {
+        layout(x, y, context, &mut metrics, paint)?;
+
+        return Ok(metrics);
+    }
+
+    Err(ErrorKind::UnknownError)
+}
+
+fn shape_run(
+    x: f32,
+    y: f32,
+    context: &mut TextContext,
+    paint: &Paint,
+    text: &str,
+    max_width: Option<f32>
+) -> Result<TextMetrics, ErrorKind> {
     let mut result = TextMetrics {
         x: 0.0,
         y: 0.0,
@@ -460,12 +488,12 @@ pub(crate) fn shape(
             for word in sub_text.split_word_bounds() {
                 let id = ShapingId::new(paint, word);
 
-                if !context.shaper_cache.contains(&id) {
+                if !context.shaped_words_cache.contains(&id) {
                     let word = shape_word(word, hb_direction, context, paint);
-                    context.shaper_cache.put(id, word);
+                    context.shaped_words_cache.put(id, word);
                 }
 
-                if let Some(Ok(word)) = context.shaper_cache.get(&id) {
+                if let Some(Ok(word)) = context.shaped_words_cache.get(&id) {
                     let mut word = word.clone();
 
                     if let Some(max_width) = max_width {
@@ -503,8 +531,6 @@ pub(crate) fn shape(
             }
         }
     }
-
-    layout(x, y, context, &mut result, paint)?;
 
     Ok(result)
 }
