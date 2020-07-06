@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{ErrorKind, Paint};
 
-use super::{Align, Baseline, FontDb, FontId, TextLayout};
+use super::{Align, Baseline, FontDb, FontId, TextMetrics};
 
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -87,8 +87,8 @@ impl Shaper {
         paint: &Paint,
         text: &str,
         max_width: Option<f32>,
-    ) -> Result<TextLayout, ErrorKind> {
-        let mut result = TextLayout {
+    ) -> Result<TextMetrics, ErrorKind> {
+        let mut result = TextMetrics {
             x: 0.0,
             y: 0.0,
             width: 0.0,
@@ -254,7 +254,7 @@ impl Shaper {
     }
 
     // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
-    fn layout(x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextLayout, paint: &Paint) -> Result<(), ErrorKind> {
+    fn layout(x: f32, y: f32, fontdb: &mut FontDb, res: &mut TextMetrics, paint: &Paint) -> Result<(), ErrorKind> {
         let mut cursor_x = x;
         let mut cursor_y = y;
 
@@ -267,35 +267,34 @@ impl Shaper {
 
         res.x = cursor_x;
 
-        let mut height = 0.0f32;
-        let mut y = cursor_y;
+        let mut min_y = cursor_y;
+        let mut max_y = cursor_y;
 
         for glyph in &mut res.glyphs {
             let font = fontdb.get_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
             // Baseline alignment
-            let ascender = font.ascender(paint.font_size);
-            let descender = font.descender(paint.font_size);
+            let metrics = font.metrics(paint.font_size);
 
             let alignment_offset_y = match paint.text_baseline {
-                Baseline::Top => ascender,
-                Baseline::Middle => (ascender + descender) / 2.0,
+                Baseline::Top => metrics.ascender,
+                Baseline::Middle => (metrics.ascender + metrics.descender) / 2.0,
                 Baseline::Alphabetic => 0.0,
-                Baseline::Bottom => descender,
+                Baseline::Bottom => metrics.descender,
             };
 
             glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
             glyph.y = cursor_y + glyph.offset_y - glyph.bearing_y + alignment_offset_y;
 
-            height = height.max(font.height(paint.font_size));
-            y = y.min(glyph.y);
+            min_y = min_y.min(glyph.y);
+            max_y = max_y.max(glyph.y + glyph.height);
 
             cursor_x += glyph.advance_x + paint.letter_spacing;
             cursor_y += glyph.advance_y;
         }
 
-        res.y = y;
-        res.height = height;
+        res.y = min_y;
+        res.height = max_y - min_y;
 
         Ok(())
     }

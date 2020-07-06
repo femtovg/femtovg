@@ -5,7 +5,7 @@ use crate::{
     RenderTarget, Renderer,
 };
 
-use super::{Atlas, FontId, RenderMode, ShapedGlyph, TextLayout};
+use super::{Atlas, FontId, RenderMode, ShapedGlyph, TextMetrics};
 
 const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
@@ -75,7 +75,7 @@ pub struct TextRendererContext {
 
 pub fn render_atlas<T: Renderer>(
     canvas: &mut Canvas<T>,
-    text_layout: &TextLayout,
+    text_layout: &TextMetrics,
     paint: &Paint,
     mode: RenderMode,
 ) -> Result<Vec<DrawCmd>, ErrorKind> {
@@ -327,7 +327,7 @@ fn find_texture_or_alloc<T: Renderer>(
 
 pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
-    text_layout: &TextLayout,
+    text_layout: &TextMetrics,
     paint: &Paint,
     mode: RenderMode,
     invscale: f32,

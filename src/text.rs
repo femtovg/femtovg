@@ -10,7 +10,7 @@ mod atlas;
 pub use atlas::Atlas;
 
 mod font;
-pub use font::Font;
+pub use font::{Font, FontMetrics};
 
 mod fontdb;
 pub use fontdb::{FontDb};
@@ -19,16 +19,16 @@ pub use fontdb::{FontDb};
 pub struct FontId(pub Index);
 
 #[derive(Clone, Default, Debug)]
-pub struct TextLayout {
+pub struct TextMetrics {
     pub x: f32,
     pub y: f32,
-    pub width: f32,
-    pub height: f32,
+    width: f32,
+    height: f32,
     pub glyphs: Vec<ShapedGlyph>,
     pub(crate) final_byte_index: usize,
 }
 
-impl TextLayout {
+impl TextMetrics {
     pub(crate) fn scale(&mut self, scale: f32) {
         self.x *= scale;
         self.y *= scale;
@@ -41,6 +41,16 @@ impl TextLayout {
             glyph.width *= scale;
             glyph.height *= scale;
         }
+    }
+
+    /// width of the glyphs as drawn
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// height of the glyphs as drawn
+    pub fn height(&self) -> f32 {
+        self.height
     }
 }
 

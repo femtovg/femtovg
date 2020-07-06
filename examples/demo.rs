@@ -345,10 +345,10 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
 
     for (line_num, line_range) in lines.into_iter().enumerate() {
         if let Ok(res) = canvas.fill_text(x, y, &text[line_range], paint) {
-            let hit = mx > x && mx < (x + width) && my >= y && my < (y + res.height);
+            let hit = mx > x && mx < (x + width) && my >= y && my < (y + res.height());
 
             if hit {
-                caret_x = if mx < x + res.width / 2.0 { x } else { x + res.width };
+                caret_x = if mx < x + res.width() / 2.0 { x } else { x + res.width() };
                 px = x;
 
                 for glyph in &res.glyphs {
@@ -364,7 +364,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
                 }
 
                 let mut path = Path::new();
-                path.rect(caret_x, y, 1.0, res.height);
+                path.rect(caret_x, y, 1.0, res.height());
                 canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 255)));
 
                 gutter = line_num + 1;
@@ -372,7 +372,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
                 gutter_y = y + 14.0 / 2.0;
             }
 
-            y += res.height;
+            y += res.height();
         }
     }
 
@@ -387,7 +387,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: 
 
         if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, paint) {
             let mut path = Path::new();
-            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width + 8.0, 14.0, 6.0);
+            path.rounded_rect(res.x - 4.0, res.y - 2.0, res.width() + 8.0, 14.0, 6.0);
             canvas.fill_path(&mut path, paint);
 
             paint.set_color(Color::rgba(32, 32, 32, 255));
@@ -899,7 +899,7 @@ fn draw_edit_box_num<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: 
         paint.set_font_size(16.0);
         paint.set_color(Color::rgba(255, 255, 255, 128));
 
-        let _ = canvas.fill_text(x + w - layout.width - h * 0.5, y + h * 0.5, title, paint);
+        let _ = canvas.fill_text(x + w - layout.width() - h * 0.5, y + h * 0.5, title, paint);
     }
 }
 
@@ -970,7 +970,7 @@ fn draw_button<T: Renderer>(
     paint.set_text_baseline(Baseline::Middle);
 
     let tw = if let Ok(layout) = canvas.measure_text(0.0, 0.0, text, paint) {
-        layout.width
+        layout.width()
     } else {
         0.0
     };
@@ -982,7 +982,7 @@ fn draw_button<T: Renderer>(
         paint.set_font_size(h * 1.3);
 
         if let Ok(layout) = canvas.measure_text(0.0, 0.0, icon, paint) {
-            iw = layout.width + (h * 0.15);
+            iw = layout.width() + (h * 0.15);
         }
 
         let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 - iw * 0.75, y + h * 0.5, icon, paint);

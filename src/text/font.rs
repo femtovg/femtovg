@@ -5,14 +5,40 @@ use crate::{ErrorKind, Path};
 
 pub struct Glyph {
     pub path: Path,
-    pub metrics: Metrics,
+    pub metrics: GlyphMetrics,
 }
 
-pub struct Metrics {
+pub struct GlyphMetrics {
     pub(crate) width: f32,
     pub(crate) height: f32,
     pub(crate) bearing_x: f32,
     pub(crate) bearing_y: f32,
+}
+
+pub struct FontMetrics {
+    pub(crate) ascender: f32,
+    pub(crate) descender: f32,
+    pub(crate) height: f32
+}
+
+impl FontMetrics {
+    fn scale(&mut self, scale: f32) {
+        self.ascender *= scale;
+        self.descender *= scale;
+        self.height *= scale;
+    }
+
+    pub fn ascender(&self) -> f32 {
+        self.ascender
+    }
+
+    pub fn descender(&self) -> f32 {
+        self.descender
+    }
+
+    pub fn height(&self) -> f32 {
+        self.height
+    }
 }
 
 pub struct Font {
@@ -48,16 +74,16 @@ impl Font {
         self.owned_ttf_font.as_font()
     }
 
-    pub fn ascender(&self, size: f32) -> f32 {
-        self.font_ref().ascender() as f32 * self.scale(size)
-    }
+    pub fn metrics(&self, size: f32) -> FontMetrics {
+        let mut metrics = FontMetrics {
+            ascender: self.font_ref().ascender() as f32,
+            descender: self.font_ref().descender() as f32,
+            height: self.font_ref().height() as f32,
+        };
 
-    pub fn descender(&self, size: f32) -> f32 {
-        self.font_ref().descender() as f32 * self.scale(size)
-    }
+        metrics.scale(self.scale(size));
 
-    pub fn height(&self, size: f32) -> f32 {
-        self.font_ref().height() as f32 * self.scale(size)
+        metrics
     }
 
     pub fn scale(&self, size: f32) -> f32 {
@@ -75,7 +101,7 @@ impl Font {
                     codepoint,
                     Glyph {
                         path,
-                        metrics: Metrics {
+                        metrics: GlyphMetrics {
                             width: bbox.width() as f32,
                             height: bbox.height() as f32,
                             bearing_x: bbox.x_min as f32,

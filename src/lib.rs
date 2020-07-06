@@ -11,6 +11,7 @@ https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 TODO:
     - TextLayout.height maybe incorrect since it returns the font max height, not the text bounding box height
     - Fix blurring
+    - emoji support
     - Optimise text rendering
     - Move path methods back to canvas??
     - Canvas push state with callback auto pop
@@ -29,7 +30,7 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, TextLayout, FontId};
+pub use text::{Align, Baseline, TextMetrics, FontId, FontMetrics};
 
 use text::{FontDb, RenderMode, Shaper, TextRendererContext};
 
@@ -840,7 +841,6 @@ where
         self.fontdb.add_font_file(file_path)
     }
 
-    // TODO: use &[u8] for data
     pub fn add_font_mem(&mut self, data: Vec<u8>) -> Result<FontId, ErrorKind> {
         self.shaper.clear_cache();
         self.fontdb.add_font_mem(data)
@@ -857,7 +857,7 @@ where
         y: f32,
         text: S,
         mut paint: Paint,
-    ) -> Result<TextLayout, ErrorKind> {
+    ) -> Result<TextMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -870,6 +870,18 @@ where
         layout.scale(invscale);
 
         Ok(layout)
+    }
+
+    pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        self.transform_text_paint(&mut paint);
+
+        if let Some(Some(id)) = paint.font_ids.get(0) {
+            if let Some(font) = self.fontdb.get(*id) {
+                return Ok(font.metrics(paint.font_size));
+            }
+        }
+
+        Err(ErrorKind::NoFontFound)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
@@ -917,8 +929,8 @@ where
         Ok(res)
     }
 
-    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextLayout, ErrorKind> {
-        self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Fill)
+    pub fn fill_text<S: AsRef<str>>(&mut self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
     pub fn stroke_text<S: AsRef<str>>(
@@ -927,8 +939,8 @@ where
         y: f32,
         text: S,
         paint: Paint,
-    ) -> Result<TextLayout, ErrorKind> {
-        self.draw_text(x, y, text.as_ref().trim_end(), paint, RenderMode::Stroke)
+    ) -> Result<TextMetrics, ErrorKind> {
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
     // Private
@@ -948,7 +960,7 @@ where
         text: &str,
         mut paint: Paint,
         render_mode: RenderMode,
-    ) -> Result<TextLayout, ErrorKind> {
+    ) -> Result<TextMetrics, ErrorKind> {
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;

@@ -52,9 +52,9 @@ impl FontDb {
         Ok(FontId(self.fonts.insert(font)))
     }
 
-    // pub fn get(&self, id: FontId) -> Option<&Font> {
-    //     self.fonts.get(id.0)
-    // }
+    pub fn get(&self, id: FontId) -> Option<&Font> {
+        self.fonts.get(id.0)
+    }
 
     pub fn get_mut(&mut self, id: FontId) -> Option<&mut Font> {
         self.fonts.get_mut(id.0)

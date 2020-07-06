@@ -175,7 +175,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y:
             //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
             let mut path = Path::new();
-            path.rect(res.x, res.y, res.width, res.height);
+            path.rect(res.x, res.y, res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
@@ -198,7 +198,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
 
         if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint) {
             let mut path = Path::new();
-            path.rect(res.x, res.y, res.width, res.height);
+            path.rect(res.x, res.y, res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
@@ -210,6 +210,8 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y:
     //paint.set_text_align(Align::Right);
     paint.set_font_size(font_size);
 
+    let font_metrics = canvas.measure_font(paint).expect("Error measuring font");
+
     let width = canvas.width();
     let mut y = y;
 
@@ -218,8 +220,8 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y:
         .expect("Error while breaking text");
 
     for line_range in lines {
-        if let Ok(res) = canvas.fill_text(x, y, &text[line_range], paint) {
-            y += res.height;
+        if let Ok(_res) = canvas.fill_text(x, y, &text[line_range], paint) {
+            y += font_metrics.height();
         }
     }
 
@@ -248,8 +250,10 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: 
         paint.set_font(&[fonts.sans]);
         paint.set_font_size(i as f32);
 
-        if let Ok(res) = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint) {
-            cursor_y += res.height;
+        let font_metrics = canvas.measure_font(paint).expect("Error measuring font");
+
+        if let Ok(_res) = canvas.fill_text(x, cursor_y, "The quick brown fox jumps over the lazy dog", paint) {
+            cursor_y += font_metrics.height();
         }
     }
 }
