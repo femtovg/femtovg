@@ -171,6 +171,7 @@ impl PathCache {
                         let (c1x, c1y) = transform.transform_point(c1x, c1y);
                         let (c2x, c2y) = transform.transform_point(c2x, c2y);
                         let (x, y) = transform.transform_point(x, y);
+
                         cache.tesselate_bezier(
                             last.x,
                             last.y,
@@ -185,6 +186,20 @@ impl PathCache {
                             tess_tol,
                             dist_tol,
                         );
+
+                        // cache.tesselate_bezier_afd(
+                        //     last.x,
+                        //     last.y,
+                        //     c1x,
+                        //     c1y,
+                        //     c2x,
+                        //     c2y,
+                        //     x,
+                        //     y,
+                        //     PointFlags::CORNER,
+                        //     tess_tol,
+                        //     dist_tol,
+                        // );
                     }
                 }
                 Verb::Close => {
@@ -359,6 +374,116 @@ impl PathCache {
         );
     }
 
+    // fn tesselate_bezier_afd(
+    //     &mut self,
+    //     x1: f32,
+    //     y1: f32,
+    //     x2: f32,
+    //     y2: f32,
+    //     x3: f32,
+    //     y3: f32,
+    //     x4: f32,
+    //     y4: f32,
+    //     flags: PointFlags,
+    //     tess_tol: f32,
+    //     dist_tol: f32,
+    // ) {
+    //     let ax = -x1 + 3.*x2 - 3.*x3 + x4;
+    //     let ay = -y1 + 3.*y2 - 3.*y3 + y4;
+    //     let bx = 3.*x1 - 6.*x2 + 3.*x3;
+    //     let by = 3.*y1 - 6.*y2 + 3.*y3;
+    //     let cx = -3.*x1 + 3.*x2;
+    //     let cy = -3.*y1 + 3.*y2;
+    
+    //     // Transform to forward difference basis (stepsize 1)
+    //     let mut px = x1;
+    //     let mut py = y1;
+    //     let mut dx = ax + bx + cx;
+    //     let mut dy = ay + by + cy;
+    //     let mut ddx = 6.*ax + 2.*bx;
+    //     let mut ddy = 6.*ay + 2.*by;
+    //     let mut dddx = 6.*ax;
+    //     let mut dddy = 6.*ay;
+    
+    //     //printf("dx: %f, dy: %f\n", dx, dy);
+    //     //printf("ddx: %f, ddy: %f\n", ddx, ddy);
+    //     //printf("dddx: %f, dddy: %f\n", dddx, dddy);
+    
+    //     const AFD_ONE: i32 = 1<<10;
+    
+    //     let mut t = 0;
+    //     let mut dt = AFD_ONE;
+    
+    //     let tol = tess_tol * 4.0;
+    
+    //     while t < AFD_ONE {
+    
+    //         // Flatness measure.
+    //         let mut d = ddx*ddx + ddy*ddy + dddx*dddx + dddy*dddy;
+    
+    //         // Go to higher resolution if we're moving a lot
+    //         // or overshooting the end.
+    //         while (d > tol && dt > 1) || (t+dt > AFD_ONE) {
+    
+    //             // Apply L to the curve. Increase curve resolution.
+    //             dx = 0.5 * dx - (1.0/8.0)*ddx + (1.0/16.0)*dddx;
+    //             dy = 0.5 * dy - (1.0/8.0)*ddy + (1.0/16.0)*dddy;
+    //             ddx = (1.0/4.0) * ddx - (1.0/8.0) * dddx;
+    //             ddy = (1.0/4.0) * ddy - (1.0/8.0) * dddy;
+    //             dddx = (1.0/8.0) * dddx;
+    //             dddy = (1.0/8.0) * dddy;
+    
+    //             // Half the stepsize.
+    //             dt >>= 1;
+    
+    //             // Recompute d
+    //             d = ddx*ddx + ddy*ddy + dddx*dddx + dddy*dddy;
+    
+    //         }
+    
+    //         // Go to lower resolution if we're really flat
+    //         // and we aren't going to overshoot the end.
+    //         // XXX: tol/32 is just a guess for when we are too flat.
+    //         while (d > 0.0 && d < tol/32.0 && dt < AFD_ONE) && (t+2*dt <= AFD_ONE) {
+    
+    //             // printf("down\n");
+    
+    //             // Apply L^(-1) to the curve. Decrease curve resolution.
+    //             dx = 2. * dx + ddx;
+    //             dy = 2. * dy + ddy;
+    //             ddx = 4. * ddx + 4. * dddx;
+    //             ddy = 4. * ddy + 4. * dddy;
+    //             dddx = 8. * dddx;
+    //             dddy = 8. * dddy;
+    
+    //             // Double the stepsize.
+    //             dt <<= 1;
+    
+    //             // Recompute d
+    //             d = ddx*ddx + ddy*ddy + dddx*dddx + dddy*dddy;
+    
+    //         }
+    
+    //         // Forward differencing.
+    //         px += dx;
+    //         py += dy;
+    //         dx += ddx;
+    //         dy += ddy;
+    //         ddx += dddx;
+    //         ddy += dddy;
+    
+    //         // Output a point.
+    //         self.add_point(px, py, flags, dist_tol);
+    
+    //         // Advance along the curve.
+    //         t += dt;
+    
+    //         // Ensure we don't overshoot.
+    //         debug_assert!(t <= AFD_ONE);
+    
+    //     }
+    // }
+
     pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
         // Early out if point is outside the bounding rectangle
         // TODO: Make this a method on Bounds
@@ -431,8 +556,8 @@ impl PathCache {
             contour.fill.clear();
 
             // TODO: woff = 0.0 produces no artifaacts for small sizes
-            let woff = 0.5 * fringe_width; // produces artifacts
-                                           //let woff = 0.0;//0.5 * fringe_width; // Makes everything thicker
+            //let woff = 0.5 * fringe_width;
+            let woff = 0.0; // Makes everything thicker
 
             if has_fringe {
                 for (p0, p1) in contour.point_pairs(&self.points) {

@@ -65,6 +65,7 @@ pub fn normalize(x: &mut f32, y: &mut f32) -> f32 {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Transform2D(pub [f32; 6]);
 
 // TODO: Implement std::ops::* on this

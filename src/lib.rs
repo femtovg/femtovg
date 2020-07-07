@@ -1,3 +1,7 @@
+#[cfg(feature = "serde")]
+#[macro_use]
+extern crate serde;
+
 use std::ops::Range;
 use std::path::Path as FilePath;
 
@@ -9,8 +13,6 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - emoji support
-    - Move path methods back to canvas??
     - optional serde feature
     - harfbuzz shaping as a feature
     - Documentation

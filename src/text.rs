@@ -830,6 +830,7 @@ pub(crate) fn render_direct<T: Renderer>(
                 .text_context
                 .font_mut(glyph.font_id)
                 .ok_or(ErrorKind::NoFontFound)?;
+
             let scale = font.scale(paint.font_size);
 
             let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {

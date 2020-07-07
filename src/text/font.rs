@@ -96,7 +96,7 @@ impl Font {
         size / self.units_per_em as f32
     }
 
-    pub fn glyph(&mut self, codepoint: u16) -> Option<&Glyph> {
+    pub fn glyph(&mut self, codepoint: u16) -> Option<&mut Glyph> {
         if !self.glyphs.contains_key(&codepoint) {
             let mut path = Path::new();
 
@@ -118,6 +118,6 @@ impl Font {
             }
         }
 
-        self.glyphs.get(&codepoint)
+        self.glyphs.get_mut(&codepoint)
     }
 }

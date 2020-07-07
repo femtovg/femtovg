@@ -25,6 +25,7 @@ impl Default for Solidity {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum PackedVerb {
     MoveTo,
     LineTo,
@@ -70,13 +71,14 @@ impl Verb {
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
 #[derive(Default, Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Path {
-    transform: Transform2D,
     verbs: Vec<PackedVerb>,
     coords: Vec<f32>,
     lastx: f32,
     lasty: f32,
     dist_tol: f32,
+    #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) cache: Option<(u64, PathCache)>,
 }
 
@@ -464,30 +466,6 @@ impl Path {
 
         self.verbs.extend_from_slice(verbs);
         self.coords.extend_from_slice(coords);
-        // for verb in verbs.iter() {
-        //     match verb {
-        //         Verb::MoveTo(x, y) => {
-        //             self.lastx = *x;
-        //             self.lasty = *y;
-        //         }
-        //         Verb::LineTo(x, y) => {
-        //             self.lastx = *x;
-        //             self.lasty = *y;
-        //         }
-        //         Verb::BezierTo(_c1x, _c1y, _c2x, _c2y, x, y) => {
-        //             self.lastx = *x;
-        //             self.lasty = *y;
-        //         }
-        //         _ => (),
-        //     }
-
-        //     let start = self.coords.len();
-        //     let num_coords = verb.num_coordinates();
-        //     self.coords
-        //         .resize_with(self.coords.len() + num_coords, Default::default);
-
-        //     self.verbs.push(verb.to_packed(&mut self.coords[start..]));
-        // }
     }
 }
 
