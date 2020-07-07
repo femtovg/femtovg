@@ -663,7 +663,7 @@ fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     paint: &Paint,
     mode: RenderMode,
-    glyph: &ShapedGlyph
+    glyph: &ShapedGlyph,
 ) -> Result<RenderedGlyph, ErrorKind> {
     // TODO: this may be blur * 2 - fix it when blurring iss implemented
     let padding = GLYPH_PADDING;
@@ -797,7 +797,9 @@ fn find_texture_or_alloc<T: Renderer>(
         // All atlases are exausted and a new one must be created
         let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
 
-        let loc = atlas.add_rect(width, height).ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
+        let loc = atlas
+            .add_rect(width, height)
+            .ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
         let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = images.alloc(renderer, info)?;

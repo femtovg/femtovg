@@ -1,9 +1,7 @@
 use fnv::FnvHashMap;
 use owned_ttf_parser::{AsFontRef, Font as TtfFont, GlyphId, OwnedFont};
 
-use crate::{
-    ErrorKind, Path,
-};
+use crate::{ErrorKind, Path};
 
 pub struct GlyphMetrics {
     pub width: f32,

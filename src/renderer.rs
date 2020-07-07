@@ -3,9 +3,7 @@
 use imgref::ImgVec;
 use rgb::RGBA8;
 
-use crate::{
-    Color, CompositeOperationState, ErrorKind, FillRule, ImageId, ImageInfo, ImageSource, ImageStore,
-};
+use crate::{Color, CompositeOperationState, ErrorKind, FillRule, ImageId, ImageInfo, ImageSource, ImageStore};
 
 mod opengl;
 pub use opengl::OpenGl;
