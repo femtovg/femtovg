@@ -9,9 +9,10 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - Fix blurring
     - emoji support
     - Move path methods back to canvas??
+    - optional serde feature
+    - harfbuzz shaping as a feature
     - Documentation
     - Rename crate to femtovg
     - Tests
@@ -443,14 +444,6 @@ where
     /// Deletes created image.
     pub fn delete_image(&mut self, id: ImageId) {
         self.images.remove(&mut self.renderer, id);
-    }
-
-    /// Blurs the provided image inside the specified region.
-    /// Amount is the number of times that the blur is ran against the image.
-    pub fn blur_image(&mut self, id: ImageId, amount: u8, x: usize, y: usize, width: usize, height: usize) {
-        if let Some(img) = self.images.get_mut(id) {
-            self.renderer.blur(img, amount, x, y, width, height);
-        }
     }
 
     /// Returns the size in pixels of the image for the specified id.
@@ -951,7 +944,6 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         paint.font_size *= scale;
         paint.letter_spacing *= scale;
-        paint.font_blur = (paint.font_blur as f32 * scale) as u8;
         paint.line_width *= scale;
     }
 
@@ -974,7 +966,7 @@ where
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if paint.font_size > 72.0 {
+        if paint.font_size > 92.0 {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
             let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;

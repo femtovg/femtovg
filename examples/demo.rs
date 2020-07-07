@@ -22,8 +22,6 @@ use gpucanvas::{
     LineJoin,
     Paint,
     Path,
-    PixelFormat,
-    RenderTarget,
     Renderer,
     Solidity,
 };
@@ -66,15 +64,6 @@ fn main() {
 
     //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
     //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
-
-    let graph_image_id = canvas
-        .create_image_empty(
-            1000,
-            600,
-            PixelFormat::Rgba8,
-            ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED,
-        )
-        .expect("Cannot alloc image");
 
     //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
@@ -184,32 +173,7 @@ fn main() {
                 let mousex = pt.0;
                 let mousey = pt.1;
 
-                // draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
-
-                // {
-                //     canvas.save();
-                //     canvas.set_render_target(RenderTarget::Image(graph_image_id));
-                //     //canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.3, 0.3, 0.32, 1.0));
-                //     canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
-                //     draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-                //     canvas.restore();
-
-                //     canvas.set_render_target(RenderTarget::Screen);
-
-                //     //canvas.blur_image(graph_image_id, 4, 50, 150, 300, 400);
-
-                //     canvas.save();
-                //     canvas.reset();
-
-                //     let mut path = Path::new();
-                //     path.rect(0.0, 0.0, width, height);
-                //     canvas.fill_path(
-                //         &mut path,
-                //         Paint::image(graph_image_id, 0.0, 0.0, width, height, 0.0, 1.0)
-                //     );
-
-                //     canvas.restore();
-                // }
+                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
 
                 draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
 
@@ -224,7 +188,6 @@ fn main() {
                     mousey,
                 );
 
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
                 draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
 
                 draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
@@ -345,7 +308,7 @@ fn draw_paragraph<T: Renderer>(
     x: f32,
     y: f32,
     width: f32,
-    height: f32,
+    _height: f32,
     mx: f32,
     my: f32,
 ) {
@@ -664,10 +627,6 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
     text_paint.set_font_size(16.0);
     text_paint.set_font(&[fonts.bold]);
     text_paint.set_text_align(Align::Center);
-    text_paint.set_font_blur(2);
-    let _ = canvas.fill_text(x + (w / 2.0), y + 19.0 + 1.0, title, text_paint);
-
-    text_paint.set_font_blur(0);
     text_paint.set_color(Color::rgba(220, 220, 220, 160));
 
     let _ = canvas.fill_text(x + (w / 2.0), y + 19.0, title, text_paint);

@@ -80,8 +80,8 @@ impl UniformArray {
     }
 }
 
-impl From<Params> for UniformArray {
-    fn from(params: Params) -> Self {
+impl From<&Params> for UniformArray {
+    fn from(params: &Params) -> Self {
         let mut arr = Self::default();
 
         arr.set_scissor_mat(params.scissor_mat);

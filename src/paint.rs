@@ -83,7 +83,6 @@ pub struct Paint {
     pub(crate) line_join: LineJoin,
     pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,
-    pub(crate) font_blur: u8,
     pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
@@ -105,7 +104,6 @@ impl Default for Paint {
             line_join: Default::default(),
             font_ids: Default::default(),
             font_size: 16.0,
-            font_blur: 0,
             letter_spacing: 0.0,
             text_baseline: Default::default(),
             text_align: Default::default(),
@@ -373,18 +371,6 @@ impl Paint {
     /// Only has effect on canvas text operations
     pub fn set_letter_spacing(&mut self, spacing: f32) {
         self.letter_spacing = spacing;
-    }
-
-    /// Returns the current font blur
-    pub fn font_blur(&self) -> u8 {
-        self.font_blur
-    }
-
-    /// Sets the font blur radius
-    ///
-    /// Useful for implementing text shadow. Only has effect on canvas text operations
-    pub fn set_font_blur(&mut self, blur: u8) {
-        self.font_blur = blur;
     }
 
     /// Returns the current vertical align

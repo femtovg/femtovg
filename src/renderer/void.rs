@@ -43,8 +43,6 @@ impl Renderer for Void {
 
     fn delete_image(&mut self, image: Self::Image) {}
 
-    fn blur(&mut self, image: &mut Self::Image, passes: u8, x: usize, y: usize, width: usize, height: usize) {}
-
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         Ok(ImgVec::new(Vec::new(), 0, 0))
     }

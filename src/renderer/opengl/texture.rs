@@ -155,7 +155,7 @@ impl Texture {
         self.id
     }
 
-    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, opengles: bool) -> Result<(), ErrorKind> {
+    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, _opengles: bool) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
         if x + size.0 > self.info.width() {

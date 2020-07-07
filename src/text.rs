@@ -21,7 +21,6 @@ pub use atlas::Atlas;
 
 const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
-const MAX_TEXTURE_SIZE: usize = 4096;
 const LRU_CACHE_CAPACITY: usize = 1000;
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -75,7 +74,6 @@ struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
     size: u32,
-    blur: u8,
     line_width: u32,
     render_mode: RenderMode,
 }
@@ -86,7 +84,6 @@ impl RenderedGlyphId {
             glyph_index,
             font_id,
             size: (paint.font_size * 10.0).trunc() as u32,
-            blur: paint.font_blur,
             line_width: (paint.line_width * 10.0).trunc() as u32,
             render_mode: mode,
         }
@@ -429,7 +426,7 @@ pub(crate) fn shape(
     let id = ShapingId::new(paint, text);
 
     if !context.shaping_run_cache.contains(&id) {
-        let metrics = shape_run(x, y, context, paint, text, max_width)?;
+        let metrics = shape_run(context, paint, text, max_width)?;
         context.shaping_run_cache.put(id, metrics);
     }
 
@@ -443,8 +440,6 @@ pub(crate) fn shape(
 }
 
 fn shape_run(
-    x: f32,
-    y: f32,
     context: &mut TextContext,
     paint: &Paint,
     text: &str,
@@ -780,10 +775,10 @@ fn render_glyph<T: Renderer>(
     canvas: &mut Canvas<T>,
     paint: &Paint,
     mode: RenderMode,
-    glyph: &ShapedGlyph,
+    glyph: &ShapedGlyph
 ) -> Result<RenderedGlyph, ErrorKind> {
     // TODO: this may be blur * 2 - fix it when blurring iss implemented
-    let padding = GLYPH_PADDING + paint.font_blur as u32;
+    let padding = GLYPH_PADDING;
 
     let line_width = if mode == RenderMode::Stroke {
         paint.line_width
@@ -823,14 +818,14 @@ fn render_glyph<T: Renderer>(
     };
 
     let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32;
-    let y = 512.0 - dst_y as f32 - glyph.bearing_y - (line_width / 2.0) - padding as f32;
+    let y = TEXTURE_SIZE as f32 - dst_y as f32 - glyph.bearing_y - (line_width / 2.0) - padding as f32;
 
     canvas.translate(x, y);
 
     canvas.set_render_target(RenderTarget::Image(dst_image_id));
     canvas.clear_rect(
         dst_x as u32,
-        512 - dst_y as u32 - height as u32,
+        TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
         width as u32,
         height as u32,
         Color::black(),
@@ -885,17 +880,6 @@ fn render_glyph<T: Renderer>(
 
     canvas.restore();
 
-    if paint.font_blur > 0 {
-        // canvas.renderer.blur(
-        //     canvas.images.get_mut(dst_image_id).unwrap(),
-        //     style.blur,
-        //     dst_x + style.blur as usize,
-        //     dst_y + style.blur as usize,
-        //     width as usize - style.blur as usize,
-        //     height as usize - style.blur as usize,
-        // );
-    }
-
     Ok(RenderedGlyph {
         width: width,
         height: height,
@@ -923,25 +907,9 @@ fn find_texture_or_alloc<T: Renderer>(
 
     if texture_search_result.is_none() {
         // All atlases are exausted and a new one must be created
-        let mut atlas_size = TEXTURE_SIZE;
+        let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
 
-        // Try incrementally larger atlasses until a large enough one
-        // is found or the MAX_TEXTURE_SIZE limit is reached
-        let (atlas, loc) = loop {
-            let mut test_atlas = Atlas::new(atlas_size, atlas_size);
-
-            if let Some(loc) = test_atlas.add_rect(width as usize, height as usize) {
-                break (test_atlas, Some(loc));
-            }
-
-            if atlas_size >= MAX_TEXTURE_SIZE {
-                break (test_atlas, None);
-            }
-
-            atlas_size *= 2;
-        };
-
-        let loc = loc.ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
+        let loc = atlas.add_rect(width, height).ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
         let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
         let image_id = images.alloc(renderer, info)?;

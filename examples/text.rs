@@ -269,10 +269,8 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f
     paint.set_font(&[fonts.bold]);
     paint.set_line_width(12.0);
     paint.set_font_size(72.0);
-    paint.set_font_blur(2);
     let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", paint);
 
-    paint.set_font_blur(0);
     paint.set_color(Color::black());
     paint.set_line_width(10.0);
     let _ = canvas.stroke_text(x, y, "RUST", paint);

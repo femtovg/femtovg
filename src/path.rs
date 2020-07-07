@@ -56,34 +56,6 @@ impl Verb {
         }
     }
 
-    fn to_packed(&self, coords: &mut [f32]) -> PackedVerb {
-        match *self {
-            Self::MoveTo(x, y) => {
-                coords[0] = x;
-                coords[1] = y;
-                PackedVerb::MoveTo
-            }
-            Self::LineTo(x, y) => {
-                coords[0] = x;
-                coords[1] = y;
-                PackedVerb::LineTo
-            }
-            Self::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
-                coords[0] = c1x;
-                coords[1] = c1y;
-                coords[2] = c2x;
-                coords[3] = c2y;
-                coords[4] = x;
-                coords[5] = y;
-
-                PackedVerb::BezierTo
-            }
-            Self::Solid => PackedVerb::Solid,
-            Self::Hole => PackedVerb::Hole,
-            Self::Close => PackedVerb::Close,
-        }
-    }
-
     fn from_packed(packed: &PackedVerb, coords: &[f32]) -> Self {
         match *packed {
             PackedVerb::MoveTo => Self::MoveTo(coords[0], coords[1]),

@@ -6,9 +6,7 @@ use super::{gl, gl::types::*, Texture};
 
 pub struct Framebuffer {
     fbo: GLuint,
-    depth_stencil_rbo: GLuint,
-    width: u32,
-    height: u32,
+    depth_stencil_rbo: GLuint
 }
 
 impl Framebuffer {
@@ -62,8 +60,6 @@ impl Framebuffer {
         Framebuffer {
             fbo,
             depth_stencil_rbo,
-            width,
-            height,
         }
     }
 
