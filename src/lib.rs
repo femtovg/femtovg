@@ -13,7 +13,6 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - optional serde feature
     - harfbuzz shaping as a feature
     - Documentation
     - Rename crate to femtovg
@@ -59,6 +58,7 @@ use path::Convexity;
 pub use path::{Path, Solidity};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FillRule {
     EvenOdd,
     NonZero,
@@ -155,6 +155,7 @@ impl Default for Scissor {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineCap {
     Butt,
     Round,
@@ -168,6 +169,7 @@ impl Default for LineCap {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
     Miter,
     Round,

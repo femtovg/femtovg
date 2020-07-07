@@ -25,7 +25,7 @@ impl Default for Solidity {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PackedVerb {
     MoveTo,
     LineTo,
@@ -71,14 +71,14 @@ impl Verb {
 
 /// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
 #[derive(Default, Clone, Debug)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
     verbs: Vec<PackedVerb>,
     coords: Vec<f32>,
     lastx: f32,
     lasty: f32,
     dist_tol: f32,
-    #[cfg_attr(feature = "serialization", serde(skip))]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) cache: Option<(u64, PathCache)>,
 }
 

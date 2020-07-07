@@ -5,8 +5,10 @@ use crate::geometry::Transform2D;
 use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum PaintFlavor {
     Color(Color),
+    #[cfg_attr(feature = "serde", serde(skip))]
     Image {
         id: ImageId,
         cx: f32,
@@ -70,9 +72,11 @@ pub(crate) enum PaintFlavor {
 /// canvas.stroke_path(&mut path, stroke_paint);
 /// ```
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Paint {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
+    #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) alpha_mask: Option<ImageId>,
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
@@ -81,6 +85,7 @@ pub struct Paint {
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
+    #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,
     pub(crate) letter_spacing: f32,

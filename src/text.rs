@@ -28,6 +28,7 @@ const TEXTURE_SIZE: usize = 512;
 const LRU_CACHE_CAPACITY: usize = 1000;
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Baseline {
     /// The text baseline is the top of the em square.
     Top,
@@ -46,6 +47,7 @@ impl Default for Baseline {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Align {
     /// The text is left-aligned.
     Left,
@@ -463,9 +465,6 @@ fn shape_word(
             }
 
             let scale = font.scale(paint.font_size);
-
-            //let start_index = run.start + info.cluster as usize;
-            //debug_assert!(text.get(start_index..).is_some());
 
             let mut g = ShapedGlyph {
                 x: 0.0,
