@@ -7,7 +7,7 @@ use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
 use harfbuzz_rs as hb;
 use lru::LruCache;
-use owned_ttf_parser::{AsFontRef, Font as TtfFont, GlyphId, OwnedFont};
+
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -18,6 +18,10 @@ use crate::{
 
 mod atlas;
 pub use atlas::Atlas;
+
+mod font;
+use font::Font;
+pub use font::FontMetrics;
 
 const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
@@ -264,119 +268,6 @@ impl TextContext {
     }
 }
 
-struct Glyph {
-    path: Path,
-    metrics: GlyphMetrics,
-}
-
-struct GlyphMetrics {
-    width: f32,
-    height: f32,
-    bearing_x: f32,
-    bearing_y: f32,
-}
-
-pub struct FontMetrics {
-    ascender: f32,
-    descender: f32,
-    height: f32,
-}
-
-impl FontMetrics {
-    fn scale(&mut self, scale: f32) {
-        self.ascender *= scale;
-        self.descender *= scale;
-        self.height *= scale;
-    }
-
-    pub fn ascender(&self) -> f32 {
-        self.ascender
-    }
-
-    pub fn descender(&self) -> f32 {
-        self.descender
-    }
-
-    pub fn height(&self) -> f32 {
-        self.height
-    }
-}
-
-pub(crate) struct Font {
-    data: Vec<u8>,
-    owned_ttf_font: OwnedFont,
-    units_per_em: u16,
-    glyphs: FnvHashMap<u16, Glyph>,
-}
-
-impl Font {
-    fn new(data: &[u8]) -> Result<Self, ErrorKind> {
-        let owned_ttf_font = OwnedFont::from_vec(data.to_owned(), 0).ok_or(ErrorKind::FontParseError)?;
-
-        let units_per_em = owned_ttf_font
-            .as_font()
-            .units_per_em()
-            .ok_or(ErrorKind::FontInfoExtracionError)?;
-
-        Ok(Self {
-            data: data.to_owned(),
-            owned_ttf_font,
-            units_per_em,
-            glyphs: Default::default(),
-        })
-    }
-
-    // pub fn postscript_name(&self) -> String {
-    //     self.owned_ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
-    //     //self.face.postscript_name().unwrap_or_else(String::new)
-    // }
-
-    fn font_ref(&self) -> &TtfFont<'_> {
-        self.owned_ttf_font.as_font()
-    }
-
-    pub(crate) fn metrics(&self, size: f32) -> FontMetrics {
-        let mut metrics = FontMetrics {
-            ascender: self.font_ref().ascender() as f32,
-            descender: self.font_ref().descender() as f32,
-            height: self.font_ref().height() as f32,
-        };
-
-        metrics.scale(self.scale(size));
-
-        metrics
-    }
-
-    fn scale(&self, size: f32) -> f32 {
-        size / self.units_per_em as f32
-    }
-
-    fn glyph(&mut self, codepoint: u16) -> Option<&Glyph> {
-        if !self.glyphs.contains_key(&codepoint) {
-            let mut path = Path::new();
-
-            let id = GlyphId(codepoint);
-
-            if let Some(bbox) = self.font_ref().outline_glyph(id, &mut path) {
-                self.glyphs.insert(
-                    codepoint,
-                    Glyph {
-                        path,
-                        metrics: GlyphMetrics {
-                            width: bbox.width() as f32,
-                            height: bbox.height() as f32,
-                            bearing_x: bbox.x_min as f32,
-                            bearing_y: bbox.y_max as f32,
-                        },
-                    },
-                );
-            }
-        }
-
-        self.glyphs.get(&codepoint)
-    }
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct TextMetrics {
     pub x: f32,
@@ -540,7 +431,7 @@ fn shape_word(
         // Call harfbuzz
         let output = {
             // TODO: It may be faster if this is created only once and stored inside the Font struct
-            let face = hb::Face::new(font.data.clone(), 0);
+            let face = hb::Face::new(font.data().clone(), 0);
             let hb_font = hb::Font::new(face);
 
             let buffer = hb::UnicodeBuffer::new().add_str(word).set_direction(hb_direction);
@@ -632,10 +523,10 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
         let metrics = font.metrics(paint.font_size);
 
         let alignment_offset_y = match paint.text_baseline {
-            Baseline::Top => metrics.ascender,
-            Baseline::Middle => (metrics.ascender + metrics.descender) / 2.0,
+            Baseline::Top => metrics.ascender(),
+            Baseline::Middle => (metrics.ascender() + metrics.descender()) / 2.0,
             Baseline::Alphabetic => 0.0,
-            Baseline::Bottom => metrics.descender,
+            Baseline::Bottom => metrics.descender(),
         };
 
         glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
@@ -748,8 +639,6 @@ pub(crate) fn render_atlas<T: Renderer>(
             cmd.quads.push(q);
         }
     }
-
-    //dbg!("aasd");
 
     canvas.set_render_target(initial_render_target);
 
