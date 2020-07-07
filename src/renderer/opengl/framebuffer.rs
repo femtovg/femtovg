@@ -1,8 +1,7 @@
-// TODO: Path rendering only needs stencil attachment, try to get rid of the depth attachment
-
-//use crate::PixelFormat;
 
 use super::{gl, gl::types::*, Texture};
+
+use crate::ErrorKind;
 
 pub struct Framebuffer {
     fbo: GLuint,
@@ -10,7 +9,7 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(texture: &Texture) -> Self {
+    pub fn new(texture: &Texture) -> Result<Self, ErrorKind> {
         let mut fbo = 0;
 
         unsafe {
@@ -27,6 +26,8 @@ impl Framebuffer {
 
         let depth_stencil_rbo = Self::gen_depth_stencil_rbo(width, height);
 
+        let fbo = Framebuffer { fbo, depth_stencil_rbo };
+
         unsafe {
             gl::FramebufferRenderbuffer(
                 gl::FRAMEBUFFER,
@@ -38,26 +39,27 @@ impl Framebuffer {
             let status = gl::CheckFramebufferStatus(gl::FRAMEBUFFER);
 
             if status != gl::FRAMEBUFFER_COMPLETE {
-                // TODO: do not panic here
-                match status {
-                    gl::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => panic!("({}) Framebuffer incomplete attachment", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => panic!("({}) Framebuffer incomplete draw buffer", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => panic!("({}) Framebuffer incomplete layer targets", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => panic!("({}) Framebuffer incomplete dimensions", status),
+                let reason = match status {
+                    gl::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => format!("({}) Framebuffer incomplete attachment", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => format!("({}) Framebuffer incomplete draw buffer", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => format!("({}) Framebuffer incomplete layer targets", status),
+                    gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => format!("({}) Framebuffer incomplete dimensions", status),
                     gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
-                        panic!("({}) Framebuffer incomplete missing attachment", status)
+                        format!("({}) Framebuffer incomplete missing attachment", status)
                     }
-                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => panic!("({}) Framebuffer incomplete multisample", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => panic!("({}) Framebuffer incomplete read buffer", status),
-                    gl::FRAMEBUFFER_UNSUPPORTED => panic!("({}) Framebuffer unsupported", status),
-                    _ => panic!("({}) Framebuffer not complete!", status),
+                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => format!("({}) Framebuffer incomplete multisample", status),
+                    //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
+                    gl::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
+                    _ => format!("({}) Framebuffer not complete!", status),
                 };
+
+                return Err(ErrorKind::RenderTargetError(reason));
             }
 
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         }
 
-        Framebuffer { fbo, depth_stencil_rbo }
+        Ok(fbo)
     }
 
     pub fn bind(&self) {

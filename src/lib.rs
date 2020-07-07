@@ -13,14 +13,10 @@ HTML5 Canvas API:
 https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
-    - harfbuzz shaping as a feature
     - Documentation
     - Rename crate to femtovg
     - Tests
     - Publish to crates.io
-    - Emoji support
-    - fn text_path -> Path
-    - path effects - effects that work on the geometry of Path - dashes (https://github.com/jrmuizel/raqote/blob/master/src/dash.rs)
 */
 
 mod utils;

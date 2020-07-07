@@ -15,10 +15,20 @@ pub struct Glyph {
     pub metrics: GlyphMetrics,
 }
 
+// TODO: underline, strikeout, subscript, superscript metrics
+#[derive(Clone, Default)]
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,
     height: f32,
+    postscript_name: String,
+    regular: bool,
+    italic: bool,
+    bold: bool,
+    oblique: bool,
+    variable: bool,
+    weight: u16,
+    width: u16,
 }
 
 impl FontMetrics {
@@ -39,12 +49,45 @@ impl FontMetrics {
     pub fn height(&self) -> f32 {
         self.height
     }
+
+    pub fn postscript_name(&self) -> &str {
+        &self.postscript_name
+    }
+
+    pub fn regular(&self) -> bool {
+        self.regular
+    }
+
+    pub fn italic(&self) -> bool {
+        self.italic
+    }
+
+    pub fn bold(&self) -> bool {
+        self.bold
+    }
+
+    pub fn oblique(&self) -> bool {
+        self.oblique
+    }
+
+    pub fn variable(&self) -> bool {
+        self.variable
+    }
+
+    pub fn weight(&self) -> u16 {
+        self.weight
+    }
+
+    pub fn width(&self) -> u16 {
+        self.width
+    }
 }
 
 pub(crate) struct Font {
     data: Vec<u8>,
     owned_ttf_font: OwnedFont,
     units_per_em: u16,
+    metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
 }
 
@@ -57,10 +100,27 @@ impl Font {
             .units_per_em()
             .ok_or(ErrorKind::FontInfoExtracionError)?;
 
+        let ttf_font = owned_ttf_font.as_font();
+
+        let metrics = FontMetrics {
+            ascender: ttf_font.ascender() as f32,
+            descender: ttf_font.descender() as f32,
+            height: ttf_font.height() as f32,
+            postscript_name: ttf_font.post_script_name().unwrap_or_default(),
+            regular: ttf_font.is_regular(),
+            italic: ttf_font.is_italic(),
+            bold: ttf_font.is_bold(),
+            oblique: ttf_font.is_oblique(),
+            variable: ttf_font.is_variable(),
+            weight: ttf_font.width().to_number(),
+            width: ttf_font.weight().to_number(),
+        };
+
         Ok(Self {
             data: data.to_owned(),
             owned_ttf_font,
             units_per_em,
+            metrics,
             glyphs: Default::default(),
         })
     }
@@ -69,21 +129,12 @@ impl Font {
         self.data.as_ref()
     }
 
-    // pub fn postscript_name(&self) -> String {
-    //     self.owned_ttf_font.as_font().post_script_name().unwrap()// TODO: Remove this unwrap
-    //     //self.face.postscript_name().unwrap_or_else(String::new)
-    // }
-
     fn font_ref(&self) -> &TtfFont<'_> {
         self.owned_ttf_font.as_font()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
-        let mut metrics = FontMetrics {
-            ascender: self.font_ref().ascender() as f32,
-            descender: self.font_ref().descender() as f32,
-            height: self.font_ref().height() as f32,
-        };
+        let mut metrics = self.metrics.clone();
 
         metrics.scale(self.scale(size));
 

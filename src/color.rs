@@ -64,11 +64,9 @@ impl Color {
         }
     }
 
-    // TODO: Log error
     pub fn hex(raw_hex: &str) -> Self {
         let hex = raw_hex.trim_start_matches('#');
 
-        // TODO: 3len hex - #bab => #babbab
         if hex.len() == 8 {
             Self::rgba(
                 hex_to_u8(&hex[0..2]),

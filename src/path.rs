@@ -21,8 +21,6 @@ impl Default for Solidity {
     }
 }
 
-// TODO: Maybe to avoid confusion solid/hole should be true/false as a last param to rect, circle etc
-
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

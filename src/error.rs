@@ -18,6 +18,7 @@ pub enum ErrorKind {
     FontSizeTooLargeForAtlas,
     ShaderCompileError(String),
     ShaderLinkError(String),
+    RenderTargetError(String),
     ImageIdNotFound,
     ImageUpdateOutOfBounds,
     ImageUpdateWithDifferentFormat,

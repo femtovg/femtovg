@@ -622,7 +622,6 @@ impl PathCache {
         }
     }
 
-    // TODO: instead of passing 3 paint values here we can just pass the paint struct as a parameter
     pub(crate) fn expand_stroke(
         &mut self,
         stroke_width: f32,

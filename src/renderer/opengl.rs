@@ -41,7 +41,7 @@ pub struct OpenGl {
     main_program: MainProgram,
     vert_arr: GLuint,
     vert_buff: GLuint,
-    framebuffers: FnvHashMap<ImageId, Framebuffer>,
+    framebuffers: FnvHashMap<ImageId, Result<Framebuffer,ErrorKind>>,
 }
 
 impl OpenGl {
@@ -363,15 +363,15 @@ impl OpenGl {
             },
             RenderTarget::Image(id) => {
                 if let Some(texture) = images.get(id) {
-                    let fb = self.framebuffers.entry(id).or_insert_with(|| Framebuffer::new(texture));
+                    if let Ok(fb) = self.framebuffers.entry(id).or_insert_with(|| Framebuffer::new(texture)) {
+                        fb.bind();
 
-                    fb.bind();
+                        self.view[0] = texture.info().width() as f32;
+                        self.view[1] = texture.info().height() as f32;
 
-                    self.view[0] = texture.info().width() as f32;
-                    self.view[1] = texture.info().height() as f32;
-
-                    unsafe {
-                        gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+                        unsafe {
+                            gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+                        }
                     }
                 }
             }
@@ -538,10 +538,13 @@ impl Renderer for OpenGl {
             );
         }
 
-        // TODO: flip image
-        //image = image::imageops::flip_vertical(&image);
+        let mut flipped = Vec::with_capacity(w * h);
 
-        Ok(image)
+        for row in image.rows().rev() {
+            flipped.extend_from_slice(row);
+        }
+
+        Ok(ImgVec::new(flipped, w, h))
     }
 }
 

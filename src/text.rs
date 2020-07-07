@@ -544,7 +544,6 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
     Ok(())
 }
 
-// TODO: error handling
 // fn rb_font(font: &mut Font) -> rustybuzz::Font {
 //     let face = match rustybuzz::Face::new(&font.data, 0) {
 //         Some(v) => v,
@@ -559,8 +558,6 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
 //
 // fn rb_buffer(text: &str, direction: Direction, script: Script) -> rustybuzz::Buffer {
 //     let mut buffer = rustybuzz::Buffer::new(text);
-//
-//     // TODO: Direction and script
 //
 //     buffer
 // }
@@ -665,7 +662,6 @@ fn render_glyph<T: Renderer>(
     mode: RenderMode,
     glyph: &ShapedGlyph,
 ) -> Result<RenderedGlyph, ErrorKind> {
-    // TODO: this may be blur * 2 - fix it when blurring iss implemented
     let padding = GLYPH_PADDING;
 
     let line_width = if mode == RenderMode::Stroke {
