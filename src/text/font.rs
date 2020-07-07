@@ -16,12 +16,11 @@ pub struct Glyph {
 }
 
 // TODO: underline, strikeout, subscript, superscript metrics
-#[derive(Clone, Default)]
+#[derive(Copy, Clone, Default)]
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,
     height: f32,
-    postscript_name: String,
     regular: bool,
     italic: bool,
     bold: bool,
@@ -48,10 +47,6 @@ impl FontMetrics {
 
     pub fn height(&self) -> f32 {
         self.height
-    }
-
-    pub fn postscript_name(&self) -> &str {
-        &self.postscript_name
     }
 
     pub fn regular(&self) -> bool {
@@ -106,7 +101,6 @@ impl Font {
             ascender: ttf_font.ascender() as f32,
             descender: ttf_font.descender() as f32,
             height: ttf_font.height() as f32,
-            postscript_name: ttf_font.post_script_name().unwrap_or_default(),
             regular: ttf_font.is_regular(),
             italic: ttf_font.is_italic(),
             bold: ttf_font.is_bold(),
@@ -134,7 +128,7 @@ impl Font {
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
-        let mut metrics = self.metrics.clone();
+        let mut metrics = self.metrics;
 
         metrics.scale(self.scale(size));
 
