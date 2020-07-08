@@ -37,10 +37,12 @@ impl FontMetrics {
         self.height *= scale;
     }
 
+    /// The distance from the baseline to the top of the highest glyph
     pub fn ascender(&self) -> f32 {
         self.ascender
     }
 
+    /// The distance from the baseline to the bottom of the lowest descenders on the glyphs
     pub fn descender(&self) -> f32 {
         self.descender
     }
