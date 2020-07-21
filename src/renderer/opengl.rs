@@ -47,7 +47,7 @@ pub struct OpenGl {
 impl OpenGl {
     pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
-        F: Fn(&'static str) -> *const c_void,
+        F: FnMut(&'static str) -> *const c_void,
     {
         let debug = cfg!(debug_assertions);
         let antialias = true;
