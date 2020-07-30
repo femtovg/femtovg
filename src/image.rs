@@ -45,7 +45,7 @@ impl ImageSource<'_> {
     pub fn format(&self) -> PixelFormat {
         match self {
             Self::Rgb(_) => PixelFormat::Rgb8,
-            Self::Rgba(_) => PixelFormat::Rgb8,
+            Self::Rgba(_) => PixelFormat::Rgba8,
             Self::Gray(_) => PixelFormat::Gray8,
         }
     }
