@@ -181,11 +181,10 @@ impl<T> ImageStore<T> {
     ) -> Result<(), ErrorKind> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(&mut image.1, data, x, y)?;
+            Ok(())
         } else {
-            return Err(ErrorKind::ImageIdNotFound);
+            Err(ErrorKind::ImageIdNotFound)
         }
-
-        Ok(())
     }
 
     pub fn info(&self, id: ImageId) -> Option<ImageInfo> {
