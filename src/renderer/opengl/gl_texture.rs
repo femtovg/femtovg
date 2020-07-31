@@ -5,16 +5,16 @@ use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
 use super::gl;
 use super::gl::types::*;
 
-pub struct Texture {
+pub struct GlTexture {
     id: GLuint,
     info: ImageInfo,
 }
 
-impl Texture {
+impl GlTexture {
     pub fn new(info: ImageInfo, opengles: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
-        let mut texture = Texture { id: 0, info: info };
+        let mut texture = Self { id: 0, info: info };
 
         unsafe {
             gl::GenTextures(1, &mut texture.id);

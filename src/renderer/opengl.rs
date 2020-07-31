@@ -16,8 +16,8 @@ use super::{Command, CommandType, Params, RenderTarget, Renderer};
 mod program;
 use program::MainProgram;
 
-mod texture;
-use texture::Texture;
+mod gl_texture;
+use gl_texture::GlTexture;
 
 mod framebuffer;
 use framebuffer::Framebuffer;
@@ -134,7 +134,7 @@ impl OpenGl {
         }
     }
 
-    fn convex_fill(&self, images: &ImageStore<Texture>, cmd: &Command, gpu_paint: &Params) {
+    fn convex_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
@@ -154,7 +154,7 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, images: &ImageStore<Texture>, cmd: &Command, stencil_paint: &Params, fill_paint: &Params) {
+    fn concave_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, stencil_paint: &Params, fill_paint: &Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -226,7 +226,7 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, images: &ImageStore<Texture>, cmd: &Command, paint: &Params) {
+    fn stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         for drawable in &cmd.drawables {
@@ -240,7 +240,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, images: &ImageStore<Texture>, cmd: &Command, paint1: &Params, paint2: &Params) {
+    fn stencil_stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint1: &Params, paint2: &Params) {
         unsafe {
             gl::Enable(gl::STENCIL_TEST);
             gl::StencilMask(0xff);
@@ -299,7 +299,7 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, images: &ImageStore<Texture>, cmd: &Command, paint: &Params) {
+    fn triangles(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -313,7 +313,7 @@ impl OpenGl {
 
     fn set_uniforms(
         &self,
-        images: &ImageStore<Texture>,
+        images: &ImageStore<GlTexture>,
         paint: &Params,
         image_tex: Option<ImageId>,
         alpha_tex: Option<ImageId>,
@@ -354,7 +354,7 @@ impl OpenGl {
         }
     }
 
-    fn set_target(&mut self, images: &ImageStore<Texture>, target: RenderTarget) {
+    fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
         match target {
             RenderTarget::Screen => unsafe {
                 Framebuffer::unbind();
@@ -380,7 +380,7 @@ impl OpenGl {
 }
 
 impl Renderer for OpenGl {
-    type Image = Texture;
+    type Image = GlTexture;
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -393,7 +393,7 @@ impl Renderer for OpenGl {
         }
     }
 
-    fn render(&mut self, images: &ImageStore<Texture>, verts: &[Vertex], commands: &[Command]) {
+    fn render(&mut self, images: &ImageStore<GlTexture>, verts: &[Vertex], commands: &[Command]) {
         self.main_program.bind();
 
         unsafe {
@@ -490,7 +490,7 @@ impl Renderer for OpenGl {
     }
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
-        Texture::new(info, self.is_opengles)
+        Self::Image::new(info, self.is_opengles)
     }
 
     fn update_image(
