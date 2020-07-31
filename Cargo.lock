@@ -516,7 +516,7 @@ dependencies = [
  "generational-arena 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "gl_generator 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "glutin 0.24.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "harfbuzz_rs 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "harfbuzz_rs 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "image 0.23.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "imgref 1.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lru 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "harfbuzz_rs"
-version = "1.1.1"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 1.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1645,7 +1645,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum glutin_glx_sys 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "08c243de74d6cf5ea100c788826d2fb9319de315485dd4b310811a663b3809c3"
 "checksum glutin_wgl_sys 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "a93dba7ee3a0feeac0f437141ff25e71ce2066bcf1a706acab1559ffff94eb6a"
 "checksum harfbuzz-sys 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "212d74cab8498b2d15700b694fb38f77562869d05e1f8b602dd05221a1ca2d63"
-"checksum harfbuzz_rs 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "31961611d8fe594957a088a0e50913a8c2b02563bd3ce39a5840ee697a6907ba"
+"checksum harfbuzz_rs 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "cab35982090055087fad29795c465b33e8cf201bda50bfa008311ffe88630f16"
 "checksum hermit-abi 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)" = "3deed196b6e7f9e44a2ae8d94225d80302d81208b1bb673fd21fe634645c85a9"
 "checksum image 0.23.8 (registry+https://github.com/rust-lang/crates.io-index)" = "543904170510c1b5fb65140485d84de4a57fddb2ed685481e9020ce3d2c9f64c"
 "checksum imgref 1.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "e82542789c712bcb3a1051b7db56998f75a44838aa7dbff842442473304d55b8"
