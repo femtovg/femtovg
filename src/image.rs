@@ -62,19 +62,19 @@ impl ImageSource<'_> {
 
 impl<'a> From<ImgRef<'a, RGB8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, RGB8>) -> Self {
-        ImageSource::Rgb(src)
+        Self::Rgb(src)
     }
 }
 
 impl<'a> From<ImgRef<'a, RGBA8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, RGBA8>) -> Self {
-        ImageSource::Rgba(src)
+        Self::Rgba(src)
     }
 }
 
 impl<'a> From<ImgRef<'a, GRAY8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, GRAY8>) -> Self {
-        ImageSource::Gray(src)
+        Self::Gray(src)
     }
 }
 
