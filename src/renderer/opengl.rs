@@ -41,7 +41,7 @@ pub struct OpenGl {
     main_program: MainProgram,
     vert_arr: GLuint,
     vert_buff: GLuint,
-    framebuffers: FnvHashMap<ImageId, Result<Framebuffer,ErrorKind>>,
+    framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
 }
 
 impl OpenGl {

@@ -1,4 +1,3 @@
-
 use super::{gl, gl::types::*, Texture};
 
 use crate::ErrorKind;
@@ -47,7 +46,9 @@ impl Framebuffer {
                     gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
                         format!("({}) Framebuffer incomplete missing attachment", status)
                     }
-                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => format!("({}) Framebuffer incomplete multisample", status),
+                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => {
+                        format!("({}) Framebuffer incomplete multisample", status)
+                    }
                     //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
                     gl::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
                     _ => format!("({}) Framebuffer not complete!", status),
