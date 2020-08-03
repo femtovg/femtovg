@@ -1,5 +1,4 @@
-
-use super::{gl, gl::types::*, Texture};
+use super::{gl, gl::types::*, GlTexture};
 
 use crate::ErrorKind;
 
@@ -9,7 +8,7 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(texture: &Texture) -> Result<Self, ErrorKind> {
+    pub fn new(texture: &GlTexture) -> Result<Self, ErrorKind> {
         let mut fbo = 0;
 
         unsafe {
@@ -47,7 +46,9 @@ impl Framebuffer {
                     gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
                         format!("({}) Framebuffer incomplete missing attachment", status)
                     }
-                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => format!("({}) Framebuffer incomplete multisample", status),
+                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => {
+                        format!("({}) Framebuffer incomplete multisample", status)
+                    }
                     //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
                     gl::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
                     _ => format!("({}) Framebuffer not complete!", status),
@@ -76,7 +77,7 @@ impl Framebuffer {
         }
     }
 
-    // pub fn blit_to_texture(&self, texture: &Texture) {
+    // pub fn blit_to_texture(&self, texture: &GlTexture) {
     //     let dest_fbo = Self::new(texture);
 
     //     unsafe {

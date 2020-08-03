@@ -62,19 +62,19 @@ impl ImageSource<'_> {
 
 impl<'a> From<ImgRef<'a, RGB8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, RGB8>) -> Self {
-        ImageSource::Rgb(src)
+        Self::Rgb(src)
     }
 }
 
 impl<'a> From<ImgRef<'a, RGBA8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, RGBA8>) -> Self {
-        ImageSource::Rgba(src)
+        Self::Rgba(src)
     }
 }
 
 impl<'a> From<ImgRef<'a, GRAY8>> for ImageSource<'a> {
     fn from(src: ImgRef<'a, GRAY8>) -> Self {
-        ImageSource::Gray(src)
+        Self::Gray(src)
     }
 }
 
@@ -181,11 +181,10 @@ impl<T> ImageStore<T> {
     ) -> Result<(), ErrorKind> {
         if let Some(image) = self.0.get_mut(id.0) {
             renderer.update_image(&mut image.1, data, x, y)?;
+            Ok(())
         } else {
-            return Err(ErrorKind::ImageIdNotFound);
+            Err(ErrorKind::ImageIdNotFound)
         }
-
-        Ok(())
     }
 
     pub fn info(&self, id: ImageId) -> Option<ImageInfo> {
