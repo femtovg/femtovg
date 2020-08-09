@@ -402,6 +402,14 @@ where
         Ok(id)
     }
 
+    pub fn get_image(&self, id: ImageId) -> Option<&T::Image> {
+        self.images.get(id)
+    }
+
+    pub fn get_image_mut(&mut self, id: ImageId) -> Option<&mut T::Image> {
+        self.images.get_mut(id)
+    }
+
     /// Decode an image from file
     #[cfg(feature = "image-loading")]
     pub fn load_image_file<P: AsRef<FilePath>>(
