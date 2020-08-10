@@ -164,7 +164,7 @@ impl<T> ImageStore<T> {
     }
 
     ///
-    /// Reallocates the image without changing the index
+    /// Reallocates the image without changing the index.
     ///
     pub fn realloc<R: Renderer<Image = T>>(
         &mut self,

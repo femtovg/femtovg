@@ -394,11 +394,8 @@ where
     ) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
-
         let id = self.create_image_empty(size.0, size.1, src.format(), flags)?;
-
         self.images.update(&mut self.renderer, id, src, 0, 0)?;
-
         Ok(id)
     }
 
@@ -410,7 +407,14 @@ where
         self.images.get_mut(id)
     }
 
-    pub fn realloc_image(&mut self, id: ImageId, width: usize, height: usize, format: PixelFormat, flags: ImageFlags) -> Result<(), ErrorKind> {
+    pub fn realloc_image(
+        &mut self,
+        id: ImageId,
+        width: usize,
+        height: usize,
+        format: PixelFormat,
+        flags: ImageFlags,
+    ) -> Result<(), ErrorKind> {
         let info = ImageInfo::new(flags, width, height, format);
         self.images.realloc(&mut self.renderer, id, info)
     }
