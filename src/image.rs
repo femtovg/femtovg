@@ -163,6 +163,22 @@ impl<T> ImageStore<T> {
         Ok(ImageId(self.0.insert((info, image))))
     }
 
+    ///
+    /// Reallocates the image without changing the index
+    ///
+    pub fn realloc<R: Renderer<Image = T>>(
+        &mut self,
+        renderer: &mut R,
+        id: ImageId,
+        info: ImageInfo,
+    ) -> Result<(), ErrorKind> {
+        let new = renderer.alloc_image(info)?;
+        if let Some(old) = self.0.get_mut(id.0) {
+            old.1 = new;
+        }
+        Ok(())
+    }
+
     pub fn get(&self, id: ImageId) -> Option<&T> {
         self.0.get(id.0).map(|inner| &inner.1)
     }
