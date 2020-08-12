@@ -66,7 +66,7 @@ impl Default for FillRule {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum BlendFactor {
     Zero,
     One,
@@ -81,7 +81,7 @@ pub enum BlendFactor {
     SrcAlphaSaturate,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum CompositeOperation {
     SourceOver,
     SourceIn,
@@ -96,7 +96,7 @@ pub enum CompositeOperation {
     Xor,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct CompositeOperationState {
     src_rgb: BlendFactor,
     src_alpha: BlendFactor,
@@ -178,7 +178,7 @@ impl Default for LineJoin {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct State {
     composite_operation: CompositeOperationState,
     transform: Transform2D,
