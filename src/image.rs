@@ -172,11 +172,14 @@ impl<T> ImageStore<T> {
         id: ImageId,
         info: ImageInfo,
     ) -> Result<(), ErrorKind> {
-        let new = renderer.alloc_image(info)?;
         if let Some(old) = self.0.get_mut(id.0) {
+            let new = renderer.alloc_image(info)?;
+            old.0 = info;
             old.1 = new;
+            Ok(())
+        } else {
+            Err(ErrorKind::ImageIdNotFound)
         }
-        Ok(())
     }
 
     pub fn get(&self, id: ImageId) -> Option<&T> {
