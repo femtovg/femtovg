@@ -463,13 +463,19 @@ where
         self.images.remove(&mut self.renderer, id);
     }
 
-    /// Returns the size in pixels of the image for the specified id.
-    pub fn image_size(&self, id: ImageId) -> Result<(usize, usize), ErrorKind> {
+    /// Returns image info
+    pub fn image_info(&self, id: ImageId) -> Result<ImageInfo, ErrorKind> {
         if let Some(info) = self.images.info(id) {
-            Ok((info.width(), info.height()))
+            Ok(info)
         } else {
             Err(ErrorKind::ImageIdNotFound)
         }
+    }
+
+    /// Returns the size in pixels of the image for the specified id.
+    pub fn image_size(&self, id: ImageId) -> Result<(usize, usize), ErrorKind> {
+        let info = self.image_info(id)?;
+        Ok((info.width(), info.height()))
     }
 
     // Transforms
