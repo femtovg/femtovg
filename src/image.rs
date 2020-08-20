@@ -15,7 +15,7 @@ use crate::{ErrorKind, Renderer};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub Index);
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PixelFormat {
     Rgb8,
     Rgba8,
@@ -33,7 +33,7 @@ bitflags! {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub enum ImageSource<'a> {
     Rgb(ImgRef<'a, RGB8>),
@@ -105,7 +105,7 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ImageInfo {
     flags: ImageFlags,
     width: usize,
@@ -172,11 +172,14 @@ impl<T> ImageStore<T> {
         id: ImageId,
         info: ImageInfo,
     ) -> Result<(), ErrorKind> {
-        let new = renderer.alloc_image(info)?;
         if let Some(old) = self.0.get_mut(id.0) {
+            let new = renderer.alloc_image(info)?;
+            old.0 = info;
             old.1 = new;
+            Ok(())
+        } else {
+            Err(ErrorKind::ImageIdNotFound)
         }
-        Ok(())
     }
 
     pub fn get(&self, id: ImageId) -> Option<&T> {

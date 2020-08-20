@@ -14,7 +14,7 @@ pub use void::Void;
 mod params;
 pub(crate) use params::Params;
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct Drawable {
     pub(crate) fill_verts: Option<(usize, usize)>,
     pub(crate) stroke_verts: Option<(usize, usize)>,
@@ -115,7 +115,7 @@ impl Vertex {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShaderType {
     FillGradient,
     FillImage,

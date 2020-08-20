@@ -16,7 +16,7 @@ pub struct Glyph {
 }
 
 // TODO: underline, strikeout, subscript, superscript metrics
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,

@@ -564,7 +564,7 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
 
 // Renderer
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct DrawCmd {
     pub image_id: ImageId,
     pub quads: Vec<Quad>,
