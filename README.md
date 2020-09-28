@@ -1,4 +1,4 @@
-# gpucanvas
+# femtovg
 
 **Work in progress!**
 
