@@ -25,6 +25,9 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [x] Nearest font matching
 * [x] Path hit testing
 
+## In progress
+* [ ] [Metal backend](https://github.com/adamnemecek/gpucanvas/)
+
 ## Not supported
 * [ ] Stroke dashing
 * [ ] Path scissoring
@@ -32,6 +35,23 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [ ] 3D transforms
 * [ ] OpenGl ES2 backend
 * [ ] Color fonts
+
+## Examples
+### Demo
+![demo](assets/demo.png)
+Run with `cargo run --example demo`
+
+### Breakout
+![breakout](assets/breakout.png)
+Run with `cargo run --example breakout`
+
+### SVG
+![svg](assets/svg.png)
+Run with `cargo run --example svg`
+
+### Text
+![text](assets/text.png)
+Run with `cargo run --example text`
 
 ## License
 Licensed under either of
