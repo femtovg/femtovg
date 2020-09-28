@@ -10,9 +10,9 @@ use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::{Window, WindowBuilder};
 use glutin::ContextBuilder;
 
-use gpucanvas::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
+use femtovg::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
 
-type Canvas = gpucanvas::Canvas<OpenGl>;
+type Canvas = femtovg::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
 type Vector = euclid::default::Vector2D<f32>;
 type Size = euclid::default::Size2D<f32>;

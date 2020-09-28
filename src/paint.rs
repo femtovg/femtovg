@@ -58,7 +58,7 @@ pub(crate) enum PaintFlavor {
 ///
 /// # Example
 /// ```
-/// use gpucanvas::{Paint, Path, Color, Canvas, renderer::Void};
+/// use femtovg::{Paint, Path, Color, Canvas, renderer::Void};
 ///
 /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
 ///
@@ -135,7 +135,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use gpucanvas::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///

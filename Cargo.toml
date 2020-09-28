@@ -1,13 +1,13 @@
 [package]
-name = "gpucanvas"
+name = "femtovg"
 description = "Antialiased 2D vector drawing library"
 version = "0.1.0"
 license = "MIT/Apache-2.0"
 readme = "README.md"
-authors = ["Peter Todorov <ptodorov@cytec.bg>"]
-keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
+authors = ["Peter Todorov <ptodorov@cytec.bg>", "Adam Nemecek <adamnemecek@gmail.com>"]
+keywords = ["graphics", "canvas", "vector", "drawing", "gpu", "2d"]
 categories = ["graphics"]
-repository = "https://github.com/cytecbg/gpucanvas"
+repository = "https://github.com/femtovg/femtovg"
 edition = "2018"
 
 [profile.release]

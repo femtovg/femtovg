@@ -1,4 +1,4 @@
-use gpucanvas::{renderer::Void, Baseline, Canvas, Color, FillRule, Paint, Path, Solidity};
+use femtovg::{renderer::Void, Baseline, Canvas, Color, FillRule, Paint, Path, Solidity};
 
 #[test]
 fn path_with_single_move_to() {

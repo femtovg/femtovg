@@ -7,7 +7,7 @@ use glutin::{
     ContextBuilder,
 };
 
-use gpucanvas::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
+use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
 
 struct Fonts {
     sans: FontId,
