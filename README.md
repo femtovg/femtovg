@@ -7,6 +7,23 @@ Ported from https://github.com/memononen/nanovg
 
 Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more Rust-y. Rendering is done via one OpenGl (ES) 3.0+ backend.
 
+## Screenshots
+### Demo
+![demo](assets/demo.png)
+Run with `cargo run --example demo`
+
+### Breakout
+![breakout](assets/breakout.png)
+Run with `cargo run --example breakout`
+
+### SVG
+![svg](assets/svg.png)
+Run with `cargo run --example svg`
+
+### Text
+![text](assets/text.png)
+Run with `cargo run --example text`
+
 ## Features
 * [x] Anti-aliasing
 * [x] Bézier paths filling and stroking
@@ -35,23 +52,6 @@ Most of the implementation is the same as the original C code with some bug fixe
 * [ ] 3D transforms
 * [ ] OpenGl ES2 backend
 * [ ] Color fonts
-
-## Examples
-### Demo
-![demo](assets/demo.png)
-Run with `cargo run --example demo`
-
-### Breakout
-![breakout](assets/breakout.png)
-Run with `cargo run --example breakout`
-
-### SVG
-![svg](assets/svg.png)
-Run with `cargo run --example svg`
-
-### Text
-![text](assets/text.png)
-Run with `cargo run --example text`
 
 ## License
 Licensed under either of
