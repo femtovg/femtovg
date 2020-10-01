@@ -1,5 +1,7 @@
 # femtovg
 
+[Join the Discord channel](https://discord.gg/V69VdVu)
+
 **Work in progress!**
 
 Antialiased 2D vector drawing library written in Rust.
