@@ -1,5 +1,5 @@
 
-precision mediump float;
+precision highp float;
 
 #define UNIFORMARRAY_SIZE 12
 
