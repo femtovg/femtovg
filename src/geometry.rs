@@ -3,6 +3,7 @@ use std::ops::{Index, IndexMut};
 
 use fnv::FnvHasher;
 
+#[cfg (feature="text")]
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
 }

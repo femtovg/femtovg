@@ -2,7 +2,9 @@
 // so that they are easier to find when autocompleting
 
 use crate::geometry::Transform2D;
-use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{Color, FillRule, ImageId, LineCap, LineJoin};
+#[cfg (feature="text")]
+use crate::{Align, Baseline, FontId};
 
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -85,11 +87,16 @@ pub struct Paint {
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
+    #[cfg (feature="text")]
     #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
+    #[cfg (feature="text")]
     pub(crate) font_size: f32,
+    #[cfg (feature="text")]
     pub(crate) letter_spacing: f32,
+    #[cfg (feature="text")]
     pub(crate) text_baseline: Baseline,
+    #[cfg (feature="text")]
     pub(crate) text_align: Align,
     pub(crate) fill_rule: FillRule,
 }
@@ -107,10 +114,15 @@ impl Default for Paint {
             line_cap_start: Default::default(),
             line_cap_end: Default::default(),
             line_join: Default::default(),
+            #[cfg (feature="text")]
             font_ids: Default::default(),
+            #[cfg (feature="text")]
             font_size: 16.0,
+            #[cfg (feature="text")]
             letter_spacing: 0.0,
+            #[cfg (feature="text")]
             text_baseline: Default::default(),
+            #[cfg (feature="text")]
             text_align: Default::default(),
             fill_rule: Default::default(),
         }
@@ -344,6 +356,7 @@ impl Paint {
         self.line_join = join;
     }
 
+    #[cfg (feature="text")]
     pub fn set_font(&mut self, font_ids: &[FontId]) {
         self.font_ids = Default::default();
 
@@ -355,6 +368,7 @@ impl Paint {
     /// Returns the current font size
     ///
     /// Only has effect on canvas text operations
+    #[cfg (feature="text")]
     pub fn font_size(&self) -> f32 {
         self.font_size
     }
@@ -362,11 +376,13 @@ impl Paint {
     /// Sets the font size.
     ///
     /// Only has effect on canvas text operations
+    #[cfg (feature="text")]
     pub fn set_font_size(&mut self, size: f32) {
         self.font_size = size;
     }
 
     /// Returns the current letter spacing
+    #[cfg (feature="text")]
     pub fn letter_spacing(&self) -> f32 {
         self.letter_spacing
     }
@@ -374,11 +390,13 @@ impl Paint {
     /// Sets the letter spacing for this paint
     ///
     /// Only has effect on canvas text operations
+    #[cfg (feature="text")]
     pub fn set_letter_spacing(&mut self, spacing: f32) {
         self.letter_spacing = spacing;
     }
 
     /// Returns the current vertical align
+    #[cfg (feature="text")]
     pub fn text_baseline(&self) -> Baseline {
         self.text_baseline
     }
@@ -386,11 +404,13 @@ impl Paint {
     /// Sets the text vertical alignment for this paint
     ///
     /// Only has effect on canvas text operations
+    #[cfg (feature="text")]
     pub fn set_text_baseline(&mut self, align: Baseline) {
         self.text_baseline = align;
     }
 
     /// Returns the current horizontal align
+    #[cfg (feature="text")]
     pub fn text_align(&self) -> Align {
         self.text_align
     }
@@ -398,6 +418,7 @@ impl Paint {
     /// Sets the text horizontal alignment for this paint
     ///
     /// Only has effect on canvas text operations
+    #[cfg (feature="text")]
     pub fn set_text_align(&mut self, align: Align) {
         self.text_align = align;
     }

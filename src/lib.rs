@@ -2,7 +2,9 @@
 #[macro_use]
 extern crate serde;
 
+#[cfg (feature="text")]
 use std::ops::Range;
+#[cfg (feature="image-loading")]
 use std::path::Path as FilePath;
 
 use imgref::ImgVec;
@@ -21,13 +23,14 @@ TODO:
 
 mod utils;
 
-mod text;
-
 mod error;
 pub use error::ErrorKind;
 
+#[cfg (feature="text")]
+mod text;
+#[cfg (feature="text")]
 pub use text::{Align, Baseline, FontId, FontMetrics, TextMetrics};
-
+#[cfg (feature="text")]
 use text::{RenderMode, TextContext};
 
 mod image;
@@ -201,6 +204,7 @@ pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
     renderer: T,
+    #[cfg (feature="text")]
     text_context: TextContext,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
@@ -222,6 +226,7 @@ where
             width: 0,
             height: 0,
             renderer: renderer,
+            #[cfg (feature="text")]
             text_context: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
@@ -855,18 +860,22 @@ where
 
     // Text
 
+    #[cfg (feature="text")]
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_file(file_path)
     }
 
+    #[cfg (feature="text")]
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_mem(data)
     }
 
+    #[cfg (feature="text")]
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
         self.text_context.add_font_dir(dir_path)
     }
 
+    #[cfg (feature="text")]
     pub fn measure_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -886,6 +895,7 @@ where
         Ok(layout)
     }
 
+    #[cfg (feature="text")]
     pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
@@ -901,6 +911,7 @@ where
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
+    #[cfg (feature="text")]
     pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
@@ -913,6 +924,7 @@ where
         Ok(layout.final_byte_index)
     }
 
+    #[cfg (feature="text")]
     pub fn break_text_vec<S: AsRef<str>>(
         &mut self,
         max_width: f32,
@@ -941,6 +953,7 @@ where
         Ok(res)
     }
 
+    #[cfg (feature="text")]
     pub fn fill_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -951,6 +964,7 @@ where
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
+    #[cfg (feature="text")]
     pub fn stroke_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -962,7 +976,7 @@ where
     }
 
     // Private
-
+    #[cfg (feature="text")]
     fn transform_text_paint(&self, paint: &mut Paint) {
         let scale = self.font_scale() * self.device_px_ratio;
         paint.font_size *= scale;
@@ -970,6 +984,7 @@ where
         paint.line_width *= scale;
     }
 
+    #[cfg (feature="text")]
     fn draw_text(
         &mut self,
         x: f32,
@@ -1025,6 +1040,7 @@ where
         Ok(layout)
     }
 
+    #[cfg (feature="text")]
     fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint) {
         let scissor = self.state().scissor;
 
@@ -1044,6 +1060,7 @@ where
         self.verts.extend_from_slice(verts);
     }
 
+    #[cfg (feature="text")]
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
 
