@@ -1,4 +1,5 @@
 use std::ffi::{c_void, CStr};
+use std::os::raw::{c_char};
 use std::mem;
 use std::ptr;
 
@@ -69,7 +70,7 @@ impl OpenGl {
         };
 
         unsafe {
-            let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *mut i8);
+            let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *const c_char);
 
             opengl.is_opengles = version.to_str().ok().map_or(false, |str| str.starts_with("OpenGL ES"));
 
