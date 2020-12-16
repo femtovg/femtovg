@@ -1,63 +1,78 @@
-use super::{gl, gl::types::*, GlTexture};
+use std::rc::Rc;
+
+use super::GlTexture;
+
+use glow::HasContext;
 
 use crate::ErrorKind;
 
 pub struct Framebuffer {
-    fbo: GLuint,
-    depth_stencil_rbo: GLuint,
+    context: Rc<glow::Context>,
+    fbo: <glow::Context as glow::HasContext>::Framebuffer,
+    depth_stencil_rbo: <glow::Context as glow::HasContext>::Renderbuffer,
 }
 
 impl Framebuffer {
-    pub fn new(texture: &GlTexture) -> Result<Self, ErrorKind> {
-        let mut fbo = 0;
-
+    pub fn new(context: &Rc<glow::Context>, texture: &GlTexture) -> Result<Self, ErrorKind> {
+        let fbo = unsafe { context.create_framebuffer().unwrap() };
         unsafe {
-            gl::GenFramebuffers(1, &mut fbo);
-            gl::BindFramebuffer(gl::FRAMEBUFFER, fbo);
+            context.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
         }
 
         let width = texture.info().width() as u32;
         let height = texture.info().height() as u32;
 
         unsafe {
-            gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, texture.id(), 0);
+            context.framebuffer_texture_2d(
+                glow::FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                Some(texture.id()),
+                0,
+            );
         }
 
-        let depth_stencil_rbo = Self::gen_depth_stencil_rbo(width, height);
+        let depth_stencil_rbo = Self::gen_depth_stencil_rbo(context, width, height);
 
-        let fbo = Framebuffer { fbo, depth_stencil_rbo };
+        let fbo = Framebuffer {
+            context: context.clone(),
+            fbo,
+            depth_stencil_rbo,
+        };
 
         unsafe {
-            gl::FramebufferRenderbuffer(
-                gl::FRAMEBUFFER,
-                gl::DEPTH_STENCIL_ATTACHMENT,
-                gl::RENDERBUFFER,
-                depth_stencil_rbo,
+            context.framebuffer_renderbuffer(
+                glow::FRAMEBUFFER,
+                glow::DEPTH_STENCIL_ATTACHMENT,
+                glow::RENDERBUFFER,
+                Some(depth_stencil_rbo),
             );
 
-            let status = gl::CheckFramebufferStatus(gl::FRAMEBUFFER);
+            let status = context.check_framebuffer_status(glow::FRAMEBUFFER);
 
-            if status != gl::FRAMEBUFFER_COMPLETE {
+            if status != glow::FRAMEBUFFER_COMPLETE {
                 let reason = match status {
-                    gl::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => format!("({}) Framebuffer incomplete attachment", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => format!("({}) Framebuffer incomplete draw buffer", status),
-                    //gl::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => format!("({}) Framebuffer incomplete layer targets", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => format!("({}) Framebuffer incomplete dimensions", status),
-                    gl::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
+                    glow::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => {
+                        format!("({}) Framebuffer incomplete attachment", status)
+                    }
+                    //glow::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => format!("({}) Framebuffer incomplete draw buffer", status),
+                    //glow::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => format!("({}) Framebuffer incomplete layer targets", status),
+                    //FIXME: will be in next glow release: glow::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => format!("({}) Framebuffer incomplete dimensions", status),
+                    glow::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
                         format!("({}) Framebuffer incomplete missing attachment", status)
                     }
-                    gl::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => {
+                    glow::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => {
                         format!("({}) Framebuffer incomplete multisample", status)
                     }
-                    //gl::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
-                    gl::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
+                    //glow::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
+                    glow::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
                     _ => format!("({}) Framebuffer not complete!", status),
                 };
 
                 return Err(ErrorKind::RenderTargetError(reason));
             }
 
-            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
+            context.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
 
         Ok(fbo)
@@ -65,15 +80,15 @@ impl Framebuffer {
 
     pub fn bind(&self) {
         unsafe {
-            gl::BindFramebuffer(gl::FRAMEBUFFER, self.fbo);
+            self.context.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
         }
     }
 
-    pub fn unbind() {
+    pub fn unbind(context: &Rc<glow::Context>) {
         unsafe {
-            gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
-            gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+            context.bind_framebuffer(glow::FRAMEBUFFER, None);
+            context.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
+            context.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
         }
     }
 
@@ -81,10 +96,10 @@ impl Framebuffer {
     //     let dest_fbo = Self::new(texture);
 
     //     unsafe {
-    //         gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.fbo);
-    //         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, dest_fbo.fbo);
+    //         glow::BindFramebuffer(glow::READ_FRAMEBUFFER, self.fbo);
+    //         glow::BindFramebuffer(glow::DRAW_FRAMEBUFFER, dest_fbo.fbo);
 
-    //         gl::BlitFramebuffer(
+    //         glow::BlitFramebuffer(
     //             0,
     //             0,
     //             self.width as i32,
@@ -93,34 +108,35 @@ impl Framebuffer {
     //             0,
     //             dest_fbo.width as i32,
     //             dest_fbo.height as i32,
-    //             gl::COLOR_BUFFER_BIT,
-    //             gl::NEAREST
+    //             glow::COLOR_BUFFER_BIT,
+    //             glow::NEAREST
     //         );
 
-    //         gl::BindFramebuffer(gl::READ_FRAMEBUFFER, 0);
-    //         gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+    //         glow::BindFramebuffer(glow::READ_FRAMEBUFFER, 0);
+    //         glow::BindFramebuffer(glow::DRAW_FRAMEBUFFER, 0);
     //     }
     // }
 
-    fn gen_depth_stencil_rbo(width: u32, height: u32) -> GLuint {
-        let mut id = 0;
-
+    fn gen_depth_stencil_rbo(
+        context: &Rc<glow::Context>,
+        width: u32,
+        height: u32,
+    ) -> <glow::Context as glow::HasContext>::Renderbuffer {
         unsafe {
-            gl::GenRenderbuffers(1, &mut id);
-            gl::BindRenderbuffer(gl::RENDERBUFFER, id);
-            gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width as i32, height as i32);
-            gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
+            let id = context.create_renderbuffer().unwrap();
+            context.bind_renderbuffer(glow::RENDERBUFFER, Some(id));
+            context.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, width as i32, height as i32);
+            context.bind_renderbuffer(glow::RENDERBUFFER, None);
+            id
         }
-
-        id
     }
 }
 
 impl Drop for Framebuffer {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteFramebuffers(1, &self.fbo);
-            gl::DeleteRenderbuffers(1, &self.depth_stencil_rbo);
+            self.context.delete_framebuffer(self.fbo);
+            self.context.delete_renderbuffer(self.depth_stencil_rbo);
         }
     }
 }

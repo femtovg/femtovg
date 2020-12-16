@@ -15,12 +15,8 @@ impl Default for UniformArray {
 }
 
 impl UniformArray {
-    pub fn size() -> usize {
-        UNIFORMARRAY_SIZE
-    }
-
-    pub fn as_ptr(&self) -> *const f32 {
-        self.0.as_ptr()
+    pub fn as_slice(&self) -> &[f32] {
+        &self.0
     }
 
     pub fn set_scissor_mat(&mut self, mat: [f32; 12]) {
