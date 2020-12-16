@@ -24,7 +24,7 @@ unicode-bidi = "0.3.4"
 unicode-segmentation = "1.6.0"
 generational-arena = "0.2.8"
 lru = { version = "0.5.3", default-features = false }
-image = { version = "0.23.6", optional = true }
+image = { version = "0.23.6", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -40,8 +40,22 @@ default = ["image-loading"]
 image-loading = ["image"]
 
 [dev-dependencies]
-glutin = "0.24.1"
+winit = { version = "0.22.0", default-features = false }
 euclid = "0.20.13"
 rand = "0.7"
 svg = "0.8.0"
-usvg = "0.12.0"
+usvg = { version = "0.12.0", default-features = false }
+instant = { version = "0.1", features = [ "now" ] }
+resource = "0.5.0"
+image = { version = "0.23.6", default-features = false, features = ["jpeg"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+glutin = "0.24.0"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+winit = { version = "0.22.0", default-features = false, features = ["web-sys"] }
+wasm-bindgen = { version = "0.2" }
+web_sys = { version = "0.3", package = "web-sys", features=["console", "WebGlContextAttributes"] }
+console_error_panic_hook = "0.1.5"
+instant = { version = "0.1", features = [ "wasm-bindgen", "now" ] }
+resource = { version = "0.5.0", features = [ "force-static" ] }

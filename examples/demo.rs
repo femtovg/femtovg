@@ -1,10 +1,11 @@
 use std::f32::consts::PI;
-use std::time::Instant;
 
-use glutin::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use glutin::window::WindowBuilder;
-use glutin::ContextBuilder;
+use resource::resource;
+
+use instant::Instant;
+use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
 //use glutin::{GlRequest, Api};
 
 use femtovg::{
@@ -37,27 +38,66 @@ struct Fonts {
 }
 
 fn main() {
+    // This provides better error messages in debug mode.
+    // It's disabled in release mode so it doesn't bloat up the file size.
+    #[cfg(all(debug_assertions, target_arch = "wasm32"))]
+    console_error_panic_hook::set_once();
+
     let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600))
-        .with_title("femtovg demo");
 
-    //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
-    //let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(8).build_windowed(wb, &el).unwrap();
-    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+    #[cfg(not(target_arch = "wasm32"))]
+    let (renderer, windowed_context) = {
+        use glutin::ContextBuilder;
 
-    let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+        let wb = WindowBuilder::new()
+            .with_inner_size(winit::dpi::PhysicalSize::new(1000, 600))
+            .with_title("femtovg demo");
+
+        //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
+        //let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(8).build_windowed(wb, &el).unwrap();
+        let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
+        let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+
+        let renderer =
+            OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+
+        (renderer, windowed_context)
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let (renderer, window) = {
+        use wasm_bindgen::JsCast;
+
+        let canvas = web_sys::window()
+            .unwrap()
+            .document()
+            .unwrap()
+            .get_element_by_id("canvas")
+            .unwrap()
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .unwrap();
+
+        use winit::platform::web::WindowBuilderExtWebSys;
+
+        let renderer = OpenGl::new_from_html_canvas(&canvas).expect("Cannot create renderer");
+
+        let window = WindowBuilder::new().with_canvas(Some(canvas)).build(&el).unwrap();
+
+        (renderer, window)
+    };
+
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
     let fonts = Fonts {
         regular: canvas
-            .add_font("examples/assets/Roboto-Regular.ttf")
+            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
             .expect("Cannot add font"),
         bold: canvas
-            .add_font("examples/assets/Roboto-Light.ttf")
+            .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
             .expect("Cannot add font"),
-        icons: canvas.add_font("examples/assets/entypo.ttf").expect("Cannot add font"),
+        icons: canvas
+            .add_font_mem(&resource!("examples/assets/entypo.ttf"))
+            .expect("Cannot add font"),
     };
 
     //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
@@ -67,14 +107,44 @@ fn main() {
 
     //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
-    let images: Vec<ImageId> = (1..=12)
-        .map(|i| {
-            let name = format!("examples/assets/images/image{}.jpg", i);
-            canvas
-                .load_image_file(name, ImageFlags::empty())
-                .expect("cannot load image")
-        })
-        .collect();
+    let images = vec![
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image1.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image2.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image3.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image4.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image5.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image6.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image7.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image8.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image9.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image10.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image11.jpg"), ImageFlags::empty())
+            .unwrap(),
+        canvas
+            .load_image_mem(&resource!("examples/assets/images/image12.jpg"), ImageFlags::empty())
+            .unwrap(),
+    ];
 
     let mut screenshot_image_id = None;
 
@@ -88,11 +158,15 @@ fn main() {
     let mut perf = PerfGraph::new();
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
@@ -115,7 +189,7 @@ fn main() {
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
-                    glutin::event::MouseScrollDelta::LineDelta(_, y) => {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
                         let pt = canvas.transform().inversed().transform_point(mousex, mousey);
                         canvas.translate(pt.0, pt.1);
                         canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
@@ -158,8 +232,8 @@ fn main() {
 
                 perf.update(dt);
 
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
 
                 let t = start.elapsed().as_secs_f32();
 
@@ -291,11 +365,12 @@ fn main() {
                 //canvas.restore();
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
             Event::MainEventsCleared => {
                 //scroll = 1.0;
-                windowed_context.window().request_redraw()
+                window.request_redraw()
             }
             _ => (),
         }
