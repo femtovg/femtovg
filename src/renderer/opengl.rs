@@ -1,5 +1,8 @@
 use std::mem;
-use std::{ffi::c_void, rc::Rc};
+use std::rc::Rc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::c_void;
 
 use fnv::FnvHashMap;
 use imgref::ImgVec;
@@ -40,14 +43,37 @@ pub struct OpenGl {
 }
 
 impl OpenGl {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
     {
+        Self::new_from_context(unsafe { glow::Context::from_loader_function(load_fn) })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
+        let mut attrs = web_sys::WebGlContextAttributes::new();
+        attrs.stencil(true);
+        attrs.antialias(false);
+
+        use wasm_bindgen::JsCast;
+        let webgl1_context = canvas
+            .get_context_with_context_options("webgl", attrs.as_ref())
+            .map_err(|_| ErrorKind::GeneralError("Canvas::getContext failed to retrieve WebGL 1 context".to_owned()))?
+            .unwrap()
+            .dyn_into::<web_sys::WebGlRenderingContext>()
+            .unwrap();
+
+        let context = glow::Context::from_webgl1_context(webgl1_context);
+        Self::new_from_context(context)
+    }
+
+    fn new_from_context(context: glow::Context) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
-        let context = Rc::new(unsafe { glow::Context::from_loader_function(load_fn) });
+        let context = Rc::new(context);
 
         let main_program = MainProgram::new(&context, antialias)?;
 
