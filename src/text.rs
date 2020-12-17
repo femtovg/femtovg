@@ -777,7 +777,7 @@ fn find_texture_or_alloc<T: Renderer>(
             .add_rect(width, height)
             .ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
-        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Gray8);
+        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
         let image_id = images.alloc(renderer, info)?;
 
         textures.push(FontTexture { atlas, image_id });

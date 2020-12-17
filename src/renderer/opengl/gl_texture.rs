@@ -11,7 +11,7 @@ pub struct GlTexture {
 }
 
 impl GlTexture {
-    pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles: bool) -> Result<Self, ErrorKind> {
+    pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles_2_0: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
         let mut texture = Self {
@@ -24,15 +24,17 @@ impl GlTexture {
             texture.id = context.create_texture().unwrap();
             context.bind_texture(glow::TEXTURE_2D, Some(texture.id));
             context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-            context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, texture.info.width() as i32);
-            context.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
-            context.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+            if !opengles_2_0 {
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, texture.info.width() as i32);
+                context.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
+                context.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+            }
         }
 
         match info.format() {
             PixelFormat::Gray8 => unsafe {
-                //let format = if opengles { glow::RED } else { glow::RED };
-                let internal_format = if opengles { glow::LUMINANCE } else { glow::R8 };
+                let internal_format = if opengles_2_0 { glow::LUMINANCE } else { glow::R8 };
+                let format = if opengles_2_0 { internal_format } else { glow::RED };
 
                 context.tex_image_2d(
                     glow::TEXTURE_2D,
@@ -41,7 +43,7 @@ impl GlTexture {
                     texture.info.width() as i32,
                     texture.info.height() as i32,
                     0,
-                    glow::RED,
+                    format,
                     glow::UNSIGNED_BYTE,
                     None, //data.buf().as_ptr() as *const GLvoid
                 );
@@ -140,9 +142,11 @@ impl GlTexture {
 
         unsafe {
             context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
-            context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
-            context.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
-            context.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+            if !opengles_2_0 {
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+                context.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
+                context.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+            }
         }
 
         if flags.contains(ImageFlags::GENERATE_MIPMAPS) {
@@ -163,7 +167,7 @@ impl GlTexture {
         self.id
     }
 
-    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, _opengles: bool) -> Result<(), ErrorKind> {
+    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, opengles_2_0: bool) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
         if x + size.0 > self.info.width() {
@@ -181,12 +185,14 @@ impl GlTexture {
         unsafe {
             self.context.bind_texture(glow::TEXTURE_2D, Some(self.id));
             self.context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-            self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.0 as i32);
+            if !opengles_2_0 {
+                self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.0 as i32);
+            }
         }
 
         match src {
             ImageSource::Gray(data) => unsafe {
-                //let format = if opengles { glow::LUMINANCE } else { glow::RED };
+                let format = if opengles_2_0 { glow::LUMINANCE } else { glow::R8 };
 
                 self.context.tex_sub_image_2d(
                     glow::TEXTURE_2D,
@@ -195,7 +201,7 @@ impl GlTexture {
                     y as i32,
                     size.0 as i32,
                     size.1 as i32,
-                    glow::R8,
+                    format,
                     glow::UNSIGNED_BYTE,
                     glow::PixelUnpackData::Slice(data.buf().align_to().1),
                 );
@@ -237,7 +243,9 @@ impl GlTexture {
 
         unsafe {
             self.context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
-            self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+            if !opengles_2_0 {
+                self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+            }
             //glow::PixelStorei(glow::UNPACK_SKIP_PIXELS, 0);
             //glow::PixelStorei(glow::UNPACK_SKIP_ROWS, 0);
             self.context.bind_texture(glow::TEXTURE_2D, None);
