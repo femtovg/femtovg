@@ -1,7 +1,5 @@
-use std::ffi::{c_void, CStr};
-use std::os::raw::{c_char};
 use std::mem;
-use std::ptr;
+use std::{ffi::c_void, rc::Rc};
 
 use fnv::FnvHashMap;
 use imgref::ImgVec;
@@ -11,6 +9,8 @@ use crate::{
     renderer::{ImageId, Vertex},
     BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageInfo, ImageSource, ImageStore,
 };
+
+use glow::HasContext;
 
 use super::{Command, CommandType, Params, RenderTarget, Renderer};
 
@@ -26,13 +26,6 @@ use framebuffer::Framebuffer;
 mod uniform_array;
 use uniform_array::UniformArray;
 
-#[allow(clippy::all)]
-mod gl {
-    include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
-}
-
-use gl::types::*;
-
 pub struct OpenGl {
     debug: bool,
     antialias: bool,
@@ -40,22 +33,23 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     main_program: MainProgram,
-    vert_arr: GLuint,
-    vert_buff: GLuint,
+    vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
+    vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
+    context: Rc<glow::Context>,
 }
 
 impl OpenGl {
     pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
-        F: FnMut(&'static str) -> *const c_void,
+        F: FnMut(&str) -> *const c_void,
     {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
-        gl::load_with(load_fn);
+        let context = Rc::new(unsafe { glow::Context::from_loader_function(load_fn) });
 
-        let main_program = MainProgram::new(antialias)?;
+        let main_program = MainProgram::new(&context, antialias)?;
 
         let mut opengl = OpenGl {
             debug: debug,
@@ -67,15 +61,16 @@ impl OpenGl {
             vert_arr: Default::default(),
             vert_buff: Default::default(),
             framebuffers: Default::default(),
+            context: context.clone(),
         };
 
         unsafe {
-            let version = CStr::from_ptr(gl::GetString(gl::VERSION) as *const c_char);
+            let version = context.get_parameter_string(glow::VERSION);
 
-            opengl.is_opengles = version.to_str().ok().map_or(false, |str| str.starts_with("OpenGL ES"));
+            opengl.is_opengles = version.starts_with("OpenGL ES");
 
-            gl::GenVertexArrays(1, &mut opengl.vert_arr);
-            gl::GenBuffers(1, &mut opengl.vert_buff);
+            opengl.vert_arr = opengl.context.create_vertex_array().ok();
+            opengl.vert_buff = opengl.context.create_buffer().ok();
         }
 
         Ok(opengl)
@@ -90,43 +85,43 @@ impl OpenGl {
             return;
         }
 
-        let err = unsafe { gl::GetError() };
+        let err = unsafe { self.context.get_error() };
 
-        if err == gl::NO_ERROR {
+        if err == glow::NO_ERROR {
             return;
         }
 
         let message = match err {
-            gl::INVALID_ENUM => "Invalid enum",
-            gl::INVALID_VALUE => "Invalid value",
-            gl::INVALID_OPERATION => "Invalid operation",
-            gl::OUT_OF_MEMORY => "Out of memory",
-            gl::INVALID_FRAMEBUFFER_OPERATION => "Invalid framebuffer operation",
+            glow::INVALID_ENUM => "Invalid enum",
+            glow::INVALID_VALUE => "Invalid value",
+            glow::INVALID_OPERATION => "Invalid operation",
+            glow::OUT_OF_MEMORY => "Out of memory",
+            glow::INVALID_FRAMEBUFFER_OPERATION => "Invalid framebuffer operation",
             _ => "Unknown error",
         };
 
         eprintln!("({}) Error on {} - {}", err, label, message);
     }
 
-    fn gl_factor(factor: BlendFactor) -> GLenum {
+    fn gl_factor(factor: BlendFactor) -> u32 {
         match factor {
-            BlendFactor::Zero => gl::ZERO,
-            BlendFactor::One => gl::ONE,
-            BlendFactor::SrcColor => gl::SRC_COLOR,
-            BlendFactor::OneMinusSrcColor => gl::ONE_MINUS_SRC_COLOR,
-            BlendFactor::DstColor => gl::DST_COLOR,
-            BlendFactor::OneMinusDstColor => gl::ONE_MINUS_DST_COLOR,
-            BlendFactor::SrcAlpha => gl::SRC_ALPHA,
-            BlendFactor::OneMinusSrcAlpha => gl::ONE_MINUS_SRC_ALPHA,
-            BlendFactor::DstAlpha => gl::DST_ALPHA,
-            BlendFactor::OneMinusDstAlpha => gl::ONE_MINUS_DST_ALPHA,
-            BlendFactor::SrcAlphaSaturate => gl::SRC_ALPHA_SATURATE,
+            BlendFactor::Zero => glow::ZERO,
+            BlendFactor::One => glow::ONE,
+            BlendFactor::SrcColor => glow::SRC_COLOR,
+            BlendFactor::OneMinusSrcColor => glow::ONE_MINUS_SRC_COLOR,
+            BlendFactor::DstColor => glow::DST_COLOR,
+            BlendFactor::OneMinusDstColor => glow::ONE_MINUS_DST_COLOR,
+            BlendFactor::SrcAlpha => glow::SRC_ALPHA,
+            BlendFactor::OneMinusSrcAlpha => glow::ONE_MINUS_SRC_ALPHA,
+            BlendFactor::DstAlpha => glow::DST_ALPHA,
+            BlendFactor::OneMinusDstAlpha => glow::ONE_MINUS_DST_ALPHA,
+            BlendFactor::SrcAlphaSaturate => glow::SRC_ALPHA_SATURATE,
         }
     }
 
     fn set_composite_operation(&self, blend_state: CompositeOperationState) {
         unsafe {
-            gl::BlendFuncSeparate(
+            self.context.blend_func_separate(
                 Self::gl_factor(blend_state.src_rgb),
                 Self::gl_factor(blend_state.dst_rgb),
                 Self::gl_factor(blend_state.src_alpha),
@@ -141,13 +136,14 @@ impl OpenGl {
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32);
+                    self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32);
                 }
             }
 
             if let Some((start, count)) = drawable.stroke_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    self.context
+                        .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                 }
             }
         }
@@ -157,34 +153,36 @@ impl OpenGl {
 
     fn concave_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, stencil_paint: &Params, fill_paint: &Params) {
         unsafe {
-            gl::Enable(gl::STENCIL_TEST);
-            gl::StencilMask(0xff);
-            gl::StencilFunc(gl::ALWAYS, 0, 0xff);
-            gl::ColorMask(gl::FALSE, gl::FALSE, gl::FALSE, gl::FALSE);
-            //gl::DepthMask(gl::FALSE);
+            self.context.enable(glow::STENCIL_TEST);
+            self.context.stencil_mask(0xff);
+            self.context.stencil_func(glow::ALWAYS, 0, 0xff);
+            self.context.color_mask(false, false, false, false);
+            //glow::DepthMask(glow::FALSE);
         }
 
         self.set_uniforms(images, stencil_paint, None, None);
 
         unsafe {
-            gl::StencilOpSeparate(gl::FRONT, gl::KEEP, gl::KEEP, gl::INCR_WRAP);
-            gl::StencilOpSeparate(gl::BACK, gl::KEEP, gl::KEEP, gl::DECR_WRAP);
-            gl::Disable(gl::CULL_FACE);
+            self.context
+                .stencil_op_separate(glow::FRONT, glow::KEEP, glow::KEEP, glow::INCR_WRAP);
+            self.context
+                .stencil_op_separate(glow::BACK, glow::KEEP, glow::KEEP, glow::DECR_WRAP);
+            self.context.disable(glow::CULL_FACE);
         }
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_FAN, start as i32, count as i32);
+                    self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32);
                 }
             }
         }
 
         unsafe {
-            gl::Enable(gl::CULL_FACE);
+            self.context.enable(glow::CULL_FACE);
             // Draw anti-aliased pixels
-            gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
-            //gl::DepthMask(gl::TRUE);
+            self.context.color_mask(true, true, true, true);
+            //glow::DepthMask(glow::TRUE);
         }
 
         self.set_uniforms(images, fill_paint, cmd.image, cmd.alpha_mask);
@@ -192,18 +190,19 @@ impl OpenGl {
         if self.antialias {
             unsafe {
                 match cmd.fill_rule {
-                    FillRule::NonZero => gl::StencilFunc(gl::EQUAL, 0x0, 0xff),
-                    FillRule::EvenOdd => gl::StencilFunc(gl::EQUAL, 0x0, 0x1),
+                    FillRule::NonZero => self.context.stencil_func(glow::EQUAL, 0x0, 0xff),
+                    FillRule::EvenOdd => self.context.stencil_func(glow::EQUAL, 0x0, 0x1),
                 }
 
-                gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
+                self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
             }
 
             // draw fringes
             for drawable in &cmd.drawables {
                 if let Some((start, count)) = drawable.stroke_verts {
                     unsafe {
-                        gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                        self.context
+                            .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                     }
                 }
             }
@@ -211,17 +210,18 @@ impl OpenGl {
 
         unsafe {
             match cmd.fill_rule {
-                FillRule::NonZero => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0xff),
-                FillRule::EvenOdd => gl::StencilFunc(gl::NOTEQUAL, 0x0, 0x1),
+                FillRule::NonZero => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0xff),
+                FillRule::EvenOdd => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0x1),
             }
 
-            gl::StencilOp(gl::ZERO, gl::ZERO, gl::ZERO);
+            self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
 
             if let Some((start, count)) = cmd.triangles_verts {
-                gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                self.context
+                    .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
             }
 
-            gl::Disable(gl::STENCIL_TEST);
+            self.context.disable(glow::STENCIL_TEST);
         }
 
         self.check_error("concave_fill");
@@ -233,7 +233,8 @@ impl OpenGl {
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    self.context
+                        .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                 }
             }
         }
@@ -243,12 +244,12 @@ impl OpenGl {
 
     fn stencil_stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint1: &Params, paint2: &Params) {
         unsafe {
-            gl::Enable(gl::STENCIL_TEST);
-            gl::StencilMask(0xff);
+            self.context.enable(glow::STENCIL_TEST);
+            self.context.stencil_mask(0xff);
 
             // Fill the stroke base without overlap
-            gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
-            gl::StencilOp(gl::KEEP, gl::KEEP, gl::INCR);
+            self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            self.context.stencil_op(glow::KEEP, glow::KEEP, glow::INCR);
         }
 
         self.set_uniforms(images, paint2, cmd.image, cmd.alpha_mask);
@@ -256,7 +257,8 @@ impl OpenGl {
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    self.context
+                        .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                 }
             }
         }
@@ -265,36 +267,38 @@ impl OpenGl {
         self.set_uniforms(images, paint1, cmd.image, cmd.alpha_mask);
 
         unsafe {
-            gl::StencilFunc(gl::EQUAL, 0x0, 0xff);
-            gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
+            self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
         }
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    self.context
+                        .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                 }
             }
         }
 
         unsafe {
             // Clear stencil buffer.
-            gl::ColorMask(gl::FALSE, gl::FALSE, gl::FALSE, gl::FALSE);
-            gl::StencilFunc(gl::ALWAYS, 0x0, 0xff);
-            gl::StencilOp(gl::ZERO, gl::ZERO, gl::ZERO);
+            self.context.color_mask(false, false, false, false);
+            self.context.stencil_func(glow::ALWAYS, 0x0, 0xff);
+            self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
         }
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
                 unsafe {
-                    gl::DrawArrays(gl::TRIANGLE_STRIP, start as i32, count as i32);
+                    self.context
+                        .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
                 }
             }
         }
 
         unsafe {
-            gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
-            gl::Disable(gl::STENCIL_TEST);
+            self.context.color_mask(true, true, true, true);
+            self.context.disable(glow::STENCIL_TEST);
         }
 
         self.check_error("stencil_stroke");
@@ -305,7 +309,7 @@ impl OpenGl {
 
         if let Some((start, count)) = cmd.triangles_verts {
             unsafe {
-                gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32);
+                self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
             }
         }
 
@@ -320,21 +324,25 @@ impl OpenGl {
         alpha_tex: Option<ImageId>,
     ) {
         let arr = UniformArray::from(paint);
-        self.main_program.set_config(UniformArray::size() as i32, arr.as_ptr());
+        self.main_program.set_config(arr.as_slice());
         self.check_error("set_uniforms uniforms");
 
-        let tex = image_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
+        let tex = image_tex
+            .and_then(|id| images.get(id))
+            .map_or(None, |tex| Some(tex.id()));
 
         unsafe {
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, tex);
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, tex);
         }
 
-        let masktex = alpha_tex.and_then(|id| images.get(id)).map_or(0, |tex| tex.id());
+        let masktex = alpha_tex
+            .and_then(|id| images.get(id))
+            .map_or(None, |tex| Some(tex.id()));
 
         unsafe {
-            gl::ActiveTexture(gl::TEXTURE0 + 1);
-            gl::BindTexture(gl::TEXTURE_2D, masktex);
+            self.context.active_texture(glow::TEXTURE0 + 1);
+            self.context.bind_texture(glow::TEXTURE_2D, masktex);
         }
 
         self.check_error("set_uniforms texture");
@@ -342,36 +350,42 @@ impl OpenGl {
 
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
-            gl::Enable(gl::SCISSOR_TEST);
-            gl::Scissor(
+            self.context.enable(glow::SCISSOR_TEST);
+            self.context.scissor(
                 x as i32,
                 self.view[1] as i32 - (height as i32 + y as i32),
                 width as i32,
                 height as i32,
             );
-            gl::ClearColor(color.r, color.g, color.b, color.a);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
-            gl::Disable(gl::SCISSOR_TEST);
+            self.context.clear_color(color.r, color.g, color.b, color.a);
+            self.context.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+            self.context.disable(glow::SCISSOR_TEST);
         }
     }
 
     fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
         match target {
             RenderTarget::Screen => unsafe {
-                Framebuffer::unbind();
+                Framebuffer::unbind(&self.context);
                 self.view = self.screen_view;
-                gl::Viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
+                self.context.viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             },
             RenderTarget::Image(id) => {
+                let context = self.context.clone();
                 if let Some(texture) = images.get(id) {
-                    if let Ok(fb) = self.framebuffers.entry(id).or_insert_with(|| Framebuffer::new(texture)) {
+                    if let Ok(fb) = self
+                        .framebuffers
+                        .entry(id)
+                        .or_insert_with(|| Framebuffer::new(&context, texture))
+                    {
                         fb.bind();
 
                         self.view[0] = texture.info().width() as f32;
                         self.view[1] = texture.info().height() as f32;
 
                         unsafe {
-                            gl::Viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
+                            self.context
+                                .viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
                         }
                     }
                 }
@@ -390,7 +404,7 @@ impl Renderer for OpenGl {
         self.screen_view = self.view;
 
         unsafe {
-            gl::Viewport(0, 0, width as i32, height as i32);
+            self.context.viewport(0, 0, width as i32, height as i32);
         }
     }
 
@@ -398,46 +412,42 @@ impl Renderer for OpenGl {
         self.main_program.bind();
 
         unsafe {
-            gl::Enable(gl::CULL_FACE);
+            self.context.enable(glow::CULL_FACE);
 
-            gl::CullFace(gl::BACK);
-            gl::FrontFace(gl::CCW);
-            gl::Enable(gl::BLEND);
-            gl::Disable(gl::DEPTH_TEST);
-            gl::Disable(gl::SCISSOR_TEST);
-            gl::ColorMask(gl::TRUE, gl::TRUE, gl::TRUE, gl::TRUE);
-            gl::StencilMask(0xffff_ffff);
-            gl::StencilOp(gl::KEEP, gl::KEEP, gl::KEEP);
-            gl::StencilFunc(gl::ALWAYS, 0, 0xffff_ffff);
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-            gl::ActiveTexture(gl::TEXTURE0 + 1);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
+            self.context.cull_face(glow::BACK);
+            self.context.front_face(glow::CCW);
+            self.context.enable(glow::BLEND);
+            self.context.disable(glow::DEPTH_TEST);
+            self.context.disable(glow::SCISSOR_TEST);
+            self.context.color_mask(true, true, true, true);
+            self.context.stencil_mask(0xffff_ffff);
+            self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+            self.context.stencil_func(glow::ALWAYS, 0, 0xffff_ffff);
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, None);
+            self.context.active_texture(glow::TEXTURE0 + 1);
+            self.context.bind_texture(glow::TEXTURE_2D, None);
 
-            gl::BindVertexArray(self.vert_arr);
+            self.context.bind_vertex_array(self.vert_arr);
 
             let vertex_size = mem::size_of::<Vertex>();
 
-            gl::BindBuffer(gl::ARRAY_BUFFER, self.vert_buff);
-            let size = verts.len() * vertex_size;
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                size as isize,
-                verts.as_ptr() as *const GLvoid,
-                gl::STREAM_DRAW,
-            );
+            self.context.bind_buffer(glow::ARRAY_BUFFER, self.vert_buff);
+            self.context
+                .buffer_data_u8_slice(glow::ARRAY_BUFFER, verts.align_to().1, glow::STREAM_DRAW);
 
-            gl::EnableVertexAttribArray(0);
-            gl::EnableVertexAttribArray(1);
+            self.context.enable_vertex_attrib_array(0);
+            self.context.enable_vertex_attrib_array(1);
 
-            gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, vertex_size as i32, ptr::null::<c_void>());
-            gl::VertexAttribPointer(
+            self.context
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, vertex_size as i32, 0);
+            self.context.vertex_attrib_pointer_f32(
                 1,
                 2,
-                gl::FLOAT,
-                gl::FALSE,
+                glow::FLOAT,
+                false,
                 vertex_size as i32,
-                (2 * mem::size_of::<f32>()) as *const c_void,
+                2 * mem::size_of::<f32>() as i32,
             );
         }
 
@@ -476,13 +486,13 @@ impl Renderer for OpenGl {
         }
 
         unsafe {
-            gl::DisableVertexAttribArray(0);
-            gl::DisableVertexAttribArray(1);
-            gl::BindVertexArray(0);
+            self.context.disable_vertex_attrib_array(0);
+            self.context.disable_vertex_attrib_array(1);
+            self.context.bind_vertex_array(None);
 
-            gl::Disable(gl::CULL_FACE);
-            gl::BindBuffer(gl::ARRAY_BUFFER, 0);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
+            self.context.disable(glow::CULL_FACE);
+            self.context.bind_buffer(glow::ARRAY_BUFFER, None);
+            self.context.bind_texture(glow::TEXTURE_2D, None);
         }
 
         self.main_program.unbind();
@@ -491,7 +501,7 @@ impl Renderer for OpenGl {
     }
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
-        Self::Image::new(info, self.is_opengles)
+        Self::Image::new(&self.context, info, self.is_opengles)
     }
 
     fn update_image(
@@ -528,14 +538,14 @@ impl Renderer for OpenGl {
         );
 
         unsafe {
-            gl::ReadPixels(
+            self.context.read_pixels(
                 0,
                 0,
                 self.view[0] as i32,
                 self.view[1] as i32,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE,
-                image.buf_mut().as_ptr() as *mut GLvoid,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(image.buf_mut().align_to_mut().1),
             );
         }
 
@@ -551,15 +561,15 @@ impl Renderer for OpenGl {
 
 impl Drop for OpenGl {
     fn drop(&mut self) {
-        if self.vert_arr != 0 {
+        if let Some(vert_arr) = self.vert_arr {
             unsafe {
-                gl::DeleteVertexArrays(1, &self.vert_arr);
+                self.context.delete_vertex_array(vert_arr);
             }
         }
 
-        if self.vert_buff != 0 {
+        if let Some(vert_buff) = self.vert_buff {
             unsafe {
-                gl::DeleteBuffers(1, &self.vert_buff);
+                self.context.delete_buffer(vert_buff);
             }
         }
     }

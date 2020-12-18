@@ -1,62 +1,48 @@
-use std::ffi::{CStr, CString};
-use std::ptr;
+use std::rc::Rc;
 
 use crate::ErrorKind;
 
-use super::gl;
-use super::gl::types::*;
+use glow::HasContext;
 
 const GLSL_VERSION: &str = "#version 100";
 
 pub(crate) struct Shader {
-    id: GLuint,
+    context: Rc<glow::Context>,
+    id: <glow::Context as glow::HasContext>::Shader,
 }
 
 impl Shader {
-    pub fn new(src: &CStr, kind: GLenum) -> Result<Self, ErrorKind> {
-        let id = unsafe { gl::CreateShader(kind) };
+    pub fn new(context: &Rc<glow::Context>, src: &str, kind: u32) -> Result<Self, ErrorKind> {
+        let id = unsafe { context.create_shader(kind).unwrap() };
 
         // Compile
         unsafe {
-            gl::ShaderSource(id, 1, &src.as_ptr(), ptr::null());
-            gl::CompileShader(id);
+            context.shader_source(id, src);
+            context.compile_shader(id);
         }
 
         // Validate
-        let mut success: GLint = 1;
-        unsafe {
-            gl::GetShaderiv(id, gl::COMPILE_STATUS, &mut success);
-        }
 
-        if success == 0 {
-            let mut len = 0;
-            unsafe {
-                gl::GetShaderiv(id, gl::INFO_LOG_LENGTH, &mut len);
-            }
-
-            let error = create_whitespace_cstring_with_len(len as usize);
-
-            unsafe {
-                gl::GetShaderInfoLog(id, len, ptr::null_mut(), error.as_ptr() as *mut GLchar);
-            }
+        let success = unsafe { context.get_shader_compile_status(id) };
+        if !success {
+            let error = unsafe { context.get_shader_info_log(id) };
 
             let name = match kind {
-                gl::VERTEX_SHADER => "Vertex stage",
-                gl::FRAGMENT_SHADER => "Fragment stage",
+                glow::VERTEX_SHADER => "Vertex stage",
+                glow::FRAGMENT_SHADER => "Fragment stage",
                 _ => "Shader stage",
             };
 
-            return Err(ErrorKind::ShaderCompileError(format!(
-                "{}: {}",
-                name,
-                error.to_string_lossy()
-            )));
+            return Err(ErrorKind::ShaderCompileError(format!("{}: {}", name, error)));
         }
 
-        Ok(Shader { id })
+        Ok(Shader {
+            context: context.clone(),
+            id,
+        })
     }
 
-    pub fn id(&self) -> GLuint {
+    pub fn id(&self) -> <glow::Context as glow::HasContext>::Shader {
         self.id
     }
 }
@@ -64,63 +50,54 @@ impl Shader {
 impl Drop for Shader {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteShader(self.id);
+            self.context.delete_shader(self.id);
         }
     }
 }
 
 pub(crate) struct Program {
-    id: GLuint,
+    context: Rc<glow::Context>,
+    id: <glow::Context as glow::HasContext>::Program,
 }
 
 impl Program {
-    pub fn new(shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self, ErrorKind> {
+    pub fn new(context: &Rc<glow::Context>, shaders: &[Shader], attrib_locations: &[&str]) -> Result<Self, ErrorKind> {
         let program = Self {
-            id: unsafe { gl::CreateProgram() },
+            context: context.clone(),
+            id: unsafe { context.create_program().unwrap() },
         };
 
         // Attach stages
         for shader in shaders {
             unsafe {
-                gl::AttachShader(program.id, shader.id());
+                context.attach_shader(program.id, shader.id());
             }
         }
 
         for (i, loc) in attrib_locations.iter().enumerate() {
             unsafe {
-                gl::BindAttribLocation(program.id, i as u32, CString::new(*loc)?.as_ptr());
+                context.bind_attrib_location(program.id, i as u32, *loc);
             }
         }
 
         unsafe {
-            gl::LinkProgram(program.id);
+            context.link_program(program.id);
         }
 
         // Check for error
-        let mut success: GLint = 1;
-        unsafe {
-            gl::GetProgramiv(program.id, gl::LINK_STATUS, &mut success);
-        }
 
-        if success == 0 {
-            let mut len: GLint = 0;
-            unsafe {
-                gl::GetProgramiv(program.id, gl::INFO_LOG_LENGTH, &mut len);
-            }
+        let success = unsafe { context.get_program_link_status(program.id) };
 
-            let error = create_whitespace_cstring_with_len(len as usize);
+        if !success {
+            let error = unsafe { context.get_program_info_log(program.id) };
 
-            unsafe {
-                gl::GetProgramInfoLog(program.id, len, ptr::null_mut(), error.as_ptr() as *mut GLchar);
-            }
-
-            return Err(ErrorKind::ShaderLinkError(error.to_string_lossy().into_owned()));
+            return Err(ErrorKind::ShaderLinkError(error));
         }
 
         // Detach stages
         for shader in shaders {
             unsafe {
-                gl::DetachShader(program.id, shader.id());
+                context.detach_shader(program.id, shader.id());
             }
         }
 
@@ -129,47 +106,48 @@ impl Program {
 
     pub(crate) fn bind(&self) {
         unsafe {
-            gl::UseProgram(self.id);
+            self.context.use_program(Some(self.id));
         }
     }
 
     pub(crate) fn unbind(&self) {
         unsafe {
-            gl::UseProgram(0);
+            self.context.use_program(None);
         }
     }
 
-    fn uniform_location(&self, name: &str) -> Result<GLint, ErrorKind> {
-        unsafe { Ok(gl::GetUniformLocation(self.id, CString::new(name)?.as_ptr())) }
+    fn uniform_location(&self, name: &str) -> Result<<glow::Context as glow::HasContext>::UniformLocation, ErrorKind> {
+        unsafe { Ok(self.context.get_uniform_location(self.id, name).unwrap()) }
     }
 }
 
 impl Drop for Program {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteProgram(self.id);
+            self.context.delete_program(self.id);
         }
     }
 }
 
 pub struct MainProgram {
+    context: Rc<glow::Context>,
     program: Program,
-    loc_viewsize: GLint,
-    loc_tex: GLint,
-    loc_masktex: GLint,
-    loc_frag: GLint,
+    loc_viewsize: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_tex: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_masktex: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_frag: <glow::Context as glow::HasContext>::UniformLocation,
 }
 
 impl MainProgram {
-    pub(crate) fn new(antialias: bool) -> Result<Self, ErrorKind> {
+    pub(crate) fn new(context: &Rc<glow::Context>, antialias: bool) -> Result<Self, ErrorKind> {
         let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
         let frag_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-fs.glsl"));
 
-        let vert_shader = Shader::new(&CString::new(vert_shader_src)?, gl::VERTEX_SHADER)?;
-        let frag_shader = Shader::new(&CString::new(frag_shader_src)?, gl::FRAGMENT_SHADER)?;
+        let vert_shader = Shader::new(context, &vert_shader_src, glow::VERTEX_SHADER)?;
+        let frag_shader = Shader::new(context, &frag_shader_src, glow::FRAGMENT_SHADER)?;
 
-        let program = Program::new(&[vert_shader, frag_shader], &["vertex", "tcoord"])?;
+        let program = Program::new(context, &[vert_shader, frag_shader], &["vertex", "tcoord"])?;
 
         let loc_viewsize = program.uniform_location("viewSize")?;
         let loc_tex = program.uniform_location("tex")?;
@@ -177,6 +155,7 @@ impl MainProgram {
         let loc_frag = program.uniform_location("frag")?;
 
         Ok(Self {
+            context: context.clone(),
             program,
             loc_viewsize,
             loc_tex,
@@ -185,27 +164,27 @@ impl MainProgram {
         })
     }
 
-    pub(crate) fn set_tex(&self, tex: GLint) {
+    pub(crate) fn set_tex(&self, tex: i32) {
         unsafe {
-            gl::Uniform1i(self.loc_tex, tex);
+            self.context.uniform_1_i32(Some(&self.loc_tex), tex);
         }
     }
 
-    pub(crate) fn set_masktex(&self, tex: GLint) {
+    pub(crate) fn set_masktex(&self, tex: i32) {
         unsafe {
-            gl::Uniform1i(self.loc_masktex, tex);
+            self.context.uniform_1_i32(Some(&self.loc_masktex), tex);
         }
     }
 
     pub(crate) fn set_view(&self, view: [f32; 2]) {
         unsafe {
-            gl::Uniform2fv(self.loc_viewsize, 1, view.as_ptr());
+            self.context.uniform_2_f32_slice(Some(&self.loc_viewsize), &view);
         }
     }
 
-    pub(crate) fn set_config(&self, count: i32, ptr: *const f32) {
+    pub(crate) fn set_config(&self, config: &[f32]) {
         unsafe {
-            gl::Uniform4fv(self.loc_frag, count, ptr);
+            self.context.uniform_4_f32_slice(Some(&self.loc_frag), config);
         }
     }
 
@@ -216,11 +195,4 @@ impl MainProgram {
     pub(crate) fn unbind(&self) {
         self.program.unbind();
     }
-}
-
-// CString buffer for GetShaderInfoLog and GetProgramInfoLog
-fn create_whitespace_cstring_with_len(len: usize) -> CString {
-    let mut buffer: Vec<u8> = Vec::with_capacity(len + 1);
-    buffer.extend([b' '].iter().cycle().take(len));
-    unsafe { CString::from_vec_unchecked(buffer) }
 }
