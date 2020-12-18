@@ -45,3 +45,7 @@ euclid = "0.20.13"
 rand = "0.7"
 svg = "0.8.0"
 usvg = "0.12.0"
+
+ # Needed to pull in fix for https://github.com/grovesNL/glow/pull/137
+[patch.crates-io]
+glow = { git = "https://github.com/grovesNL/glow", rev = "f4dcf90b4d683c61b2cc0f4fa00004bc814c5453", version = "0.6.1", default-features = false }
