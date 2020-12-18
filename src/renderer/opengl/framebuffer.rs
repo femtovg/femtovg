@@ -87,8 +87,6 @@ impl Framebuffer {
     pub fn unbind(context: &Rc<glow::Context>) {
         unsafe {
             context.bind_framebuffer(glow::FRAMEBUFFER, None);
-            context.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
-            context.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
         }
     }
 
