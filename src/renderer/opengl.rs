@@ -1,5 +1,8 @@
 use std::mem;
-use std::{ffi::c_void, rc::Rc};
+use std::rc::Rc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::ffi::c_void;
 
 use fnv::FnvHashMap;
 use imgref::ImgVec;
@@ -29,7 +32,7 @@ use uniform_array::UniformArray;
 pub struct OpenGl {
     debug: bool,
     antialias: bool,
-    is_opengles: bool,
+    is_opengles_2_0: bool,
     view: [f32; 2],
     screen_view: [f32; 2],
     main_program: MainProgram,
@@ -40,21 +43,44 @@ pub struct OpenGl {
 }
 
 impl OpenGl {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
     {
+        Self::new_from_context(unsafe { glow::Context::from_loader_function(load_fn) }, false)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
+        let mut attrs = web_sys::WebGlContextAttributes::new();
+        attrs.stencil(true);
+        attrs.antialias(false);
+
+        use wasm_bindgen::JsCast;
+        let webgl1_context = canvas
+            .get_context_with_context_options("webgl", attrs.as_ref())
+            .map_err(|_| ErrorKind::GeneralError("Canvas::getContext failed to retrieve WebGL 1 context".to_owned()))?
+            .unwrap()
+            .dyn_into::<web_sys::WebGlRenderingContext>()
+            .unwrap();
+
+        let context = glow::Context::from_webgl1_context(webgl1_context);
+        Self::new_from_context(context, true)
+    }
+
+    fn new_from_context(context: glow::Context, is_opengles_2_0: bool) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
-        let context = Rc::new(unsafe { glow::Context::from_loader_function(load_fn) });
+        let context = Rc::new(context);
 
         let main_program = MainProgram::new(&context, antialias)?;
 
         let mut opengl = OpenGl {
             debug: debug,
             antialias: antialias,
-            is_opengles: false,
+            is_opengles_2_0: false,
             view: [0.0, 0.0],
             screen_view: [0.0, 0.0],
             main_program: main_program,
@@ -65,9 +91,7 @@ impl OpenGl {
         };
 
         unsafe {
-            let version = context.get_parameter_string(glow::VERSION);
-
-            opengl.is_opengles = version.starts_with("OpenGL ES");
+            opengl.is_opengles_2_0 = is_opengles_2_0;
 
             opengl.vert_arr = opengl.context.create_vertex_array().ok();
             opengl.vert_buff = opengl.context.create_buffer().ok();
@@ -77,7 +101,7 @@ impl OpenGl {
     }
 
     pub fn is_opengles(&self) -> bool {
-        self.is_opengles
+        self.is_opengles_2_0
     }
 
     fn check_error(&self, label: &str) {
@@ -501,7 +525,7 @@ impl Renderer for OpenGl {
     }
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
-        Self::Image::new(&self.context, info, self.is_opengles)
+        Self::Image::new(&self.context, info, self.is_opengles_2_0)
     }
 
     fn update_image(
@@ -511,7 +535,7 @@ impl Renderer for OpenGl {
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        image.update(data, x, y, self.is_opengles)
+        image.update(data, x, y, self.is_opengles_2_0)
     }
 
     fn delete_image(&mut self, image: Self::Image) {
