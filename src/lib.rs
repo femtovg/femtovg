@@ -266,12 +266,26 @@ where
 
     /// Returns the with of the canvas
     pub fn width(&self) -> f32 {
-        self.width as f32
+        match self.current_render_target {
+            RenderTarget::Image(id) => {
+                self.image_info(id).map(|info| info.width() as f32).unwrap_or(0.0)
+            },
+            RenderTarget::Screen => {
+                self.width as f32
+            }
+        }
     }
 
     /// Returns the height of the canvas
     pub fn height(&self) -> f32 {
-        self.height as f32
+        match self.current_render_target {
+            RenderTarget::Image(id) => {
+                self.image_info(id).map(|info| info.height() as f32).unwrap_or(0.0)
+            },
+            RenderTarget::Screen => {
+                self.height as f32
+            }
+        }
     }
 
     /// Tells the renderer to execute all drawing commands and clears the current internal state
