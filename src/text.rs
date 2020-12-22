@@ -81,16 +81,18 @@ struct RenderedGlyphId {
     size: u32,
     line_width: u32,
     render_mode: RenderMode,
+    subpixel_location: u8
 }
 
 impl RenderedGlyphId {
-    fn new(glyph_index: u32, font_id: FontId, paint: &Paint, mode: RenderMode) -> Self {
+    fn new(glyph_index: u32, font_id: FontId, paint: &Paint, mode: RenderMode, subpixel_location: u8) -> Self {
         Self {
             glyph_index,
             font_id,
             size: (paint.font_size * 10.0).trunc() as u32,
             line_width: (paint.line_width * 10.0).trunc() as u32,
             render_mode: mode,
+            subpixel_location
         }
     }
 }
@@ -579,7 +581,9 @@ pub(crate) fn render_atlas<T: Renderer>(
     let initial_render_target = canvas.current_render_target;
 
     for glyph in &text_layout.glyphs {
-        let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode);
+        let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
+        
+        let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
         if !canvas.text_context.rendered_glyphs.contains_key(&id) {
             let glyph = render_glyph(canvas, paint, mode, &glyph)?;
@@ -602,7 +606,7 @@ pub(crate) fn render_atlas<T: Renderer>(
 
             let mut q = Quad::default();
 
-            q.x0 = glyph.x - half_line_width - GLYPH_PADDING as f32;
+            q.x0 = glyph.x.trunc() - half_line_width - GLYPH_PADDING as f32;
             q.y0 = glyph.y - half_line_width - GLYPH_PADDING as f32;
             q.x1 = q.x0 + rendered.width as f32;
             q.y1 = q.y0 + rendered.height as f32;
@@ -681,7 +685,7 @@ fn render_glyph<T: Renderer>(
         (path, scale)
     };
 
-    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32;
+    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + glyph.x.fract();
     let y = TEXTURE_SIZE as f32 - dst_y as f32 - glyph.bearing_y - (line_width / 2.0) - padding as f32;
 
     canvas.translate(x, y);
