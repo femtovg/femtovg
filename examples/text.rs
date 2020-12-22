@@ -99,6 +99,14 @@ fn main() {
                     if *keycode == VirtualKeyCode::D {
                         x += 0.1;
                     }
+
+                    if *keycode == VirtualKeyCode::Add {
+                        font_size += 1.0;
+                    }
+
+                    if *keycode == VirtualKeyCode::Subtract {
+                        font_size -= 1.0;
+                    }
                 }
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
