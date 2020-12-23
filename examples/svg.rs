@@ -10,9 +10,7 @@ use svg::node::element::path::{Command, Data};
 use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
-use femtovg::{
-    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer,
-};
+use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
 
 fn main() {
     let el = EventLoop::new();

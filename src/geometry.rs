@@ -64,12 +64,14 @@ pub fn normalize(x: &mut f32, y: &mut f32) -> f32 {
     d
 }
 
+/// 2×3 matrix (2 rows, 3 columns) used for 2D linear transformations. It can represent transformations such as translation, rotation, or scaling.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Transform2D(pub [f32; 6]);
 
 // TODO: Implement std::ops::* on this
 impl Transform2D {
+    /// Creates an identity transformation with no translation, rotation or scaling applied.
     pub fn identity() -> Self {
         Self([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }

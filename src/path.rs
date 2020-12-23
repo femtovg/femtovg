@@ -9,6 +9,7 @@ pub use cache::{Convexity, PathCache};
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
 
+/// Used to specify Solid/Hole when adding shapes to a path.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Solidity {
     Solid = 1,

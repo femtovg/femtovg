@@ -15,6 +15,7 @@ pub struct Glyph {
     pub metrics: GlyphMetrics,
 }
 
+/// Information about a font.
 // TODO: underline, strikeout, subscript, superscript metrics
 #[derive(Copy, Clone, Default, Debug)]
 pub struct FontMetrics {

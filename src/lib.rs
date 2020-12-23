@@ -14,9 +14,7 @@ https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
 
 TODO:
     - Documentation
-    - Rename crate to femtovg
     - Tests
-    - Publish to crates.io
 */
 
 mod utils;
@@ -31,7 +29,8 @@ pub use text::{Align, Baseline, FontId, FontMetrics, TextMetrics};
 use text::{RenderMode, TextContext};
 
 mod image;
-pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, ImageStore, PixelFormat};
+use crate::image::ImageStore;
+pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
 
 mod color;
 pub use color::Color;
@@ -53,6 +52,7 @@ mod path;
 use path::Convexity;
 pub use path::{Path, Solidity};
 
+/// The fill rule used when filling paths
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FillRule {
@@ -66,36 +66,61 @@ impl Default for FillRule {
     }
 }
 
+/// Blend factors
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum BlendFactor {
+    /// Not all
     Zero,
+    /// All use
     One,
+    /// Using the source color
     SrcColor,
+    /// Minus the source color
     OneMinusSrcColor,
+    /// Using the target color
     DstColor,
+    /// Minus the target color
     OneMinusDstColor,
+    /// Using the source alpha
     SrcAlpha,
+    /// Minus the source alpha
     OneMinusSrcAlpha,
+    /// Using the target alpha
     DstAlpha,
+    /// Minus the target alpha
     OneMinusDstAlpha,
+    /// Scale color by minimum of source alpha and destination alpha
     SrcAlphaSaturate,
 }
 
+/// Predefined composite oprations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum CompositeOperation {
+    /// Displays the source over the destination.
     SourceOver,
+    /// Displays the source in the destination, i.e. only the part of the source inside the destination is shown and the destination is transparent.
     SourceIn,
+    /// Only displays the part of the source that is outside the destination, which is made transparent.
     SourceOut,
+    /// Displays the source on top of the destination. The part of the source outside the destination is not shown.
     Atop,
+    /// Displays the destination over the source.
     DestinationOver,
+    /// Only displays the part of the destination that is inside the source, which is made transparent.
     DestinationIn,
+    /// Only displays the part of the destination that is outside the source, which is made transparent.
     DestinationOut,
+    /// Displays the destination on top of the source. The part of the destination that is outside the source is not shown.
     DestinationAtop,
+    /// Displays the source together with the destination, the overlapping area is rendered lighter.
     Lighter,
+    /// Ignores the destination and just displays the source.
     Copy,
+    /// Only the areas that exclusively belong either to the destination or the source are displayed. Overlapping parts are ignored.
     Xor,
 }
 
+/// Determines how a new ("source") data is displayed against an existing ("destination") data.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct CompositeOperationState {
     src_rgb: BlendFactor,
@@ -105,6 +130,7 @@ pub struct CompositeOperationState {
 }
 
 impl CompositeOperationState {
+    /// Creates a new CompositeOperationState from the provided CompositeOperation
     pub fn new(op: CompositeOperation) -> Self {
         let (sfactor, dfactor) = match op {
             CompositeOperation::SourceOver => (BlendFactor::One, BlendFactor::OneMinusSrcAlpha),
@@ -125,6 +151,16 @@ impl CompositeOperationState {
             src_alpha: sfactor,
             dst_rgb: dfactor,
             dst_alpha: dfactor,
+        }
+    }
+
+    /// Creates a new CompositeOperationState with source and destination blend factors.
+    pub fn with_blend_factors(src_factor: BlendFactor, dst_factor: BlendFactor) -> Self {
+        Self {
+            src_rgb: src_factor,
+            src_alpha: src_factor,
+            dst_rgb: dst_factor,
+            dst_alpha: dst_factor,
         }
     }
 }
@@ -150,11 +186,16 @@ impl Default for Scissor {
     }
 }
 
+/// Determines the shape used to draw the end points of lines.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineCap {
+    /// The ends of lines are squared off at the endpoints. Default value.
     Butt,
+    /// The ends of lines are rounded.
     Round,
+    /// The ends of lines are squared off by adding a box with an equal
+    /// width and half the height of the line's thickness.
     Square,
 }
 
@@ -164,11 +205,22 @@ impl Default for LineCap {
     }
 }
 
+/// Determines the shape used to join two line segments where they meet.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
+    /// Connected segments are joined by extending their outside edges to
+    /// connect at a single point, with the effect of filling an additional
+    /// lozenge-shaped area. This setting is affected by the miterLimit property.
+    /// Default value.
     Miter,
+    /// Rounds off the corners of a shape by filling an additional sector
+    /// of disc centered at the common endpoint of connected segments.
+    /// The radius for these rounded corners is equal to the line width.
     Round,
+    /// Fills an additional triangular area between the common endpoint
+    /// of connected segments, and the separate outside rectangular
+    /// corners of each segment.
     Bevel,
 }
 
@@ -197,6 +249,7 @@ impl Default for State {
     }
 }
 
+/// Main 2D drawing context.
 pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
@@ -217,6 +270,7 @@ impl<T> Canvas<T>
 where
     T: Renderer,
 {
+    /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let mut canvas = Self {
             width: 0,
@@ -239,6 +293,7 @@ where
         Ok(canvas)
     }
 
+    /// Sets the size of the default framebuffer (screen size)
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
         self.width = width;
         self.height = height;
@@ -252,6 +307,7 @@ where
         self.append_cmd(Command::new(CommandType::SetRenderTarget(RenderTarget::Screen)));
     }
 
+    /// Clears the rectangle area defined by left upper corner (x,y), width and height with the provided color.
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         let cmd = Command::new(CommandType::ClearRect {
             x,
@@ -264,27 +320,19 @@ where
         self.append_cmd(cmd);
     }
 
-    /// Returns the with of the canvas
+    /// Returns the width of the current render target.
     pub fn width(&self) -> f32 {
         match self.current_render_target {
-            RenderTarget::Image(id) => {
-                self.image_info(id).map(|info| info.width() as f32).unwrap_or(0.0)
-            },
-            RenderTarget::Screen => {
-                self.width as f32
-            }
+            RenderTarget::Image(id) => self.image_info(id).map(|info| info.width() as f32).unwrap_or(0.0),
+            RenderTarget::Screen => self.width as f32,
         }
     }
 
-    /// Returns the height of the canvas
+    /// Returns the height of the current render target.
     pub fn height(&self) -> f32 {
         match self.current_render_target {
-            RenderTarget::Image(id) => {
-                self.image_info(id).map(|info| info.height() as f32).unwrap_or(0.0)
-            },
-            RenderTarget::Screen => {
-                self.height as f32
-            }
+            RenderTarget::Image(id) => self.image_info(id).map(|info| info.height() as f32).unwrap_or(0.0),
+            RenderTarget::Screen => self.height as f32,
         }
     }
 
@@ -389,6 +437,7 @@ where
 
     // Images
 
+    /// Allocates an empty image with the provided domensions and format.
     pub fn create_image_empty(
         &mut self,
         width: usize,
@@ -401,6 +450,7 @@ where
         self.images.alloc(&mut self.renderer, info)
     }
 
+    /// Creates image from specified image data.
     pub fn create_image<'a, S: Into<ImageSource<'a>>>(
         &mut self,
         src: S,
@@ -421,6 +471,7 @@ where
         self.images.get_mut(id)
     }
 
+    /// Resizes an image to the new provided dimensions.
     pub fn realloc_image(
         &mut self,
         id: ImageId,
@@ -500,10 +551,11 @@ where
     }
 
     /// Premultiplies current coordinate system by specified matrix.
-    /// The parameters are interpreted as matrix as follows:
-    ///   [a c e]
-    ///   [b d f]
-    ///   [0 0 1]
+    ///
+    /// The parameters are interpreted as matrix as follows:  
+    ///   [a c e]  
+    ///   [b d f]  
+    ///   [0 0 1]  
     pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
         let transform = Transform2D([a, b, c, d, e, f]);
         self.state_mut().transform.premultiply(&transform);
@@ -635,6 +687,7 @@ where
         path_cache.contains_point(x, y, fill_rule)
     }
 
+    /// Return the bounding box for a Path
     pub fn path_bbox(&self, path: &mut Path) -> Bounds {
         let transform = self.state().transform;
 
@@ -644,7 +697,7 @@ where
         path_cache.bounds
     }
 
-    /// Fills the current path with current fill style.
+    /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
         let transform = self.state().transform;
 
@@ -759,7 +812,7 @@ where
         self.append_cmd(cmd);
     }
 
-    /// Strokes the provided Path using Paint.
+    /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &mut Path, mut paint: Paint) {
         let transform = self.state().transform;
 
@@ -869,18 +922,22 @@ where
 
     // Text
 
+    /// Adds a font file to the canvas
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_file(file_path)
     }
 
+    /// Adds a font to the canvas by reading it from the specified chunk of memory.
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
         self.text_context.add_font_mem(data)
     }
 
+    /// Adds all .ttf files from a directory
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
         self.text_context.add_font_dir(dir_path)
     }
 
+    /// Returns information on how the provided text will be drawn with the specified paint.
     pub fn measure_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -900,6 +957,7 @@ where
         Ok(layout)
     }
 
+    /// Returns font metrics for a particular Paint.
     pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
@@ -927,6 +985,7 @@ where
         Ok(layout.final_byte_index)
     }
 
+    /// Returnes a list of ranges representing each line of text that will fit inside max_width
     pub fn break_text_vec<S: AsRef<str>>(
         &mut self,
         max_width: f32,
@@ -955,6 +1014,7 @@ where
         Ok(res)
     }
 
+    /// Fills the provided string with the specified Paint.
     pub fn fill_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -965,6 +1025,7 @@ where
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
+    /// Strokes the provided string with the specified Paint.
     pub fn stroke_text<S: AsRef<str>>(
         &mut self,
         x: f32,

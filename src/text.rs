@@ -26,6 +26,11 @@ const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
 const LRU_CACHE_CAPACITY: usize = 1000;
 
+/// A font handle
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct FontId(Index);
+
+/// Text baseline.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Baseline {
@@ -45,6 +50,7 @@ impl Default for Baseline {
     }
 }
 
+/// Text alignment
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Align {
@@ -81,7 +87,7 @@ struct RenderedGlyphId {
     size: u32,
     line_width: u32,
     render_mode: RenderMode,
-    subpixel_location: u8
+    subpixel_location: u8,
 }
 
 impl RenderedGlyphId {
@@ -92,7 +98,7 @@ impl RenderedGlyphId {
             size: (paint.font_size * 10.0).trunc() as u32,
             line_width: (paint.line_width * 10.0).trunc() as u32,
             render_mode: mode,
-            subpixel_location
+            subpixel_location,
         }
     }
 }
@@ -158,9 +164,6 @@ struct FontTexture {
     atlas: Atlas,
     image_id: ImageId,
 }
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct FontId(Index);
 
 pub(crate) struct TextContext {
     fonts: Arena<Font>,
@@ -271,6 +274,7 @@ impl TextContext {
     }
 }
 
+/// Result of a shaping run.
 #[derive(Clone, Default, Debug)]
 pub struct TextMetrics {
     pub x: f32,
@@ -582,7 +586,7 @@ pub(crate) fn render_atlas<T: Renderer>(
 
     for glyph in &text_layout.glyphs {
         let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
-        
+
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
         if !canvas.text_context.rendered_glyphs.contains_key(&id) {

@@ -1,5 +1,6 @@
 use std::u8;
 
+/// Struct for representing colors.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Color {
@@ -64,6 +65,7 @@ impl Color {
         }
     }
 
+    /// Returns color value specified by hex value. Eg. #bababa or #bababa00
     pub fn hex(raw_hex: &str) -> Self {
         let hex = raw_hex.trim_start_matches('#');
 

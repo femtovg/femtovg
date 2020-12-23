@@ -49,7 +49,7 @@ pub(crate) enum PaintFlavor {
 /// Struct controlling how graphical shapes are rendered.
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
-/// display something on a canvas. Unlike the HTML canvas where the current drawing style is stored
+/// display something on the canvas. Unlike the HTML canvas where the current drawing style is stored
 /// in an internal stack this paint struct is simply passed to the relevant drawing methods on the canvas.
 ///
 /// Clients code can have as many paints as they desire for different use cases and styles. This makes
@@ -64,7 +64,7 @@ pub(crate) enum PaintFlavor {
 ///
 /// let fill_paint = Paint::color(Color::hex("454545"));
 /// let mut stroke_paint = Paint::color(Color::hex("bababa"));
-/// stroke_paint.set_stroke_width(4.0);
+/// stroke_paint.set_line_width(4.0);
 ///
 /// let mut path = Path::new();
 /// path.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
@@ -139,7 +139,7 @@ impl Paint {
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
-    /// let image_id = canvas.create_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
+    /// let image_id = canvas.load_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
     /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
     ///
     /// let mut path = Path::new();
@@ -162,7 +162,19 @@ impl Paint {
 
     /// Creates and returns a linear gradient paint.
     ///
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::linear_gradient(0.0, 0.0, 0.0, 100.0, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
+    /// let mut path = Path::new();
+    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// canvas.fill_path(&mut path, bg);
+    /// ```
     pub fn linear_gradient(
         start_x: f32,
         start_y: f32,
@@ -191,7 +203,29 @@ impl Paint {
     /// drop shadows or highlights for boxes. Parameters (x,y) define the top-left corner of the rectangle,
     /// (w,h) define the size of the rectangle, r defines the corner radius, and f feather. Feather defines how blurry
     /// the border of the rectangle is. Parameter inner_color specifies the inner color and outer_color the outer color of the gradient.
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::box_gradient(
+    ///    0.0,
+    ///    0.0,
+    ///    100.0,
+    ///    100.0,
+    ///    10.0,
+    ///    10.0,
+    ///    Color::rgba(0, 0, 0, 128),
+    ///    Color::rgba(0, 0, 0, 0),
+    /// );
+    ///
+    /// let mut path = Path::new();
+    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// canvas.fill_path(&mut path, bg);
+    /// ```
     pub fn box_gradient(
         x: f32,
         y: f32,
@@ -223,6 +257,26 @@ impl Paint {
     /// Parameters (cx,cy) specify the center, inr and outr specify
     /// the inner and outer radius of the gradient, icol specifies the start color and ocol the end color.
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::radial_gradient(
+    ///    50.0,
+    ///    50.0,
+    ///    18.0,
+    ///    24.0,
+    ///    Color::rgba(0, 0, 0, 128),
+    ///    Color::rgba(0, 0, 0, 0),
+    /// );
+    ///
+    /// let mut path = Path::new();
+    /// path.circle(50.0, 50.0, 20.0);
+    /// canvas.fill_path(&mut path, bg);
+    /// ```
     pub fn radial_gradient(
         cx: f32,
         cy: f32,

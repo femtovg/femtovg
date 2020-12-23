@@ -12,9 +12,11 @@ use std::convert::TryFrom;
 
 use crate::{ErrorKind, Renderer};
 
+/// An image handle
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub Index);
 
+/// Image format (RGB8, RGBA8, Gray8)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PixelFormat {
     Rgb8,
@@ -23,6 +25,7 @@ pub enum PixelFormat {
 }
 
 bitflags! {
+    /// Image flags (eg. repeat, flip, mipmaps, etc.)
     pub struct ImageFlags: u32 {
         const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
         const REPEAT_X = 1 << 1;        // Repeat image in X direction.
@@ -33,6 +36,7 @@ bitflags! {
     }
 }
 
+/// Image source
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub enum ImageSource<'a> {
@@ -42,6 +46,7 @@ pub enum ImageSource<'a> {
 }
 
 impl ImageSource<'_> {
+    /// Source format
     pub fn format(&self) -> PixelFormat {
         match self {
             Self::Rgb(_) => PixelFormat::Rgb8,
@@ -50,8 +55,10 @@ impl ImageSource<'_> {
         }
     }
 
-    // TODO: Create size struct and use it here and in ImageInfo.
+    /// Source dimensions
     pub fn dimensions(&self) -> (usize, usize) {
+        // TODO: Create size struct and use it here and in ImageInfo.
+
         match self {
             Self::Rgb(imgref) => (imgref.width(), imgref.height()),
             Self::Rgba(imgref) => (imgref.width(), imgref.height()),
@@ -105,6 +112,7 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     }
 }
 
+/// Information about an image
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ImageInfo {
     flags: ImageFlags,
@@ -123,18 +131,22 @@ impl ImageInfo {
         }
     }
 
+    /// Image flags
     pub fn flags(&self) -> ImageFlags {
         self.flags
     }
 
+    /// Image width in pixels
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Image height in pixels
     pub fn height(&self) -> usize {
         self.height
     }
 
+    /// Image format
     pub fn format(&self) -> PixelFormat {
         self.format
     }
