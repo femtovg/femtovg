@@ -40,6 +40,7 @@ pub struct OpenGl {
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
+    screen_target: Option<Framebuffer>
 }
 
 impl OpenGl {
@@ -88,6 +89,7 @@ impl OpenGl {
             vert_buff: Default::default(),
             framebuffers: Default::default(),
             context: context.clone(),
+            screen_target: None
         };
 
         unsafe {
@@ -388,13 +390,20 @@ impl OpenGl {
     }
 
     fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
-        match target {
-            RenderTarget::Screen => unsafe {
+        match (target, &self.screen_target) {
+            (RenderTarget::Screen, None) => unsafe {
                 Framebuffer::unbind(&self.context);
                 self.view = self.screen_view;
                 self.context.viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             },
-            RenderTarget::Image(id) => {
+            (RenderTarget::Screen, Some(framebuffer)) => {
+                framebuffer.bind();
+                self.view = self.screen_view;
+                unsafe {
+                    self.context.viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
+                }
+            },
+            (RenderTarget::Image(id), _) => {
                 let context = self.context.clone();
                 if let Some(texture) = images.get(id) {
                     if let Ok(fb) = self
@@ -414,6 +423,20 @@ impl OpenGl {
                     }
                 }
             }
+        }
+    }
+
+    /// Make the "Screen" RenderTarget actually render to a framebuffer object. This is useful when
+    /// embedding femtovg into another program where final composition is handled by an external task.
+    /// The given `framebuffer_object` must refer to a Framebuffer Object created on the current OpenGL
+    /// Context, and must have a depth & stencil attachment.
+    ///
+    /// Pass `None` to clear any previous Framebuffer Object ID that was passed and target rendering to
+    /// the default target (normally the window).
+    pub fn set_screen_target(&mut self, framebuffer_object: Option<u32>) {
+        match framebuffer_object {
+            Some(fbo_id) => self.screen_target = Some(Framebuffer::from_external(&self.context, fbo_id)),
+            None => self.screen_target = None
         }
     }
 }
