@@ -14,6 +14,9 @@ pub use void::Void;
 mod params;
 pub(crate) use params::Params;
 
+mod webgpu;
+pub use webgpu::*;
+
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Drawable {
     pub(crate) fill_verts: Option<(usize, usize)>,
