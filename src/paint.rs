@@ -4,6 +4,92 @@
 use crate::geometry::Transform2D;
 use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub(crate) struct GradientStop(pub f32, pub Color);
+
+// We use MultiStopGradient as a key since we cache them. We either need
+// to define Hash (for HashMap) or Ord for (BTreeMap).
+impl Eq for GradientStop {}
+impl Ord for GradientStop {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if other < self {
+            std::cmp::Ordering::Less
+        } else if self < other {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    }
+}
+
+pub(crate) type MultiStopGradient = [GradientStop; 16];
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub(crate) enum GradientColors {
+    TwoStop {
+        start_color: Color,
+        end_color: Color
+    },
+    MultiStop {
+        // We support up to 16 stops.
+        stops: MultiStopGradient
+    }
+}
+impl GradientColors {
+    fn mul_alpha(&mut self, a: f32) {
+        match self {
+            GradientColors::TwoStop { start_color, end_color } => {
+                start_color.a *= a;
+                end_color.a *= a;
+            },
+            GradientColors::MultiStop { stops } => {
+                for stop in stops {
+                    stop.1.a *= a;
+                }
+            }
+        }
+    }
+    fn from_stops(stops: &[(f32, Color)]) -> GradientColors {
+        if stops.is_empty() {
+            // No stops, we use black.
+            GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::black()
+            }
+        } else if stops.len() == 1 {
+            // One stop devolves to a solid color fill (but using the gradient shader variation).
+            GradientColors::TwoStop {
+                start_color: stops[0].1,
+                end_color: stops[0].1
+            }
+        } else if stops.len() == 2 && stops[0].0 <= 0.0 && stops[1].0 >= 1.0 {
+            // Two stops takes the classic gradient path, so long as the stop positions are at
+            // the extents (if the stop positions are inset then we'll fill to them).
+            GradientColors::TwoStop {
+                start_color: stops[0].1,
+                end_color: stops[1].1
+            }
+        } else {
+            // Actual multistop gradient. We copy out the stops and then use a stop with a
+            // position > 1.0 as a sentinel. GradientStore ignores stop positions > 1.0
+            // when synthesizing the gradient texture.
+            let mut out_stops: [GradientStop; 16] = Default::default();
+            for i in 0..16 {
+                if i < stops.len() {
+                    out_stops[i] = GradientStop(stops[i].0, stops[i].1);
+                } else {
+                    out_stops[i] = GradientStop(2.0, Color::black());
+                }
+            }
+            GradientColors::MultiStop {
+                stops: out_stops
+            }
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum PaintFlavor {
@@ -23,8 +109,7 @@ pub(crate) enum PaintFlavor {
         start_y: f32,
         end_x: f32,
         end_y: f32,
-        start_color: Color,
-        end_color: Color,
+        colors: GradientColors,
     },
     BoxGradient {
         x: f32,
@@ -33,17 +118,27 @@ pub(crate) enum PaintFlavor {
         height: f32,
         radius: f32,
         feather: f32,
-        inner_color: Color,
-        outer_color: Color,
+        colors: GradientColors,
     },
     RadialGradient {
         cx: f32,
         cy: f32,
         in_radius: f32,
         out_radius: f32,
-        inner_color: Color,
-        outer_color: Color,
+        colors: GradientColors,
     },
+}
+
+// Convenience method to fetch the GradientColors out of a PaintFlavor
+impl PaintFlavor {
+    pub(crate) fn gradient_colors(&self) -> Option<&GradientColors> {
+        match self {
+            PaintFlavor::LinearGradient { colors, .. } => Some(colors),
+            PaintFlavor::BoxGradient { colors, .. } => Some(colors),
+            PaintFlavor::RadialGradient { colors, .. } => Some(colors),
+            _ => None
+        }
+    }
 }
 
 /// Struct controlling how graphical shapes are rendered.
@@ -190,8 +285,47 @@ impl Paint {
             start_y,
             end_x,
             end_y,
-            start_color,
-            end_color,
+            colors: GradientColors::TwoStop { start_color, end_color }
+        };
+
+        new
+    }
+    /// Creates and returns a linear gradient paint with two or more stops.
+    ///
+    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::linear_gradient_stops(
+    ///    0.0, 0.0,
+    ///    0.0, 100.0,
+    ///    &[
+    ///         (0.0, Color::rgba(255, 255, 255, 16)),
+    ///         (0.5, Color::rgba(0, 0, 0, 16)),
+    ///         (1.0, Color::rgba(255, 0, 0, 16))
+    ///    ]);
+    /// let mut path = Path::new();
+    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// canvas.fill_path(&mut path, bg);
+    /// ```
+    pub fn linear_gradient_stops(
+        start_x: f32,
+        start_y: f32,
+        end_x: f32,
+        end_y: f32,
+        stops: &[(f32, Color)]
+    ) -> Self {
+        let mut new = Self::default();
+
+        new.flavor = PaintFlavor::LinearGradient {
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            colors: GradientColors::from_stops(stops)
         };
 
         new
@@ -245,8 +379,10 @@ impl Paint {
             height,
             radius,
             feather,
-            inner_color,
-            outer_color,
+            colors: GradientColors::TwoStop {
+                start_color: inner_color,
+                end_color: outer_color
+            }
         };
 
         new
@@ -254,8 +390,8 @@ impl Paint {
 
     /// Creates and returns a radial gradient.
     ///
-    /// Parameters (cx,cy) specify the center, inr and outr specify
-    /// the inner and outer radius of the gradient, icol specifies the start color and ocol the end color.
+    /// Parameters (cx,cy) specify the center, in_radius and out_radius specify
+    /// the inner and outer radius of the gradient, inner_color specifies the start color and outer_color the end color.
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
     ///
     /// # Example
@@ -292,8 +428,60 @@ impl Paint {
             cy,
             in_radius,
             out_radius,
-            inner_color,
-            outer_color,
+            colors: GradientColors::TwoStop {
+                start_color: inner_color,
+                end_color: outer_color
+            }
+        };
+
+        new
+    }
+
+    /// Creates and returns a multi-stop radial gradient.
+    ///
+    /// Parameters (cx,cy) specify the center, in_radius and out_radius specify the inner and outer radius of the gradient,
+    /// colors specifies a list of color stops with offsets. The first offset should be 0.0 and the last offset should be 1.0.
+    /// If a gradient has more than 16 stops, then only the first 16 stops will be used.
+    ///
+    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::radial_gradient_stops(
+    ///    50.0,
+    ///    50.0,
+    ///    18.0,
+    ///    24.0,
+    ///    &[
+    ///         (0.0, Color::rgba(0, 0, 0, 128)),
+    ///         (0.5, Color::rgba(0, 0, 128, 128)),
+    ///         (1.0, Color::rgba(0, 128, 0, 128))
+    ///    ]
+    /// );
+    ///
+    /// let mut path = Path::new();
+    /// path.circle(50.0, 50.0, 20.0);
+    /// canvas.fill_path(&mut path, bg);
+    /// ```
+    pub fn radial_gradient_stops(
+        cx: f32,
+        cy: f32,
+        in_radius: f32,
+        out_radius: f32,
+        stops: &[(f32, Color)]
+    ) -> Self {
+        let mut new = Self::default();
+
+        new.flavor = PaintFlavor::RadialGradient {
+            cx,
+            cy,
+            in_radius,
+            out_radius,
+            colors: GradientColors::from_stops(stops)
         };
 
         new
@@ -477,26 +665,19 @@ impl Paint {
                 *alpha *= a;
             }
             PaintFlavor::LinearGradient {
-                start_color, end_color, ..
+                colors, ..
             } => {
-                start_color.a *= a;
-                end_color.a *= a;
+                colors.mul_alpha(a);
             }
             PaintFlavor::BoxGradient {
-                inner_color,
-                outer_color,
-                ..
+                colors, ..
             } => {
-                inner_color.a *= a;
-                outer_color.a *= a;
+                colors.mul_alpha(a);
             }
             PaintFlavor::RadialGradient {
-                inner_color,
-                outer_color,
-                ..
+                colors, ..
             } => {
-                inner_color.a *= a;
-                outer_color.a *= a;
+                colors.mul_alpha(a);
             }
         }
     }

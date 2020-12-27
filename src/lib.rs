@@ -52,6 +52,9 @@ mod path;
 use path::Convexity;
 pub use path::{Path, Solidity};
 
+mod gradient_store;
+use gradient_store::GradientStore;
+
 /// The fill rule used when filling paths
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -264,6 +267,7 @@ pub struct Canvas<T: Renderer> {
     device_px_ratio: f32,
     tess_tol: f32,
     dist_tol: f32,
+    gradients: GradientStore
 }
 
 impl<T> Canvas<T>
@@ -286,6 +290,7 @@ where
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
+            gradients: GradientStore::new()
         };
 
         canvas.save();
@@ -343,6 +348,7 @@ where
         self.renderer.render(&self.images, &self.verts, &self.commands);
         self.commands.clear();
         self.verts.clear();
+        self.gradients.release_old_gradients(&mut self.images, &mut self.renderer);
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
@@ -766,6 +772,8 @@ where
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -899,6 +907,8 @@ where
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -1111,6 +1121,8 @@ where
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
