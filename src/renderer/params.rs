@@ -1,4 +1,4 @@
-use crate::{Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D};
+use crate::{Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D, paint::GradientColors};
 
 use super::ShaderType;
 
@@ -133,8 +133,7 @@ impl Params {
                 start_y,
                 end_x,
                 end_y,
-                start_color,
-                end_color,
+                colors,
             } => {
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
@@ -159,9 +158,16 @@ impl Params {
                 params.extent[1] = large + d * 0.5;
                 params.feather = 1.0f32.max(d);
 
-                params.inner_col = start_color.premultiplied().to_array();
-                params.outer_col = end_color.premultiplied().to_array();
-                params.shader_type = ShaderType::FillGradient.to_f32();
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradient.to_f32();
+                    },
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                    }
+                }
             }
             PaintFlavor::BoxGradient {
                 x,
@@ -170,8 +176,7 @@ impl Params {
                 height,
                 radius,
                 feather,
-                inner_color,
-                outer_color,
+                colors
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform.multiply(&paint.transform);
@@ -181,17 +186,23 @@ impl Params {
                 params.extent[1] = height * 0.5;
                 params.radius = radius;
                 params.feather = feather;
-                params.inner_col = inner_color.premultiplied().to_array();
-                params.outer_col = outer_color.premultiplied().to_array();
-                params.shader_type = ShaderType::FillGradient.to_f32();
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradient.to_f32();
+                    },
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                    }
+                }
             }
             PaintFlavor::RadialGradient {
                 cx,
                 cy,
                 in_radius,
                 out_radius,
-                inner_color,
-                outer_color,
+                colors,
             } => {
                 let r = (in_radius + out_radius) * 0.5;
                 let f = out_radius - in_radius;
@@ -204,9 +215,16 @@ impl Params {
                 params.extent[1] = r;
                 params.radius = r;
                 params.feather = 1.0f32.max(f);
-                params.inner_col = inner_color.premultiplied().to_array();
-                params.outer_col = outer_color.premultiplied().to_array();
-                params.shader_type = ShaderType::FillGradient.to_f32();
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradient.to_f32();
+                    },
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                    }
+                }
             }
         }
 

@@ -374,7 +374,7 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
+    fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         unsafe {
             self.context.enable(glow::SCISSOR_TEST);
             self.context.scissor(

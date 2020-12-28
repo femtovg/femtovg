@@ -73,6 +73,16 @@ void main(void) {
         vec4 color = mix(innerCol,outerCol,d);
 
         result = color;
+    } else if (shaderType == 3) {
+        // Image-based Gradient; sample a texture using the gradient position.
+
+        // Calculate gradient color using box gradient
+        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+
+        float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
+        vec4 color = texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
+
+        result = color;
     } else if (shaderType == 1) {
         // Image
 
