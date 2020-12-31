@@ -433,7 +433,7 @@ impl OpenGl {
     ///
     /// Pass `None` to clear any previous Framebuffer Object ID that was passed and target rendering to
     /// the default target (normally the window).
-    pub fn set_screen_target(&mut self, framebuffer_object: Option<u32>) {
+    pub fn set_screen_target(&mut self, framebuffer_object: Option<<glow::Context as glow::HasContext>::Framebuffer>) {
         match framebuffer_object {
             Some(fbo_id) => self.screen_target = Some(Framebuffer::from_external(&self.context, fbo_id)),
             None => self.screen_target = None
