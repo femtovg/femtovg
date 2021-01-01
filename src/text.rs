@@ -22,7 +22,15 @@ mod font;
 use font::Font;
 pub use font::FontMetrics;
 
-const GLYPH_PADDING: u32 = 2;
+// This padding is an empty border around the glyph’s pixels but inside the
+// sampled area (texture coordinates) for the quad in render_atlas().
+const GLYPH_PADDING: u32 = 1;
+// We add an additional margin of 1 pixel outside of the sampled area,
+// to deal with the linear interpolation of texels at the edge of that area
+// which mixes in the texels just outside of the edge.
+// This manifests as noise around the glyph, outside of the padding.
+const GLYPH_MARGIN: u32 = 1;
+
 const TEXTURE_SIZE: usize = 512;
 const LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -651,7 +659,7 @@ fn render_glyph<T: Renderer>(
     mode: RenderMode,
     glyph: &ShapedGlyph,
 ) -> Result<RenderedGlyph, ErrorKind> {
-    let padding = GLYPH_PADDING;
+    let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
     let line_width = if mode == RenderMode::Stroke {
         paint.line_width
@@ -754,12 +762,12 @@ fn render_glyph<T: Renderer>(
     canvas.restore();
 
     Ok(RenderedGlyph {
-        width: width,
-        height: height,
-        atlas_x: dst_x as u32,
-        atlas_y: dst_y as u32,
+        width: width - 2 * GLYPH_MARGIN,
+        height: height - 2 * GLYPH_MARGIN,
+        atlas_x: dst_x as u32 + GLYPH_MARGIN,
+        atlas_y: dst_y as u32 + GLYPH_MARGIN,
         texture_index: dst_index,
-        padding: padding,
+        padding: padding - GLYPH_MARGIN,
     })
 }
 
