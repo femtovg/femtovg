@@ -1,4 +1,4 @@
-//! Module containing renderer implementations
+//! Module containing renderer implementations.
 
 use imgref::ImgVec;
 use rgb::RGBA8;

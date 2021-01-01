@@ -26,11 +26,12 @@ const GLYPH_PADDING: u32 = 2;
 const TEXTURE_SIZE: usize = 512;
 const LRU_CACHE_CAPACITY: usize = 1000;
 
-/// A font handle
+/// A font handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct FontId(Index);
 
-/// Text baseline.
+/// Text baseline vertical alignment:
+/// `Top`, `Middle`, `Alphabetic` (default), `Bottom`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Baseline {
@@ -50,7 +51,7 @@ impl Default for Baseline {
     }
 }
 
-/// Text alignment
+/// Text horizontal alignment: `Left` (default), `Center`, `Right`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub enum Align {

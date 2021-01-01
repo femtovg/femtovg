@@ -65,7 +65,9 @@ impl Color {
         }
     }
 
-    /// Returns color value specified by hex value. Eg. #bababa or #bababa00
+    /// Returns color value for a 6-digit (`RRGGBB`) or 8-digit (`RRGGBBAA`)
+    /// HTML hexadecimal string. Any other length produces `rgb(0,0,0)`.
+    /// The “#” is optional.
     pub fn hex(raw_hex: &str) -> Self {
         let hex = raw_hex.trim_start_matches('#');
 
