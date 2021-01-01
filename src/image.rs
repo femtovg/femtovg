@@ -12,11 +12,11 @@ use std::convert::TryFrom;
 
 use crate::{ErrorKind, Renderer};
 
-/// An image handle
+/// An image handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(pub Index);
 
-/// Image format (RGB8, RGBA8, Gray8)
+/// Image format: `Rgb8`, `Rgba8`, `Gray8`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PixelFormat {
     Rgb8,
@@ -112,7 +112,7 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     }
 }
 
-/// Information about an image
+/// Information about an image.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ImageInfo {
     flags: ImageFlags,

@@ -1,3 +1,18 @@
+/*!
+ * The femtovg API is (like [NanoVG](https://github.com/memononen/nanovg))
+ * loosely modeled on the
+ * [HTML5 Canvas API](https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html).
+ *
+ * The coordinate system’s origin is the top-left corner,
+ * with positive X rightwards, positive Y downwards.
+ */
+
+/*
+TODO:
+    - Documentation
+    - Tests
+*/
+
 #[cfg(feature = "serde")]
 #[macro_use]
 extern crate serde;
@@ -7,15 +22,6 @@ use std::path::Path as FilePath;
 
 use imgref::ImgVec;
 use rgb::RGBA8;
-
-/*
-HTML5 Canvas API:
-https://bucephalus.org/text/CanvasHandbook/CanvasHandbook.html
-
-TODO:
-    - Documentation
-    - Tests
-*/
 
 mod utils;
 
@@ -55,7 +61,7 @@ pub use path::{Path, Solidity};
 mod gradient_store;
 use gradient_store::GradientStore;
 
-/// The fill rule used when filling paths
+/// The fill rule used when filling paths: `EvenOdd`, `NonZero` (default).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FillRule {
@@ -69,7 +75,7 @@ impl Default for FillRule {
     }
 }
 
-/// Blend factors
+/// Blend factors.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum BlendFactor {
     /// Not all
@@ -189,7 +195,8 @@ impl Default for Scissor {
     }
 }
 
-/// Determines the shape used to draw the end points of lines.
+/// Determines the shape used to draw the end points of lines:
+/// `Butt` (default), `Round`, `Square`.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineCap {
@@ -209,6 +216,7 @@ impl Default for LineCap {
 }
 
 /// Determines the shape used to join two line segments where they meet.
+/// `Miter` (default), `Round`, `Bevel`.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
@@ -558,10 +566,10 @@ where
 
     /// Premultiplies current coordinate system by specified matrix.
     ///
-    /// The parameters are interpreted as matrix as follows:  
-    ///   [a c e]  
-    ///   [b d f]  
-    ///   [0 0 1]  
+    /// The parameters are interpreted as matrix as follows:
+    ///   [a c e]
+    ///   [b d f]
+    ///   [0 0 1]
     pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
         let transform = Transform2D([a, b, c, d, e, f]);
         self.state_mut().transform.premultiply(&transform);

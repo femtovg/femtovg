@@ -68,7 +68,8 @@ impl Verb {
     }
 }
 
-/// A collection of verbs (MoveTo, LineTo, BezierTo) describing a one or more contours.
+/// A collection of verbs (`move_to()`, `line_to()`, `bezier_to()`, etc.)
+/// describing one or more contours.
 #[derive(Default, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
