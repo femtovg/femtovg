@@ -492,11 +492,15 @@ impl Paint {
         self.flavor = PaintFlavor::Color(color);
     }
 
-    pub fn alpha_mask(&self) -> Option<ImageId> {
+    pub(crate) fn alpha_mask(&self) -> Option<ImageId> {
         self.alpha_mask
     }
 
-    pub fn set_alpha_mask(&mut self, image_id: Option<ImageId>) {
+    /// Set an alpha mask; this is only used by draw_triangles which is used for text.
+    // This is scoped to crate visibility because fill_path and stroke_path don't propagate
+    // the alpha mask (so nothing draws), and the texture coordinates are used for antialiasing
+    // when path drawing.
+    pub(crate) fn set_alpha_mask(&mut self, image_id: Option<ImageId>) {
         self.alpha_mask = image_id;
     }
 
