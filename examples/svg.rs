@@ -25,11 +25,11 @@ fn main() {
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
     let roboto_light = canvas
-        .add_font("examples/assets/Roboto-Light.ttf")
+        .add_font("examples/assets/Roboto-Light.ttf", None)
         .expect("Cannot add font");
 
     let roboto_regular = canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
+        .add_font("examples/assets/Roboto-Regular.ttf", None)
         .expect("Cannot add font");
 
     let mut screenshot_image_id = None;

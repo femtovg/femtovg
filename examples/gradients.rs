@@ -27,7 +27,8 @@ fn main() {
         window_size.height as u32,
         windowed_context.window().scale_factor() as f32,
     );
-    canvas.add_font("examples/assets/Roboto-Regular.ttf")
+    canvas
+        .add_font("examples/assets/Roboto-Regular.ttf", None)
         .expect("Cannot add font");
     
     let start = Instant::now();

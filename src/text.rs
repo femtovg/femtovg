@@ -11,8 +11,8 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, Path, PixelFormat,
-    RenderTarget, Renderer,
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, Path, PixelFormat, RenderTarget,
+    Renderer,
 };
 
 mod atlas;
@@ -211,7 +211,10 @@ impl TextContext {
                     self.add_font_dir(&path)?;
                 } else {
                     if let Some("ttf") = path.extension().and_then(OsStr::to_str) {
-                        fonts.push(self.add_font_file(path)?);
+                        let data = std::fs::read(path)?;
+                        for index in 0..owned_ttf_parser::fonts_in_collection(&data).unwrap_or(1) {
+                            fonts.push(self.add_font_mem(&data, Some(index))?);
+                        }
                     }
                 }
             }
@@ -220,16 +223,16 @@ impl TextContext {
         Ok(fonts)
     }
 
-    pub fn add_font_file<T: AsRef<FilePath>>(&mut self, path: T) -> Result<FontId, ErrorKind> {
+    pub fn add_font_file<T: AsRef<FilePath>>(&mut self, path: T, index: Option<u32>) -> Result<FontId, ErrorKind> {
         let data = std::fs::read(path)?;
 
-        self.add_font_mem(&data)
+        self.add_font_mem(&data, index)
     }
 
-    pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
+    pub fn add_font_mem(&mut self, data: &[u8], index: Option<u32>) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(data)?;
+        let font = Font::new(data, index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -660,11 +663,7 @@ fn render_glyph<T: Renderer>(
     let width = glyph.width.ceil() as u32 + line_width.ceil() as u32 + padding * 2;
     let height = glyph.height.ceil() as u32 + line_width.ceil() as u32 + padding * 2;
 
-    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
-        canvas,
-        width as usize,
-        height as usize,
-    )?;
+    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(canvas, width as usize, height as usize)?;
 
     // render glyph to image
     canvas.save();
@@ -797,7 +796,10 @@ fn find_texture_or_alloc<T: Renderer>(
                 canvas.reset();
                 canvas.set_render_target(RenderTarget::Image(image_id));
                 canvas.clear_rect(
-                    0, 0, size.0 as u32, size.1 as u32,
+                    0,
+                    0,
+                    size.0 as u32,
+                    size.1 as u32,
                     Color::rgb(255, 0, 0), // Shown as white if using Gray8.
                 );
                 canvas.restore();

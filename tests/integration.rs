@@ -149,7 +149,7 @@ fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
 
     canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
+        .add_font("examples/assets/Roboto-Regular.ttf", None)
         .expect("Font not found");
 
     let mut paint = Paint::color(Color::black());
