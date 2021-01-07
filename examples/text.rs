@@ -100,11 +100,11 @@ fn main() {
                         x += 0.1;
                     }
 
-                    if *keycode == VirtualKeyCode::Add {
+                    if *keycode == VirtualKeyCode::NumpadAdd {
                         font_size += 1.0;
                     }
 
-                    if *keycode == VirtualKeyCode::Subtract {
+                    if *keycode == VirtualKeyCode::NumpadSubtract {
                         font_size -= 1.0;
                     }
                 }
