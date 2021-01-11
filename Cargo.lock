@@ -351,7 +351,7 @@ dependencies = [
 
 [[package]]
 name = "femtovg"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bitflags",
  "console_error_panic_hook",
