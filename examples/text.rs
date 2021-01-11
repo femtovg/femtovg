@@ -62,6 +62,9 @@ fn main() {
 
     let mut font_size = 18.0;
 
+    #[cfg(feature = "debug_inspector")]
+    let mut font_texture_to_show: Option<usize> = None;
+
     let mut x = 5.0;
     let mut y = 380.0;
 
@@ -73,8 +76,10 @@ fn main() {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
-                }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                },
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit
+                },
                 WindowEvent::KeyboardInput {
                     input:
                         KeyboardInput {
@@ -107,7 +112,24 @@ fn main() {
                     if *keycode == VirtualKeyCode::NumpadSubtract {
                         font_size -= 1.0;
                     }
-                }
+                },
+                WindowEvent::MouseInput {
+                    device_id: _, state: ElementState::Pressed, ..
+                } => {
+                    #[cfg(feature = "debug_inspector")]
+                    {
+                        let len = canvas.debug_inspector_get_font_textures().len();
+                        let next = match font_texture_to_show {
+                            None    => 0,
+                            Some(i) => i + 1
+                        };
+                        font_texture_to_show = if next < len {
+                            Some(next)
+                        } else {
+                            None
+                        };
+                    }
+                },
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
@@ -153,11 +175,29 @@ fn main() {
                     format!("Scroll to increase / decrease font size. Current: {}", font_size),
                     paint,
                 );
+                #[cfg(feature = "debug_inspector")]
+                let _ = canvas.fill_text(
+                    size.width as f32 - 10.0,
+                    24.0,
+                    format!("Click to show font atlas texture. Current: {:?}", font_texture_to_show),
+                    paint,
+                );
 
                 canvas.save();
                 canvas.reset();
                 perf.render(&mut canvas, 5.0, 5.0);
                 canvas.restore();
+
+                #[cfg(feature = "debug_inspector")]
+                if let Some(index) = font_texture_to_show {
+                    canvas.save();
+                    canvas.reset();
+                    let textures = canvas.debug_inspector_get_font_textures();
+                    if let Some(&id) = textures.get(index) {
+                        canvas.debug_inspector_draw_image(id);
+                    }
+                    canvas.restore();
+                }
 
                 canvas.flush();
                 windowed_context.swap_buffers().unwrap();

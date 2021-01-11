@@ -38,6 +38,7 @@ wasm-bindgen = { version = "0.2" }
 [features]
 default = ["image-loading"]
 image-loading = ["image"]
+debug_inspector = []
 
 [dev-dependencies]
 winit = { version = "0.24", default-features = false }

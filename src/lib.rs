@@ -1154,6 +1154,26 @@ where
     fn state_mut(&mut self) -> &mut State {
         self.state_stack.last_mut().unwrap()
     }
+
+    #[cfg(feature = "debug_inspector")]
+    pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
+        self.text_context.debug_inspector_get_textures()
+    }
+
+    #[cfg(feature = "debug_inspector")]
+    pub fn debug_inspector_draw_image(&mut self, id: ImageId) {
+        if let Ok(size) = self.image_size(id) {
+            let width  = size.0 as f32;
+            let height = size.1 as f32;
+            let mut path = Path::new();
+            path.rect(0f32, 0f32, width, height);
+            self.fill_path(&mut path, Paint::image(
+                id,
+                0f32, 0f32, width, height,
+                0f32, 1f32
+            ));
+        }
+    }
 }
 
 impl<T: Renderer> Drop for Canvas<T> {
