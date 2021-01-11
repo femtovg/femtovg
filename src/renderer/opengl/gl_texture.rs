@@ -232,6 +232,18 @@ impl GlTexture {
                     glow::PixelUnpackData::Slice(data.buf().align_to().1),
                 );
             },
+            #[cfg(target_arch = "wasm32")]
+            ImageSource::HtmlImageElement(image_element) => unsafe {
+                self.context.tex_sub_image_2d_with_html_image(
+                    glow::TEXTURE_2D,
+                    0,
+                    x as i32,
+                    y as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    image_element,
+                )
+            },
         }
 
         if self.info.flags().contains(ImageFlags::GENERATE_MIPMAPS) {

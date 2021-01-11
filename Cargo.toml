@@ -32,7 +32,7 @@ glow = { version = "0.7.0", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 glow = { version = "0.7.0", features = ["web-sys"], default-features = false }
-web_sys = { version = "0.3", package = "web-sys", features = ["WebGlContextAttributes"] }
+web_sys = { version = "0.3", package = "web-sys", features = ["WebGlContextAttributes", "HtmlImageElement"] }
 wasm-bindgen = { version = "0.2" }
 
 [features]
