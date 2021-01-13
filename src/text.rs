@@ -11,7 +11,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, ImageStore, Paint, Path, PixelFormat,
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, Path, PixelFormat,
     RenderTarget, Renderer,
 };
 
@@ -280,6 +280,11 @@ impl TextContext {
 
     fn clear_caches(&mut self) {
         self.shaped_words_cache.clear();
+    }
+
+    #[cfg(feature = "debug_inspector")]
+    pub fn debug_inspector_get_textures(&self) -> Vec<ImageId> {
+        self.textures.iter().map(|t| t.image_id).collect()
     }
 }
 
@@ -635,21 +640,6 @@ pub(crate) fn render_atlas<T: Renderer>(
 
     canvas.set_render_target(initial_render_target);
 
-    // debug draw
-    // {
-    //     canvas.save();
-    //     canvas.reset();
-
-    //     let image_id = canvas.text_renderer_context.textures[0].image_id;
-
-    //     let mut path = Path::new();
-    //     path.rect(20.5, 20.5, 512.0, 512.0);
-    //     canvas.fill_path(&mut path, Paint::image(image_id, 20.5, 20.5, 512.0, 512.0, 0.0, 1.0));
-    //     canvas.stroke_path(&mut path, Paint::color(Color::black()));
-
-    //     canvas.restore();
-    // }
-
     Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
 }
 
@@ -671,9 +661,7 @@ fn render_glyph<T: Renderer>(
     let height = glyph.height.ceil() as u32 + line_width.ceil() as u32 + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
-        &mut canvas.text_context.textures,
-        &mut canvas.images,
-        &mut canvas.renderer,
+        canvas,
         width as usize,
         height as usize,
     )?;
@@ -771,15 +759,15 @@ fn render_glyph<T: Renderer>(
     })
 }
 
+// Returns (texture index, image id, glyph padding box)
 fn find_texture_or_alloc<T: Renderer>(
-    textures: &mut Vec<FontTexture>,
-    images: &mut ImageStore<T::Image>,
-    renderer: &mut T,
+    canvas: &mut Canvas<T>,
     width: usize,
     height: usize,
 ) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
-    // Find a free location in one of the the atlases
-    let mut texture_search_result = textures.iter_mut().enumerate().find_map(|(index, texture)| {
+    // Find a free location in one of the atlases
+    let mut textures = canvas.text_context.textures.iter_mut().enumerate();
+    let mut texture_search_result = textures.find_map(|(index, texture)| {
         texture
             .atlas
             .add_rect(width, height)
@@ -794,12 +782,31 @@ fn find_texture_or_alloc<T: Renderer>(
             .add_rect(width, height)
             .ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
 
+        // Using PixelFormat::Gray8 works perfectly and takes less VRAM.
+        // We keep Rgba8 for now because it might be useful for sub-pixel
+        // anti-aliasing (ClearType®), and the atlas debug display is much
+        // clearer with different colors.
         let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
-        let image_id = images.alloc(renderer, info)?;
+        let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
-        textures.push(FontTexture { atlas, image_id });
+        #[cfg(feature = "debug_inspector")]
+        if cfg!(debug_assertions) {
+            // Fill the texture with red pixels only in debug builds.
+            if let Ok(size) = canvas.image_size(image_id) {
+                canvas.save();
+                canvas.reset();
+                canvas.set_render_target(RenderTarget::Image(image_id));
+                canvas.clear_rect(
+                    0, 0, size.0 as u32, size.1 as u32,
+                    Color::rgb(255, 0, 0), // Shown as white if using Gray8.
+                );
+                canvas.restore();
+            }
+        }
 
-        let index = textures.len() - 1;
+        canvas.text_context.textures.push(FontTexture { atlas, image_id });
+
+        let index = canvas.text_context.textures.len() - 1;
         texture_search_result = Some((index, image_id, loc));
     }
 
