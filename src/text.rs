@@ -154,9 +154,12 @@ struct ShapingId {
 }
 
 impl ShapingId {
-    fn new(paint: &Paint, word: &str) -> Self {
+    fn new(paint: &Paint, word: &str, max_width: Option<f32>) -> Self {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
+        if let Some(max_width) = max_width {
+            (max_width.trunc() as i32).hash(&mut hasher);
+        }
 
         Self {
             size: (paint.font_size * 10.0).trunc() as u32,
@@ -335,7 +338,7 @@ pub(crate) fn shape(
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
-    let id = ShapingId::new(paint, text);
+    let id = ShapingId::new(paint, text, max_width);
 
     if !context.shaping_run_cache.contains(&id) {
         let metrics = shape_run(context, paint, text, max_width)?;
@@ -391,7 +394,7 @@ fn shape_run(
             let mut byte_index = run.start;
 
             for word in sub_text.split_word_bounds() {
-                let id = ShapingId::new(paint, word);
+                let id = ShapingId::new(paint, word, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
                     let word = shape_word(word, hb_direction, context, paint);
