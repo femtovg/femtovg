@@ -656,7 +656,7 @@ where
         // Transform the current scissor rect into current transform space.
         // If there is difference in rotation, this will be approximation.
 
-        let mut pxform = Transform2D::identity();
+        let mut pxform = state.scissor.transform;
 
         let mut invxform = state.transform;
         invxform.inverse();
