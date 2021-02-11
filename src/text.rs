@@ -691,7 +691,8 @@ fn render_glyph<T: Renderer>(
     };
 
     let rendered_bearing_y = glyph.bearing_y.round();
-    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + glyph.x.fract();
+    let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
+    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + x_quant;
     let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - (line_width / 2.0) - padding as f32;
 
     canvas.translate(x, y);
