@@ -117,6 +117,7 @@ struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
+    bearing_y: i32,
     atlas_x: u32,
     atlas_y: u32,
     padding: u32,
@@ -550,7 +551,7 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
         };
 
         glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
-        glyph.y = cursor_y + glyph.offset_y - glyph.bearing_y + alignment_offset_y;
+        glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y - glyph.bearing_y;
 
         min_y = min_y.min(glyph.y);
         max_y = max_y.max(glyph.y + glyph.height);
@@ -628,7 +629,7 @@ pub(crate) fn render_atlas<T: Renderer>(
             let mut q = Quad::default();
 
             q.x0 = glyph.x.trunc() - half_line_width - GLYPH_PADDING as f32;
-            q.y0 = glyph.y - half_line_width - GLYPH_PADDING as f32;
+            q.y0 = (glyph.y + glyph.bearing_y).trunc() - rendered.bearing_y as f32 - half_line_width - GLYPH_PADDING as f32;
             q.x1 = q.x0 + rendered.width as f32;
             q.y1 = q.y0 + rendered.height as f32;
 
@@ -689,8 +690,10 @@ fn render_glyph<T: Renderer>(
         (path, scale)
     };
 
-    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + glyph.x.fract();
-    let y = TEXTURE_SIZE as f32 - dst_y as f32 - glyph.bearing_y - (line_width / 2.0) - padding as f32;
+    let rendered_bearing_y = glyph.bearing_y.round();
+    let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
+    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + x_quant;
+    let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - (line_width / 2.0) - padding as f32;
 
     canvas.translate(x, y);
 
@@ -729,7 +732,7 @@ fn render_glyph<T: Renderer>(
         (-1.0 / 16.0, -5.0 / 16.0),
         (3.0 / 16.0, -7.0 / 16.0),
         (5.0 / 16.0, -3.0 / 16.0),
-        (5.0 / 16.0, 1.0 / 16.0),
+        (7.0 / 16.0, 1.0 / 16.0),
         (1.0 / 16.0, 5.0 / 16.0),
         (-3.0 / 16.0, 7.0 / 16.0),
         (-5.0 / 16.0, 3.0 / 16.0),
@@ -755,6 +758,7 @@ fn render_glyph<T: Renderer>(
     Ok(RenderedGlyph {
         width: width - 2 * GLYPH_MARGIN,
         height: height - 2 * GLYPH_MARGIN,
+        bearing_y: rendered_bearing_y as i32,
         atlas_x: dst_x as u32 + GLYPH_MARGIN,
         atlas_y: dst_y as u32 + GLYPH_MARGIN,
         texture_index: dst_index,

@@ -49,7 +49,7 @@ impl FontMetrics {
     }
 
     pub fn height(&self) -> f32 {
-        self.height
+        self.height.round()
     }
 
     pub fn regular(&self) -> bool {
