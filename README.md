@@ -1,6 +1,6 @@
 # femtovg
 
-[Join the Discord channel](https://discord.gg/V69VdVu)
+[Join the femtovg Discord channel](https://discord.gg/V69VdVu)
 
 **Work in progress!**
 
