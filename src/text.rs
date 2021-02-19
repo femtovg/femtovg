@@ -594,8 +594,8 @@ pub(crate) fn render_atlas<T: Renderer>(
 ) -> Result<Vec<DrawCmd>, ErrorKind> {
     let mut cmd_map = FnvHashMap::default();
 
-    let half_line_width = if mode == RenderMode::Stroke {
-        paint.line_width / 2.0
+    let line_width_offset = if mode == RenderMode::Stroke {
+        (paint.line_width / 2.0).ceil()
     } else {
         0.0
     };
@@ -628,8 +628,8 @@ pub(crate) fn render_atlas<T: Renderer>(
 
             let mut q = Quad::default();
 
-            q.x0 = glyph.x.trunc() - half_line_width - GLYPH_PADDING as f32;
-            q.y0 = (glyph.y + glyph.bearing_y).trunc() - rendered.bearing_y as f32 - half_line_width - GLYPH_PADDING as f32;
+            q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
+            q.y0 = (glyph.y + glyph.bearing_y).round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
             q.x1 = q.x0 + rendered.width as f32;
             q.y1 = q.y0 + rendered.height as f32;
 
@@ -661,8 +661,10 @@ fn render_glyph<T: Renderer>(
         0.0
     };
 
-    let width = glyph.width.ceil() as u32 + line_width.ceil() as u32 + padding * 2;
-    let height = glyph.height.ceil() as u32 + line_width.ceil() as u32 + padding * 2;
+    let line_width_offset = (line_width / 2.0).ceil();
+
+    let width = glyph.width.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+    let height = glyph.height.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
 
     let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
         canvas,
@@ -692,8 +694,8 @@ fn render_glyph<T: Renderer>(
 
     let rendered_bearing_y = glyph.bearing_y.round();
     let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
-    let x = dst_x as f32 - glyph.bearing_x + (line_width / 2.0) + padding as f32 + x_quant;
-    let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - (line_width / 2.0) - padding as f32;
+    let x = dst_x as f32 - glyph.bearing_x + line_width_offset + padding as f32 + x_quant;
+    let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
 
     canvas.translate(x, y);
 
