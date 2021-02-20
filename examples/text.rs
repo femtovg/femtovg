@@ -36,19 +36,19 @@ fn main() {
 
     let fonts = Fonts {
         sans: canvas
-            .add_font("examples/assets/Roboto-Regular.ttf")
+            .add_font("examples/assets/Roboto-Regular.ttf", None)
             .expect("Cannot add font"),
         bold: canvas
-            .add_font("examples/assets/Roboto-Bold.ttf")
+            .add_font("examples/assets/Roboto-Bold.ttf", None)
             .expect("Cannot add font"),
         light: canvas
-            .add_font("examples/assets/Roboto-Light.ttf")
+            .add_font("examples/assets/Roboto-Light.ttf", None)
             .expect("Cannot add font"),
     };
 
     // The fact that a font is added to the canvas is enough for it to be considered when
     // searching for fallbacks
-    let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
+    let _ = canvas.add_font("examples/assets/amiri-regular.ttf", None);
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
     let image_id = canvas

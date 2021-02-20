@@ -90,13 +90,13 @@ fn main() {
 
     let fonts = Fonts {
         regular: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
+            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"), None)
             .expect("Cannot add font"),
         bold: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
+            .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"), None)
             .expect("Cannot add font"),
         icons: canvas
-            .add_font_mem(&resource!("examples/assets/entypo.ttf"))
+            .add_font_mem(&resource!("examples/assets/entypo.ttf"), None)
             .expect("Cannot add font"),
     };
 

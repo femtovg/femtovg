@@ -90,8 +90,9 @@ pub(crate) struct Font {
 }
 
 impl Font {
-    pub fn new(data: &[u8]) -> Result<Self, ErrorKind> {
-        let owned_ttf_font = OwnedFont::from_vec(data.to_owned(), 0).ok_or(ErrorKind::FontParseError)?;
+    pub fn new(data: &[u8], index: Option<u32>) -> Result<Self, ErrorKind> {
+        let owned_ttf_font =
+            OwnedFont::from_vec(data.to_owned(), index.unwrap_or(0)).ok_or(ErrorKind::FontParseError)?;
 
         let units_per_em = owned_ttf_font
             .as_font()

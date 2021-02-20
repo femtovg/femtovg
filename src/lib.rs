@@ -275,7 +275,7 @@ pub struct Canvas<T: Renderer> {
     device_px_ratio: f32,
     tess_tol: f32,
     dist_tol: f32,
-    gradients: GradientStore
+    gradients: GradientStore,
 }
 
 impl<T> Canvas<T>
@@ -298,7 +298,7 @@ where
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
-            gradients: GradientStore::new()
+            gradients: GradientStore::new(),
         };
 
         canvas.save();
@@ -356,7 +356,8 @@ where
         self.renderer.render(&self.images, &self.verts, &self.commands);
         self.commands.clear();
         self.verts.clear();
-        self.gradients.release_old_gradients(&mut self.images, &mut self.renderer);
+        self.gradients
+            .release_old_gradients(&mut self.images, &mut self.renderer);
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
@@ -781,7 +782,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -916,7 +920,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -940,14 +947,15 @@ where
 
     // Text
 
-    /// Adds a font file to the canvas
-    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_file(file_path)
+    /// Adds a font file to the canvas with the given index from the TrueType font collection file
+    pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P, index: Option<u32>) -> Result<FontId, ErrorKind> {
+        self.text_context.add_font_file(file_path, index)
     }
 
-    /// Adds a font to the canvas by reading it from the specified chunk of memory.
-    pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_mem(data)
+    /// Adds a font to the canvas by reading it from the specified chunk of memory, selecting
+    /// by index if the data is a TrueType font collection file
+    pub fn add_font_mem(&mut self, data: &[u8], index: Option<u32>) -> Result<FontId, ErrorKind> {
+        self.text_context.add_font_mem(data, index)
     }
 
     /// Adds all .ttf files from a directory
@@ -1130,7 +1138,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
@@ -1163,15 +1174,11 @@ where
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_draw_image(&mut self, id: ImageId) {
         if let Ok(size) = self.image_size(id) {
-            let width  = size.0 as f32;
+            let width = size.0 as f32;
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect(0f32, 0f32, width, height);
-            self.fill_path(&mut path, Paint::image(
-                id,
-                0f32, 0f32, width, height,
-                0f32, 1f32
-            ));
+            self.fill_path(&mut path, Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
 }

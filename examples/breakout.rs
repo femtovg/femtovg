@@ -91,13 +91,13 @@ impl Game {
 
         let fonts = Fonts {
             regular: canvas
-                .add_font("examples/assets/Roboto-Regular.ttf")
+                .add_font("examples/assets/Roboto-Regular.ttf", None)
                 .expect("Cannot add font"),
             bold: canvas
-                .add_font("examples/assets/Roboto-Bold.ttf")
+                .add_font("examples/assets/Roboto-Bold.ttf", None)
                 .expect("Cannot add font"),
             light: canvas
-                .add_font("examples/assets/Roboto-Light.ttf")
+                .add_font("examples/assets/Roboto-Light.ttf", None)
                 .expect("Cannot add font"),
         };
 
