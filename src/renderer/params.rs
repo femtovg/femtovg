@@ -1,4 +1,6 @@
-use crate::{Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D, paint::GradientColors};
+use crate::{
+    paint::GradientColors, Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
+};
 
 use super::ShaderType;
 
@@ -163,7 +165,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }
@@ -176,7 +178,7 @@ impl Params {
                 height,
                 radius,
                 feather,
-                colors
+                colors,
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform.multiply(&paint.transform);
@@ -191,7 +193,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }
@@ -220,7 +222,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }

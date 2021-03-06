@@ -120,7 +120,7 @@ pub enum ShaderType {
     FillGradient,
     FillImage,
     Stencil,
-    FillImageGradient
+    FillImageGradient,
 }
 
 impl Default for ShaderType {
@@ -135,7 +135,7 @@ impl ShaderType {
             Self::FillGradient => 0.0,
             Self::FillImage => 1.0,
             Self::Stencil => 2.0,
-            Self::FillImageGradient => 3.0
+            Self::FillImageGradient => 3.0,
         }
     }
 }
