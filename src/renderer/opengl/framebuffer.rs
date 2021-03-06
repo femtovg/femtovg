@@ -17,7 +17,7 @@ impl Framebuffer {
         Framebuffer {
             context: context.clone(),
             fbo,
-            depth_stencil_rbo: None
+            depth_stencil_rbo: None,
         }
     }
     pub fn new(context: &Rc<glow::Context>, texture: &GlTexture) -> Result<Self, ErrorKind> {

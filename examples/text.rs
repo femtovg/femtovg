@@ -76,10 +76,8 @@ fn main() {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
-                },
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit
-                },
+                }
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::KeyboardInput {
                     input:
                         KeyboardInput {
@@ -112,24 +110,21 @@ fn main() {
                     if *keycode == VirtualKeyCode::NumpadSubtract {
                         font_size -= 1.0;
                     }
-                },
+                }
                 WindowEvent::MouseInput {
-                    device_id: _, state: ElementState::Pressed, ..
-                } => {
-                    #[cfg(feature = "debug_inspector")]
-                    {
-                        let len = canvas.debug_inspector_get_font_textures().len();
-                        let next = match font_texture_to_show {
-                            None    => 0,
-                            Some(i) => i + 1
-                        };
-                        font_texture_to_show = if next < len {
-                            Some(next)
-                        } else {
-                            None
-                        };
-                    }
-                },
+                    device_id: _,
+                    state: ElementState::Pressed,
+                    ..
+                } =>
+                #[cfg(feature = "debug_inspector")]
+                {
+                    let len = canvas.debug_inspector_get_font_textures().len();
+                    let next = match font_texture_to_show {
+                        None => 0,
+                        Some(i) => i + 1,
+                    };
+                    font_texture_to_show = if next < len { Some(next) } else { None };
+                }
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
