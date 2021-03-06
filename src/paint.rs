@@ -492,6 +492,12 @@ impl Paint {
         self.flavor = PaintFlavor::Color(color);
     }
 
+    /// Returns the paint with a new solid color set to the specified value.
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.set_color(color);
+        self
+    }
+
     pub(crate) fn alpha_mask(&self) -> Option<ImageId> {
         self.alpha_mask
     }
@@ -514,6 +520,12 @@ impl Paint {
         self.shape_anti_alias = value;
     }
 
+    /// Returns the paint with anti alias set to the specified value.
+    pub fn with_anti_alias(mut self, value: bool) -> Self {
+        self.set_anti_alias(value);
+        self
+    }
+
     /// True if this paint uses higher quality stencil strokes.
     pub fn stencil_strokes(&self) -> bool {
         self.stencil_strokes
@@ -522,6 +534,12 @@ impl Paint {
     /// Sets whether to use higher quality stencil strokes.
     pub fn set_stencil_strokes(&mut self, value: bool) {
         self.stencil_strokes = value;
+    }
+
+    /// Returns the paint with stencil strokes set to the specified value.
+    pub fn with_stencil_strokes(mut self, value: bool) -> Self {
+        self.set_stencil_strokes(value);
+        self
     }
 
     /// Returns the current line width.
@@ -534,6 +552,12 @@ impl Paint {
         self.line_width = width;
     }
 
+    /// Returns the paint with line width set to the specified value.
+    pub fn with_line_width(mut self, width: f32) -> Self {
+        self.set_line_width(width);
+        self
+    }
+
     /// Getter for the miter limit
     pub fn miter_limit(&self) -> f32 {
         self.miter_limit
@@ -544,6 +568,12 @@ impl Paint {
     /// If the miter at a corner exceeds this limit, LineJoin is replaced with LineJoin::Bevel.
     pub fn set_miter_limit(&mut self, limit: f32) {
         self.miter_limit = limit;
+    }
+
+    /// Returns the paint with the miter limit set to the specified value.
+    pub fn with_miter_limit(mut self, limit: f32) -> Self {
+        self.set_miter_limit(limit);
+        self
     }
 
     /// Returns the current start line cap for this paint.
@@ -564,6 +594,12 @@ impl Paint {
         self.line_cap_end = cap;
     }
 
+    /// Returns the paint with line cap set to the specified value.
+    pub fn with_line_cap(mut self, cap: LineCap) -> Self {
+        self.set_line_cap(cap);
+        self
+    }
+
     /// Sets how the beggining cap of the line is drawn
     ///
     /// By default it's set to LineCap::Butt
@@ -571,11 +607,23 @@ impl Paint {
         self.line_cap_start = cap;
     }
 
+    /// Returns the paint with the beginning cap of the line set to the specified value.
+    pub fn with_line_cap_start(mut self, cap: LineCap) -> Self {
+        self.set_line_cap_start(cap);
+        self
+    }
+
     /// Sets how the end cap of the line is drawn
     ///
     /// By default it's set to LineCap::Butt
     pub fn set_line_cap_end(&mut self, cap: LineCap) {
         self.line_cap_end = cap;
+    }
+
+    /// Returns the paint with the beginning cap of the line set to the specified value.
+    pub fn with_line_cap_end(mut self, cap: LineCap) -> Self {
+        self.set_line_cap_end(cap);
+        self
     }
 
     /// Returns the current line join for this paint.
@@ -590,12 +638,24 @@ impl Paint {
         self.line_join = join;
     }
 
+    /// Returns the paint with the line join set to the specified value.
+    pub fn with_line_join(mut self, join: LineJoin) -> Self {
+        self.set_line_join(join);
+        self
+    }
+
     pub fn set_font(&mut self, font_ids: &[FontId]) {
         self.font_ids = Default::default();
 
         for (i, id) in font_ids.iter().take(8).enumerate() {
             self.font_ids[i] = Some(*id);
         }
+    }
+
+    /// Returns the paint with the font set to the specified value.
+    pub fn with_font(mut self, font_ids: &[FontId]) -> Self {
+        self.set_font(font_ids);
+        self
     }
 
     /// Returns the current font size
@@ -612,6 +672,12 @@ impl Paint {
         self.font_size = size;
     }
 
+    /// Returns the paint with the font size set to the specified value.
+    pub fn with_font_size(mut self, size: f32) -> Self {
+        self.set_font_size(size);
+        self
+    }
+
     /// Returns the current letter spacing
     pub fn letter_spacing(&self) -> f32 {
         self.letter_spacing
@@ -622,6 +688,12 @@ impl Paint {
     /// Only has effect on canvas text operations
     pub fn set_letter_spacing(&mut self, spacing: f32) {
         self.letter_spacing = spacing;
+    }
+
+    /// Returns the paint with the letter spacing set to the specified value.
+    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        self.set_letter_spacing(spacing);
+        self
     }
 
     /// Returns the current vertical align
@@ -636,6 +708,12 @@ impl Paint {
         self.text_baseline = align;
     }
 
+    /// Returns the paint with the text vertical alignment set to the specified value.
+    pub fn with_text_baseline(mut self, align: Baseline) -> Self {
+        self.set_text_baseline(align);
+        self
+    }
+
     /// Returns the current horizontal align
     pub fn text_align(&self) -> Align {
         self.text_align
@@ -648,6 +726,12 @@ impl Paint {
         self.text_align = align;
     }
 
+    /// Returns the paint with the text horizontal alignment set to the specified value.
+    pub fn with_text_align(mut self, align: Align) -> Self {
+        self.set_text_align(align);
+        self
+    }
+
     /// Retrieves the current fill rule setting for this paint
     pub fn fill_rule(&self) -> FillRule {
         self.fill_rule
@@ -658,6 +742,12 @@ impl Paint {
     /// https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/fill-rule
     pub fn set_fill_rule(&mut self, rule: FillRule) {
         self.fill_rule = rule;
+    }
+
+    /// Returns the paint with the rule for filling a path set to the specified value.
+    pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
+        self.set_fill_rule(rule);
+        self
     }
 
     pub(crate) fn mul_alpha(&mut self, a: f32) {
