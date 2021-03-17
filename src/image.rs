@@ -1,5 +1,8 @@
 use bitflags::bitflags;
-use generational_arena::{Arena, Index};
+use generational_arena::{
+    Arena,
+    Index,
+};
 use imgref::*;
 use rgb::alt::GRAY8;
 use rgb::*;
@@ -10,7 +13,10 @@ use ::image::DynamicImage;
 #[cfg(feature = "image-loading")]
 use std::convert::TryFrom;
 
-use crate::{ErrorKind, Renderer};
+use crate::{
+    ErrorKind,
+    Renderer,
+};
 
 /// An image handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]

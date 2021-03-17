@@ -1,16 +1,41 @@
 use std::ops::Deref;
 use std::time::Instant;
 
-use glutin::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
+use glutin::event::{
+    ElementState,
+    Event,
+    KeyboardInput,
+    MouseButton,
+    VirtualKeyCode,
+    WindowEvent,
+};
+use glutin::event_loop::{
+    ControlFlow,
+    EventLoop,
+};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 
-use svg::node::element::path::{Command, Data};
+use svg::node::element::path::{
+    Command,
+    Data,
+};
 use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
-use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
+use femtovg::{
+    renderer::OpenGl,
+    Align,
+    Baseline,
+    Canvas,
+    Color,
+    FillRule,
+    FontId,
+    ImageFlags,
+    Paint,
+    Path,
+    Renderer,
+};
 
 fn main() {
     let el = EventLoop::new();

@@ -1,5 +1,11 @@
-use std::hash::{Hash, Hasher};
-use std::ops::{Index, IndexMut};
+use std::hash::{
+    Hash,
+    Hasher,
+};
+use std::ops::{
+    Index,
+    IndexMut,
+};
 
 use fnv::FnvHasher;
 

@@ -3,7 +3,17 @@ use std::collections::BTreeMap;
 use imgref;
 use rgb;
 
-use crate::{Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer, image::ImageStore, paint::MultiStopGradient};
+use crate::{
+    image::ImageStore,
+    paint::MultiStopGradient,
+    Color,
+    ErrorKind,
+    ImageFlags,
+    ImageId,
+    ImageInfo,
+    ImageSource,
+    Renderer,
+};
 
 /// GradientStore holds image ids for multi-stop gradients. The actual image/textures
 /// are contained by the Canvas's ImageStore.
@@ -12,38 +22,37 @@ use crate::{Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Rende
 // and update the texture immediately prior to giving the renderer the command list.
 pub(crate) struct GradientStore {
     this_frame: BTreeMap<MultiStopGradient, ImageId>,
-    prev_frame: BTreeMap<MultiStopGradient, ImageId>
+    prev_frame: BTreeMap<MultiStopGradient, ImageId>,
 }
 impl GradientStore {
     /// Create a new empty gradient store
     pub fn new() -> GradientStore {
         GradientStore {
             this_frame: BTreeMap::new(),
-            prev_frame: BTreeMap::new()
+            prev_frame: BTreeMap::new(),
         }
     }
 
     /// Lookup or add a multi-stop gradient in this gradient store.
-    pub fn lookup_or_add<R: Renderer>(&mut self, colors: MultiStopGradient, images: &mut ImageStore<R::Image>, renderer: &mut R) -> Result<ImageId, ErrorKind> {
+    pub fn lookup_or_add<R: Renderer>(
+        &mut self,
+        colors: MultiStopGradient,
+        images: &mut ImageStore<R::Image>,
+        renderer: &mut R,
+    ) -> Result<ImageId, ErrorKind> {
         if let Some(gradient_image_id) = self.prev_frame.remove(&colors) {
             // See if we already have this texture from the previous frame. If we find
             // it then we migrate it to the current frame so we don't release it and
             // return the texture id to the caller.
             self.this_frame.insert(colors, gradient_image_id);
             Ok(gradient_image_id)
-        }
-        else if let Some(gradient_image_id) = self.this_frame.get(&colors) {
+        } else if let Some(gradient_image_id) = self.this_frame.get(&colors) {
             // See if we already used this gradient in this frame, and return the texture
             // id if we do.
             Ok(*gradient_image_id)
         } else {
             // We need to allocate a texture and synthesize the gradient image.
-            let info = ImageInfo::new(
-                ImageFlags::REPEAT_Y,
-                256,
-                1,
-                crate::PixelFormat::Rgba8,  
-            );
+            let info = ImageInfo::new(ImageFlags::REPEAT_Y, 256, 1, crate::PixelFormat::Rgba8);
             let gradient_image_id = images.alloc(renderer, info)?;
             let image = linear_gradient_stops(&colors);
             images.update(renderer, gradient_image_id, ImageSource::Rgba(image.as_ref()), 0, 0)?;
@@ -67,12 +76,13 @@ impl GradientStore {
 }
 
 // Gradient filling, adapted from https://github.com/lieff/lvg/blob/master/render/common.c#L147
-fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, offset0: f32, offset1: f32)
-{
+fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, offset0: f32, offset1: f32) {
     let s0o = offset0.max(0.0).min(1.0);
     let s1o = offset1.max(0.0).min(1.0);
 
-    if s1o < s0o { return }
+    if s1o < s0o {
+        return;
+    }
 
     let s = (s0o * 256.0) as usize;
     let e = (s1o * 256.0) as usize;
@@ -100,7 +110,7 @@ fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, off
             (r * a * 255.0) as u8,
             (g * a * 255.0) as u8,
             (b * a * 255.0) as u8,
-            (a * 255.0) as u8
+            (a * 255.0) as u8,
         );
         r += dr;
         g += dg;
@@ -115,12 +125,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
     if gradient[0].0 > 0.0 {
         let s0 = gradient[0].0;
         let color0 = gradient[0].1;
-        gradient_span(
-            &mut dest, 
-            color0, 
-            color0, 
-            0.0, 
-            s0);
+        gradient_span(&mut dest, color0, color0, 0.0, s0);
     }
 
     // Iterate over the stops in overlapping pairs and fill out the rest of the
@@ -132,7 +137,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
         let s1 = stop[1].0;
         let color0 = stop[0].1;
         let color1 = stop[1].1;
-    
+
         // Catch the case where the last stop doesn't go all the way to 1.0 and
         // pad it.
         if s0 < 1.0 && s1 > 1.0 {
@@ -143,7 +148,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
 
         // If the first stop is >1.0 then we're done.
         if s0 > 1.0 {
-            break
+            break;
         };
     }
     imgref::Img::new(dest.to_vec(), 256, 1)

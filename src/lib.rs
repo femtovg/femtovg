@@ -30,21 +30,46 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, FontId, FontMetrics, TextMetrics};
+pub use text::{
+    Align,
+    Baseline,
+    FontId,
+    FontMetrics,
+    TextMetrics,
+};
 
-use text::{RenderMode, TextContext};
+use text::{
+    RenderMode,
+    TextContext,
+};
 
 mod image;
 use crate::image::ImageStore;
-pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
+pub use crate::image::{
+    ImageFlags,
+    ImageId,
+    ImageInfo,
+    ImageSource,
+    PixelFormat,
+};
 
 mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{RenderTarget, Renderer};
+pub use renderer::{
+    RenderTarget,
+    Renderer,
+};
 
-use renderer::{Command, CommandType, Drawable, Params, ShaderType, Vertex};
+use renderer::{
+    Command,
+    CommandType,
+    Drawable,
+    Params,
+    ShaderType,
+    Vertex,
+};
 
 pub(crate) mod geometry;
 pub use geometry::Transform2D;
@@ -56,7 +81,10 @@ use paint::PaintFlavor;
 
 mod path;
 use path::Convexity;
-pub use path::{Path, Solidity};
+pub use path::{
+    Path,
+    Solidity,
+};
 
 mod gradient_store;
 use gradient_store::GradientStore;
@@ -275,7 +303,7 @@ pub struct Canvas<T: Renderer> {
     device_px_ratio: f32,
     tess_tol: f32,
     dist_tol: f32,
-    gradients: GradientStore
+    gradients: GradientStore,
 }
 
 impl<T> Canvas<T>
@@ -298,7 +326,7 @@ where
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
-            gradients: GradientStore::new()
+            gradients: GradientStore::new(),
         };
 
         canvas.save();
@@ -356,7 +384,8 @@ where
         self.renderer.render(&self.images, &self.verts, &self.commands);
         self.commands.clear();
         self.verts.clear();
-        self.gradients.release_old_gradients(&mut self.images, &mut self.renderer);
+        self.gradients
+            .release_old_gradients(&mut self.images, &mut self.renderer);
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
@@ -781,7 +810,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -916,7 +948,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -1130,7 +1165,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
@@ -1163,15 +1201,11 @@ where
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_draw_image(&mut self, id: ImageId) {
         if let Ok(size) = self.image_size(id) {
-            let width  = size.0 as f32;
+            let width = size.0 as f32;
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect(0f32, 0f32, width, height);
-            self.fill_path(&mut path, Paint::image(
-                id,
-                0f32, 0f32, width, height,
-                0f32, 1f32
-            ));
+            self.fill_path(&mut path, Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
 }

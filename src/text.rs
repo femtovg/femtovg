@@ -1,18 +1,38 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::{Hash, Hasher};
+use std::hash::{
+    Hash,
+    Hasher,
+};
 use std::path::Path as FilePath;
 
-use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
-use generational_arena::{Arena, Index};
+use fnv::{
+    FnvBuildHasher,
+    FnvHashMap,
+    FnvHasher,
+};
+use generational_arena::{
+    Arena,
+    Index,
+};
 use lru::LruCache;
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, Path, PixelFormat,
-    RenderTarget, Renderer,
+    Canvas,
+    Color,
+    ErrorKind,
+    FillRule,
+    ImageFlags,
+    ImageId,
+    ImageInfo,
+    Paint,
+    Path,
+    PixelFormat,
+    RenderTarget,
+    Renderer,
 };
 
 mod atlas;
@@ -629,7 +649,10 @@ pub(crate) fn render_atlas<T: Renderer>(
             let mut q = Quad::default();
 
             q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
-            q.y0 = (glyph.y + glyph.bearing_y).round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
+            q.y0 = (glyph.y + glyph.bearing_y).round()
+                - rendered.bearing_y as f32
+                - line_width_offset
+                - GLYPH_PADDING as f32;
             q.x1 = q.x0 + rendered.width as f32;
             q.y1 = q.y0 + rendered.height as f32;
 
@@ -666,11 +689,7 @@ fn render_glyph<T: Renderer>(
     let width = glyph.width.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
     let height = glyph.height.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
 
-    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
-        canvas,
-        width as usize,
-        height as usize,
-    )?;
+    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(canvas, width as usize, height as usize)?;
 
     // render glyph to image
     canvas.save();
@@ -806,7 +825,10 @@ fn find_texture_or_alloc<T: Renderer>(
                 canvas.reset();
                 canvas.set_render_target(RenderTarget::Image(image_id));
                 canvas.clear_rect(
-                    0, 0, size.0 as u32, size.1 as u32,
+                    0,
+                    0,
+                    size.0 as u32,
+                    size.1 as u32,
                     Color::rgb(255, 0, 0), // Shown as white if using Gray8.
                 );
                 canvas.restore();

@@ -9,13 +9,29 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    renderer::{ImageId, Vertex},
-    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageInfo, ImageSource, ImageStore,
+    renderer::{
+        ImageId,
+        Vertex,
+    },
+    BlendFactor,
+    Color,
+    CompositeOperationState,
+    ErrorKind,
+    FillRule,
+    ImageInfo,
+    ImageSource,
+    ImageStore,
 };
 
 use glow::HasContext;
 
-use super::{Command, CommandType, Params, RenderTarget, Renderer};
+use super::{
+    Command,
+    CommandType,
+    Params,
+    RenderTarget,
+    Renderer,
+};
 
 mod program;
 use program::MainProgram;
@@ -40,7 +56,7 @@ pub struct OpenGl {
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
-    screen_target: Option<Framebuffer>
+    screen_target: Option<Framebuffer>,
 }
 
 impl OpenGl {
@@ -89,7 +105,7 @@ impl OpenGl {
             vert_buff: Default::default(),
             framebuffers: Default::default(),
             context: context.clone(),
-            screen_target: None
+            screen_target: None,
         };
 
         unsafe {
@@ -402,7 +418,7 @@ impl OpenGl {
                 unsafe {
                     self.context.viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
                 }
-            },
+            }
             (RenderTarget::Image(id), _) => {
                 let context = self.context.clone();
                 if let Some(texture) = images.get(id) {
@@ -436,7 +452,7 @@ impl OpenGl {
     pub fn set_screen_target(&mut self, framebuffer_object: Option<<glow::Context as glow::HasContext>::Framebuffer>) {
         match framebuffer_object {
             Some(fbo_id) => self.screen_target = Some(Framebuffer::from_external(&self.context, fbo_id)),
-            None => self.screen_target = None
+            None => self.screen_target = None,
         }
     }
 }

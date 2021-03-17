@@ -3,9 +3,18 @@
 use imgref::ImgVec;
 use rgb::RGBA8;
 
-use crate::{ErrorKind, ImageInfo, ImageSource, ImageStore};
+use crate::{
+    ErrorKind,
+    ImageInfo,
+    ImageSource,
+    ImageStore,
+};
 
-use super::{Command, Renderer, Vertex};
+use super::{
+    Command,
+    Renderer,
+    Vertex,
+};
 
 /// Void renderer used for testing
 pub struct Void;

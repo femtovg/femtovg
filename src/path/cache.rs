@@ -4,10 +4,19 @@ use std::ops::Range;
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Bounds, Transform2D};
+use crate::geometry::{
+    self,
+    Bounds,
+    Transform2D,
+};
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
-use crate::{FillRule, LineCap, LineJoin, Solidity};
+use crate::{
+    FillRule,
+    LineCap,
+    LineJoin,
+    Solidity,
+};
 
 use super::Verb;
 

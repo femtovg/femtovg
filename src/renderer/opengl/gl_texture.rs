@@ -1,6 +1,12 @@
 use std::rc::Rc;
 
-use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
+use crate::{
+    ErrorKind,
+    ImageFlags,
+    ImageInfo,
+    ImageSource,
+    PixelFormat,
+};
 
 use glow::HasContext;
 

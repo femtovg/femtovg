@@ -1,16 +1,43 @@
 use std::time::Instant;
 
 use rand::{
-    distributions::{Distribution, Standard},
+    distributions::{
+        Distribution,
+        Standard,
+    },
     prelude::*,
 };
 
-use glutin::event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use glutin::window::{Window, WindowBuilder};
+use glutin::event::{
+    DeviceEvent,
+    ElementState,
+    Event,
+    KeyboardInput,
+    MouseButton,
+    VirtualKeyCode,
+    WindowEvent,
+};
+use glutin::event_loop::{
+    ControlFlow,
+    EventLoop,
+};
+use glutin::window::{
+    Window,
+    WindowBuilder,
+};
 use glutin::ContextBuilder;
 
-use femtovg::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
+use femtovg::{
+    renderer::OpenGl,
+    Align,
+    Baseline,
+    Color,
+    FontId,
+    ImageFlags,
+    ImageId,
+    Paint,
+    Path,
+};
 
 type Canvas = femtovg::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
