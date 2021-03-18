@@ -21,7 +21,7 @@ impl From<PixelFormat> for wgpu::TextureFormat {
 pub struct WGPUTexture {
     //
     info: ImageInfo,
-    tex: wgpu::TextureView,
+    tex: wgpu::Texture,
     sampler: wgpu::Sampler,
     context: WGPUContext,
 }
@@ -45,23 +45,21 @@ impl WGPUTexture {
         let mip_level_count = if generate_mipmaps { 0 } else { 0 };
 
         // todo: what's the difference between texture and texture_view
-        let tex = context
-            .device()
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Low Resolution Target"),
-                size: wgpu::Extent3d {
-                    width: 0,
-                    height: 0,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                //todo!
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::RENDER_ATTACHMENT,
-            })
-            .create_view(&Default::default());
+        let tex = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("Low Resolution Target"),
+            size: wgpu::Extent3d {
+                width: 0,
+                height: 0,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            //todo!
+            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::RENDER_ATTACHMENT,
+        });
+        // .create_view(&Default::default());
 
         let filter = if nearest {
             wgpu::FilterMode::Nearest
@@ -100,5 +98,15 @@ impl WGPUTexture {
             info,
             tex,
         }
+    }
+
+    pub fn write_texture(&self, extent: wgpu::Extent3d, data: &[u8]) {
+        let layout = wgpu::TextureDataLayout { ..Default::default() };
+        // self.context.queue().write_texture(&self.tex, data, layout, extent, )
+        todo!()
+    }
+
+    pub fn resize(&mut self) {
+        todo!()
     }
 }
