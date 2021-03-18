@@ -6,6 +6,9 @@ pub use wgpu_vec::*;
 mod wgpu_queue;
 pub use wgpu_queue::*;
 
+ mod wgpu_texture;
+ pub use wgpu_texture::*;
+
 use crate::{
     renderer::{
         ImageId,
@@ -32,13 +35,21 @@ use super::{
 use fnv::FnvHashMap;
 use imgref::ImgVec;
 use rgb::RGBA8;
+use std::borrow::Cow;
 
 pub struct WGPU {
     
 }
 
 impl WGPU {
-    pub fn new() -> Self {
+    pub fn new(device: &wgpu::Device) -> Self {
+        
+        // let shader = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        //     label: None,
+        //     source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("webgpu/shader.wgsl"))),
+        //     flags: wgpu::ShaderFlags::all(),
+        // });
+
         todo!()
         // Self {
 
