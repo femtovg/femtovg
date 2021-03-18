@@ -17,6 +17,9 @@ use crate::{
 mod opengl;
 pub use opengl::OpenGl;
 
+mod webgpu;
+pub  use webgpu::WGPU;
+
 mod void;
 pub use void::Void;
 
