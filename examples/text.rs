@@ -132,12 +132,12 @@ fn main() {
                         font_size -= 1.0;
                     }
                 }
+                #[cfg(feature = "debug_inspector")]
                 WindowEvent::MouseInput {
                     device_id: _,
                     state: ElementState::Pressed,
                     ..
                 } =>
-                #[cfg(feature = "debug_inspector")]
                 {
                     let len = canvas.debug_inspector_get_font_textures().len();
                     let next = match font_texture_to_show {
