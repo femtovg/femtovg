@@ -1,5 +1,10 @@
-
-use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
+use crate::{
+    ErrorKind,
+    ImageFlags,
+    ImageInfo,
+    ImageSource,
+    PixelFormat,
+};
 
 impl From<PixelFormat> for wgpu::TextureFormat {
     fn from(a: PixelFormat) -> Self {
@@ -12,5 +17,5 @@ impl From<PixelFormat> for wgpu::TextureFormat {
 }
 
 pub struct WGPUTexture {
-
+    
 }

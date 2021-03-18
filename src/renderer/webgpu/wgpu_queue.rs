@@ -1,4 +1,3 @@
-
 #[derive(Clone)]
 pub struct WGPUContext {
     device: std::rc::Rc<wgpu::Device>,
