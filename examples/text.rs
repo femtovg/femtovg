@@ -137,8 +137,7 @@ fn main() {
                     device_id: _,
                     state: ElementState::Pressed,
                     ..
-                } =>
-                {
+                } => {
                     let len = canvas.debug_inspector_get_font_textures().len();
                     let next = match font_texture_to_show {
                         None => 0,
