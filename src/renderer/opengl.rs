@@ -577,7 +577,8 @@ impl Renderer for OpenGl {
         image.update(data, x, y, self.is_opengles_2_0)
     }
 
-    fn delete_image(&mut self, image: Self::Image) {
+    fn delete_image(&mut self, image: Self::Image, image_id: ImageId) {
+        self.framebuffers.remove(&image_id);
         image.delete();
     }
 
