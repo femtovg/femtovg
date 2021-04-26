@@ -14,6 +14,7 @@ use super::{
     Command,
     Renderer,
     Vertex,
+    ImageId
 };
 
 /// Void renderer used for testing
@@ -50,7 +51,7 @@ impl Renderer for Void {
         Ok(())
     }
 
-    fn delete_image(&mut self, image: Self::Image) {}
+    fn delete_image(&mut self, image: Self::Image, _image_id: ImageId) {}
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         Ok(ImgVec::new(Vec::new(), 0, 0))

@@ -99,7 +99,7 @@ pub trait Renderer {
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize)
         -> Result<(), ErrorKind>;
-    fn delete_image(&mut self, image: Self::Image);
+    fn delete_image(&mut self, image: Self::Image, image_id: ImageId);
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;
 }
