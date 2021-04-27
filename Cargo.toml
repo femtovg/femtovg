@@ -43,7 +43,7 @@ debug_inspector = []
 [dev-dependencies]
 winit = { version = "0.24", default-features = false }
 euclid = "0.22.3"
-rand = "0.7"
+rand = "0.8"
 svg = "0.8.0"
 usvg = { version = "0.12.0", default-features = false }
 instant = { version = "0.1", features = [ "now" ] }
@@ -60,3 +60,4 @@ web_sys = { version = "0.3", package = "web-sys", features=["console", "WebGlCon
 console_error_panic_hook = "0.1.5"
 instant = { version = "0.1", features = [ "wasm-bindgen", "now" ] }
 resource = { version = "0.5.0", features = [ "force-static" ] }
+getrandom = { version = "0.2.2", features = ["js"] }
