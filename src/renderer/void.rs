@@ -12,9 +12,9 @@ use crate::{
 
 use super::{
     Command,
+    ImageId,
     Renderer,
     Vertex,
-    ImageId
 };
 
 /// Void renderer used for testing
