@@ -31,8 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Install nightly toolchain
-        run: rustup toolchain install nightly
-      - name: Install nightly rustfmt
-        run: rustup component add rustfmt --toolchain nightly
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+            override: true
+            components: rustfmt
       - name: Run rustfmt
         run: cargo +nightly fmt --all -- --check
