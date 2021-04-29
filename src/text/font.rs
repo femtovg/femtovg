@@ -1,9 +1,9 @@
 use fnv::FnvHashMap;
 use owned_ttf_parser::{
-    AsFontRef,
-    Font as TtfFont,
+    AsFaceRef,
+    Face as TtfFont,
     GlyphId,
-    OwnedFont,
+    OwnedFace,
 };
 
 use crate::{
@@ -91,7 +91,7 @@ impl FontMetrics {
 
 pub(crate) struct Font {
     data: Vec<u8>,
-    owned_ttf_font: OwnedFont,
+    owned_ttf_font: OwnedFace,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
@@ -99,14 +99,14 @@ pub(crate) struct Font {
 
 impl Font {
     pub fn new(data: &[u8]) -> Result<Self, ErrorKind> {
-        let owned_ttf_font = OwnedFont::from_vec(data.to_owned(), 0).ok_or(ErrorKind::FontParseError)?;
+        let owned_ttf_font = OwnedFace::from_vec(data.to_owned(), 0).map_err(|_| ErrorKind::FontParseError)?;
 
         let units_per_em = owned_ttf_font
-            .as_font()
+            .as_face_ref()
             .units_per_em()
             .ok_or(ErrorKind::FontInfoExtracionError)?;
 
-        let ttf_font = owned_ttf_font.as_font();
+        let ttf_font = owned_ttf_font.as_face_ref();
 
         let metrics = FontMetrics {
             ascender: ttf_font.ascender() as f32,
@@ -135,7 +135,7 @@ impl Font {
     }
 
     fn font_ref(&self) -> &TtfFont<'_> {
-        self.owned_ttf_font.as_font()
+        self.owned_ttf_font.as_face_ref()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
