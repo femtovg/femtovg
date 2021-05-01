@@ -18,9 +18,11 @@ use crate::{
     CompositeOperationState,
     ErrorKind,
     FillRule,
+    ImageFilter,
     ImageInfo,
     ImageSource,
     ImageStore,
+    Scissor,
 };
 
 use glow::HasContext;
@@ -31,6 +33,7 @@ use super::{
     Params,
     RenderTarget,
     Renderer,
+    ShaderType,
 };
 
 mod program;
@@ -57,6 +60,7 @@ pub struct OpenGl {
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
     screen_target: Option<Framebuffer>,
+    current_render_target: RenderTarget,
 }
 
 impl OpenGl {
@@ -106,6 +110,7 @@ impl OpenGl {
             framebuffers: Default::default(),
             context: context.clone(),
             screen_target: None,
+            current_render_target: RenderTarget::Screen,
         };
 
         unsafe {
@@ -406,6 +411,7 @@ impl OpenGl {
     }
 
     fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
+        self.current_render_target = target;
         match (target, &self.screen_target) {
             (RenderTarget::Screen, None) => unsafe {
                 Framebuffer::unbind(&self.context);
@@ -455,6 +461,94 @@ impl OpenGl {
             None => self.screen_target = None,
         }
     }
+
+    fn render_filtered_image(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        filter: ImageFilter,
+    ) {
+        match filter {
+            ImageFilter::GaussianBlur { sigma } => self.render_gaussian_blur(images, cmd, target_image, sigma),
+        }
+    }
+
+    fn render_gaussian_blur(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        mut cmd: Command,
+        target_image: ImageId,
+        sigma: f32,
+    ) {
+        let original_render_target = self.current_render_target;
+
+        // The filtering happens in two passes, first a horizontal blur and then the vertial blur. The
+        // first pass therefore renders into an intermediate, temporarily allocated texture.
+
+        let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
+
+        let image_paint = crate::Paint::image(
+            cmd.image.unwrap(),
+            0.,
+            0.,
+            source_image_info.width() as _,
+            source_image_info.height() as _,
+            0.,
+            1.,
+        );
+        let mut blur_params = Params::new(images, &image_paint, &Scissor::default(), 0., 0., 0.);
+        blur_params.shader_type = ShaderType::FilterImage.to_f32();
+
+        let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
+        let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
+        let gauss_coeff_z = gauss_coeff_y * gauss_coeff_y;
+
+        blur_params.image_blur_filter_coeff[0] = gauss_coeff_x;
+        blur_params.image_blur_filter_coeff[1] = gauss_coeff_y;
+        blur_params.image_blur_filter_coeff[2] = gauss_coeff_z;
+
+        blur_params.image_blur_filter_direction = [1.0, 0.0];
+
+        blur_params.image_blur_filter_sigma = sigma;
+
+        let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
+        self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
+        self.main_program.set_view(self.view);
+
+        self.clear_rect(
+            0,
+            0,
+            source_image_info.width() as _,
+            source_image_info.height() as _,
+            Color::rgbaf(0., 0., 0., 0.),
+        );
+
+        self.triangles(images, &cmd, &blur_params);
+
+        self.set_target(images, RenderTarget::Image(target_image));
+        self.main_program.set_view(self.view);
+
+        self.clear_rect(
+            0,
+            0,
+            source_image_info.width() as _,
+            source_image_info.height() as _,
+            Color::rgbaf(0., 0., 0., 0.),
+        );
+
+        blur_params.image_blur_filter_direction = [0.0, 1.0];
+
+        cmd.image = Some(horizontal_blur_buffer);
+
+        self.triangles(images, &cmd, &blur_params);
+
+        images.remove(self, horizontal_blur_buffer);
+
+        // restore previous render target and view
+        self.set_target(images, original_render_target);
+        self.main_program.set_view(self.view);
+    }
 }
 
 impl Renderer for OpenGl {
@@ -471,7 +565,7 @@ impl Renderer for OpenGl {
         }
     }
 
-    fn render(&mut self, images: &ImageStore<Self::Image>, verts: &[Vertex], commands: &[Command]) {
+    fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
         self.main_program.bind();
 
         unsafe {
@@ -520,18 +614,21 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        for cmd in commands {
+        for cmd in commands.into_iter() {
             self.set_composite_operation(cmd.composite_operation);
 
-            match &cmd.cmd_type {
-                CommandType::ConvexFill { params } => self.convex_fill(images, cmd, params),
+            match cmd.cmd_type {
+                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, params),
                 CommandType::ConcaveFill {
-                    stencil_params,
-                    fill_params,
-                } => self.concave_fill(images, cmd, stencil_params, fill_params),
-                CommandType::Stroke { params } => self.stroke(images, cmd, params),
-                CommandType::StencilStroke { params1, params2 } => self.stencil_stroke(images, cmd, params1, params2),
-                CommandType::Triangles { params } => self.triangles(images, cmd, params),
+                    ref stencil_params,
+                    ref fill_params,
+                } => self.concave_fill(images, &cmd, stencil_params, fill_params),
+                CommandType::Stroke { ref params } => self.stroke(images, &cmd, params),
+                CommandType::StencilStroke {
+                    ref params1,
+                    ref params2,
+                } => self.stencil_stroke(images, &cmd, params1, params2),
+                CommandType::Triangles { ref params } => self.triangles(images, &cmd, params),
                 CommandType::ClearRect {
                     x,
                     y,
@@ -539,11 +636,14 @@ impl Renderer for OpenGl {
                     height,
                     color,
                 } => {
-                    self.clear_rect(*x, *y, *width, *height, *color);
+                    self.clear_rect(x, y, width, height, color);
                 }
                 CommandType::SetRenderTarget(target) => {
-                    self.set_target(images, *target);
+                    self.set_target(images, target);
                     self.main_program.set_view(self.view);
+                }
+                CommandType::RenderFilteredImage { target_image, filter } => {
+                    self.render_filtered_image(images, cmd, target_image, filter)
                 }
             }
         }

@@ -253,3 +253,11 @@ impl<T> ImageStore<T> {
         }
     }
 }
+
+/// ImageFilter allows specifying the type of filter to apply to images with
+/// [`crate::Canvas::filter_image`].
+#[derive(Clone, Copy, Debug)]
+pub enum ImageFilter {
+    /// The filter shall be a gaussian blur with given sigma as standard deviation.
+    GaussianBlur { sigma: f32 },
+}

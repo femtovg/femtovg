@@ -28,6 +28,9 @@ pub struct Params {
     pub(crate) tex_type: f32,
     pub(crate) shader_type: f32,
     pub(crate) has_mask: f32,
+    pub(crate) image_blur_filter_direction: [f32; 2],
+    pub(crate) image_blur_filter_sigma: f32,
+    pub(crate) image_blur_filter_coeff: [f32; 3],
 }
 
 impl Params {

@@ -46,6 +46,7 @@ use text::{
 mod image;
 use crate::image::ImageStore;
 pub use crate::image::{
+    ImageFilter,
     ImageFlags,
     ImageId,
     ImageInfo,
@@ -381,8 +382,8 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush(&mut self) {
-        self.renderer.render(&self.images, &self.verts, &self.commands);
-        self.commands.clear();
+        self.renderer
+            .render(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -584,6 +585,51 @@ where
     pub fn image_size(&self, id: ImageId) -> Result<(usize, usize), ErrorKind> {
         let info = self.image_info(id)?;
         Ok((info.width(), info.height()))
+    }
+
+    /// Renders the given source_image into target_image while applying a filter effect.
+    ///
+    /// The target image must have the same size as the source image. The filtering is recorded
+    /// as a drawing command and run by the renderer when [`Self::flush()`] is called.
+    ///
+    /// The filtering does not take any transformation set on the Canvas into account nor does it
+    /// change the current rendering target.
+    pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
+        let (image_width, image_height) = match self.image_size(source_image) {
+            Ok((w, h)) => (w, h),
+            Err(_) => return,
+        };
+
+        // The renderer will receive a RenderFilteredImage command with two triangles attached that
+        // cover the image and the source image.
+        let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
+        cmd.image = Some(source_image);
+
+        let vertex_offset = self.verts.len();
+
+        let image_width = image_width as f32;
+        let image_height = image_height as f32;
+
+        let quad_x0 = 0.0;
+        let quad_y0 = -image_height;
+        let quad_x1 = image_width;
+        let quad_y1 = image_height;
+
+        let texture_x0 = -(image_width / 2.);
+        let texture_y0 = -(image_height / 2.);
+        let texture_x1 = (image_width) / 2.;
+        let texture_y1 = (image_height) / 2.;
+
+        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y0, texture_x1, texture_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y1, texture_x0, texture_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+
+        cmd.triangles_verts = Some((vertex_offset, 6));
+
+        self.append_cmd(cmd)
     }
 
     // Transforms
