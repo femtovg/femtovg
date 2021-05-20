@@ -510,7 +510,9 @@ impl OpenGl {
 
         blur_params.image_blur_filter_direction = [1.0, 0.0];
 
-        blur_params.image_blur_filter_sigma = sigma;
+        // GLES 2.0 does not allow non-constant loop indices, so limit the standard devitation to allow for a upper fixed limit
+        // on the number of iterations in the fragment shader.
+        blur_params.image_blur_filter_sigma = sigma.min(8.);
 
         let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
         self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));

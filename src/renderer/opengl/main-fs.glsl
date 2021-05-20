@@ -115,7 +115,12 @@ void main(void) {
         float coefficient_sum = gaussian_coeff.x;
         gaussian_coeff.xy *= gaussian_coeff.yz;
 
-        for (float i = 1.0; i <= sampleCount; i += 1.) {
+        for (float i = 1.0; i <= 12.0; i += 1.) {
+            // Work around GLES 2.0 limitation of only allowing constant loop indices
+            // by breaking here. Sigma has an upper bound of 8, imposed on the Rust side.
+            if (i >= sampleCount) {
+                break;
+            }
             color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
             color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
             coefficient_sum += 2.0 * gaussian_coeff.x;
