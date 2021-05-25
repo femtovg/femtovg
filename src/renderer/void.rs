@@ -25,7 +25,7 @@ impl Renderer for Void {
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
-    fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
+    fn render(&mut self, images: &mut ImageStore<VoidImage>, verts: &[Vertex], commands: Vec<Command>) {}
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Ok(VoidImage { info })

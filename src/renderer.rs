@@ -8,6 +8,7 @@ use crate::{
     CompositeOperationState,
     ErrorKind,
     FillRule,
+    ImageFilter,
     ImageId,
     ImageInfo,
     ImageSource,
@@ -56,6 +57,10 @@ pub enum CommandType {
     Triangles {
         params: Params,
     },
+    RenderFilteredImage {
+        target_image: ImageId,
+        filter: ImageFilter,
+    },
 }
 
 pub struct Command {
@@ -94,7 +99,7 @@ pub trait Renderer {
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
-    fn render(&mut self, images: &ImageStore<Self::Image>, verts: &[Vertex], commands: &[Command]);
+    fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>);
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize)
@@ -130,6 +135,7 @@ pub enum ShaderType {
     FillImage,
     Stencil,
     FillImageGradient,
+    FilterImage,
 }
 
 impl Default for ShaderType {
@@ -145,6 +151,7 @@ impl ShaderType {
             Self::FillImage => 1.0,
             Self::Stencil => 2.0,
             Self::FillImageGradient => 3.0,
+            Self::FilterImage => 4.0,
         }
     }
 }
