@@ -23,6 +23,8 @@ use std::path::Path as FilePath;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
+use fnv::FnvHashMap;
+
 mod utils;
 
 mod text;
@@ -39,7 +41,10 @@ pub use text::{
 };
 
 use text::{
+    FontTexture,
     RenderMode,
+    RenderedGlyph,
+    RenderedGlyphId,
     TextContext,
 };
 
@@ -295,6 +300,8 @@ pub struct Canvas<T: Renderer> {
     height: u32,
     renderer: T,
     text_context: TextContext,
+    rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
+    glyph_textures: Vec<FontTexture>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -318,6 +325,8 @@ where
             height: 0,
             renderer: renderer,
             text_context: Default::default(),
+            rendered_glyphs: Default::default(),
+            glyph_textures: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -1241,7 +1250,7 @@ where
 
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
-        self.text_context.debug_inspector_get_textures()
+        self.glyph_textures.iter().map(|t| t.image_id).collect()
     }
 
     #[cfg(feature = "debug_inspector")]

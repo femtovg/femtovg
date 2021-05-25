@@ -110,7 +110,7 @@ impl Default for RenderMode {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-struct RenderedGlyphId {
+pub(crate) struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
     size: u32,
@@ -133,7 +133,7 @@ impl RenderedGlyphId {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct RenderedGlyph {
+pub(crate) struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
@@ -193,17 +193,15 @@ impl ShapingId {
 type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
 type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
-struct FontTexture {
+pub(crate) struct FontTexture {
     atlas: Atlas,
-    image_id: ImageId,
+    pub(crate) image_id: ImageId,
 }
 
 pub(crate) struct TextContext {
     fonts: Arena<Font>,
     shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
     shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
-    textures: Vec<FontTexture>,
-    rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
 }
 
 impl Default for TextContext {
@@ -215,8 +213,6 @@ impl Default for TextContext {
             fonts: Default::default(),
             shaping_run_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_run),
             shaped_words_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_words),
-            textures: Default::default(),
-            rendered_glyphs: Default::default(),
         }
     }
 }
@@ -304,11 +300,6 @@ impl TextContext {
 
     fn clear_caches(&mut self) {
         self.shaped_words_cache.clear();
-    }
-
-    #[cfg(feature = "debug_inspector")]
-    pub fn debug_inspector_get_textures(&self) -> Vec<ImageId> {
-        self.textures.iter().map(|t| t.image_id).collect()
     }
 }
 
@@ -627,15 +618,15 @@ pub(crate) fn render_atlas<T: Renderer>(
 
         let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
-        if !canvas.text_context.rendered_glyphs.contains_key(&id) {
+        if !canvas.rendered_glyphs.contains_key(&id) {
             let glyph = render_glyph(canvas, paint, mode, &glyph)?;
 
-            canvas.text_context.rendered_glyphs.insert(id, glyph);
+            canvas.rendered_glyphs.insert(id, glyph);
         }
 
-        let rendered = canvas.text_context.rendered_glyphs.get(&id).unwrap();
+        let rendered = canvas.rendered_glyphs.get(&id).unwrap();
 
-        if let Some(texture) = canvas.text_context.textures.get(rendered.texture_index) {
+        if let Some(texture) = canvas.glyph_textures.get(rendered.texture_index) {
             let image_id = texture.image_id;
             let size = texture.atlas.size();
             let itw = 1.0 / size.0 as f32;
@@ -794,7 +785,7 @@ fn find_texture_or_alloc<T: Renderer>(
     height: usize,
 ) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
     // Find a free location in one of the atlases
-    let mut textures = canvas.text_context.textures.iter_mut().enumerate();
+    let mut textures = canvas.glyph_textures.iter_mut().enumerate();
     let mut texture_search_result = textures.find_map(|(index, texture)| {
         texture
             .atlas
@@ -835,9 +826,9 @@ fn find_texture_or_alloc<T: Renderer>(
             }
         }
 
-        canvas.text_context.textures.push(FontTexture { atlas, image_id });
+        canvas.glyph_textures.push(FontTexture { atlas, image_id });
 
-        let index = canvas.text_context.textures.len() - 1;
+        let index = canvas.glyph_textures.len() - 1;
         texture_search_result = Some((index, image_id, loc));
     }
 
