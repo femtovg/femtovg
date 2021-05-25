@@ -1,10 +1,13 @@
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs;
 use std::hash::{
     Hash,
     Hasher,
 };
+use std::ops::Range;
 use std::path::Path as FilePath;
+use std::rc::Rc;
 
 use fnv::{
     FnvBuildHasher,
@@ -198,13 +201,84 @@ pub(crate) struct FontTexture {
     pub(crate) image_id: ImageId,
 }
 
-pub(crate) struct TextContext {
+/// TextContext provides functionality for text processing in femtovg. You can
+/// add fonts using the [`Self::add_font_file()`], [`Self::add_font_mem()`] and
+/// [`Self::add_font_dir()`] functions. For each registered font a [`FontId`] is
+/// returned.
+///
+/// The [`FontId`] can be supplied to [`crate::Paint`] along with additional parameters
+/// such as the font size.
+///
+/// The paint is needed when using TextContext's measurement functions such as
+/// [`Self::measure_text()`].
+///
+/// Note that the measurements are done entirely with the supplied sizes in the paint
+/// parameter. If you need measurements that take a [`crate::Canvas`]'s transform or dpi into
+/// account (see [`crate::Canvas::set_size()`]), you need to use the measurement functions
+/// on the canvas.
+#[derive(Clone)]
+pub struct TextContext(pub(crate) Rc<RefCell<TextContextImpl>>);
+
+impl Default for TextContext {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl TextContext {
+    /// Registers all .ttf files from a directory with this text context. If successful, the
+    /// font ids of all registered fonts are returned.
+    pub fn add_font_dir<T: AsRef<FilePath>>(&self, path: T) -> Result<Vec<FontId>, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_dir(path)
+    }
+
+    /// Registers the .ttf file from the specified path with this text context. If successful,
+    /// the font id is returned.
+    pub fn add_font_file<T: AsRef<FilePath>>(&self, path: T) -> Result<FontId, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_file(path)
+    }
+
+    /// Registers the in-memory representation of a TrueType font pointed to by the data
+    /// parameter with this text context. If successful, the font id is returned.
+    pub fn add_font_mem(&self, data: &[u8]) -> Result<FontId, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_mem(data)
+    }
+
+    /// Returns information on how the provided text will be drawn with the specified paint.
+    pub fn measure_text<S: AsRef<str>>(&self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
+        self.0.as_ref().borrow_mut().measure_text(x, y, text, paint)
+    }
+
+    /// Returns the maximum index-th byte of text that will fit inside max_width.
+    ///
+    /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
+    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
+        self.0.as_ref().borrow_mut().break_text(max_width, text, paint)
+    }
+
+    /// Returnes a list of ranges representing each line of text that will fit inside max_width
+    pub fn break_text_vec<S: AsRef<str>>(
+        &self,
+        max_width: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        self.0.as_ref().borrow_mut().break_text_vec(max_width, text, paint)
+    }
+
+    /// Returns font metrics for a particular Paint.
+    pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        self.0.as_ref().borrow_mut().measure_font(paint)
+    }
+}
+
+pub(crate) struct TextContextImpl {
     fonts: Arena<Font>,
     shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
     shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
 }
 
-impl Default for TextContext {
+impl Default for TextContextImpl {
     fn default() -> Self {
         let fnv_run = FnvBuildHasher::default();
         let fnv_words = FnvBuildHasher::default();
@@ -217,7 +291,7 @@ impl Default for TextContext {
     }
 }
 
-impl TextContext {
+impl TextContextImpl {
     pub fn add_font_dir<T: AsRef<FilePath>>(&mut self, path: T) -> Result<Vec<FontId>, ErrorKind> {
         let path = path.as_ref();
         let mut fonts = Vec::new();
@@ -301,6 +375,60 @@ impl TextContext {
     fn clear_caches(&mut self) {
         self.shaped_words_cache.clear();
     }
+
+    pub fn measure_text<S: AsRef<str>>(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<TextMetrics, ErrorKind> {
+        Ok(shape(x, y, self, &paint, text.as_ref(), None)?)
+    }
+
+    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
+        let layout = shape(0.0, 0.0, self, &paint, text.as_ref(), Some(max_width))?;
+
+        Ok(layout.final_byte_index)
+    }
+
+    pub fn break_text_vec<S: AsRef<str>>(
+        &mut self,
+        max_width: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        let text = text.as_ref();
+
+        let mut res = Vec::new();
+        let mut start = 0;
+
+        while start < text.len() {
+            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
+                if index == 0 {
+                    break;
+                }
+
+                let index = start + index;
+                res.push(start..index);
+                start += &text[start..index].len();
+            } else {
+                break;
+            }
+        }
+
+        Ok(res)
+    }
+
+    pub fn measure_font(&mut self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        if let Some(Some(id)) = paint.font_ids.get(0) {
+            if let Some(font) = self.font(*id) {
+                return Ok(font.metrics(paint.font_size));
+            }
+        }
+
+        Err(ErrorKind::NoFontFound)
+    }
 }
 
 /// Result of a shaping run.
@@ -345,7 +473,7 @@ impl TextMetrics {
 pub(crate) fn shape(
     x: f32,
     y: f32,
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
     text: &str,
     max_width: Option<f32>,
@@ -367,7 +495,7 @@ pub(crate) fn shape(
 }
 
 fn shape_run(
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
     text: &str,
     max_width: Option<f32>,
@@ -458,7 +586,7 @@ fn shape_run(
 fn shape_word(
     word: &str,
     hb_direction: rustybuzz::Direction,
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
@@ -532,7 +660,13 @@ fn shape_word(
 }
 
 // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
-fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, paint: &Paint) -> Result<(), ErrorKind> {
+fn layout(
+    x: f32,
+    y: f32,
+    context: &mut TextContextImpl,
+    res: &mut TextMetrics,
+    paint: &Paint,
+) -> Result<(), ErrorKind> {
     let mut cursor_x = x;
     let mut cursor_y = y;
 
@@ -687,10 +821,8 @@ fn render_glyph<T: Renderer>(
     canvas.reset();
 
     let (mut path, scale) = {
-        let font = canvas
-            .text_context
-            .font_mut(glyph.font_id)
-            .ok_or(ErrorKind::NoFontFound)?;
+        let mut text_context = canvas.text_context.as_ref().borrow_mut();
+        let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let scale = font.scale(paint.font_size);
 
         let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
@@ -849,10 +981,8 @@ pub(crate) fn render_direct<T: Renderer>(
 
     for glyph in &text_layout.glyphs {
         let (mut path, scale) = {
-            let font = canvas
-                .text_context
-                .font_mut(glyph.font_id)
-                .ok_or(ErrorKind::NoFontFound)?;
+            let mut text_context = canvas.text_context.as_ref().borrow_mut();
+            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
             let scale = font.scale(paint.font_size);
 
