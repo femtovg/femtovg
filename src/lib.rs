@@ -17,11 +17,15 @@ TODO:
 #[macro_use]
 extern crate serde;
 
+use std::cell::RefCell;
 use std::ops::Range;
 use std::path::Path as FilePath;
+use std::rc::Rc;
 
 use imgref::ImgVec;
 use rgb::RGBA8;
+
+use fnv::FnvHashMap;
 
 mod utils;
 
@@ -35,12 +39,16 @@ pub use text::{
     Baseline,
     FontId,
     FontMetrics,
+    TextContext,
     TextMetrics,
 };
 
 use text::{
+    FontTexture,
     RenderMode,
-    TextContext,
+    RenderedGlyph,
+    RenderedGlyphId,
+    TextContextImpl,
 };
 
 mod image;
@@ -294,7 +302,9 @@ pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
     renderer: T,
-    text_context: TextContext,
+    text_context: Rc<RefCell<TextContextImpl>>,
+    rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
+    glyph_textures: Vec<FontTexture>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -318,6 +328,36 @@ where
             height: 0,
             renderer: renderer,
             text_context: Default::default(),
+            rendered_glyphs: Default::default(),
+            glyph_textures: Default::default(),
+            current_render_target: RenderTarget::Screen,
+            state_stack: Default::default(),
+            commands: Default::default(),
+            verts: Default::default(),
+            images: ImageStore::new(),
+            fringe_width: 1.0,
+            device_px_ratio: 1.0,
+            tess_tol: 0.25,
+            dist_tol: 0.01,
+            gradients: GradientStore::new(),
+        };
+
+        canvas.save();
+
+        Ok(canvas)
+    }
+
+    /// Creates a new canvas with the specified renderer and using the fonts registered with the
+    /// provided [`TextContext`]. Note that the context is explicitly shared, so that any fonts
+    /// registered with a clone of this context will also be visible to this canvas.
+    pub fn new_with_text_context(renderer: T, text_context: TextContext) -> Result<Self, ErrorKind> {
+        let mut canvas = Self {
+            width: 0,
+            height: 0,
+            renderer: renderer,
+            text_context: text_context.0,
+            rendered_glyphs: Default::default(),
+            glyph_textures: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -1023,17 +1063,17 @@ where
 
     /// Adds a font file to the canvas
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_file(file_path)
+        self.text_context.as_ref().borrow_mut().add_font_file(file_path)
     }
 
     /// Adds a font to the canvas by reading it from the specified chunk of memory.
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_mem(data)
+        self.text_context.as_ref().borrow_mut().add_font_mem(data)
     }
 
     /// Adds all .ttf files from a directory
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
-        self.text_context.add_font_dir(dir_path)
+        self.text_context.as_ref().borrow_mut().add_font_dir(dir_path)
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
@@ -1050,23 +1090,21 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
-        layout.scale(invscale);
-
-        Ok(layout)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .measure_text(x * scale, y * scale, text, paint)
+            .map(|mut metrics| {
+                metrics.scale(invscale);
+                metrics
+            })
     }
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
-        if let Some(Some(id)) = paint.font_ids.get(0) {
-            if let Some(font) = self.text_context.font(*id) {
-                return Ok(font.metrics(paint.font_size));
-            }
-        }
-
-        Err(ErrorKind::NoFontFound)
+        self.text_context.as_ref().borrow_mut().measure_font(paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
@@ -1079,9 +1117,10 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let max_width = max_width * scale;
 
-        let layout = text::shape(0.0, 0.0, &mut self.text_context, &paint, text, Some(max_width))?;
-
-        Ok(layout.final_byte_index)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .break_text(max_width, text, paint)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -1089,28 +1128,18 @@ where
         &mut self,
         max_width: f32,
         text: S,
-        paint: Paint,
+        mut paint: Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        self.transform_text_paint(&mut paint);
+
         let text = text.as_ref();
+        let scale = self.font_scale() * self.device_px_ratio;
+        let max_width = max_width * scale;
 
-        let mut res = Vec::new();
-        let mut start = 0;
-
-        while start < text.len() {
-            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
-                if index == 0 {
-                    break;
-                }
-
-                let index = start + index;
-                res.push(start..index);
-                start += &text[start..index].len();
-            } else {
-                break;
-            }
-        }
-
-        Ok(res)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .break_text_vec(max_width, text, paint)
     }
 
     /// Fills the provided string with the specified Paint.
@@ -1158,7 +1187,14 @@ where
 
         self.transform_text_paint(&mut paint);
 
-        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
+        let mut layout = text::shape(
+            x * scale,
+            y * scale,
+            &mut self.text_context.as_ref().borrow_mut(),
+            &paint,
+            text,
+            None,
+        )?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
@@ -1241,7 +1277,7 @@ where
 
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
-        self.text_context.debug_inspector_get_textures()
+        self.glyph_textures.iter().map(|t| t.image_id).collect()
     }
 
     #[cfg(feature = "debug_inspector")]
