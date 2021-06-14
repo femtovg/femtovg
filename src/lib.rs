@@ -853,8 +853,8 @@ where
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4);
+        let fringe_width = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
@@ -931,14 +931,30 @@ where
             // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
             // over the shape area with stencil test enabled to produce the final fill. These are
             // the verts needed for the covering quad
-            self.verts
-                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.miny, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.miny, 0.5, 1.0));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.maxx + fringe_width,
+                path_cache.bounds.maxy + fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.maxx + fringe_width,
+                path_cache.bounds.miny - fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.minx - fringe_width,
+                path_cache.bounds.maxy + fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.minx - fringe_width,
+                path_cache.bounds.miny,
+                0.5,
+                1.0,
+            ));
 
             cmd.triangles_verts = Some((offset, 4));
         }
