@@ -68,15 +68,19 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
-    let tree = usvg::Tree::from_file("examples/assets/Ghostscript_Tiger.svg", &usvg::Options::default()).unwrap();
+    let svg_data = std::fs::read("examples/assets/Ghostscript_Tiger.svg").unwrap();
+    let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default()).unwrap();
 
-    let xml_opt = usvg::XmlOptions {
+    let xml_opt = xmlwriter::Options {
         use_single_quote: false,
-        indent: usvg::XmlIndent::Spaces(4),
-        attributes_indent: usvg::XmlIndent::Spaces(4),
+        indent: xmlwriter::Indent::Spaces(4),
+        attributes_indent: xmlwriter::Indent::Spaces(4),
     };
 
-    let svg = tree.to_string(xml_opt);
+    let svg = tree.to_string(&usvg::XmlOptions {
+        writer_opts: xml_opt,
+        ..Default::default()
+    });
 
     let mut paths = render_svg(&svg);
 
@@ -204,7 +208,7 @@ fn main() {
 }
 
 fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
-    let svg = svg::read(std::io::Cursor::new(&svg)).unwrap();
+    let svg = svg::read(svg).unwrap();
 
     let mut paths = Vec::new();
 
