@@ -621,7 +621,7 @@ fn shape_word(
         let mut has_missing = false;
 
         for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
-            if info.codepoint == 0 {
+            if info.glyph_id == 0 {
                 has_missing = true;
             }
 
@@ -633,7 +633,7 @@ fn shape_word(
                 c: c,
                 byte_index: info.cluster as usize,
                 font_id: font_id,
-                codepoint: info.codepoint,
+                codepoint: info.glyph_id,
                 width: 0.0,
                 height: 0.0,
                 advance_x: position.x_advance as f32 * scale,
@@ -644,7 +644,7 @@ fn shape_word(
                 bearing_y: 0.0,
             };
 
-            if let Some(glyph) = font.glyph(info.codepoint as u16) {
+            if let Some(glyph) = font.glyph(info.glyph_id as u16) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
                 g.bearing_x = glyph.metrics.bearing_x * scale;
