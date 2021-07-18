@@ -10,6 +10,7 @@ use rgb::RGBA8;
 
 use crate::{
     renderer::{
+        GlyphTexture,
         ImageId,
         Vertex,
     },
@@ -178,7 +179,7 @@ impl OpenGl {
     }
 
     fn convex_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
-        self.set_uniforms(images, gpu_paint, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
@@ -207,7 +208,7 @@ impl OpenGl {
             //glow::DepthMask(glow::FALSE);
         }
 
-        self.set_uniforms(images, stencil_paint, None, None);
+        self.set_uniforms(images, stencil_paint, None, GlyphTexture::None);
 
         unsafe {
             self.context
@@ -232,7 +233,7 @@ impl OpenGl {
             //glow::DepthMask(glow::TRUE);
         }
 
-        self.set_uniforms(images, fill_paint, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, fill_paint, cmd.image, cmd.glyph_texture);
 
         if self.antialias {
             unsafe {
@@ -275,7 +276,7 @@ impl OpenGl {
     }
 
     fn stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
-        self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -299,7 +300,7 @@ impl OpenGl {
             self.context.stencil_op(glow::KEEP, glow::KEEP, glow::INCR);
         }
 
-        self.set_uniforms(images, paint2, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint2, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.stroke_verts {
@@ -311,7 +312,7 @@ impl OpenGl {
         }
 
         // Draw anti-aliased pixels.
-        self.set_uniforms(images, paint1, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint1, cmd.image, cmd.glyph_texture);
 
         unsafe {
             self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
@@ -352,7 +353,7 @@ impl OpenGl {
     }
 
     fn triangles(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
-        self.set_uniforms(images, paint, cmd.image, cmd.alpha_mask);
+        self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         if let Some((start, count)) = cmd.triangles_verts {
             unsafe {
@@ -368,7 +369,7 @@ impl OpenGl {
         images: &ImageStore<GlTexture>,
         paint: &Params,
         image_tex: Option<ImageId>,
-        alpha_tex: Option<ImageId>,
+        glyph_tex: GlyphTexture,
     ) {
         let arr = UniformArray::from(paint);
         self.main_program.set_config(arr.as_slice());
@@ -383,13 +384,14 @@ impl OpenGl {
             self.context.bind_texture(glow::TEXTURE_2D, tex);
         }
 
-        let masktex = alpha_tex
-            .and_then(|id| images.get(id))
-            .map_or(None, |tex| Some(tex.id()));
+        let glyphtex = match glyph_tex {
+            GlyphTexture::None => None,
+            GlyphTexture::AlphaMask(id) | GlyphTexture::ColorTexture(id) => images.get(id).map(|tex| tex.id()),
+        };
 
         unsafe {
             self.context.active_texture(glow::TEXTURE0 + 1);
-            self.context.bind_texture(glow::TEXTURE_2D, masktex);
+            self.context.bind_texture(glow::TEXTURE_2D, glyphtex);
         }
 
         self.check_error("set_uniforms texture");
@@ -612,7 +614,7 @@ impl Renderer for OpenGl {
 
         // Bind the two uniform samplers to texture units
         self.main_program.set_tex(0);
-        self.main_program.set_masktex(1);
+        self.main_program.set_glyphtex(1);
 
         self.check_error("render prepare");
 
