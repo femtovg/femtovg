@@ -32,7 +32,6 @@ use crate::{
     ImageId,
     ImageInfo,
     Paint,
-    Path,
     PixelFormat,
     RenderTarget,
     Renderer,
@@ -820,18 +819,15 @@ fn render_glyph<T: Renderer>(
     canvas.save();
     canvas.reset();
 
-    let (mut path, scale) = {
-        let mut text_context = canvas.text_context.as_ref().borrow_mut();
+    let text_context = canvas.text_context.clone();
+    let mut text_context = text_context.borrow_mut();
+
+    let (maybe_path, scale) = {
         let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
         let scale = font.scale(paint.font_size);
 
-        let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
-            font_glyph.path.clone()
-        } else {
-            Path::new()
-        };
-
-        (path, scale)
+        let maybe_path = font.glyph(glyph.codepoint as u16).map(|glyph| &mut glyph.path);
+        (maybe_path, scale)
     };
 
     let rendered_bearing_y = glyph.bearing_y.round();
@@ -850,51 +846,53 @@ fn render_glyph<T: Renderer>(
         Color::black(),
     );
 
-    let factor = 1.0 / 8.0;
+    if let Some(mut path) = maybe_path {
+        let factor = 1.0 / 8.0;
 
-    let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
-    mask_paint.set_fill_rule(FillRule::EvenOdd);
-    mask_paint.set_anti_alias(false);
-
-    if mode == RenderMode::Stroke {
-        mask_paint.line_width = line_width / scale;
-    }
-
-    canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
-
-    // 4x
-    // let points = [
-    //     (-3.0/8.0, 1.0/8.0),
-    //     (1.0/8.0, 3.0/8.0),
-    //     (3.0/8.0, -1.0/8.0),
-    //     (-1.0/8.0, -3.0/8.0),
-    // ];
-
-    // 8x
-    let points = [
-        (-7.0 / 16.0, -1.0 / 16.0),
-        (-1.0 / 16.0, -5.0 / 16.0),
-        (3.0 / 16.0, -7.0 / 16.0),
-        (5.0 / 16.0, -3.0 / 16.0),
-        (7.0 / 16.0, 1.0 / 16.0),
-        (1.0 / 16.0, 5.0 / 16.0),
-        (-3.0 / 16.0, 7.0 / 16.0),
-        (-5.0 / 16.0, 3.0 / 16.0),
-    ];
-
-    for point in &points {
-        canvas.save();
-        canvas.translate(point.0, point.1);
-
-        canvas.scale(scale, scale);
+        let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
+        mask_paint.set_fill_rule(FillRule::EvenOdd);
+        mask_paint.set_anti_alias(false);
 
         if mode == RenderMode::Stroke {
-            canvas.stroke_path(&mut path, mask_paint);
-        } else {
-            canvas.fill_path(&mut path, mask_paint);
+            mask_paint.line_width = line_width / scale;
         }
 
-        canvas.restore();
+        canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+        // 4x
+        // let points = [
+        //     (-3.0/8.0, 1.0/8.0),
+        //     (1.0/8.0, 3.0/8.0),
+        //     (3.0/8.0, -1.0/8.0),
+        //     (-1.0/8.0, -3.0/8.0),
+        // ];
+
+        // 8x
+        let points = [
+            (-7.0 / 16.0, -1.0 / 16.0),
+            (-1.0 / 16.0, -5.0 / 16.0),
+            (3.0 / 16.0, -7.0 / 16.0),
+            (5.0 / 16.0, -3.0 / 16.0),
+            (7.0 / 16.0, 1.0 / 16.0),
+            (1.0 / 16.0, 5.0 / 16.0),
+            (-3.0 / 16.0, 7.0 / 16.0),
+            (-5.0 / 16.0, 3.0 / 16.0),
+        ];
+
+        for point in &points {
+            canvas.save();
+            canvas.translate(point.0, point.1);
+
+            canvas.scale(scale, scale);
+
+            if mode == RenderMode::Stroke {
+                canvas.stroke_path(&mut path, mask_paint);
+            } else {
+                canvas.fill_path(&mut path, mask_paint);
+            }
+
+            canvas.restore();
+        }
     }
 
     canvas.restore();
@@ -977,17 +975,19 @@ pub(crate) fn render_direct<T: Renderer>(
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
 
+    let text_context = canvas.text_context.clone();
+    let mut text_context = text_context.borrow_mut();
+
     let mut scaled = false;
 
     for glyph in &text_layout.glyphs {
         let (mut path, scale) = {
-            let mut text_context = canvas.text_context.as_ref().borrow_mut();
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
             let scale = font.scale(paint.font_size);
 
             let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
-                font_glyph.path.clone()
+                &mut font_glyph.path
             } else {
                 continue;
             };
