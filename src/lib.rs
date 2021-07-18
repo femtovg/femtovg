@@ -86,7 +86,10 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::PaintFlavor;
+use paint::{
+    GlyphTexture,
+    PaintFlavor,
+};
 
 mod path;
 use path::Convexity;
@@ -1218,12 +1221,10 @@ where
         if paint.font_size > 92.0 {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
-            let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
+            let create_vertices = |quads: &Vec<text::Quad>| {
+                let mut verts = Vec::with_capacity(quads.len() * 6);
 
-            for cmd in &cmds {
-                let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
-
-                for quad in &cmd.quads {
+                for quad in quads {
                     let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
                     let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
                     let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
@@ -1236,8 +1237,26 @@ where
                     verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
                     verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
                 }
+                verts
+            };
 
-                paint.set_alpha_mask(Some(cmd.image_id));
+            let draw_commands = text::render_atlas(self, &layout, &paint, render_mode)?;
+
+            for cmd in draw_commands.alpha_glyphs {
+                let verts = create_vertices(&cmd.quads);
+
+                paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
+
+                // Apply global alpha
+                paint.mul_alpha(self.state().alpha);
+
+                self.render_triangles(&verts, &paint);
+            }
+
+            for cmd in draw_commands.color_glyphs {
+                let verts = create_vertices(&cmd.quads);
+
+                paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
 
                 // Apply global alpha
                 paint.mul_alpha(self.state().alpha);
@@ -1258,7 +1277,7 @@ where
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.alpha_mask = paint.alpha_mask();
+        cmd.glyph_texture = paint.glyph_texture();
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);

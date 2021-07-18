@@ -148,6 +148,19 @@ impl PaintFlavor {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum GlyphTexture {
+    None,
+    AlphaMask(ImageId),
+    ColorTexture(ImageId),
+}
+
+impl Default for GlyphTexture {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Struct controlling how graphical shapes are rendered.
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
@@ -179,7 +192,7 @@ pub struct Paint {
     pub(crate) flavor: PaintFlavor,
     pub(crate) transform: Transform2D,
     #[cfg_attr(feature = "serialization", serde(skip))]
-    pub(crate) alpha_mask: Option<ImageId>,
+    pub(crate) glyph_texture: GlyphTexture,
     pub(crate) shape_anti_alias: bool,
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
@@ -201,7 +214,7 @@ impl Default for Paint {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
             transform: Default::default(),
-            alpha_mask: Default::default(),
+            glyph_texture: Default::default(),
             shape_anti_alias: true,
             stencil_strokes: true,
             miter_limit: 10.0,
@@ -487,16 +500,16 @@ impl Paint {
         self.flavor = PaintFlavor::Color(color);
     }
 
-    pub(crate) fn alpha_mask(&self) -> Option<ImageId> {
-        self.alpha_mask
+    pub(crate) fn glyph_texture(&self) -> GlyphTexture {
+        self.glyph_texture
     }
 
-    /// Set an alpha mask; this is only used by draw_triangles which is used for text.
+    /// Set an alpha mask or color glyph texture; this is only used by draw_triangles which is used for text.
     // This is scoped to crate visibility because fill_path and stroke_path don't propagate
     // the alpha mask (so nothing draws), and the texture coordinates are used for antialiasing
     // when path drawing.
-    pub(crate) fn set_alpha_mask(&mut self, image_id: Option<ImageId>) {
-        self.alpha_mask = image_id;
+    pub(crate) fn set_glyph_texture(&mut self, texture: GlyphTexture) {
+        self.glyph_texture = texture;
     }
 
     /// Returns boolean if the shapes drawn with this paint will be antialiased.

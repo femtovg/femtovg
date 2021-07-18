@@ -18,13 +18,13 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define strokeThr frag[10].y
 #define texType int(frag[10].z)
 #define shaderType int(frag[10].w)
-#define hasMask int(frag[11].x)
+#define glyphTextureType int(frag[11].x)
 #define imageBlurFilterDirection frag[11].yz
 #define imageBlurFilterSigma frag[11].w
 #define imageBlurFilterCoeff frag[12].xyz
 
 uniform sampler2D tex;
-uniform sampler2D masktex;
+uniform sampler2D glyphtex;
 uniform vec2 viewSize;
 
 varying vec2 ftcoord;
@@ -138,13 +138,16 @@ void main(void) {
         result = color;
     }
 
-    if (hasMask == 1) {
+    if (glyphTextureType > 0) {
         // Textured tris
-        vec4 mask = texture2D(masktex, ftcoord);
-        mask = vec4(mask.x);
+        vec4 mask = texture2D(glyphtex, ftcoord);
 
-        //if (texType == 1) mask_color = vec4(mask_color.xyz * mask_color.w, mask_color.w);
-        //if (texType == 2) mask_color = vec4(mask_color.x);
+        if (glyphTextureType == 1) {
+            mask = vec4(mask.x);
+        } else {
+            result = vec4(1, 1, 1, 1);
+            mask = vec4(mask.xyz * mask.w, mask.w);
+        }
 
         mask *= scissor;
         result *= mask;

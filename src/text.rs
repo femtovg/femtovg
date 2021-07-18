@@ -44,6 +44,8 @@ mod font;
 use font::Font;
 pub use font::FontMetrics;
 
+use self::font::GlyphRendering;
+
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().
 const GLYPH_PADDING: u32 = 1;
@@ -143,6 +145,7 @@ pub(crate) struct RenderedGlyph {
     atlas_x: u32,
     atlas_y: u32,
     padding: u32,
+    color_glyph: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -730,13 +733,19 @@ pub(crate) struct Quad {
     pub t1: f32,
 }
 
+pub(crate) struct GlyphDrawCommands {
+    pub(crate) alpha_glyphs: Vec<DrawCmd>,
+    pub(crate) color_glyphs: Vec<DrawCmd>,
+}
+
 pub(crate) fn render_atlas<T: Renderer>(
     canvas: &mut Canvas<T>,
     text_layout: &TextMetrics,
     paint: &Paint,
     mode: RenderMode,
-) -> Result<Vec<DrawCmd>, ErrorKind> {
-    let mut cmd_map = FnvHashMap::default();
+) -> Result<GlyphDrawCommands, ErrorKind> {
+    let mut alpha_cmd_map = FnvHashMap::default();
+    let mut color_cmd_map = FnvHashMap::default();
 
     let line_width_offset = if mode == RenderMode::Stroke {
         (paint.line_width / 2.0).ceil()
@@ -765,12 +774,20 @@ pub(crate) fn render_atlas<T: Renderer>(
             let itw = 1.0 / size.0 as f32;
             let ith = 1.0 / size.1 as f32;
 
+            let cmd_map = if rendered.color_glyph {
+                &mut color_cmd_map
+            } else {
+                &mut alpha_cmd_map
+            };
+
             let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
                 image_id,
                 quads: Vec::new(),
             });
 
             let mut q = Quad::default();
+
+            let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
             q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
             q.y0 = (glyph.y + glyph.bearing_y).round()
@@ -791,7 +808,10 @@ pub(crate) fn render_atlas<T: Renderer>(
 
     canvas.set_render_target(initial_render_target);
 
-    Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
+    Ok(GlyphDrawCommands {
+        alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+        color_glyphs: color_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+    })
 }
 
 fn render_glyph<T: Renderer>(
@@ -802,10 +822,24 @@ fn render_glyph<T: Renderer>(
 ) -> Result<RenderedGlyph, ErrorKind> {
     let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
-    let line_width = if mode == RenderMode::Stroke {
-        paint.line_width
-    } else {
+    let text_context = canvas.text_context.clone();
+    let mut text_context = text_context.borrow_mut();
+
+    let (mut maybe_glyph_representation, scale) = {
+        let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let scale = font.scale(paint.font_size);
+
+        let maybe_glyph_representation =
+            font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16);
+        (maybe_glyph_representation, scale)
+    };
+
+    let color_glyph = matches!(maybe_glyph_representation, Some(GlyphRendering::RenderAsImage(..)));
+
+    let line_width = if color_glyph || mode != RenderMode::Stroke {
         0.0
+    } else {
+        paint.line_width
     };
 
     let line_width_offset = (line_width / 2.0).ceil();
@@ -819,85 +853,12 @@ fn render_glyph<T: Renderer>(
     canvas.save();
     canvas.reset();
 
-    let text_context = canvas.text_context.clone();
-    let mut text_context = text_context.borrow_mut();
-
-    let (maybe_path, scale) = {
-        let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let scale = font.scale(paint.font_size);
-
-        let maybe_path = font.glyph(glyph.codepoint as u16).map(|glyph| &mut glyph.path);
-        (maybe_path, scale)
-    };
-
     let rendered_bearing_y = glyph.bearing_y.round();
     let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
     let x = dst_x as f32 - glyph.bearing_x + line_width_offset + padding as f32 + x_quant;
     let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
 
-    canvas.translate(x, y);
-
-    canvas.set_render_target(RenderTarget::Image(dst_image_id));
-    canvas.clear_rect(
-        dst_x as u32,
-        TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
-        width as u32,
-        height as u32,
-        Color::black(),
-    );
-
-    if let Some(mut path) = maybe_path {
-        let factor = 1.0 / 8.0;
-
-        let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
-        mask_paint.set_fill_rule(FillRule::EvenOdd);
-        mask_paint.set_anti_alias(false);
-
-        if mode == RenderMode::Stroke {
-            mask_paint.line_width = line_width / scale;
-        }
-
-        canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
-
-        // 4x
-        // let points = [
-        //     (-3.0/8.0, 1.0/8.0),
-        //     (1.0/8.0, 3.0/8.0),
-        //     (3.0/8.0, -1.0/8.0),
-        //     (-1.0/8.0, -3.0/8.0),
-        // ];
-
-        // 8x
-        let points = [
-            (-7.0 / 16.0, -1.0 / 16.0),
-            (-1.0 / 16.0, -5.0 / 16.0),
-            (3.0 / 16.0, -7.0 / 16.0),
-            (5.0 / 16.0, -3.0 / 16.0),
-            (7.0 / 16.0, 1.0 / 16.0),
-            (1.0 / 16.0, 5.0 / 16.0),
-            (-3.0 / 16.0, 7.0 / 16.0),
-            (-5.0 / 16.0, 3.0 / 16.0),
-        ];
-
-        for point in &points {
-            canvas.save();
-            canvas.translate(point.0, point.1);
-
-            canvas.scale(scale, scale);
-
-            if mode == RenderMode::Stroke {
-                canvas.stroke_path(&mut path, mask_paint);
-            } else {
-                canvas.fill_path(&mut path, mask_paint);
-            }
-
-            canvas.restore();
-        }
-    }
-
-    canvas.restore();
-
-    Ok(RenderedGlyph {
+    let rendered_glyph = RenderedGlyph {
         width: width - 2 * GLYPH_MARGIN,
         height: height - 2 * GLYPH_MARGIN,
         bearing_y: rendered_bearing_y as i32,
@@ -905,7 +866,86 @@ fn render_glyph<T: Renderer>(
         atlas_y: dst_y as u32 + GLYPH_MARGIN,
         texture_index: dst_index,
         padding: padding - GLYPH_MARGIN,
-    })
+        color_glyph,
+    };
+
+    match maybe_glyph_representation.as_mut() {
+        Some(GlyphRendering::RenderAsPath(ref mut path)) => {
+            canvas.translate(x, y);
+
+            canvas.set_render_target(RenderTarget::Image(dst_image_id));
+            canvas.clear_rect(
+                dst_x as u32,
+                TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
+                width as u32,
+                height as u32,
+                Color::black(),
+            );
+            let factor = 1.0 / 8.0;
+
+            let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
+            mask_paint.set_fill_rule(FillRule::EvenOdd);
+            mask_paint.set_anti_alias(false);
+
+            if mode == RenderMode::Stroke {
+                mask_paint.line_width = line_width / scale;
+            }
+
+            canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+            // 4x
+            // let points = [
+            //     (-3.0/8.0, 1.0/8.0),
+            //     (1.0/8.0, 3.0/8.0),
+            //     (3.0/8.0, -1.0/8.0),
+            //     (-1.0/8.0, -3.0/8.0),
+            // ];
+
+            // 8x
+            let points = [
+                (-7.0 / 16.0, -1.0 / 16.0),
+                (-1.0 / 16.0, -5.0 / 16.0),
+                (3.0 / 16.0, -7.0 / 16.0),
+                (5.0 / 16.0, -3.0 / 16.0),
+                (7.0 / 16.0, 1.0 / 16.0),
+                (1.0 / 16.0, 5.0 / 16.0),
+                (-3.0 / 16.0, 7.0 / 16.0),
+                (-5.0 / 16.0, 3.0 / 16.0),
+            ];
+
+            for point in &points {
+                canvas.save();
+                canvas.translate(point.0, point.1);
+
+                canvas.scale(scale, scale);
+
+                if mode == RenderMode::Stroke {
+                    canvas.stroke_path(path, mask_paint);
+                } else {
+                    canvas.fill_path(path, mask_paint);
+                }
+
+                canvas.restore();
+            }
+        }
+        Some(GlyphRendering::RenderAsImage(image_buffer)) => {
+            use std::convert::TryFrom;
+            let target_x = rendered_glyph.atlas_x as usize;
+            let target_y = rendered_glyph.atlas_y as usize;
+            let target_width = rendered_glyph.width as u32;
+            let target_height = rendered_glyph.height as u32;
+
+            let image_buffer = image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
+            if let Some(image) = crate::image::ImageSource::try_from(&image_buffer).ok() {
+                canvas.update_image(dst_image_id, image, target_x, target_y).unwrap();
+            }
+        }
+        _ => {}
+    }
+
+    canvas.restore();
+
+    Ok(rendered_glyph)
 }
 
 // Returns (texture index, image id, glyph padding box)
@@ -934,7 +974,8 @@ fn find_texture_or_alloc<T: Renderer>(
         // Using PixelFormat::Gray8 works perfectly and takes less VRAM.
         // We keep Rgba8 for now because it might be useful for sub-pixel
         // anti-aliasing (ClearType®), and the atlas debug display is much
-        // clearer with different colors.
+        // clearer with different colors. Also, Rgba8 is required for color
+        // fonts (typically used for emojis).
         let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
         let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
@@ -942,17 +983,42 @@ fn find_texture_or_alloc<T: Renderer>(
         if cfg!(debug_assertions) {
             // Fill the texture with red pixels only in debug builds.
             if let Ok(size) = canvas.image_size(image_id) {
-                canvas.save();
-                canvas.reset();
-                canvas.set_render_target(RenderTarget::Image(image_id));
-                canvas.clear_rect(
-                    0,
-                    0,
-                    size.0 as u32,
-                    size.1 as u32,
-                    Color::rgb(255, 0, 0), // Shown as white if using Gray8.
-                );
-                canvas.restore();
+                // With image-loading we then subsequently support color fonts, where
+                // the color glyphs are uploaded directly. Since that's immediately and
+                // the clear_rect() is run much later, it would overwrite any uploaded
+                // glyphs. So then when for the debug-inspector, use an image to clear.
+                #[cfg(feature = "image-loading")]
+                {
+                    use rgb::FromSlice;
+                    let clear_image =
+                        image::RgbaImage::from_pixel(size.0 as u32, size.1 as u32, image::Rgba::<u8>([255, 0, 0, 0]));
+                    canvas
+                        .update_image(
+                            image_id,
+                            crate::image::ImageSource::from(imgref::Img::new(
+                                clear_image.as_ref().as_rgba(),
+                                clear_image.width() as usize,
+                                clear_image.height() as usize,
+                            )),
+                            0,
+                            0,
+                        )
+                        .unwrap();
+                }
+                #[cfg(not(feature = "image-loading"))]
+                {
+                    canvas.save();
+                    canvas.reset();
+                    canvas.set_render_target(RenderTarget::Image(image_id));
+                    canvas.clear_rect(
+                        0,
+                        0,
+                        size.0 as u32,
+                        size.1 as u32,
+                        Color::rgb(255, 0, 0), // Shown as white if using Gray8.,
+                    );
+                    canvas.restore();
+                }
             }
         }
 
@@ -981,18 +1047,20 @@ pub(crate) fn render_direct<T: Renderer>(
     let mut scaled = false;
 
     for glyph in &text_layout.glyphs {
-        let (mut path, scale) = {
+        let (glyph_rendering, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
             let scale = font.scale(paint.font_size);
 
-            let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
-                &mut font_glyph.path
+            let glyph_rendering = if let Some(glyph_rendering) =
+                font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16)
+            {
+                glyph_rendering
             } else {
                 continue;
             };
 
-            (path, scale)
+            (glyph_rendering, scale)
         };
 
         canvas.save();
@@ -1008,10 +1076,15 @@ pub(crate) fn render_direct<T: Renderer>(
         );
         canvas.scale(scale * invscale, -scale * invscale);
 
-        if mode == RenderMode::Stroke {
-            canvas.stroke_path(&mut path, paint);
-        } else {
-            canvas.fill_path(&mut path, paint);
+        match glyph_rendering {
+            GlyphRendering::RenderAsPath(mut path) => {
+                if mode == RenderMode::Stroke {
+                    canvas.stroke_path(&mut path, paint);
+                } else {
+                    canvas.fill_path(&mut path, paint);
+                }
+            }
+            GlyphRendering::RenderAsImage(_) => todo!(),
         }
 
         canvas.restore();

@@ -19,8 +19,13 @@ pub struct GlyphMetrics {
 }
 
 pub struct Glyph {
-    pub path: Path,
+    pub path: Option<Path>, // None means render as image
     pub metrics: GlyphMetrics,
+}
+
+pub(crate) enum GlyphRendering<'a> {
+    RenderAsPath(&'a mut Path),
+    RenderAsImage(image::DynamicImage),
 }
 
 /// Information about a font.
@@ -156,22 +161,59 @@ impl Font {
 
             let id = GlyphId(codepoint);
 
-            if let Some(bbox) = self.font_ref().outline_glyph(id, &mut path) {
-                self.glyphs.insert(
-                    codepoint,
-                    Glyph {
-                        path,
-                        metrics: GlyphMetrics {
-                            width: bbox.width() as f32,
-                            height: bbox.height() as f32,
-                            bearing_x: bbox.x_min as f32,
-                            bearing_y: bbox.y_max as f32,
-                        },
+            let maybe_glyph = if let Some(image) = self
+                .font_ref()
+                .glyph_raster_image(id, std::u16::MAX)
+                .filter(|img| img.format == owned_ttf_parser::RasterImageFormat::PNG)
+            {
+                let scale = if image.pixels_per_em != 0 {
+                    self.units_per_em as f32 / image.pixels_per_em as f32
+                } else {
+                    1.0
+                };
+                Some(Glyph {
+                    path: None,
+                    metrics: GlyphMetrics {
+                        width: image.width as f32 * scale,
+                        height: image.height as f32 * scale,
+                        bearing_x: image.x as f32 * scale,
+                        bearing_y: (image.y as f32 + image.height as f32) * scale,
                     },
-                );
+                })
+            } else if let Some(bbox) = self.font_ref().outline_glyph(id, &mut path) {
+                Some(Glyph {
+                    path: Some(path),
+                    metrics: GlyphMetrics {
+                        width: bbox.width() as f32,
+                        height: bbox.height() as f32,
+                        bearing_x: bbox.x_min as f32,
+                        bearing_y: bbox.y_max as f32,
+                    },
+                })
+            } else {
+                None
+            };
+
+            if let Some(glyph) = maybe_glyph {
+                self.glyphs.insert(codepoint, glyph);
             }
         }
 
         self.glyphs.get_mut(&codepoint)
+    }
+
+    pub fn glyph_rendering_representation(&mut self, codepoint: u16, pixels_per_em: u16) -> Option<GlyphRendering> {
+        if let Some(image) = self
+            .font_ref()
+            .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
+            .and_then(|raster_glyph_image| {
+                image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
+            })
+        {
+            return Some(GlyphRendering::RenderAsImage(image));
+        };
+
+        self.glyph(codepoint)
+            .and_then(|glyph| glyph.path.as_mut().map(|path| GlyphRendering::RenderAsPath(path)))
     }
 }
