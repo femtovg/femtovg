@@ -334,7 +334,7 @@ impl TextContextImpl {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, _text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
+    pub fn find_font<F, T>(&mut self, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
     where
         F: FnMut((FontId, &mut Font)) -> (bool, T),
     {
@@ -590,7 +590,7 @@ fn shape_word(
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
-    context.find_font(&word, paint, |(font_id, font)| {
+    context.find_font(paint, |(font_id, font)| {
         // Call harfbuzz
         let output = {
             // TODO: It may be faster if this is created only once and stored inside the Font struct
@@ -681,19 +681,19 @@ fn layout(
     let mut min_y = cursor_y;
     let mut max_y = cursor_y;
 
+    // Use the first font in the font list as reference for alignment, the others are fallbacks and we
+    // assume that the majority of glyphs are in that first font and should dominate the layout.
+    let metrics = context.find_font(paint, |(_, font)| (false, font.metrics(paint.font_size)))?;
+
+    // Baseline alignment
+    let alignment_offset_y = match paint.text_baseline {
+        Baseline::Top => metrics.ascender(),
+        Baseline::Middle => (metrics.ascender() + metrics.descender()) / 2.0,
+        Baseline::Alphabetic => 0.0,
+        Baseline::Bottom => metrics.descender(),
+    };
+
     for glyph in &mut res.glyphs {
-        let font = context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-
-        // Baseline alignment
-        let metrics = font.metrics(paint.font_size);
-
-        let alignment_offset_y = match paint.text_baseline {
-            Baseline::Top => metrics.ascender(),
-            Baseline::Middle => (metrics.ascender() + metrics.descender()) / 2.0,
-            Baseline::Alphabetic => 0.0,
-            Baseline::Bottom => metrics.descender(),
-        };
-
         glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
         glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y - glyph.bearing_y;
 
