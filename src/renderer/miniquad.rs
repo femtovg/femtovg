@@ -3,7 +3,6 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use miniquad as mq;
-type GlTexture = mq::Texture;
 
 use crate::{
     renderer::{ImageId, Vertex},
@@ -132,6 +131,34 @@ impl From<&Params> for shader::Uniforms {
     }
 }
 
+type GlTexture = mq::Texture;
+impl From<&mq::Texture> for ImageInfo {
+    fn from(tex: &mq::Texture) -> Self {
+        ImageInfo::new(ImageFlags::empty(), tex.width as _, tex.height as _, tex.format.into())
+    }
+}
+
+impl From<PixelFormat> for mq::TextureFormat {
+    fn from(format: PixelFormat) -> Self {
+        match format {
+            PixelFormat::Rgb8 => mq::TextureFormat::RGB8,
+            PixelFormat::Rgba8 => mq::TextureFormat::RGBA8,
+            PixelFormat::Gray8 => mq::TextureFormat::Alpha,
+        }
+    }
+}
+
+impl From<mq::TextureFormat> for PixelFormat {
+    fn from(format: mq::TextureFormat) -> Self {
+        match format {
+            mq::TextureFormat::RGB8 => PixelFormat::Rgb8,
+            mq::TextureFormat::RGBA8 => PixelFormat::Rgba8,
+            mq::TextureFormat::Alpha => PixelFormat::Gray8,
+            mq::TextureFormat::Depth => PixelFormat::Gray8,
+        }
+    }
+}
+
 impl Miniquad {
     pub fn new(mut ctx: mq::Context) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
@@ -205,8 +232,8 @@ impl Miniquad {
         self.is_opengles_2_0
     }
 
-    fn check_error(&self, label: &str) {
-        // println!("--- {}", label);
+    fn check_error(&self, _label: &str) {
+        // println!("--- {}", _label);
         if !self.debug {
             return;
         }
@@ -602,7 +629,7 @@ impl Miniquad {
                 self.view = self.screen_view;
                 self.ctx.apply_viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             }
-            (RenderTarget::Screen, RenderTarget::Image(id)) => {
+            (RenderTarget::Screen, RenderTarget::Image(_)) => {
                 self.ctx.end_render_pass();
                 self.view = self.screen_view;
                 self.ctx.begin_default_pass(mq::PassAction::Nothing);
@@ -634,7 +661,7 @@ impl Miniquad {
     ///
     /// Pass `None` to clear any previous Framebuffer Object ID that was passed and target rendering to
     /// the default target (normally the window).
-    pub fn set_screen_target(&mut self, framebuffer_object: Option<<glow::Context as glow::HasContext>::Framebuffer>) {
+    pub fn set_screen_target(&mut self, _framebuffer_object: Option<<glow::Context as glow::HasContext>::Framebuffer>) {
         todo!();
         // match framebuffer_object {
         //     Some(fbo_id) => self.screen_target = Some(Framebuffer::from_external(&self.context, fbo_id)),
@@ -661,84 +688,78 @@ impl Miniquad {
         target_image: ImageId,
         sigma: f32,
     ) {
-        todo!();
-        // let original_render_target = self.current_render_target;
+        let original_render_target = self.current_render_target;
 
-        // // The filtering happens in two passes, first a horizontal blur and then the vertial blur. The
-        // // first pass therefore renders into an intermediate, temporarily allocated texture.
+        // The filtering happens in two passes, first a horizontal blur and then the vertial blur. The
+        // first pass therefore renders into an intermediate, temporarily allocated texture.
 
-        // let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
+        let (source_image_width, source_image_height, source_image_info) = {
+            let source_image = images.get(cmd.image.unwrap()).unwrap();
+            (source_image.width, source_image.height, source_image.into())
+        };
 
-        // let image_paint = crate::Paint::image(
-        //     cmd.image.unwrap(),
-        //     0.,
-        //     0.,
-        //     source_image_info.width() as _,
-        //     source_image_info.height() as _,
-        //     0.,
-        //     1.,
-        // );
-        // let mut blur_params = Params::new(images, &image_paint, &Scissor::default(), 0., 0., 0.);
-        // blur_params.shader_type = ShaderType::FilterImage.to_f32();
+        let image_paint = crate::Paint::image(
+            cmd.image.unwrap(),
+            0.,
+            0.,
+            source_image_width as _,
+            source_image_height as _,
+            0.,
+            1.,
+        );
+        let mut blur_params = Params::new(images, &image_paint, &Scissor::default(), 0., 0., 0.);
+        blur_params.shader_type = ShaderType::FilterImage.to_f32();
 
-        // let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
-        // let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
-        // let gauss_coeff_z = gauss_coeff_y * gauss_coeff_y;
+        let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
+        let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
+        let gauss_coeff_z = gauss_coeff_y * gauss_coeff_y;
 
-        // blur_params.image_blur_filter_coeff[0] = gauss_coeff_x;
-        // blur_params.image_blur_filter_coeff[1] = gauss_coeff_y;
-        // blur_params.image_blur_filter_coeff[2] = gauss_coeff_z;
+        blur_params.image_blur_filter_coeff[0] = gauss_coeff_x;
+        blur_params.image_blur_filter_coeff[1] = gauss_coeff_y;
+        blur_params.image_blur_filter_coeff[2] = gauss_coeff_z;
 
-        // blur_params.image_blur_filter_direction = [1.0, 0.0];
+        blur_params.image_blur_filter_direction = [1.0, 0.0];
 
-        // // GLES 2.0 does not allow non-constant loop indices, so limit the standard devitation to allow for a upper fixed limit
-        // // on the number of iterations in the fragment shader.
-        // blur_params.image_blur_filter_sigma = sigma.min(8.);
+        // GLES 2.0 does not allow non-constant loop indices, so limit the standard devitation to allow for a upper fixed limit
+        // on the number of iterations in the fragment shader.
+        blur_params.image_blur_filter_sigma = sigma.min(8.);
 
-        // let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
-        // self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
+        let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
+        self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
         // self.main_program.set_view(self.view);
 
-        // self.clear_rect(
-        //     0,
-        //     0,
-        //     source_image_info.width() as _,
-        //     source_image_info.height() as _,
-        //     Color::rgbaf(0., 0., 0., 0.),
-        // );
+        self.clear_rect(
+            0,
+            0,
+            source_image_width as _,
+            source_image_height as _,
+            Color::rgbaf(0., 0., 0., 0.),
+        );
 
-        // self.triangles(images, &cmd, &blur_params);
+        self.triangles(images, &cmd, &blur_params);
 
-        // self.set_target(images, RenderTarget::Image(target_image));
+        self.set_target(images, RenderTarget::Image(target_image));
         // self.main_program.set_view(self.view);
 
-        // self.clear_rect(
-        //     0,
-        //     0,
-        //     source_image_info.width() as _,
-        //     source_image_info.height() as _,
-        //     Color::rgbaf(0., 0., 0., 0.),
-        // );
+        self.clear_rect(
+            0,
+            0,
+            source_image_width as _,
+            source_image_height as _,
+            Color::rgbaf(0., 0., 0., 0.),
+        );
 
-        // blur_params.image_blur_filter_direction = [0.0, 1.0];
+        blur_params.image_blur_filter_direction = [0.0, 1.0];
 
-        // cmd.image = Some(horizontal_blur_buffer);
+        cmd.image = Some(horizontal_blur_buffer);
 
-        // self.triangles(images, &cmd, &blur_params);
+        self.triangles(images, &cmd, &blur_params);
 
-        // images.remove(self, horizontal_blur_buffer);
+        images.remove(self, horizontal_blur_buffer);
 
-        // // restore previous render target and view
-        // self.set_target(images, original_render_target);
+        // restore previous render target and view
+        self.set_target(images, original_render_target);
         // self.main_program.set_view(self.view);
-    }
-}
-
-pub fn femtovg_pixel_format_to_mq(format: PixelFormat) -> mq::TextureFormat {
-    match format {
-        PixelFormat::Rgb8 => mq::TextureFormat::RGB8,
-        PixelFormat::Rgba8 => mq::TextureFormat::RGBA8,
-        PixelFormat::Gray8 => mq::TextureFormat::Alpha,
     }
 }
 
@@ -836,7 +857,7 @@ impl Renderer for Miniquad {
         Ok(Self::Image::new_render_texture(
             &mut self.ctx,
             mq::TextureParams {
-                format: femtovg_pixel_format_to_mq(info.format()),
+                format: info.format().into(),
                 wrap: if info.flags().contains(ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y) {
                     mq::TextureWrap::Repeat
                 } else if info.flags().contains(ImageFlags::FLIP_Y) {
@@ -866,7 +887,7 @@ impl Renderer for Miniquad {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
-        if image.format != femtovg_pixel_format_to_mq(src.format()) {
+        if image.format != src.format().into() {
             return Err(ErrorKind::ImageUpdateWithDifferentFormat);
         }
 
