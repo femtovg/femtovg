@@ -49,8 +49,12 @@ mod shader {
             uniforms: UniformBlockLayout {
                 uniforms: vec![
                     UniformDesc::new("viewSize", UniformType::Float2),
-                    UniformDesc::new("scissorMat", UniformType::Mat4),
-                    UniformDesc::new("paintMat", UniformType::Mat4),
+                    UniformDesc::new("scissorMat0", UniformType::Float3),
+                    UniformDesc::new("scissorMat1", UniformType::Float3),
+                    UniformDesc::new("scissorMat2", UniformType::Float3),
+                    UniformDesc::new("paintMat0", UniformType::Float3),
+                    UniformDesc::new("paintMat1", UniformType::Float3),
+                    UniformDesc::new("paintMat2", UniformType::Float3),
                     UniformDesc::new("innerCol", UniformType::Float4),
                     UniformDesc::new("outerCol", UniformType::Float4),
                     UniformDesc::new("scissorExt", UniformType::Float2),
@@ -71,12 +75,12 @@ mod shader {
         }
     }
 
-    #[derive(Default)]
+    #[derive(Default, Debug)]
     #[repr(C)]
     pub struct Uniforms {
         pub view_size: [f32; 2],
-        pub scissor_mat: glam::Mat4,
-        pub paint_mat: glam::Mat4,
+        pub scissor_mat: [f32; 9],
+        pub paint_mat: [f32; 9],
         pub inner_col: [f32; 4],
         pub outer_col: [f32; 4],
         pub scissor_ext: [f32; 2],
@@ -97,14 +101,16 @@ mod shader {
 
 impl From<&Params> for shader::Uniforms {
     fn from(params: &Params) -> Self {
+        let sm = &params.scissor_mat;
+        let pm = &params.paint_mat;
         let mut scissor_vec = params.scissor_mat.to_vec();
         scissor_vec.extend([0., 0., 0., 1.].to_vec());
         let mut paint_vec = params.paint_mat.to_vec();
         paint_vec.extend([0., 0., 0., 1.].to_vec());
 
         Self {
-            scissor_mat: glam::Mat4::from_cols_slice(scissor_vec.as_slice()),
-            paint_mat: glam::Mat4::from_cols_slice(paint_vec.as_slice()),
+            scissor_mat: [sm[0], sm[1], sm[2], sm[4], sm[5], sm[6], sm[8], sm[9], sm[10]],
+            paint_mat: [pm[0], pm[1], pm[2], pm[4], pm[5], pm[6], pm[8], pm[9], pm[10]],
             inner_col: params.inner_col,
             outer_col: params.outer_col,
             scissor_ext: params.scissor_ext,
@@ -199,6 +205,7 @@ impl Miniquad {
     }
 
     fn check_error(&self, label: &str) {
+        // println!("--- {}", label);
         if !self.debug {
             return;
         }
@@ -554,11 +561,13 @@ impl Miniquad {
         paint: &Params,
         image_tex: Option<ImageId>,
         alpha_tex: Option<ImageId>,
-        indices: &Vec<u16>,
+        indices: &[u16],
     ) {
+        // println!("set_uniforms {:?} {:?} {:?} {:?}", paint, image_tex, alpha_tex, indices);
         let mut uniforms = shader::Uniforms::from(paint);
         uniforms.view_size = self.view;
         self.ctx.apply_uniforms(&uniforms);
+        // self.check_error(format!("set_uniforms uniforms {:?}", &uniforms).as_str());
         self.check_error("set_uniforms uniforms");
 
         let tex = image_tex.and_then(|id| images.get(id)).unwrap_or(&self.empty_texture);
@@ -568,7 +577,8 @@ impl Miniquad {
         self.bindings.images[1] = *masktex;
 
         self.bindings.index_buffer.update(&mut self.ctx, indices);
-        self.ctx.apply_bindings(&mut self.bindings);
+        self.ctx.apply_bindings(&self.bindings);
+        // self.check_error(format!("set_uniforms texture {:?}", &self.bindings).as_str());
         self.check_error("set_uniforms texture");
     }
 

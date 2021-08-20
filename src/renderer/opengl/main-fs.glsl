@@ -1,8 +1,14 @@
 
 precision highp float;
 
-uniform mat4 scissorMat;
-uniform mat4 paintMat;
+uniform vec3 scissorMat0;
+uniform vec3 scissorMat1;
+uniform vec3 scissorMat2;
+#define scissorMat mat3(scissorMat0, scissorMat1, scissorMat2)
+uniform vec3 paintMat0;
+uniform vec3 paintMat1;
+uniform vec3 paintMat2;
+#define paintMat mat3(paintMat0, paintMat1, paintMat2)
 uniform vec4 innerCol;
 uniform vec4 outerCol;
 uniform vec2 scissorExt;
