@@ -4,19 +4,14 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    Color,
-    CompositeOperationState,
-    ErrorKind,
-    FillRule,
-    ImageFilter,
-    ImageId,
-    ImageInfo,
-    ImageSource,
-    ImageStore,
+    Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
 pub use opengl::OpenGl;
+
+mod miniquad;
+pub use self::miniquad::Miniquad;
 
 mod void;
 pub use void::Void;
