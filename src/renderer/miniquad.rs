@@ -1,3 +1,4 @@
+use fnv::FnvHashMap;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
@@ -23,7 +24,7 @@ pub struct Miniquad {
     empty_texture: mq::Texture,
     // vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     // vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
-    // framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
+    render_passes: FnvHashMap<ImageId, mq::RenderPass>,
     ctx: mq::Context,
     // screen_target: Option<Framebuffer>,
     current_render_target: RenderTarget,
@@ -191,7 +192,7 @@ impl Miniquad {
             empty_texture,
             // vert_arr: Default::default(),
             // vert_buff: Default::default(),
-            // framebuffers: Default::default(),
+            render_passes: Default::default(),
             ctx,
             // screen_target: None,
             current_render_target: RenderTarget::Screen,
@@ -596,43 +597,34 @@ impl Miniquad {
     }
 
     fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
-        self.current_render_target = target;
-        match (target, None as Option<()> /*&self.screen_target*/) {
-            (RenderTarget::Screen, None) => {
-                // Framebuffer::unbind(&self.context);
+        match (target, self.current_render_target) {
+            (RenderTarget::Screen, RenderTarget::Screen) => {
                 self.view = self.screen_view;
                 self.ctx.apply_viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             }
-            (RenderTarget::Screen, Some(framebuffer)) => {
-                todo!();
-                // framebuffer.bind();
-                // self.view = self.screen_view;
-                // unsafe {
-                //     self.context.viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
-                // }
+            (RenderTarget::Screen, RenderTarget::Image(id)) => {
+                self.ctx.end_render_pass();
+                self.view = self.screen_view;
+                self.ctx.begin_default_pass(mq::PassAction::Nothing);
+                self.ctx.apply_viewport(0, 0, self.view[0] as i32, self.view[1] as i32);
             }
             (RenderTarget::Image(id), _) => {
-                todo!();
-                // let context = self.context.clone();
-                // if let Some(texture) = images.get(id) {
-                //     if let Ok(fb) = self
-                //         .framebuffers
-                //         .entry(id)
-                //         .or_insert_with(|| Framebuffer::new(&context, texture))
-                //     {
-                //         fb.bind();
-
-                //         self.view[0] = texture.info().width() as f32;
-                //         self.view[1] = texture.info().height() as f32;
-
-                //         unsafe {
-                //             self.context
-                //                 .viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
-                //         }
-                //     }
-                // }
+                if let Some(texture) = images.get(id) {
+                    self.ctx.end_render_pass();
+                    self.view[0] = texture.width as f32;
+                    self.view[1] = texture.height as f32;
+                    let ctx = &mut self.ctx;
+                    let render_pass = self
+                        .render_passes
+                        .entry(id)
+                        .or_insert_with(|| mq::RenderPass::new(ctx, *texture, None));
+                    self.ctx.begin_pass(Some(*render_pass), mq::PassAction::Nothing);
+                    self.ctx
+                        .apply_viewport(0, 0, texture.width as i32, texture.height as i32);
+                }
             }
         }
+        self.current_render_target = target;
     }
 
     /// Make the "Screen" RenderTarget actually render to a framebuffer object. This is useful when
@@ -789,6 +781,7 @@ impl Renderer for Miniquad {
         self.check_error("render prepare");
 
         for cmd in commands.into_iter() {
+            // println!("cmd {:?}", cmd.cmd_type);
             self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
@@ -833,6 +826,7 @@ impl Renderer for Miniquad {
         // }
 
         self.ctx.end_render_pass();
+
         self.ctx.commit_frame(); // FIXME: miniquad context should not be bound in self!
 
         self.check_error("render done");
@@ -952,7 +946,7 @@ impl Renderer for Miniquad {
     }
 
     fn delete_image(&mut self, image: Self::Image, image_id: ImageId) {
-        // self.framebuffers.remove(&image_id);
+        self.render_passes.remove(&image_id);
         image.delete();
     }
 

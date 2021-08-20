@@ -58,6 +58,7 @@ pub enum CommandType {
     },
 }
 
+#[derive(Debug)]
 pub struct Command {
     pub(crate) cmd_type: CommandType,
     pub(crate) drawables: Vec<Drawable>,
