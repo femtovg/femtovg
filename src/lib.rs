@@ -303,6 +303,8 @@ pub struct Canvas<T: Renderer> {
     renderer: T,
     text_context: Rc<RefCell<TextContextImpl>>,
     glyph_atlas: Rc<GlyphAtlas>,
+    // Glyph atlas used for direct rendering of color glyphs, dropped after flush()
+    emphemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -327,6 +329,7 @@ where
             renderer: renderer,
             text_context: Default::default(),
             glyph_atlas: Default::default(),
+            emphemeral_glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -354,6 +357,7 @@ where
             renderer: renderer,
             text_context: text_context.0,
             glyph_atlas: Default::default(),
+            emphemeral_glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -423,6 +427,9 @@ where
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
+        if let Some(atlas) = self.emphemeral_glyph_atlas.take() {
+            atlas.clear(self);
+        }
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
@@ -1211,7 +1218,10 @@ where
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if paint.font_size > 92.0 {
+        let bitmap_glyphs = layout.has_bitmap_glyphs();
+        let need_direct_rendering = paint.font_size > 92.0;
+
+        if need_direct_rendering && !bitmap_glyphs {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
             let create_vertices = |quads: &Vec<text::Quad>| {
@@ -1233,10 +1243,15 @@ where
                 verts
             };
 
-            let draw_commands = self
-                .glyph_atlas
-                .clone()
-                .render_atlas(self, &layout, &paint, render_mode)?;
+            let atlas = if bitmap_glyphs && need_direct_rendering {
+                self.emphemeral_glyph_atlas
+                    .get_or_insert_with(|| Default::default())
+                    .clone()
+            } else {
+                self.glyph_atlas.clone()
+            };
+
+            let draw_commands = atlas.render_atlas(self, &layout, &paint, render_mode)?;
 
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
