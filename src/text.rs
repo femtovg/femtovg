@@ -164,6 +164,7 @@ pub struct ShapedGlyph {
     pub offset_y: f32,
     pub bearing_x: f32,
     pub bearing_y: f32,
+    pub bitmap_glyph: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -468,6 +469,10 @@ impl TextMetrics {
     pub fn height(&self) -> f32 {
         self.height
     }
+
+    pub(crate) fn has_bitmap_glyphs(&self) -> bool {
+        self.glyphs.iter().find(|g| g.bitmap_glyph).is_some()
+    }
 }
 
 // Shaper
@@ -644,6 +649,7 @@ fn shape_word(
                 offset_y: position.y_offset as f32 * scale,
                 bearing_x: 0.0,
                 bearing_y: 0.0,
+                bitmap_glyph: false,
             };
 
             if let Some(glyph) = font.glyph(info.glyph_id as u16) {
@@ -651,6 +657,7 @@ fn shape_word(
                 g.height = glyph.metrics.height * scale;
                 g.bearing_x = glyph.metrics.bearing_x * scale;
                 g.bearing_y = glyph.metrics.bearing_y * scale;
+                g.bitmap_glyph = glyph.path.is_none();
             }
 
             shaped_word.width += g.advance_x + paint.letter_spacing;
@@ -1048,6 +1055,15 @@ impl GlyphAtlas {
         }
 
         texture_search_result.ok_or(ErrorKind::UnknownError)
+    }
+
+    pub(crate) fn clear<T: Renderer>(&self, canvas: &mut Canvas<T>) {
+        let image_ids = std::mem::take(&mut *self.glyph_textures.borrow_mut())
+            .into_iter()
+            .map(|font_texture| font_texture.image_id);
+        image_ids.for_each(|id| canvas.delete_image(id));
+
+        self.rendered_glyphs.borrow_mut().clear();
     }
 }
 
