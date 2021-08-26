@@ -25,8 +25,6 @@ use std::rc::Rc;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
-use fnv::FnvHashMap;
-
 mod utils;
 
 mod text;
@@ -44,10 +42,8 @@ pub use text::{
 };
 
 use text::{
-    FontTexture,
+    GlyphAtlas,
     RenderMode,
-    RenderedGlyph,
-    RenderedGlyphId,
     TextContextImpl,
 };
 
@@ -306,8 +302,7 @@ pub struct Canvas<T: Renderer> {
     height: u32,
     renderer: T,
     text_context: Rc<RefCell<TextContextImpl>>,
-    rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
-    glyph_textures: Vec<FontTexture>,
+    glyph_atlas: Rc<GlyphAtlas>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -331,8 +326,7 @@ where
             height: 0,
             renderer: renderer,
             text_context: Default::default(),
-            rendered_glyphs: Default::default(),
-            glyph_textures: Default::default(),
+            glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -359,8 +353,7 @@ where
             height: 0,
             renderer: renderer,
             text_context: text_context.0,
-            rendered_glyphs: Default::default(),
-            glyph_textures: Default::default(),
+            glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -1240,7 +1233,10 @@ where
                 verts
             };
 
-            let draw_commands = text::render_atlas(self, &layout, &paint, render_mode)?;
+            let draw_commands = self
+                .glyph_atlas
+                .clone()
+                .render_atlas(self, &layout, &paint, render_mode)?;
 
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
@@ -1312,7 +1308,12 @@ where
 
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
-        self.glyph_textures.iter().map(|t| t.image_id).collect()
+        self.glyph_atlas
+            .glyph_textures
+            .borrow()
+            .iter()
+            .map(|t| t.image_id)
+            .collect()
     }
 
     #[cfg(feature = "debug_inspector")]
