@@ -691,16 +691,22 @@ fn layout(
     let mut min_y = cursor_y;
     let mut max_y = cursor_y;
 
-    // Use the first font in the font list as reference for alignment, the others are fallbacks and we
-    // assume that the majority of glyphs are in that first font and should dominate the layout.
-    let metrics = context.find_font(paint, |(_, font)| (false, font.metrics(paint.font_size)))?;
+    let mut ascender: f32 = 0.;
+    let mut descender: f32 = 0.;
+
+    for glyph in &mut res.glyphs {
+        let font = context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let metrics = font.metrics(paint.font_size);
+        ascender = ascender.max(metrics.ascender());
+        descender = descender.min(metrics.descender());
+    }
 
     // Baseline alignment
     let alignment_offset_y = match paint.text_baseline {
-        Baseline::Top => metrics.ascender(),
-        Baseline::Middle => (metrics.ascender() + metrics.descender()) / 2.0,
+        Baseline::Top => ascender,
+        Baseline::Middle => (ascender + descender) / 2.0,
         Baseline::Alphabetic => 0.0,
-        Baseline::Bottom => metrics.descender(),
+        Baseline::Bottom => descender,
     };
 
     for glyph in &mut res.glyphs {
