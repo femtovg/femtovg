@@ -21,6 +21,7 @@ jobs:
           profile: minimal
           target: wasm32-unknown-unknown
       - run: cargo build --verbose
+      - run: cargo build --no-features --verbose
       - run: cargo build --verbose --target wasm32-unknown-unknown
       - run: cargo build --verbose --examples
       - run: cargo build --target=wasm32-unknown-unknown --example demo
