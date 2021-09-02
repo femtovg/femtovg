@@ -25,6 +25,7 @@ pub struct Glyph {
 
 pub(crate) enum GlyphRendering<'a> {
     RenderAsPath(&'a mut Path),
+    #[cfg(feature = "image-loading")]
     RenderAsImage(image::DynamicImage),
 }
 
@@ -202,10 +203,11 @@ impl Font {
         self.glyphs.get_mut(&codepoint)
     }
 
-    pub fn glyph_rendering_representation(&mut self, codepoint: u16, pixels_per_em: u16) -> Option<GlyphRendering> {
+    pub fn glyph_rendering_representation(&mut self, codepoint: u16, _pixels_per_em: u16) -> Option<GlyphRendering> {
+        #[cfg(feature = "image-loading")]
         if let Some(image) = self
             .font_ref()
-            .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
+            .glyph_raster_image(GlyphId(codepoint), _pixels_per_em)
             .and_then(|raster_glyph_image| {
                 image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
             })

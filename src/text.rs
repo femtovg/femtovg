@@ -857,7 +857,10 @@ impl GlyphAtlas {
             (maybe_glyph_representation, scale)
         };
 
+        #[cfg(feature = "image-loading")]
         let color_glyph = matches!(maybe_glyph_representation, Some(GlyphRendering::RenderAsImage(..)));
+        #[cfg(not(feature = "image-loading"))]
+        let color_glyph = false;
 
         let line_width = if color_glyph || mode != RenderMode::Stroke {
             0.0
@@ -952,6 +955,7 @@ impl GlyphAtlas {
                     canvas.restore();
                 }
             }
+            #[cfg(feature = "image-loading")]
             Some(GlyphRendering::RenderAsImage(image_buffer)) => {
                 use std::convert::TryFrom;
                 let target_x = rendered_glyph.atlas_x as usize;
@@ -1126,7 +1130,8 @@ pub(crate) fn render_direct<T: Renderer>(
                     canvas.fill_path(&mut path, paint);
                 }
             }
-            GlyphRendering::RenderAsImage(_) => todo!(),
+            #[cfg(feature = "image-loading")]
+            GlyphRendering::RenderAsImage(_) => unreachable!(),
         }
 
         canvas.restore();
