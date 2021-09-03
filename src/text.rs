@@ -701,6 +701,14 @@ fn layout(
         descender = descender.min(metrics.descender());
     }
 
+    let primary_metrics = context.find_font(paint, |(_, font)| (false, font.metrics(paint.font_size)))?;
+    if ascender.abs() < std::f32::EPSILON {
+        ascender = primary_metrics.ascender();
+    }
+    if descender.abs() < std::f32::EPSILON {
+        descender = primary_metrics.descender();
+    }
+
     // Baseline alignment
     let alignment_offset_y = match paint.text_baseline {
         Baseline::Top => ascender,
