@@ -43,6 +43,7 @@ Run with `cargo run --example text`
 * [x] Text alignment: (left center right), (top, middle, alphabetic, bottom)
 * [x] Nearest font matching
 * [x] Path hit testing
+* [x] OpenGl ES2 backend
 
 ## In progress
 * [ ] [Metal backend](https://github.com/adamnemecek/gpucanvas/)
@@ -52,7 +53,6 @@ Run with `cargo run --example text`
 * [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
-* [ ] OpenGl ES2 backend
 * [ ] Color fonts
 
 ## License
