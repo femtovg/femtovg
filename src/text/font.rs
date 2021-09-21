@@ -104,8 +104,9 @@ pub(crate) struct Font {
 }
 
 impl Font {
-    pub fn new(data: &[u8], face_index: u32) -> Result<Self, ErrorKind> {
-        let ttf_font = TtfFont::from_slice(data, face_index).map_err(|_| ErrorKind::FontParseError)?;
+    pub fn new(data: Arc<dyn AsRef<[u8]>>, face_index: u32) -> Result<Self, ErrorKind> {
+        let ttf_font =
+            TtfFont::from_slice(data.as_ref().as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
 
         let units_per_em = ttf_font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
 
@@ -123,7 +124,7 @@ impl Font {
         };
 
         Ok(Self {
-            data: Arc::new(data.to_owned()),
+            data: data.clone(),
             face_index,
             units_per_em,
             metrics,

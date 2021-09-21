@@ -8,6 +8,7 @@ use std::hash::{
 use std::ops::Range;
 use std::path::Path as FilePath;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use fnv::{
     FnvBuildHasher,
@@ -247,6 +248,17 @@ impl TextContext {
         self.0.as_ref().borrow_mut().add_font_mem(data)
     }
 
+    /// Registers the in-memory representation of a TrueType font pointed to by the shared data
+    /// parameter with this text context. If successful, the font id is returned. The face_index
+    /// specifies the face index if the font data is a true type font collection. For plain true
+    /// type fonts, use 0 as index.
+    pub fn add_shared_font_with_index(&self, data: Arc<dyn AsRef<[u8]>>, face_index: u32) -> Result<FontId, ErrorKind> {
+        self.0
+            .as_ref()
+            .borrow_mut()
+            .add_shared_font_with_index(data, face_index)
+    }
+
     /// Returns information on how the provided text will be drawn with the specified paint.
     pub fn measure_text<S: AsRef<str>>(&self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
         self.0.as_ref().borrow_mut().measure_text(x, y, text, paint)
@@ -340,6 +352,17 @@ impl TextContextImpl {
     }
 
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
+        self.clear_caches();
+
+        let font = Font::new(Arc::new(data.to_owned()), face_index)?;
+        Ok(FontId(self.fonts.insert(font)))
+    }
+
+    pub fn add_shared_font_with_index(
+        &mut self,
+        data: Arc<dyn AsRef<[u8]>>,
+        face_index: u32,
+    ) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
         let font = Font::new(data, face_index)?;
