@@ -97,14 +97,15 @@ impl FontMetrics {
 
 pub(crate) struct Font {
     data: Arc<dyn AsRef<[u8]>>,
+    face_index: u32,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
 }
 
 impl Font {
-    pub fn new(data: &[u8]) -> Result<Self, ErrorKind> {
-        let ttf_font = TtfFont::from_slice(data, 0).map_err(|_| ErrorKind::FontParseError)?;
+    pub fn new(data: &[u8], face_index: u32) -> Result<Self, ErrorKind> {
+        let ttf_font = TtfFont::from_slice(data, face_index).map_err(|_| ErrorKind::FontParseError)?;
 
         let units_per_em = ttf_font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
 
@@ -123,6 +124,7 @@ impl Font {
 
         Ok(Self {
             data: Arc::new(data.to_owned()),
+            face_index,
             units_per_em,
             metrics,
             glyphs: Default::default(),
@@ -134,7 +136,7 @@ impl Font {
     }
 
     fn font_ref(&self) -> TtfFont<'_> {
-        TtfFont::from_slice(self.data.as_ref().as_ref(), 0).unwrap()
+        TtfFont::from_slice(self.data.as_ref().as_ref(), self.face_index).unwrap()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
