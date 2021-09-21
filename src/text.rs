@@ -309,6 +309,8 @@ impl TextContextImpl {
                 } else {
                     if let Some("ttf") = path.extension().and_then(OsStr::to_str) {
                         fonts.push(self.add_font_file(path)?);
+                    } else if let Some("ttc") = path.extension().and_then(OsStr::to_str) {
+                        fonts.extend(self.add_font_file_collection(path)?);
                     }
                 }
             }
@@ -323,10 +325,24 @@ impl TextContextImpl {
         self.add_font_mem(&data)
     }
 
+    pub fn add_font_file_collection<T: AsRef<FilePath>>(
+        &mut self,
+        path: T,
+    ) -> Result<impl Iterator<Item = FontId> + '_, ErrorKind> {
+        let data = std::fs::read(path)?;
+
+        let count = ttf_parser::fonts_in_collection(&data).unwrap_or(1);
+        Ok((0..count).filter_map(move |index| Some(self.add_font_mem_with_index(&data, index).ok()?)))
+    }
+
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
+        self.add_font_mem_with_index(data, 0)
+    }
+
+    pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(data)?;
+        let font = Font::new(data, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
