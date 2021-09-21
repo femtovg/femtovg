@@ -1,9 +1,7 @@
 use fnv::FnvHashMap;
-use owned_ttf_parser::{
-    AsFaceRef,
+use ttf_parser::{
     Face as TtfFont,
     GlyphId,
-    OwnedFace,
 };
 
 use crate::{
@@ -97,7 +95,6 @@ impl FontMetrics {
 
 pub(crate) struct Font {
     data: Vec<u8>,
-    owned_ttf_font: OwnedFace,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
@@ -105,14 +102,9 @@ pub(crate) struct Font {
 
 impl Font {
     pub fn new(data: &[u8]) -> Result<Self, ErrorKind> {
-        let owned_ttf_font = OwnedFace::from_vec(data.to_owned(), 0).map_err(|_| ErrorKind::FontParseError)?;
+        let ttf_font = TtfFont::from_slice(data, 0).map_err(|_| ErrorKind::FontParseError)?;
 
-        let units_per_em = owned_ttf_font
-            .as_face_ref()
-            .units_per_em()
-            .ok_or(ErrorKind::FontInfoExtracionError)?;
-
-        let ttf_font = owned_ttf_font.as_face_ref();
+        let units_per_em = ttf_font.units_per_em().ok_or(ErrorKind::FontInfoExtracionError)?;
 
         let metrics = FontMetrics {
             ascender: ttf_font.ascender() as f32,
@@ -129,7 +121,6 @@ impl Font {
 
         Ok(Self {
             data: data.to_owned(),
-            owned_ttf_font,
             units_per_em,
             metrics,
             glyphs: Default::default(),
@@ -140,8 +131,8 @@ impl Font {
         self.data.as_ref()
     }
 
-    fn font_ref(&self) -> &TtfFont<'_> {
-        self.owned_ttf_font.as_face_ref()
+    fn font_ref(&self) -> TtfFont<'_> {
+        TtfFont::from_slice(&self.data, 0).unwrap()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
@@ -165,7 +156,7 @@ impl Font {
             let maybe_glyph = if let Some(image) = self
                 .font_ref()
                 .glyph_raster_image(id, std::u16::MAX)
-                .filter(|img| img.format == owned_ttf_parser::RasterImageFormat::PNG)
+                .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
             {
                 let scale = if image.pixels_per_em != 0 {
                     self.units_per_em as f32 / image.pixels_per_em as f32
