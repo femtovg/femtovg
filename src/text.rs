@@ -8,7 +8,6 @@ use std::hash::{
 use std::ops::Range;
 use std::path::Path as FilePath;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use fnv::{
     FnvBuildHasher,
@@ -252,7 +251,11 @@ impl TextContext {
     /// parameter with this text context. If successful, the font id is returned. The face_index
     /// specifies the face index if the font data is a true type font collection. For plain true
     /// type fonts, use 0 as index.
-    pub fn add_shared_font_with_index(&self, data: Arc<dyn AsRef<[u8]>>, face_index: u32) -> Result<FontId, ErrorKind> {
+    pub fn add_shared_font_with_index<T: AsRef<[u8]> + 'static>(
+        &self,
+        data: T,
+        face_index: u32,
+    ) -> Result<FontId, ErrorKind> {
         self.0
             .as_ref()
             .borrow_mut()
@@ -354,13 +357,13 @@ impl TextContextImpl {
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(Arc::new(data.to_owned()), face_index)?;
+        let font = Font::new(data.to_owned(), face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
-    pub fn add_shared_font_with_index(
+    pub fn add_shared_font_with_index<T: AsRef<[u8]> + 'static>(
         &mut self,
-        data: Arc<dyn AsRef<[u8]>>,
+        data: T,
         face_index: u32,
     ) -> Result<FontId, ErrorKind> {
         self.clear_caches();
