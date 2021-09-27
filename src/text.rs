@@ -643,14 +643,7 @@ fn shape_word(
     context.find_font(paint, |(font_id, font)| {
         // Call harfbuzz
         let output = {
-            // TODO: It may be faster if this is created only once and stored inside the Font struct
-            let face = match rustybuzz::Face::from_slice(&font.data(), 0) {
-                Some(v) => v,
-                None => {
-                    eprintln!("Error: malformed font.");
-                    std::process::exit(1);
-                }
-            };
+            let face = font.face_ref();
 
             let mut buffer = rustybuzz::UnicodeBuffer::new();
             buffer.push_str(word);
