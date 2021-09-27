@@ -357,7 +357,7 @@ impl TextContextImpl {
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(data.to_owned(), face_index)?;
+        let font = Font::new_with_data(data.to_owned(), face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -368,7 +368,7 @@ impl TextContextImpl {
     ) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(data, face_index)?;
+        let font = Font::new_with_data(data, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 

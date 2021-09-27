@@ -1,4 +1,5 @@
 use fnv::FnvHashMap;
+use ouroboros::self_referencing;
 use ttf_parser::{
     Face as TtfFont,
     GlyphId,
@@ -93,16 +94,19 @@ impl FontMetrics {
     }
 }
 
+#[self_referencing]
 pub(crate) struct Font {
     data: Box<dyn AsRef<[u8]>>,
-    face_index: u32,
+    #[borrows(data)]
+    #[covariant]
+    face_data: rustybuzz::Face<'this>,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
 }
 
 impl Font {
-    pub fn new<T: AsRef<[u8]> + 'static>(data: T, face_index: u32) -> Result<Self, ErrorKind> {
+    pub fn new_with_data<T: AsRef<[u8]> + 'static>(data: T, face_index: u32) -> Result<Self, ErrorKind> {
         let ttf_font =
             TtfFont::from_slice(data.as_ref().as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
 
@@ -121,26 +125,21 @@ impl Font {
             width: ttf_font.weight().to_number(),
         };
 
-        Ok(Self {
-            data: Box::new(data),
-            face_index,
+        Ok(Self::new(
+            Box::new(data),
+            |data| rustybuzz::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),
             units_per_em,
             metrics,
-            glyphs: Default::default(),
-        })
+            Default::default(),
+        ))
     }
 
-    pub fn face_ref(&self) -> rustybuzz::Face<'_> {
-        // TODO: It may be faster if this is created only once and stored inside the Font struct
-        rustybuzz::Face::from_slice(self.data.as_ref().as_ref(), self.face_index).unwrap()
-    }
-
-    fn font_ref(&self) -> TtfFont<'_> {
-        TtfFont::from_slice(self.data.as_ref().as_ref(), self.face_index).unwrap()
+    pub fn face_ref(&self) -> &rustybuzz::Face<'_> {
+        self.borrow_face_data()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
-        let mut metrics = self.metrics;
+        let mut metrics = *self.borrow_metrics();
 
         metrics.scale(self.scale(size));
 
@@ -148,60 +147,62 @@ impl Font {
     }
 
     pub fn scale(&self, size: f32) -> f32 {
-        size / self.units_per_em as f32
+        size / *self.borrow_units_per_em() as f32
     }
 
     pub fn glyph(&mut self, codepoint: u16) -> Option<&mut Glyph> {
-        if !self.glyphs.contains_key(&codepoint) {
-            let mut path = Path::new();
+        self.with_mut(|fields| {
+            if !fields.glyphs.contains_key(&codepoint) {
+                let mut path = Path::new();
 
-            let id = GlyphId(codepoint);
+                let id = GlyphId(codepoint);
 
-            let maybe_glyph = if let Some(image) = self
-                .font_ref()
-                .glyph_raster_image(id, std::u16::MAX)
-                .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
-            {
-                let scale = if image.pixels_per_em != 0 {
-                    self.units_per_em as f32 / image.pixels_per_em as f32
+                let maybe_glyph = if let Some(image) = fields
+                    .face_data
+                    .glyph_raster_image(id, std::u16::MAX)
+                    .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
+                {
+                    let scale = if image.pixels_per_em != 0 {
+                        *fields.units_per_em as f32 / image.pixels_per_em as f32
+                    } else {
+                        1.0
+                    };
+                    Some(Glyph {
+                        path: None,
+                        metrics: GlyphMetrics {
+                            width: image.width as f32 * scale,
+                            height: image.height as f32 * scale,
+                            bearing_x: image.x as f32 * scale,
+                            bearing_y: (image.y as f32 + image.height as f32) * scale,
+                        },
+                    })
+                } else if let Some(bbox) = fields.face_data.outline_glyph(id, &mut path) {
+                    Some(Glyph {
+                        path: Some(path),
+                        metrics: GlyphMetrics {
+                            width: bbox.width() as f32,
+                            height: bbox.height() as f32,
+                            bearing_x: bbox.x_min as f32,
+                            bearing_y: bbox.y_max as f32,
+                        },
+                    })
                 } else {
-                    1.0
+                    None
                 };
-                Some(Glyph {
-                    path: None,
-                    metrics: GlyphMetrics {
-                        width: image.width as f32 * scale,
-                        height: image.height as f32 * scale,
-                        bearing_x: image.x as f32 * scale,
-                        bearing_y: (image.y as f32 + image.height as f32) * scale,
-                    },
-                })
-            } else if let Some(bbox) = self.font_ref().outline_glyph(id, &mut path) {
-                Some(Glyph {
-                    path: Some(path),
-                    metrics: GlyphMetrics {
-                        width: bbox.width() as f32,
-                        height: bbox.height() as f32,
-                        bearing_x: bbox.x_min as f32,
-                        bearing_y: bbox.y_max as f32,
-                    },
-                })
-            } else {
-                None
-            };
 
-            if let Some(glyph) = maybe_glyph {
-                self.glyphs.insert(codepoint, glyph);
+                if let Some(glyph) = maybe_glyph {
+                    fields.glyphs.insert(codepoint, glyph);
+                }
             }
-        }
 
-        self.glyphs.get_mut(&codepoint)
+            fields.glyphs.get_mut(&codepoint)
+        })
     }
 
     pub fn glyph_rendering_representation(&mut self, codepoint: u16, _pixels_per_em: u16) -> Option<GlyphRendering> {
         #[cfg(feature = "image-loading")]
         if let Some(image) = self
-            .font_ref()
+            .face_ref()
             .glyph_raster_image(GlyphId(codepoint), _pixels_per_em)
             .and_then(|raster_glyph_image| {
                 image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
