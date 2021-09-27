@@ -130,8 +130,9 @@ impl Font {
         })
     }
 
-    pub fn data(&self) -> &[u8] {
-        self.data.as_ref().as_ref()
+    pub fn face_ref(&self) -> rustybuzz::Face<'_> {
+        // TODO: It may be faster if this is created only once and stored inside the Font struct
+        rustybuzz::Face::from_slice(self.data.as_ref().as_ref(), self.face_index).unwrap()
     }
 
     fn font_ref(&self) -> TtfFont<'_> {
