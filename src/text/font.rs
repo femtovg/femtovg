@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use fnv::FnvHashMap;
 use ttf_parser::{
     Face as TtfFont,
@@ -96,7 +94,7 @@ impl FontMetrics {
 }
 
 pub(crate) struct Font {
-    data: Arc<dyn AsRef<[u8]>>,
+    data: Box<dyn AsRef<[u8]>>,
     face_index: u32,
     units_per_em: u16,
     metrics: FontMetrics,
@@ -104,7 +102,7 @@ pub(crate) struct Font {
 }
 
 impl Font {
-    pub fn new(data: Arc<dyn AsRef<[u8]>>, face_index: u32) -> Result<Self, ErrorKind> {
+    pub fn new<T: AsRef<[u8]> + 'static>(data: T, face_index: u32) -> Result<Self, ErrorKind> {
         let ttf_font =
             TtfFont::from_slice(data.as_ref().as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
 
@@ -124,7 +122,7 @@ impl Font {
         };
 
         Ok(Self {
-            data: data.clone(),
+            data: Box::new(data),
             face_index,
             units_per_em,
             metrics,
