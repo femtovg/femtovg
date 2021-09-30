@@ -69,7 +69,7 @@ fn main() {
     let mut perf = PerfGraph::new();
 
     let svg_data = std::fs::read("examples/assets/Ghostscript_Tiger.svg").unwrap();
-    let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default()).unwrap();
+    let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default().to_ref()).unwrap();
 
     let xml_opt = xmlwriter::Options {
         use_single_quote: false,
