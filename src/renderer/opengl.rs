@@ -70,7 +70,10 @@ impl OpenGl {
     where
         F: FnMut(&str) -> *const c_void,
     {
-        Self::new_from_context(unsafe { glow::Context::from_loader_function(load_fn) }, false)
+        let context = unsafe { glow::Context::from_loader_function(load_fn) };
+        let version = unsafe { context.get_parameter_string(glow::VERSION) };
+        let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
+        Self::new_from_context(context, is_opengles_2_0)
     }
 
     #[cfg(target_arch = "wasm32")]
