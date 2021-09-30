@@ -9,7 +9,7 @@ use crate::ErrorKind;
 pub struct Framebuffer {
     context: Rc<glow::Context>,
     fbo: <glow::Context as glow::HasContext>::Framebuffer,
-    depth_stencil_rbo: Option<<glow::Context as glow::HasContext>::Renderbuffer>,
+    stencil_rbo: Option<<glow::Context as glow::HasContext>::Renderbuffer>,
 }
 
 impl Framebuffer {
@@ -17,7 +17,7 @@ impl Framebuffer {
         Framebuffer {
             context: context.clone(),
             fbo,
-            depth_stencil_rbo: None,
+            stencil_rbo: None,
         }
     }
     pub fn new(context: &Rc<glow::Context>, texture: &GlTexture) -> Result<Self, ErrorKind> {
@@ -39,9 +39,9 @@ impl Framebuffer {
             );
         };
 
-        let depth_stencil_rbo = unsafe { context.create_renderbuffer().unwrap() };
+        let stencil_rbo = unsafe { context.create_renderbuffer().unwrap() };
         unsafe {
-            context.bind_renderbuffer(glow::RENDERBUFFER, Some(depth_stencil_rbo));
+            context.bind_renderbuffer(glow::RENDERBUFFER, Some(stencil_rbo));
             context.renderbuffer_storage(glow::RENDERBUFFER, glow::STENCIL_INDEX8, width as i32, height as i32);
             context.bind_renderbuffer(glow::RENDERBUFFER, None);
 
@@ -49,7 +49,7 @@ impl Framebuffer {
                 glow::FRAMEBUFFER,
                 glow::STENCIL_ATTACHMENT,
                 glow::RENDERBUFFER,
-                Some(depth_stencil_rbo),
+                Some(stencil_rbo),
             );
 
             let status = context.check_framebuffer_status(glow::FRAMEBUFFER);
@@ -82,7 +82,7 @@ impl Framebuffer {
         Ok(Framebuffer {
             context: context.clone(),
             fbo,
-            depth_stencil_rbo: Some(depth_stencil_rbo),
+            stencil_rbo: Some(stencil_rbo),
         })
     }
 
@@ -128,8 +128,8 @@ impl Drop for Framebuffer {
     fn drop(&mut self) {
         unsafe {
             self.context.delete_framebuffer(self.fbo);
-            if let Some(depth_stencil_rbo) = self.depth_stencil_rbo {
-                self.context.delete_renderbuffer(depth_stencil_rbo);
+            if let Some(stencil_rbo) = self.stencil_rbo {
+                self.context.delete_renderbuffer(stencil_rbo);
             }
         }
     }
