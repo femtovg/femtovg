@@ -47,7 +47,6 @@ euclid = "0.22.3"
 rand = "0.8"
 svg = "0.10.0"
 usvg = { version = "0.18.0", default-features = false, features = ["export", "filter"] }
-xmlwriter = "0.1"
 instant = { version = "0.1", features = [ "now" ] }
 resource = "0.5.0"
 image = { version = "0.23.6", default-features = false, features = ["jpeg", "png"] }
