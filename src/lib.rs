@@ -801,7 +801,7 @@ where
     // Paths
 
     /// Returns true if the specified point (x,y) is in the provided path, and false otherwise.
-    pub fn contains_point(&mut self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
+    pub fn contains_point(&self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
