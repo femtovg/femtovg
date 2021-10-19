@@ -21,7 +21,6 @@ use svg::node::element::path::{
     Command,
     Data,
 };
-use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
 use femtovg::{
