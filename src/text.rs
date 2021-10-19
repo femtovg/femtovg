@@ -23,6 +23,7 @@ use lru::LruCache;
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::utils::sync_typographic_metrics;
 use crate::{
     Canvas,
     Color,
@@ -357,7 +358,9 @@ impl TextContextImpl {
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new_with_data(data.to_owned(), face_index)?;
+        let mut data = data.to_owned();
+        sync_typographic_metrics(&mut data).expect("Failed to sync typographic metrics");
+        let font = Font::new_with_data(data, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -367,7 +370,8 @@ impl TextContextImpl {
         face_index: u32,
     ) -> Result<FontId, ErrorKind> {
         self.clear_caches();
-
+        let mut data = data.as_ref().to_owned();
+        sync_typographic_metrics(&mut data).expect("Failed to sync typographic metrics");
         let font = Font::new_with_data(data, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
