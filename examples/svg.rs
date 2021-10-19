@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::ops::Deref;
 use std::time::Instant;
 
@@ -20,7 +21,6 @@ use svg::node::element::path::{
     Command,
     Data,
 };
-use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
 use femtovg::{
@@ -214,7 +214,7 @@ fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
 
     for event in svg {
         match event {
-            SvgEvent::Tag(Path, _, attributes) => {
+            SvgEvent::Tag("path", _, attributes) => {
                 let data = attributes.get("d").unwrap();
                 let data = Data::parse(data).unwrap();
 
@@ -235,13 +235,37 @@ fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
                 }
 
                 let fill = if let Some(fill) = attributes.get("fill") {
-                    Some(Paint::color(Color::hex(fill)))
+                    if fill.starts_with("rgba(") {
+                        let [r, g, b, a]: [u8; 4] = fill
+                            .split(',')
+                            .map(|k| k.trim_matches(|c| !char::is_numeric(c)).parse().unwrap())
+                            .collect::<Vec<u8>>()
+                            .try_into()
+                            .unwrap();
+                        Some(Paint::color(Color::rgba(r, g, b, a)))
+                    } else {
+                        Some(Paint::color(Color::hex(fill)))
+                    }
                 } else {
                     None
                 };
 
                 let stroke = if let Some(stroke) = attributes.get("stroke") {
-                    if "none" != stroke.deref() {
+                    if stroke.starts_with("rgba(") {
+                        let [r, g, b, a]: [u8; 4] = stroke
+                            .split(',')
+                            .map(|k| k.trim_matches(|c| !char::is_numeric(c)).parse().unwrap())
+                            .collect::<Vec<u8>>()
+                            .try_into()
+                            .unwrap();
+                        let mut stroke_paint = Paint::color(Color::rgba(r, g, b, a));
+
+                        if let Some(stroke_width) = attributes.get("stroke-width") {
+                            stroke_paint.set_line_width(stroke_width.parse().unwrap());
+                        }
+
+                        Some(stroke_paint)
+                    } else if "none" != stroke.deref() {
                         let mut stroke_paint = Paint::color(Color::hex(stroke));
 
                         if let Some(stroke_width) = attributes.get("stroke-width") {
