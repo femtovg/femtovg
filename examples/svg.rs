@@ -226,11 +226,13 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
                     .and_then(|fill| to_femto_color(&fill.paint))
                     .map(Paint::color);
 
-                let stroke = svg_path
-                    .stroke
-                    .as_ref()
-                    .and_then(|stroke| to_femto_color(&stroke.paint))
-                    .map(Paint::color);
+                let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
+                    to_femto_color(&stroke.paint).map(|paint| {
+                        let mut stroke_paint = Paint::color(paint);
+                        stroke_paint.set_line_width(stroke.width.value() as f32);
+                        stroke_paint
+                    })
+                });
 
                 paths.push((path, fill, stroke))
             }
