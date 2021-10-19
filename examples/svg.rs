@@ -8,7 +8,6 @@ use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
 
 use svg::node::element::path::{Command, Data};
-use svg::node::element::tag::Path;
 use svg::parser::Event as SvgEvent;
 
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
