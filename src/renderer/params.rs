@@ -1,16 +1,6 @@
 use crate::{
-    paint::{
-        GlyphTexture,
-        GradientColors,
-    },
-    Color,
-    ImageFlags,
-    ImageStore,
-    Paint,
-    PaintFlavor,
-    PixelFormat,
-    Scissor,
-    Transform2D,
+    paint::{GlyphTexture, GradientColors},
+    Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
 use super::ShaderType;

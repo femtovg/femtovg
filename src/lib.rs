@@ -32,49 +32,21 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{
-    Align,
-    Baseline,
-    FontId,
-    FontMetrics,
-    TextContext,
-    TextMetrics,
-};
+pub use text::{Align, Baseline, FontId, FontMetrics, TextContext, TextMetrics};
 
-use text::{
-    GlyphAtlas,
-    RenderMode,
-    TextContextImpl,
-};
+use text::{GlyphAtlas, RenderMode, TextContextImpl};
 
 mod image;
 use crate::image::ImageStore;
-pub use crate::image::{
-    ImageFilter,
-    ImageFlags,
-    ImageId,
-    ImageInfo,
-    ImageSource,
-    PixelFormat,
-};
+pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
 
 mod color;
 pub use color::Color;
 
 pub mod renderer;
-pub use renderer::{
-    RenderTarget,
-    Renderer,
-};
+pub use renderer::{RenderTarget, Renderer};
 
-use renderer::{
-    Command,
-    CommandType,
-    Drawable,
-    Params,
-    ShaderType,
-    Vertex,
-};
+use renderer::{Command, CommandType, Drawable, Params, ShaderType, Vertex};
 
 pub(crate) mod geometry;
 pub use geometry::Transform2D;
@@ -82,17 +54,11 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::{
-    GlyphTexture,
-    PaintFlavor,
-};
+use paint::{GlyphTexture, PaintFlavor};
 
 mod path;
 use path::Convexity;
-pub use path::{
-    Path,
-    Solidity,
-};
+pub use path::{Path, Solidity};
 
 mod gradient_store;
 use gradient_store::GradientStore;

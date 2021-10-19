@@ -3,18 +3,8 @@ use std::f32::consts::PI;
 use resource::resource;
 
 use instant::Instant;
-use winit::event::{
-    ElementState,
-    Event,
-    KeyboardInput,
-    MouseButton,
-    VirtualKeyCode,
-    WindowEvent,
-};
-use winit::event_loop::{
-    ControlFlow,
-    EventLoop,
-};
+use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 //use glutin::{GlRequest, Api};
 

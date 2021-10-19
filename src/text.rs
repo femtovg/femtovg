@@ -1,40 +1,20 @@
 use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs;
-use std::hash::{
-    Hash,
-    Hasher,
-};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::path::Path as FilePath;
 use std::rc::Rc;
 
-use fnv::{
-    FnvBuildHasher,
-    FnvHashMap,
-    FnvHasher,
-};
-use generational_arena::{
-    Arena,
-    Index,
-};
+use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
+use generational_arena::{Arena, Index};
 use lru::LruCache;
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Canvas,
-    Color,
-    ErrorKind,
-    FillRule,
-    ImageFlags,
-    ImageId,
-    ImageInfo,
-    Paint,
-    PixelFormat,
-    RenderTarget,
-    Renderer,
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
 
 mod atlas;

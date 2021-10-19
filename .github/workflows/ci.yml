@@ -31,11 +31,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Install nightly toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: nightly
+            toolchain: stable
             override: true
             components: rustfmt
       - name: Run rustfmt
-        run: cargo +nightly fmt --all -- --check
+        run: cargo fmt --all -- --check

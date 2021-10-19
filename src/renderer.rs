@@ -4,16 +4,8 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    paint::GlyphTexture,
-    Color,
-    CompositeOperationState,
-    ErrorKind,
-    FillRule,
-    ImageFilter,
-    ImageId,
-    ImageInfo,
-    ImageSource,
-    ImageStore,
+    paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo,
+    ImageSource, ImageStore,
 };
 
 mod opengl;

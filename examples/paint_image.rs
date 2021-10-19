@@ -9,29 +9,13 @@
 use instant::Instant;
 
 use glutin::{
-    event::{
-        ElementState,
-        Event,
-        WindowEvent,
-    },
-    event_loop::{
-        ControlFlow,
-        EventLoop,
-    },
+    event::{ElementState, Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     ContextBuilder,
 };
 
-use femtovg::{
-    renderer::OpenGl,
-    Canvas,
-    Color,
-    ImageFlags,
-    Paint,
-    Path,
-    PixelFormat,
-    RenderTarget,
-};
+use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 
 enum Shape {
     Rect,

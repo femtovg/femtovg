@@ -1,16 +1,10 @@
 use std::f32::consts::PI;
 use std::slice;
 
-use crate::geometry::{
-    self,
-    Transform2D,
-};
+use crate::geometry::{self, Transform2D};
 
 mod cache;
-pub use cache::{
-    Convexity,
-    PathCache,
-};
+pub use cache::{Convexity, PathCache};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.5522847493;
