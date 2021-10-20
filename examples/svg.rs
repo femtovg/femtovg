@@ -1,14 +1,9 @@
-use std::convert::TryInto;
-use std::ops::Deref;
 use std::time::Instant;
 
 use glutin::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
-
-use svg::node::element::path::{Command, Data};
-use svg::parser::Event as SvgEvent;
 
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
 
@@ -46,18 +41,7 @@ fn main() {
     let svg_data = std::fs::read("examples/assets/Ghostscript_Tiger.svg").unwrap();
     let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default().to_ref()).unwrap();
 
-    let xml_opt = xmlwriter::Options {
-        use_single_quote: false,
-        indent: xmlwriter::Indent::Spaces(4),
-        attributes_indent: xmlwriter::Indent::Spaces(4),
-    };
-
-    let svg = tree.to_string(&usvg::XmlOptions {
-        writer_opts: xml_opt,
-        ..Default::default()
-    });
-
-    let mut paths = render_svg(&svg);
+    let mut paths = render_svg(tree);
 
     // print memory usage
     let mut total_sisze_bytes = 0;
@@ -182,82 +166,55 @@ fn main() {
     });
 }
 
-fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
-    let svg = svg::read(svg).unwrap();
+fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
+    use usvg::NodeKind;
+    use usvg::PathSegment;
 
     let mut paths = Vec::new();
 
-    for event in svg {
-        match event {
-            SvgEvent::Tag("path", _, attributes) => {
-                let data = attributes.get("d").unwrap();
-                let data = Data::parse(data).unwrap();
-
+    for node in svg.root().descendants() {
+        match &*node.borrow() {
+            NodeKind::Path(svg_path) => {
                 let mut path = Path::new();
 
-                for command in data.iter() {
+                for command in svg_path.data.iter() {
                     match command {
-                        Command::Move(_pos, par) => path.move_to(par[0], par[1]),
-                        Command::Line(_pos, par) => path.line_to(par[0], par[1]),
-                        Command::CubicCurve(_pos, par) => {
-                            for points in par.chunks_exact(6) {
-                                path.bezier_to(points[0], points[1], points[2], points[3], points[4], points[5]);
-                            }
+                        PathSegment::MoveTo { x, y } => path.move_to(*x as f32, *y as f32),
+                        PathSegment::LineTo { x, y } => path.line_to(*x as f32, *y as f32),
+                        PathSegment::CurveTo { x1, y1, x2, y2, x, y } => {
+                            path.bezier_to(*x1 as f32, *y1 as f32, *x2 as f32, *y2 as f32, *x as f32, *y as f32)
                         }
-                        Command::Close => path.close(),
-                        _ => {}
+                        PathSegment::ClosePath => path.close(),
                     }
                 }
 
-                let fill = if let Some(fill) = attributes.get("fill") {
-                    if fill.starts_with("rgba(") {
-                        let [r, g, b, a]: [u8; 4] = fill
-                            .split(',')
-                            .map(|k| k.trim_matches(|c| !char::is_numeric(c)).parse().unwrap())
-                            .collect::<Vec<u8>>()
-                            .try_into()
-                            .unwrap();
-                        Some(Paint::color(Color::rgba(r, g, b, a)))
-                    } else {
-                        Some(Paint::color(Color::hex(fill)))
-                    }
-                } else {
-                    None
+                let to_femto_color = |usvg_paint: &usvg::Paint| match usvg_paint {
+                    usvg::Paint::Color(usvg::Color {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                    }) => Some(Color::rgba(*red, *green, *blue, *alpha)),
+                    _ => None,
                 };
 
-                let stroke = if let Some(stroke) = attributes.get("stroke") {
-                    if stroke.starts_with("rgba(") {
-                        let [r, g, b, a]: [u8; 4] = stroke
-                            .split(',')
-                            .map(|k| k.trim_matches(|c| !char::is_numeric(c)).parse().unwrap())
-                            .collect::<Vec<u8>>()
-                            .try_into()
-                            .unwrap();
-                        let mut stroke_paint = Paint::color(Color::rgba(r, g, b, a));
+                let fill = svg_path
+                    .fill
+                    .as_ref()
+                    .and_then(|fill| to_femto_color(&fill.paint))
+                    .map(Paint::color);
 
-                        if let Some(stroke_width) = attributes.get("stroke-width") {
-                            stroke_paint.set_line_width(stroke_width.parse().unwrap());
-                        }
+                let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
+                    to_femto_color(&stroke.paint).map(|paint| {
+                        let mut stroke_paint = Paint::color(paint);
+                        stroke_paint.set_line_width(stroke.width.value() as f32);
+                        stroke_paint
+                    })
+                });
 
-                        Some(stroke_paint)
-                    } else if "none" != stroke.deref() {
-                        let mut stroke_paint = Paint::color(Color::hex(stroke));
-
-                        if let Some(stroke_width) = attributes.get("stroke-width") {
-                            stroke_paint.set_line_width(stroke_width.parse().unwrap());
-                        }
-
-                        Some(stroke_paint)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                paths.push((path, fill, stroke));
+                paths.push((path, fill, stroke))
             }
-            _ => {}
+            _ => (),
         }
     }
 
