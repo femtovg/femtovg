@@ -49,7 +49,7 @@ svg = "0.10.0"
 usvg = { version = "0.19.0", default-features = false, features = ["export", "filter"] }
 instant = { version = "0.1", features = [ "now" ] }
 resource = "0.5.0"
-image = { version = "0.23.14", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.23.6", default-features = false, features = ["jpeg", "png"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.27.0"
