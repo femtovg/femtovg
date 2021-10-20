@@ -161,3 +161,69 @@ fn text_location_respects_scale() {
     assert_eq!(res.x, 100.0);
     assert_eq!(res.y, 100.0);
 }
+
+#[test]
+fn text_measure_without_canvas() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .expect("Font not found");
+
+    let mut test_paint = femtovg::Paint::default();
+    test_paint.set_font(&[font_id]);
+    test_paint.set_font_size(16.);
+
+    let metrics = text_context
+        .measure_text(0., 0., "Hello World", test_paint)
+        .expect("text shaping failed unexpectedly");
+
+    assert_eq!(metrics.width().ceil(), 83.);
+    assert_eq!(metrics.height().ceil(), 13.);
+}
+
+#[test]
+fn font_measure_without_canvas() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .expect("Font not found");
+
+    let mut test_paint = femtovg::Paint::default();
+    test_paint.set_font(&[font_id]);
+    test_paint.set_font_size(16.);
+
+    let metrics = text_context
+        .measure_font(test_paint)
+        .expect("font measuring failed unexpectedly");
+
+    assert_eq!(metrics.ascender().ceil(), 17.);
+}
+
+#[test]
+fn break_text_without_canvas() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .expect("Font not found");
+
+    let mut test_paint = femtovg::Paint::default();
+    test_paint.set_font(&[font_id]);
+    test_paint.set_font_size(16.);
+
+    let text = "Multiple Lines Broken";
+
+    let breaks = text_context
+        .break_text_vec(60., text, test_paint)
+        .expect("text shaping failed unexpectedly");
+
+    assert_eq!(
+        breaks
+            .iter()
+            .map(|range| &text[range.start..range.end])
+            .collect::<Vec<_>>(),
+        vec!["Multiple", " Lines ", "Broken"]
+    );
+}

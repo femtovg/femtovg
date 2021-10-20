@@ -1,14 +1,9 @@
-use std::ops::Deref;
 use std::time::Instant;
 
 use glutin::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
-
-use svg::node::element::path::{Command, Data};
-use svg::node::element::tag::Path;
-use svg::parser::Event as SvgEvent;
 
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
 
@@ -43,17 +38,10 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
-    let tree = usvg::Tree::from_file("examples/assets/Ghostscript_Tiger.svg", &usvg::Options::default()).unwrap();
+    let svg_data = std::fs::read("examples/assets/Ghostscript_Tiger.svg").unwrap();
+    let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default().to_ref()).unwrap();
 
-    let xml_opt = usvg::XmlOptions {
-        use_single_quote: false,
-        indent: usvg::XmlIndent::Spaces(4),
-        attributes_indent: usvg::XmlIndent::Spaces(4),
-    };
-
-    let svg = tree.to_string(xml_opt);
-
-    let mut paths = render_svg(&svg);
+    let mut paths = render_svg(tree);
 
     // print memory usage
     let mut total_sisze_bytes = 0;
@@ -178,58 +166,55 @@ fn main() {
     });
 }
 
-fn render_svg(svg: &str) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
-    let svg = svg::read(std::io::Cursor::new(&svg)).unwrap();
+fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
+    use usvg::NodeKind;
+    use usvg::PathSegment;
 
     let mut paths = Vec::new();
 
-    for event in svg {
-        match event {
-            SvgEvent::Tag(Path, _, attributes) => {
-                let data = attributes.get("d").unwrap();
-                let data = Data::parse(data).unwrap();
-
+    for node in svg.root().descendants() {
+        match &*node.borrow() {
+            NodeKind::Path(svg_path) => {
                 let mut path = Path::new();
 
-                for command in data.iter() {
+                for command in svg_path.data.iter() {
                     match command {
-                        Command::Move(_pos, par) => path.move_to(par[0], par[1]),
-                        Command::Line(_pos, par) => path.line_to(par[0], par[1]),
-                        Command::CubicCurve(_pos, par) => {
-                            for points in par.chunks_exact(6) {
-                                path.bezier_to(points[0], points[1], points[2], points[3], points[4], points[5]);
-                            }
+                        PathSegment::MoveTo { x, y } => path.move_to(*x as f32, *y as f32),
+                        PathSegment::LineTo { x, y } => path.line_to(*x as f32, *y as f32),
+                        PathSegment::CurveTo { x1, y1, x2, y2, x, y } => {
+                            path.bezier_to(*x1 as f32, *y1 as f32, *x2 as f32, *y2 as f32, *x as f32, *y as f32)
                         }
-                        Command::Close => path.close(),
-                        _ => {}
+                        PathSegment::ClosePath => path.close(),
                     }
                 }
 
-                let fill = if let Some(fill) = attributes.get("fill") {
-                    Some(Paint::color(Color::hex(fill)))
-                } else {
-                    None
+                let to_femto_color = |usvg_paint: &usvg::Paint| match usvg_paint {
+                    usvg::Paint::Color(usvg::Color {
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                    }) => Some(Color::rgba(*red, *green, *blue, *alpha)),
+                    _ => None,
                 };
 
-                let stroke = if let Some(stroke) = attributes.get("stroke") {
-                    if "none" != stroke.deref() {
-                        let mut stroke_paint = Paint::color(Color::hex(stroke));
+                let fill = svg_path
+                    .fill
+                    .as_ref()
+                    .and_then(|fill| to_femto_color(&fill.paint))
+                    .map(Paint::color);
 
-                        if let Some(stroke_width) = attributes.get("stroke-width") {
-                            stroke_paint.set_line_width(stroke_width.parse().unwrap());
-                        }
+                let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
+                    to_femto_color(&stroke.paint).map(|paint| {
+                        let mut stroke_paint = Paint::color(paint);
+                        stroke_paint.set_line_width(stroke.width.value() as f32);
+                        stroke_paint
+                    })
+                });
 
-                        Some(stroke_paint)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                paths.push((path, fill, stroke));
+                paths.push((path, fill, stroke))
             }
-            _ => {}
+            _ => (),
         }
     }
 

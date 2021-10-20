@@ -5,7 +5,7 @@ use rgb::RGBA8;
 
 use crate::{ErrorKind, ImageInfo, ImageSource, ImageStore};
 
-use super::{Command, Renderer, Vertex};
+use super::{Command, ImageId, Renderer, Vertex};
 
 /// Void renderer used for testing
 pub struct Void;
@@ -15,7 +15,7 @@ impl Renderer for Void {
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
-    fn render(&mut self, images: &ImageStore<VoidImage>, verts: &[Vertex], commands: &[Command]) {}
+    fn render(&mut self, images: &mut ImageStore<VoidImage>, verts: &[Vertex], commands: Vec<Command>) {}
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Ok(VoidImage { info })
@@ -41,7 +41,7 @@ impl Renderer for Void {
         Ok(())
     }
 
-    fn delete_image(&mut self, image: Self::Image) {}
+    fn delete_image(&mut self, image: Self::Image, _image_id: ImageId) {}
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         Ok(ImgVec::new(Vec::new(), 0, 0))

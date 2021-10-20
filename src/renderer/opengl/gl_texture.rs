@@ -14,22 +14,23 @@ impl GlTexture {
     pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles_2_0: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
-        let mut texture = Self {
-            context: context.clone(),
-            id: Default::default(),
-            info: info,
-        };
-
-        unsafe {
-            texture.id = context.create_texture().unwrap();
-            context.bind_texture(glow::TEXTURE_2D, Some(texture.id));
+        let id = unsafe {
+            let id = context.create_texture().unwrap();
+            context.bind_texture(glow::TEXTURE_2D, Some(id));
             context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             if !opengles_2_0 {
-                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, texture.info.width() as i32);
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, info.width() as i32);
                 context.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
                 context.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
             }
-        }
+            id
+        };
+
+        let texture = Self {
+            context: context.clone(),
+            id,
+            info,
+        };
 
         match info.format() {
             PixelFormat::Gray8 => unsafe {

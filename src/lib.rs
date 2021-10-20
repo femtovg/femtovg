@@ -17,8 +17,10 @@ TODO:
 #[macro_use]
 extern crate serde;
 
+use std::cell::RefCell;
 use std::ops::Range;
 use std::path::Path as FilePath;
+use std::rc::Rc;
 
 use imgref::ImgVec;
 use rgb::RGBA8;
@@ -30,13 +32,13 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, FontId, FontMetrics, TextMetrics};
+pub use text::{Align, Baseline, FontId, FontMetrics, TextContext, TextMetrics};
 
-use text::{RenderMode, TextContext};
+use text::{GlyphAtlas, RenderMode, TextContextImpl};
 
 mod image;
 use crate::image::ImageStore;
-pub use crate::image::{ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
+pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
 
 mod color;
 pub use color::Color;
@@ -52,7 +54,7 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::PaintFlavor;
+use paint::{GlyphTexture, PaintFlavor};
 
 mod path;
 use path::Convexity;
@@ -265,7 +267,10 @@ pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
     renderer: T,
-    text_context: TextContext,
+    text_context: Rc<RefCell<TextContextImpl>>,
+    glyph_atlas: Rc<GlyphAtlas>,
+    // Glyph atlas used for direct rendering of color glyphs, dropped after flush()
+    emphemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -275,7 +280,7 @@ pub struct Canvas<T: Renderer> {
     device_px_ratio: f32,
     tess_tol: f32,
     dist_tol: f32,
-    gradients: GradientStore
+    gradients: GradientStore,
 }
 
 impl<T> Canvas<T>
@@ -289,6 +294,8 @@ where
             height: 0,
             renderer: renderer,
             text_context: Default::default(),
+            glyph_atlas: Default::default(),
+            emphemeral_glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -298,7 +305,35 @@ where
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
-            gradients: GradientStore::new()
+            gradients: GradientStore::new(),
+        };
+
+        canvas.save();
+
+        Ok(canvas)
+    }
+
+    /// Creates a new canvas with the specified renderer and using the fonts registered with the
+    /// provided [`TextContext`]. Note that the context is explicitly shared, so that any fonts
+    /// registered with a clone of this context will also be visible to this canvas.
+    pub fn new_with_text_context(renderer: T, text_context: TextContext) -> Result<Self, ErrorKind> {
+        let mut canvas = Self {
+            width: 0,
+            height: 0,
+            renderer: renderer,
+            text_context: text_context.0,
+            glyph_atlas: Default::default(),
+            emphemeral_glyph_atlas: Default::default(),
+            current_render_target: RenderTarget::Screen,
+            state_stack: Default::default(),
+            commands: Default::default(),
+            verts: Default::default(),
+            images: ImageStore::new(),
+            fringe_width: 1.0,
+            device_px_ratio: 1.0,
+            tess_tol: 0.25,
+            dist_tol: 0.01,
+            gradients: GradientStore::new(),
         };
 
         canvas.save();
@@ -353,10 +388,14 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush(&mut self) {
-        self.renderer.render(&self.images, &self.verts, &self.commands);
-        self.commands.clear();
+        self.renderer
+            .render(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
-        self.gradients.release_old_gradients(&mut self.images, &mut self.renderer);
+        self.gradients
+            .release_old_gradients(&mut self.images, &mut self.renderer);
+        if let Some(atlas) = self.emphemeral_glyph_atlas.take() {
+            atlas.clear(self);
+        }
     }
 
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
@@ -557,6 +596,51 @@ where
         Ok((info.width(), info.height()))
     }
 
+    /// Renders the given source_image into target_image while applying a filter effect.
+    ///
+    /// The target image must have the same size as the source image. The filtering is recorded
+    /// as a drawing command and run by the renderer when [`Self::flush()`] is called.
+    ///
+    /// The filtering does not take any transformation set on the Canvas into account nor does it
+    /// change the current rendering target.
+    pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
+        let (image_width, image_height) = match self.image_size(source_image) {
+            Ok((w, h)) => (w, h),
+            Err(_) => return,
+        };
+
+        // The renderer will receive a RenderFilteredImage command with two triangles attached that
+        // cover the image and the source image.
+        let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
+        cmd.image = Some(source_image);
+
+        let vertex_offset = self.verts.len();
+
+        let image_width = image_width as f32;
+        let image_height = image_height as f32;
+
+        let quad_x0 = 0.0;
+        let quad_y0 = -image_height;
+        let quad_x1 = image_width;
+        let quad_y1 = image_height;
+
+        let texture_x0 = -(image_width / 2.);
+        let texture_y0 = -(image_height / 2.);
+        let texture_x1 = (image_width) / 2.;
+        let texture_y1 = (image_height) / 2.;
+
+        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y0, texture_x1, texture_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y1, texture_x0, texture_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+
+        cmd.triangles_verts = Some((vertex_offset, 6));
+
+        self.append_cmd(cmd)
+    }
+
     // Transforms
 
     /// Resets current transform to a identity matrix.
@@ -683,7 +767,7 @@ where
     // Paths
 
     /// Returns true if the specified point (x,y) is in the provided path, and false otherwise.
-    pub fn contains_point(&mut self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
+    pub fn contains_point(&self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -738,8 +822,8 @@ where
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_with, LineJoin::Miter, 2.4);
+        let fringe_width = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
@@ -781,7 +865,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -813,14 +900,30 @@ where
             // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
             // over the shape area with stencil test enabled to produce the final fill. These are
             // the verts needed for the covering quad
-            self.verts
-                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.maxx, path_cache.bounds.miny, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.maxy, 0.5, 1.0));
-            self.verts
-                .push(Vertex::new(path_cache.bounds.minx, path_cache.bounds.miny, 0.5, 1.0));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.maxx + fringe_width,
+                path_cache.bounds.maxy + fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.maxx + fringe_width,
+                path_cache.bounds.miny - fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.minx - fringe_width,
+                path_cache.bounds.maxy + fringe_width,
+                0.5,
+                1.0,
+            ));
+            self.verts.push(Vertex::new(
+                path_cache.bounds.minx - fringe_width,
+                path_cache.bounds.miny,
+                0.5,
+                1.0,
+            ));
 
             cmd.triangles_verts = Some((offset, 4));
         }
@@ -916,7 +1019,10 @@ where
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
@@ -942,17 +1048,17 @@ where
 
     /// Adds a font file to the canvas
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_file(file_path)
+        self.text_context.as_ref().borrow_mut().add_font_file(file_path)
     }
 
     /// Adds a font to the canvas by reading it from the specified chunk of memory.
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
-        self.text_context.add_font_mem(data)
+        self.text_context.as_ref().borrow_mut().add_font_mem(data)
     }
 
     /// Adds all .ttf files from a directory
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
-        self.text_context.add_font_dir(dir_path)
+        self.text_context.as_ref().borrow_mut().add_font_dir(dir_path)
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
@@ -969,23 +1075,21 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
-        layout.scale(invscale);
-
-        Ok(layout)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .measure_text(x * scale, y * scale, text, paint)
+            .map(|mut metrics| {
+                metrics.scale(invscale);
+                metrics
+            })
     }
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
-        if let Some(Some(id)) = paint.font_ids.get(0) {
-            if let Some(font) = self.text_context.font(*id) {
-                return Ok(font.metrics(paint.font_size));
-            }
-        }
-
-        Err(ErrorKind::NoFontFound)
+        self.text_context.as_ref().borrow_mut().measure_font(paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
@@ -998,9 +1102,10 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let max_width = max_width * scale;
 
-        let layout = text::shape(0.0, 0.0, &mut self.text_context, &paint, text, Some(max_width))?;
-
-        Ok(layout.final_byte_index)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .break_text(max_width, text, paint)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -1008,28 +1113,18 @@ where
         &mut self,
         max_width: f32,
         text: S,
-        paint: Paint,
+        mut paint: Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        self.transform_text_paint(&mut paint);
+
         let text = text.as_ref();
+        let scale = self.font_scale() * self.device_px_ratio;
+        let max_width = max_width * scale;
 
-        let mut res = Vec::new();
-        let mut start = 0;
-
-        while start < text.len() {
-            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
-                if index == 0 {
-                    break;
-                }
-
-                let index = start + index;
-                res.push(start..index);
-                start += &text[start..index].len();
-            } else {
-                break;
-            }
-        }
-
-        Ok(res)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .break_text_vec(max_width, text, paint)
     }
 
     /// Fills the provided string with the specified Paint.
@@ -1077,20 +1172,28 @@ where
 
         self.transform_text_paint(&mut paint);
 
-        let mut layout = text::shape(x * scale, y * scale, &mut self.text_context, &paint, text, None)?;
+        let mut layout = text::shape(
+            x * scale,
+            y * scale,
+            &mut self.text_context.as_ref().borrow_mut(),
+            &paint,
+            text,
+            None,
+        )?;
         //let layout = self.layout_text(x, y, text, paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        if paint.font_size > 92.0 {
+        let bitmap_glyphs = layout.has_bitmap_glyphs();
+        let need_direct_rendering = paint.font_size > 92.0;
+
+        if need_direct_rendering && !bitmap_glyphs {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;
         } else {
-            let cmds = text::render_atlas(self, &layout, &paint, render_mode)?;
+            let create_vertices = |quads: &Vec<text::Quad>| {
+                let mut verts = Vec::with_capacity(quads.len() * 6);
 
-            for cmd in &cmds {
-                let mut verts = Vec::with_capacity(cmd.quads.len() * 6);
-
-                for quad in &cmd.quads {
+                for quad in quads {
                     let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
                     let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
                     let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
@@ -1103,8 +1206,34 @@ where
                     verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
                     verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
                 }
+                verts
+            };
 
-                paint.set_alpha_mask(Some(cmd.image_id));
+            let atlas = if bitmap_glyphs && need_direct_rendering {
+                self.emphemeral_glyph_atlas
+                    .get_or_insert_with(|| Default::default())
+                    .clone()
+            } else {
+                self.glyph_atlas.clone()
+            };
+
+            let draw_commands = atlas.render_atlas(self, &layout, &paint, render_mode)?;
+
+            for cmd in draw_commands.alpha_glyphs {
+                let verts = create_vertices(&cmd.quads);
+
+                paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
+
+                // Apply global alpha
+                paint.mul_alpha(self.state().alpha);
+
+                self.render_triangles(&verts, &paint);
+            }
+
+            for cmd in draw_commands.color_glyphs {
+                let verts = create_vertices(&cmd.quads);
+
+                paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
 
                 // Apply global alpha
                 paint.mul_alpha(self.state().alpha);
@@ -1125,12 +1254,15 @@ where
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.alpha_mask = paint.alpha_mask();
+        cmd.glyph_texture = paint.glyph_texture();
 
         if let PaintFlavor::Image { id, .. } = paint.flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
-            cmd.image = self.gradients.lookup_or_add(*stops, &mut self.images, &mut self.renderer).map_or(None, |id| Some(id));
+            cmd.image = self
+                .gradients
+                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .map_or(None, |id| Some(id));
         }
 
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
@@ -1157,21 +1289,22 @@ where
 
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
-        self.text_context.debug_inspector_get_textures()
+        self.glyph_atlas
+            .glyph_textures
+            .borrow()
+            .iter()
+            .map(|t| t.image_id)
+            .collect()
     }
 
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_draw_image(&mut self, id: ImageId) {
         if let Ok(size) = self.image_size(id) {
-            let width  = size.0 as f32;
+            let width = size.0 as f32;
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect(0f32, 0f32, width, height);
-            self.fill_path(&mut path, Paint::image(
-                id,
-                0f32, 0f32, width, height,
-                0f32, 1f32
-            ));
+            self.fill_path(&mut path, Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
 }

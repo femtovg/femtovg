@@ -1,7 +1,10 @@
+use std::cell::RefCell;
 use std::ffi::OsStr;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::ops::Range;
 use std::path::Path as FilePath;
+use std::rc::Rc;
 
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
@@ -11,8 +14,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, Path, PixelFormat,
-    RenderTarget, Renderer,
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
 
 mod atlas;
@@ -21,6 +23,8 @@ pub use atlas::Atlas;
 mod font;
 use font::Font;
 pub use font::FontMetrics;
+
+use self::font::GlyphRendering;
 
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().
@@ -90,7 +94,7 @@ impl Default for RenderMode {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-struct RenderedGlyphId {
+pub(crate) struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
     size: u32,
@@ -113,7 +117,7 @@ impl RenderedGlyphId {
 }
 
 #[derive(Copy, Clone, Debug)]
-struct RenderedGlyph {
+pub(crate) struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
@@ -121,6 +125,7 @@ struct RenderedGlyph {
     atlas_x: u32,
     atlas_y: u32,
     padding: u32,
+    color_glyph: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -139,6 +144,7 @@ pub struct ShapedGlyph {
     pub offset_y: f32,
     pub bearing_x: f32,
     pub bearing_y: f32,
+    pub bitmap_glyph: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -173,20 +179,104 @@ impl ShapingId {
 type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
 type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
-struct FontTexture {
+pub(crate) struct FontTexture {
     atlas: Atlas,
-    image_id: ImageId,
+    pub(crate) image_id: ImageId,
 }
 
-pub(crate) struct TextContext {
+/// TextContext provides functionality for text processing in femtovg. You can
+/// add fonts using the [`Self::add_font_file()`], [`Self::add_font_mem()`] and
+/// [`Self::add_font_dir()`] functions. For each registered font a [`FontId`] is
+/// returned.
+///
+/// The [`FontId`] can be supplied to [`crate::Paint`] along with additional parameters
+/// such as the font size.
+///
+/// The paint is needed when using TextContext's measurement functions such as
+/// [`Self::measure_text()`].
+///
+/// Note that the measurements are done entirely with the supplied sizes in the paint
+/// parameter. If you need measurements that take a [`crate::Canvas`]'s transform or dpi into
+/// account (see [`crate::Canvas::set_size()`]), you need to use the measurement functions
+/// on the canvas.
+#[derive(Clone)]
+pub struct TextContext(pub(crate) Rc<RefCell<TextContextImpl>>);
+
+impl Default for TextContext {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl TextContext {
+    /// Registers all .ttf files from a directory with this text context. If successful, the
+    /// font ids of all registered fonts are returned.
+    pub fn add_font_dir<T: AsRef<FilePath>>(&self, path: T) -> Result<Vec<FontId>, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_dir(path)
+    }
+
+    /// Registers the .ttf file from the specified path with this text context. If successful,
+    /// the font id is returned.
+    pub fn add_font_file<T: AsRef<FilePath>>(&self, path: T) -> Result<FontId, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_file(path)
+    }
+
+    /// Registers the in-memory representation of a TrueType font pointed to by the data
+    /// parameter with this text context. If successful, the font id is returned.
+    pub fn add_font_mem(&self, data: &[u8]) -> Result<FontId, ErrorKind> {
+        self.0.as_ref().borrow_mut().add_font_mem(data)
+    }
+
+    /// Registers the in-memory representation of a TrueType font pointed to by the shared data
+    /// parameter with this text context. If successful, the font id is returned. The face_index
+    /// specifies the face index if the font data is a true type font collection. For plain true
+    /// type fonts, use 0 as index.
+    pub fn add_shared_font_with_index<T: AsRef<[u8]> + 'static>(
+        &self,
+        data: T,
+        face_index: u32,
+    ) -> Result<FontId, ErrorKind> {
+        self.0
+            .as_ref()
+            .borrow_mut()
+            .add_shared_font_with_index(data, face_index)
+    }
+
+    /// Returns information on how the provided text will be drawn with the specified paint.
+    pub fn measure_text<S: AsRef<str>>(&self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
+        self.0.as_ref().borrow_mut().measure_text(x, y, text, paint)
+    }
+
+    /// Returns the maximum index-th byte of text that will fit inside max_width.
+    ///
+    /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
+    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
+        self.0.as_ref().borrow_mut().break_text(max_width, text, paint)
+    }
+
+    /// Returnes a list of ranges representing each line of text that will fit inside max_width
+    pub fn break_text_vec<S: AsRef<str>>(
+        &self,
+        max_width: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        self.0.as_ref().borrow_mut().break_text_vec(max_width, text, paint)
+    }
+
+    /// Returns font metrics for a particular Paint.
+    pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        self.0.as_ref().borrow_mut().measure_font(paint)
+    }
+}
+
+pub(crate) struct TextContextImpl {
     fonts: Arena<Font>,
     shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
     shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
-    textures: Vec<FontTexture>,
-    rendered_glyphs: FnvHashMap<RenderedGlyphId, RenderedGlyph>,
 }
 
-impl Default for TextContext {
+impl Default for TextContextImpl {
     fn default() -> Self {
         let fnv_run = FnvBuildHasher::default();
         let fnv_words = FnvBuildHasher::default();
@@ -195,13 +285,11 @@ impl Default for TextContext {
             fonts: Default::default(),
             shaping_run_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_run),
             shaped_words_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_words),
-            textures: Default::default(),
-            rendered_glyphs: Default::default(),
         }
     }
 }
 
-impl TextContext {
+impl TextContextImpl {
     pub fn add_font_dir<T: AsRef<FilePath>>(&mut self, path: T) -> Result<Vec<FontId>, ErrorKind> {
         let path = path.as_ref();
         let mut fonts = Vec::new();
@@ -216,6 +304,8 @@ impl TextContext {
                 } else {
                     if let Some("ttf") = path.extension().and_then(OsStr::to_str) {
                         fonts.push(self.add_font_file(path)?);
+                    } else if let Some("ttc") = path.extension().and_then(OsStr::to_str) {
+                        fonts.extend(self.add_font_file_collection(path)?);
                     }
                 }
             }
@@ -230,10 +320,35 @@ impl TextContext {
         self.add_font_mem(&data)
     }
 
+    pub fn add_font_file_collection<T: AsRef<FilePath>>(
+        &mut self,
+        path: T,
+    ) -> Result<impl Iterator<Item = FontId> + '_, ErrorKind> {
+        let data = std::fs::read(path)?;
+
+        let count = ttf_parser::fonts_in_collection(&data).unwrap_or(1);
+        Ok((0..count).filter_map(move |index| Some(self.add_font_mem_with_index(&data, index).ok()?)))
+    }
+
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
+        self.add_font_mem_with_index(data, 0)
+    }
+
+    pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new(data)?;
+        let font = Font::new_with_data(data.to_owned(), face_index)?;
+        Ok(FontId(self.fonts.insert(font)))
+    }
+
+    pub fn add_shared_font_with_index<T: AsRef<[u8]> + 'static>(
+        &mut self,
+        data: T,
+        face_index: u32,
+    ) -> Result<FontId, ErrorKind> {
+        self.clear_caches();
+
+        let font = Font::new_with_data(data, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -245,7 +360,7 @@ impl TextContext {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, _text: &str, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
+    pub fn find_font<F, T>(&mut self, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
     where
         F: FnMut((FontId, &mut Font)) -> (bool, T),
     {
@@ -286,9 +401,58 @@ impl TextContext {
         self.shaped_words_cache.clear();
     }
 
-    #[cfg(feature = "debug_inspector")]
-    pub fn debug_inspector_get_textures(&self) -> Vec<ImageId> {
-        self.textures.iter().map(|t| t.image_id).collect()
+    pub fn measure_text<S: AsRef<str>>(
+        &mut self,
+        x: f32,
+        y: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<TextMetrics, ErrorKind> {
+        Ok(shape(x, y, self, &paint, text.as_ref(), None)?)
+    }
+
+    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
+        let layout = shape(0.0, 0.0, self, &paint, text.as_ref(), Some(max_width))?;
+
+        Ok(layout.final_byte_index)
+    }
+
+    pub fn break_text_vec<S: AsRef<str>>(
+        &mut self,
+        max_width: f32,
+        text: S,
+        paint: Paint,
+    ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        let text = text.as_ref();
+
+        let mut res = Vec::new();
+        let mut start = 0;
+
+        while start < text.len() {
+            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
+                if index == 0 {
+                    break;
+                }
+
+                let index = start + index;
+                res.push(start..index);
+                start += &text[start..index].len();
+            } else {
+                break;
+            }
+        }
+
+        Ok(res)
+    }
+
+    pub fn measure_font(&mut self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        if let Some(Some(id)) = paint.font_ids.get(0) {
+            if let Some(font) = self.font(*id) {
+                return Ok(font.metrics(paint.font_size));
+            }
+        }
+
+        Err(ErrorKind::NoFontFound)
     }
 }
 
@@ -327,6 +491,10 @@ impl TextMetrics {
     pub fn height(&self) -> f32 {
         self.height
     }
+
+    pub(crate) fn has_bitmap_glyphs(&self) -> bool {
+        self.glyphs.iter().find(|g| g.bitmap_glyph).is_some()
+    }
 }
 
 // Shaper
@@ -334,7 +502,7 @@ impl TextMetrics {
 pub(crate) fn shape(
     x: f32,
     y: f32,
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
     text: &str,
     max_width: Option<f32>,
@@ -356,7 +524,7 @@ pub(crate) fn shape(
 }
 
 fn shape_run(
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
     text: &str,
     max_width: Option<f32>,
@@ -447,22 +615,15 @@ fn shape_run(
 fn shape_word(
     word: &str,
     hb_direction: rustybuzz::Direction,
-    context: &mut TextContext,
+    context: &mut TextContextImpl,
     paint: &Paint,
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
-    context.find_font(&word, paint, |(font_id, font)| {
+    context.find_font(paint, |(font_id, font)| {
         // Call harfbuzz
         let output = {
-            // TODO: It may be faster if this is created only once and stored inside the Font struct
-            let face = match rustybuzz::Face::from_slice(&font.data(), 0) {
-                Some(v) => v,
-                None => {
-                    eprintln!("Error: malformed font.");
-                    std::process::exit(1);
-                }
-            };
+            let face = font.face_ref();
 
             let mut buffer = rustybuzz::UnicodeBuffer::new();
             buffer.push_str(word);
@@ -482,7 +643,7 @@ fn shape_word(
         let mut has_missing = false;
 
         for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
-            if info.codepoint == 0 {
+            if info.glyph_id == 0 {
                 has_missing = true;
             }
 
@@ -494,7 +655,7 @@ fn shape_word(
                 c: c,
                 byte_index: info.cluster as usize,
                 font_id: font_id,
-                codepoint: info.codepoint,
+                codepoint: info.glyph_id,
                 width: 0.0,
                 height: 0.0,
                 advance_x: position.x_advance as f32 * scale,
@@ -503,13 +664,15 @@ fn shape_word(
                 offset_y: position.y_offset as f32 * scale,
                 bearing_x: 0.0,
                 bearing_y: 0.0,
+                bitmap_glyph: false,
             };
 
-            if let Some(glyph) = font.glyph(info.codepoint as u16) {
+            if let Some(glyph) = font.glyph(info.glyph_id as u16) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
                 g.bearing_x = glyph.metrics.bearing_x * scale;
                 g.bearing_y = glyph.metrics.bearing_y * scale;
+                g.bitmap_glyph = glyph.path.is_none();
             }
 
             shaped_word.width += g.advance_x + paint.letter_spacing;
@@ -521,7 +684,13 @@ fn shape_word(
 }
 
 // Calculates the x,y coordinates for each glyph based on their advances. Calculates total width and height of the shaped text run
-fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, paint: &Paint) -> Result<(), ErrorKind> {
+fn layout(
+    x: f32,
+    y: f32,
+    context: &mut TextContextImpl,
+    res: &mut TextMetrics,
+    paint: &Paint,
+) -> Result<(), ErrorKind> {
     let mut cursor_x = x;
     let mut cursor_y = y;
 
@@ -537,19 +706,33 @@ fn layout(x: f32, y: f32, context: &mut TextContext, res: &mut TextMetrics, pain
     let mut min_y = cursor_y;
     let mut max_y = cursor_y;
 
+    let mut ascender: f32 = 0.;
+    let mut descender: f32 = 0.;
+
     for glyph in &mut res.glyphs {
         let font = context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-
-        // Baseline alignment
         let metrics = font.metrics(paint.font_size);
+        ascender = ascender.max(metrics.ascender());
+        descender = descender.min(metrics.descender());
+    }
 
-        let alignment_offset_y = match paint.text_baseline {
-            Baseline::Top => metrics.ascender(),
-            Baseline::Middle => (metrics.ascender() + metrics.descender()) / 2.0,
-            Baseline::Alphabetic => 0.0,
-            Baseline::Bottom => metrics.descender(),
-        };
+    let primary_metrics = context.find_font(paint, |(_, font)| (false, font.metrics(paint.font_size)))?;
+    if ascender.abs() < std::f32::EPSILON {
+        ascender = primary_metrics.ascender();
+    }
+    if descender.abs() < std::f32::EPSILON {
+        descender = primary_metrics.descender();
+    }
 
+    // Baseline alignment
+    let alignment_offset_y = match paint.text_baseline {
+        Baseline::Top => ascender,
+        Baseline::Middle => (ascender + descender) / 2.0,
+        Baseline::Alphabetic => 0.0,
+        Baseline::Bottom => descender,
+    };
+
+    for glyph in &mut res.glyphs {
         glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
         glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y - glyph.bearing_y;
 
@@ -586,240 +769,335 @@ pub(crate) struct Quad {
     pub t1: f32,
 }
 
-pub(crate) fn render_atlas<T: Renderer>(
-    canvas: &mut Canvas<T>,
-    text_layout: &TextMetrics,
-    paint: &Paint,
-    mode: RenderMode,
-) -> Result<Vec<DrawCmd>, ErrorKind> {
-    let mut cmd_map = FnvHashMap::default();
-
-    let line_width_offset = if mode == RenderMode::Stroke {
-        (paint.line_width / 2.0).ceil()
-    } else {
-        0.0
-    };
-
-    let initial_render_target = canvas.current_render_target;
-
-    for glyph in &text_layout.glyphs {
-        let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
-
-        let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
-
-        if !canvas.text_context.rendered_glyphs.contains_key(&id) {
-            let glyph = render_glyph(canvas, paint, mode, &glyph)?;
-
-            canvas.text_context.rendered_glyphs.insert(id, glyph);
-        }
-
-        let rendered = canvas.text_context.rendered_glyphs.get(&id).unwrap();
-
-        if let Some(texture) = canvas.text_context.textures.get(rendered.texture_index) {
-            let image_id = texture.image_id;
-            let size = texture.atlas.size();
-            let itw = 1.0 / size.0 as f32;
-            let ith = 1.0 / size.1 as f32;
-
-            let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
-                image_id,
-                quads: Vec::new(),
-            });
-
-            let mut q = Quad::default();
-
-            q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
-            q.y0 = (glyph.y + glyph.bearing_y).round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
-            q.x1 = q.x0 + rendered.width as f32;
-            q.y1 = q.y0 + rendered.height as f32;
-
-            q.s0 = rendered.atlas_x as f32 * itw;
-            q.t0 = rendered.atlas_y as f32 * ith;
-            q.s1 = (rendered.atlas_x + rendered.width) as f32 * itw;
-            q.t1 = (rendered.atlas_y + rendered.height) as f32 * ith;
-
-            cmd.quads.push(q);
-        }
-    }
-
-    canvas.set_render_target(initial_render_target);
-
-    Ok(cmd_map.drain().map(|(_, cmd)| cmd).collect())
+pub(crate) struct GlyphDrawCommands {
+    pub(crate) alpha_glyphs: Vec<DrawCmd>,
+    pub(crate) color_glyphs: Vec<DrawCmd>,
 }
 
-fn render_glyph<T: Renderer>(
-    canvas: &mut Canvas<T>,
-    paint: &Paint,
-    mode: RenderMode,
-    glyph: &ShapedGlyph,
-) -> Result<RenderedGlyph, ErrorKind> {
-    let padding = GLYPH_PADDING + GLYPH_MARGIN;
+#[derive(Default)]
+pub(crate) struct GlyphAtlas {
+    pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, RenderedGlyph>>,
+    pub glyph_textures: RefCell<Vec<FontTexture>>,
+}
 
-    let line_width = if mode == RenderMode::Stroke {
-        paint.line_width
-    } else {
-        0.0
-    };
+impl GlyphAtlas {
+    pub(crate) fn render_atlas<T: Renderer>(
+        &self,
+        canvas: &mut Canvas<T>,
+        text_layout: &TextMetrics,
+        paint: &Paint,
+        mode: RenderMode,
+    ) -> Result<GlyphDrawCommands, ErrorKind> {
+        let mut alpha_cmd_map = FnvHashMap::default();
+        let mut color_cmd_map = FnvHashMap::default();
 
-    let line_width_offset = (line_width / 2.0).ceil();
-
-    let width = glyph.width.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
-    let height = glyph.height.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
-
-    let (dst_index, dst_image_id, (dst_x, dst_y)) = find_texture_or_alloc(
-        canvas,
-        width as usize,
-        height as usize,
-    )?;
-
-    // render glyph to image
-    canvas.save();
-    canvas.reset();
-
-    let (mut path, scale) = {
-        let font = canvas
-            .text_context
-            .font_mut(glyph.font_id)
-            .ok_or(ErrorKind::NoFontFound)?;
-        let scale = font.scale(paint.font_size);
-
-        let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
-            font_glyph.path.clone()
+        let line_width_offset = if mode == RenderMode::Stroke {
+            (paint.line_width / 2.0).ceil()
         } else {
-            Path::new()
+            0.0
         };
 
-        (path, scale)
-    };
+        let initial_render_target = canvas.current_render_target;
 
-    let rendered_bearing_y = glyph.bearing_y.round();
-    let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
-    let x = dst_x as f32 - glyph.bearing_x + line_width_offset + padding as f32 + x_quant;
-    let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
+        for glyph in &text_layout.glyphs {
+            let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
 
-    canvas.translate(x, y);
+            let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
-    canvas.set_render_target(RenderTarget::Image(dst_image_id));
-    canvas.clear_rect(
-        dst_x as u32,
-        TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
-        width as u32,
-        height as u32,
-        Color::black(),
-    );
+            if !self.rendered_glyphs.borrow().contains_key(&id) {
+                let glyph = self.render_glyph(canvas, paint, mode, &glyph)?;
 
-    let factor = 1.0 / 8.0;
+                self.rendered_glyphs.borrow_mut().insert(id, glyph);
+            }
 
-    let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
-    mask_paint.set_fill_rule(FillRule::EvenOdd);
-    mask_paint.set_anti_alias(false);
+            let rendered_glyphs = self.rendered_glyphs.borrow();
+            let rendered = rendered_glyphs.get(&id).unwrap();
 
-    if mode == RenderMode::Stroke {
-        mask_paint.line_width = line_width / scale;
-    }
+            if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
+                let image_id = texture.image_id;
+                let size = texture.atlas.size();
+                let itw = 1.0 / size.0 as f32;
+                let ith = 1.0 / size.1 as f32;
 
-    canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+                let cmd_map = if rendered.color_glyph {
+                    &mut color_cmd_map
+                } else {
+                    &mut alpha_cmd_map
+                };
 
-    // 4x
-    // let points = [
-    //     (-3.0/8.0, 1.0/8.0),
-    //     (1.0/8.0, 3.0/8.0),
-    //     (3.0/8.0, -1.0/8.0),
-    //     (-1.0/8.0, -3.0/8.0),
-    // ];
+                let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
+                    image_id,
+                    quads: Vec::new(),
+                });
 
-    // 8x
-    let points = [
-        (-7.0 / 16.0, -1.0 / 16.0),
-        (-1.0 / 16.0, -5.0 / 16.0),
-        (3.0 / 16.0, -7.0 / 16.0),
-        (5.0 / 16.0, -3.0 / 16.0),
-        (7.0 / 16.0, 1.0 / 16.0),
-        (1.0 / 16.0, 5.0 / 16.0),
-        (-3.0 / 16.0, 7.0 / 16.0),
-        (-5.0 / 16.0, 3.0 / 16.0),
-    ];
+                let mut q = Quad::default();
 
-    for point in &points {
-        canvas.save();
-        canvas.translate(point.0, point.1);
+                let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-        canvas.scale(scale, scale);
+                q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
+                q.y0 = (glyph.y + glyph.bearing_y).round()
+                    - rendered.bearing_y as f32
+                    - line_width_offset
+                    - GLYPH_PADDING as f32;
+                q.x1 = q.x0 + rendered.width as f32;
+                q.y1 = q.y0 + rendered.height as f32;
 
-        if mode == RenderMode::Stroke {
-            canvas.stroke_path(&mut path, mask_paint);
-        } else {
-            canvas.fill_path(&mut path, mask_paint);
-        }
+                q.s0 = rendered.atlas_x as f32 * itw;
+                q.t0 = rendered.atlas_y as f32 * ith;
+                q.s1 = (rendered.atlas_x + rendered.width) as f32 * itw;
+                q.t1 = (rendered.atlas_y + rendered.height) as f32 * ith;
 
-        canvas.restore();
-    }
-
-    canvas.restore();
-
-    Ok(RenderedGlyph {
-        width: width - 2 * GLYPH_MARGIN,
-        height: height - 2 * GLYPH_MARGIN,
-        bearing_y: rendered_bearing_y as i32,
-        atlas_x: dst_x as u32 + GLYPH_MARGIN,
-        atlas_y: dst_y as u32 + GLYPH_MARGIN,
-        texture_index: dst_index,
-        padding: padding - GLYPH_MARGIN,
-    })
-}
-
-// Returns (texture index, image id, glyph padding box)
-fn find_texture_or_alloc<T: Renderer>(
-    canvas: &mut Canvas<T>,
-    width: usize,
-    height: usize,
-) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
-    // Find a free location in one of the atlases
-    let mut textures = canvas.text_context.textures.iter_mut().enumerate();
-    let mut texture_search_result = textures.find_map(|(index, texture)| {
-        texture
-            .atlas
-            .add_rect(width, height)
-            .map(|loc| (index, texture.image_id, loc))
-    });
-
-    if texture_search_result.is_none() {
-        // All atlases are exausted and a new one must be created
-        let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
-
-        let loc = atlas
-            .add_rect(width, height)
-            .ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
-
-        // Using PixelFormat::Gray8 works perfectly and takes less VRAM.
-        // We keep Rgba8 for now because it might be useful for sub-pixel
-        // anti-aliasing (ClearType®), and the atlas debug display is much
-        // clearer with different colors.
-        let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
-        let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
-
-        #[cfg(feature = "debug_inspector")]
-        if cfg!(debug_assertions) {
-            // Fill the texture with red pixels only in debug builds.
-            if let Ok(size) = canvas.image_size(image_id) {
-                canvas.save();
-                canvas.reset();
-                canvas.set_render_target(RenderTarget::Image(image_id));
-                canvas.clear_rect(
-                    0, 0, size.0 as u32, size.1 as u32,
-                    Color::rgb(255, 0, 0), // Shown as white if using Gray8.
-                );
-                canvas.restore();
+                cmd.quads.push(q);
             }
         }
 
-        canvas.text_context.textures.push(FontTexture { atlas, image_id });
+        canvas.set_render_target(initial_render_target);
 
-        let index = canvas.text_context.textures.len() - 1;
-        texture_search_result = Some((index, image_id, loc));
+        Ok(GlyphDrawCommands {
+            alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+            color_glyphs: color_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+        })
     }
 
-    texture_search_result.ok_or(ErrorKind::UnknownError)
+    fn render_glyph<T: Renderer>(
+        &self,
+        canvas: &mut Canvas<T>,
+        paint: &Paint,
+        mode: RenderMode,
+        glyph: &ShapedGlyph,
+    ) -> Result<RenderedGlyph, ErrorKind> {
+        let padding = GLYPH_PADDING + GLYPH_MARGIN;
+
+        let text_context = canvas.text_context.clone();
+        let mut text_context = text_context.borrow_mut();
+
+        let (mut maybe_glyph_representation, scale) = {
+            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let scale = font.scale(paint.font_size);
+
+            let maybe_glyph_representation =
+                font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16);
+            (maybe_glyph_representation, scale)
+        };
+
+        #[cfg(feature = "image-loading")]
+        let color_glyph = matches!(maybe_glyph_representation, Some(GlyphRendering::RenderAsImage(..)));
+        #[cfg(not(feature = "image-loading"))]
+        let color_glyph = false;
+
+        let line_width = if color_glyph || mode != RenderMode::Stroke {
+            0.0
+        } else {
+            paint.line_width
+        };
+
+        let line_width_offset = (line_width / 2.0).ceil();
+
+        let width = glyph.width.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+        let height = glyph.height.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+
+        let (dst_index, dst_image_id, (dst_x, dst_y)) =
+            self.find_texture_or_alloc(canvas, width as usize, height as usize)?;
+
+        // render glyph to image
+        canvas.save();
+        canvas.reset();
+
+        let rendered_bearing_y = glyph.bearing_y.round();
+        let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
+        let x = dst_x as f32 - glyph.bearing_x + line_width_offset + padding as f32 + x_quant;
+        let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
+
+        let rendered_glyph = RenderedGlyph {
+            width: width - 2 * GLYPH_MARGIN,
+            height: height - 2 * GLYPH_MARGIN,
+            bearing_y: rendered_bearing_y as i32,
+            atlas_x: dst_x as u32 + GLYPH_MARGIN,
+            atlas_y: dst_y as u32 + GLYPH_MARGIN,
+            texture_index: dst_index,
+            padding: padding - GLYPH_MARGIN,
+            color_glyph,
+        };
+
+        match maybe_glyph_representation.as_mut() {
+            Some(GlyphRendering::RenderAsPath(ref mut path)) => {
+                canvas.translate(x, y);
+
+                canvas.set_render_target(RenderTarget::Image(dst_image_id));
+                canvas.clear_rect(
+                    dst_x as u32,
+                    TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
+                    width as u32,
+                    height as u32,
+                    Color::black(),
+                );
+                let factor = 1.0 / 8.0;
+
+                let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
+                mask_paint.set_fill_rule(FillRule::EvenOdd);
+                mask_paint.set_anti_alias(false);
+
+                if mode == RenderMode::Stroke {
+                    mask_paint.line_width = line_width / scale;
+                }
+
+                canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+                // 4x
+                // let points = [
+                //     (-3.0/8.0, 1.0/8.0),
+                //     (1.0/8.0, 3.0/8.0),
+                //     (3.0/8.0, -1.0/8.0),
+                //     (-1.0/8.0, -3.0/8.0),
+                // ];
+
+                // 8x
+                let points = [
+                    (-7.0 / 16.0, -1.0 / 16.0),
+                    (-1.0 / 16.0, -5.0 / 16.0),
+                    (3.0 / 16.0, -7.0 / 16.0),
+                    (5.0 / 16.0, -3.0 / 16.0),
+                    (7.0 / 16.0, 1.0 / 16.0),
+                    (1.0 / 16.0, 5.0 / 16.0),
+                    (-3.0 / 16.0, 7.0 / 16.0),
+                    (-5.0 / 16.0, 3.0 / 16.0),
+                ];
+
+                for point in &points {
+                    canvas.save();
+                    canvas.translate(point.0, point.1);
+
+                    canvas.scale(scale, scale);
+
+                    if mode == RenderMode::Stroke {
+                        canvas.stroke_path(path, mask_paint);
+                    } else {
+                        canvas.fill_path(path, mask_paint);
+                    }
+
+                    canvas.restore();
+                }
+            }
+            #[cfg(feature = "image-loading")]
+            Some(GlyphRendering::RenderAsImage(image_buffer)) => {
+                use std::convert::TryFrom;
+                let target_x = rendered_glyph.atlas_x as usize;
+                let target_y = rendered_glyph.atlas_y as usize;
+                let target_width = rendered_glyph.width as u32;
+                let target_height = rendered_glyph.height as u32;
+
+                let image_buffer =
+                    image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
+                if let Some(image) = crate::image::ImageSource::try_from(&image_buffer).ok() {
+                    canvas.update_image(dst_image_id, image, target_x, target_y).unwrap();
+                }
+            }
+            _ => {}
+        }
+
+        canvas.restore();
+
+        Ok(rendered_glyph)
+    }
+
+    // Returns (texture index, image id, glyph padding box)
+    fn find_texture_or_alloc<T: Renderer>(
+        &self,
+        canvas: &mut Canvas<T>,
+        width: usize,
+        height: usize,
+    ) -> Result<(usize, ImageId, (usize, usize)), ErrorKind> {
+        // Find a free location in one of the atlases
+        let mut texture_search_result = {
+            let mut glyph_textures = self.glyph_textures.borrow_mut();
+            let mut textures = glyph_textures.iter_mut().enumerate();
+            textures.find_map(|(index, texture)| {
+                texture
+                    .atlas
+                    .add_rect(width, height)
+                    .map(|loc| (index, texture.image_id, loc))
+            })
+        };
+
+        if texture_search_result.is_none() {
+            // All atlases are exausted and a new one must be created
+            let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
+
+            let loc = atlas
+                .add_rect(width, height)
+                .ok_or(ErrorKind::FontSizeTooLargeForAtlas)?;
+
+            // Using PixelFormat::Gray8 works perfectly and takes less VRAM.
+            // We keep Rgba8 for now because it might be useful for sub-pixel
+            // anti-aliasing (ClearType®), and the atlas debug display is much
+            // clearer with different colors. Also, Rgba8 is required for color
+            // fonts (typically used for emojis).
+            let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
+            let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
+
+            #[cfg(feature = "debug_inspector")]
+            if cfg!(debug_assertions) {
+                // Fill the texture with red pixels only in debug builds.
+                if let Ok(size) = canvas.image_size(image_id) {
+                    // With image-loading we then subsequently support color fonts, where
+                    // the color glyphs are uploaded directly. Since that's immediately and
+                    // the clear_rect() is run much later, it would overwrite any uploaded
+                    // glyphs. So then when for the debug-inspector, use an image to clear.
+                    #[cfg(feature = "image-loading")]
+                    {
+                        use rgb::FromSlice;
+                        let clear_image = image::RgbaImage::from_pixel(
+                            size.0 as u32,
+                            size.1 as u32,
+                            image::Rgba::<u8>([255, 0, 0, 0]),
+                        );
+                        canvas
+                            .update_image(
+                                image_id,
+                                crate::image::ImageSource::from(imgref::Img::new(
+                                    clear_image.as_ref().as_rgba(),
+                                    clear_image.width() as usize,
+                                    clear_image.height() as usize,
+                                )),
+                                0,
+                                0,
+                            )
+                            .unwrap();
+                    }
+                    #[cfg(not(feature = "image-loading"))]
+                    {
+                        canvas.save();
+                        canvas.reset();
+                        canvas.set_render_target(RenderTarget::Image(image_id));
+                        canvas.clear_rect(
+                            0,
+                            0,
+                            size.0 as u32,
+                            size.1 as u32,
+                            Color::rgb(255, 0, 0), // Shown as white if using Gray8.,
+                        );
+                        canvas.restore();
+                    }
+                }
+            }
+
+            self.glyph_textures.borrow_mut().push(FontTexture { atlas, image_id });
+
+            let index = self.glyph_textures.borrow().len() - 1;
+            texture_search_result = Some((index, image_id, loc));
+        }
+
+        texture_search_result.ok_or(ErrorKind::UnknownError)
+    }
+
+    pub(crate) fn clear<T: Renderer>(&self, canvas: &mut Canvas<T>) {
+        let image_ids = std::mem::take(&mut *self.glyph_textures.borrow_mut())
+            .into_iter()
+            .map(|font_texture| font_texture.image_id);
+        image_ids.for_each(|id| canvas.delete_image(id));
+
+        self.rendered_glyphs.borrow_mut().clear();
+    }
 }
 
 pub(crate) fn render_direct<T: Renderer>(
@@ -832,24 +1110,26 @@ pub(crate) fn render_direct<T: Renderer>(
     let mut paint = *paint;
     paint.set_fill_rule(FillRule::EvenOdd);
 
+    let text_context = canvas.text_context.clone();
+    let mut text_context = text_context.borrow_mut();
+
     let mut scaled = false;
 
     for glyph in &text_layout.glyphs {
-        let (mut path, scale) = {
-            let font = canvas
-                .text_context
-                .font_mut(glyph.font_id)
-                .ok_or(ErrorKind::NoFontFound)?;
+        let (glyph_rendering, scale) = {
+            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
             let scale = font.scale(paint.font_size);
 
-            let path = if let Some(font_glyph) = font.glyph(glyph.codepoint as u16) {
-                font_glyph.path.clone()
+            let glyph_rendering = if let Some(glyph_rendering) =
+                font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16)
+            {
+                glyph_rendering
             } else {
                 continue;
             };
 
-            (path, scale)
+            (glyph_rendering, scale)
         };
 
         canvas.save();
@@ -865,10 +1145,16 @@ pub(crate) fn render_direct<T: Renderer>(
         );
         canvas.scale(scale * invscale, -scale * invscale);
 
-        if mode == RenderMode::Stroke {
-            canvas.stroke_path(&mut path, paint);
-        } else {
-            canvas.fill_path(&mut path, paint);
+        match glyph_rendering {
+            GlyphRendering::RenderAsPath(mut path) => {
+                if mode == RenderMode::Stroke {
+                    canvas.stroke_path(&mut path, paint);
+                } else {
+                    canvas.fill_path(&mut path, paint);
+                }
+            }
+            #[cfg(feature = "image-loading")]
+            GlyphRendering::RenderAsImage(_) => unreachable!(),
         }
 
         canvas.restore();

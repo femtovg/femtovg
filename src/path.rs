@@ -489,7 +489,7 @@ impl<'a> Iterator for PathIter<'a> {
     }
 }
 
-impl owned_ttf_parser::OutlineBuilder for Path {
+impl ttf_parser::OutlineBuilder for Path {
     fn move_to(&mut self, x: f32, y: f32) {
         self.move_to(x, y);
     }

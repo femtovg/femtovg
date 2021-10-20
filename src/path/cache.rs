@@ -104,12 +104,8 @@ impl Contour {
     fn polygon_area(points: &[Point]) -> f32 {
         let mut area = 0.0;
 
-        for window in points.windows(3) {
-            let p0 = window[0];
-            let p1 = window[1];
-            let p2 = window[2];
-
-            area += geometry::triarea2(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y);
+        for (p0, p1) in (PointPairsIter { curr: 0, points }) {
+            area += (p1.x - p0.x) * (p1.y + p0.y);
         }
 
         area * 0.5

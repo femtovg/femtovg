@@ -134,7 +134,7 @@ pub struct MainProgram {
     program: Program,
     loc_viewsize: <glow::Context as glow::HasContext>::UniformLocation,
     loc_tex: <glow::Context as glow::HasContext>::UniformLocation,
-    loc_masktex: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_glyphtex: <glow::Context as glow::HasContext>::UniformLocation,
     loc_frag: <glow::Context as glow::HasContext>::UniformLocation,
 }
 
@@ -151,7 +151,7 @@ impl MainProgram {
 
         let loc_viewsize = program.uniform_location("viewSize")?;
         let loc_tex = program.uniform_location("tex")?;
-        let loc_masktex = program.uniform_location("masktex")?;
+        let loc_glyphtex = program.uniform_location("glyphtex")?;
         let loc_frag = program.uniform_location("frag")?;
 
         Ok(Self {
@@ -159,7 +159,7 @@ impl MainProgram {
             program,
             loc_viewsize,
             loc_tex,
-            loc_masktex,
+            loc_glyphtex,
             loc_frag,
         })
     }
@@ -170,9 +170,9 @@ impl MainProgram {
         }
     }
 
-    pub(crate) fn set_masktex(&self, tex: i32) {
+    pub(crate) fn set_glyphtex(&self, tex: i32) {
         unsafe {
-            self.context.uniform_1_i32(Some(&self.loc_masktex), tex);
+            self.context.uniform_1_i32(Some(&self.loc_glyphtex), tex);
         }
     }
 

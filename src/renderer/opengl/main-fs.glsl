@@ -1,7 +1,7 @@
 
 precision highp float;
 
-#define UNIFORMARRAY_SIZE 12
+#define UNIFORMARRAY_SIZE 14
 
 uniform vec4 frag[UNIFORMARRAY_SIZE];
 
@@ -18,10 +18,13 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define strokeThr frag[10].y
 #define texType int(frag[10].z)
 #define shaderType int(frag[10].w)
-#define hasMask int(frag[11].x)
+#define glyphTextureType int(frag[11].x)
+#define imageBlurFilterDirection frag[11].yz
+#define imageBlurFilterSigma frag[11].w
+#define imageBlurFilterCoeff frag[12].xyz
 
 uniform sampler2D tex;
-uniform sampler2D masktex;
+uniform sampler2D glyphtex;
 uniform vec2 viewSize;
 
 varying vec2 ftcoord;
@@ -101,19 +104,54 @@ void main(void) {
     } else if (shaderType == 2) {
         // Stencil fill
         result = vec4(1,1,1,1);
+    } else if (shaderType == 4) {
+        // Filter Image
+
+        float sampleCount = ceil(1.5 * imageBlurFilterSigma);
+
+        vec3 gaussian_coeff = imageBlurFilterCoeff;
+
+        vec4 color_sum = texture2D(tex, fpos.xy / extent) * gaussian_coeff.x;
+        float coefficient_sum = gaussian_coeff.x;
+        gaussian_coeff.xy *= gaussian_coeff.yz;
+
+        for (float i = 1.0; i <= 12.0; i += 1.) {
+            // Work around GLES 2.0 limitation of only allowing constant loop indices
+            // by breaking here. Sigma has an upper bound of 8, imposed on the Rust side.
+            if (i >= sampleCount) {
+                break;
+            }
+            color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
+            color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
+            coefficient_sum += 2.0 * gaussian_coeff.x;
+            
+            // Compute the coefficients incrementally:
+            // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-40-incremental-computation-gaussian
+            gaussian_coeff.xy *= gaussian_coeff.yz;
+        }
+
+        vec4 color = color_sum / coefficient_sum;
+
+        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+        if (texType == 2) color = vec4(color.x);
+
+        result = color;
     }
 
-    if (hasMask == 1) {
+    if (glyphTextureType > 0) {
         // Textured tris
-        vec4 mask = texture2D(masktex, ftcoord);
-        mask = vec4(mask.x);
+        vec4 mask = texture2D(glyphtex, ftcoord);
 
-        //if (texType == 1) mask_color = vec4(mask_color.xyz * mask_color.w, mask_color.w);
-        //if (texType == 2) mask_color = vec4(mask_color.x);
+        if (glyphTextureType == 1) {
+            mask = vec4(mask.x);
+        } else {
+            result = vec4(1, 1, 1, 1);
+            mask = vec4(mask.xyz * mask.w, mask.w);
+        }
 
         mask *= scissor;
         result *= mask;
-    } else if (shaderType != 2) { // Not stencil fill
+    } else if (shaderType != 2 && shaderType != 4) { // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;
     }

@@ -10,18 +10,36 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        rust:
+          - stable
+          - beta
+          - 1.49.0  # MSRV
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
-    - name: Install toolchain
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-        profile: minimal
-        target: wasm32-unknown-unknown
-    - run: cargo build --verbose
-    - run: cargo build --verbose --target wasm32-unknown-unknown
-    - run: cargo build --verbose --examples
-    - run: cargo build --target=wasm32-unknown-unknown --example demo
-    - run: cargo test
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          override: true
+          profile: minimal
+          target: wasm32-unknown-unknown
+      - run: cargo build --verbose
+      - run: cargo build --no-default-features --verbose
+      - run: cargo build --verbose --target wasm32-unknown-unknown
+      - run: cargo build --verbose --examples
+      - run: cargo build --target=wasm32-unknown-unknown --example demo
+      - run: cargo test
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            override: true
+            components: rustfmt
+      - name: Run rustfmt
+        run: cargo fmt --all -- --check

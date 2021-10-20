@@ -1,6 +1,6 @@
 use super::Params;
 
-const UNIFORMARRAY_SIZE: usize = 12;
+const UNIFORMARRAY_SIZE: usize = 14;
 
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
 
@@ -9,7 +9,7 @@ impl Default for UniformArray {
         Self([
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
         ])
     }
 }
@@ -71,8 +71,20 @@ impl UniformArray {
         self.0[43] = shader_type;
     }
 
-    pub fn set_has_mask(&mut self, has_mask: f32) {
-        self.0[44] = has_mask;
+    pub fn set_glyph_texture_type(&mut self, glyph_texture_type: f32) {
+        self.0[44] = glyph_texture_type;
+    }
+
+    pub fn set_image_blur_filter_direction(&mut self, direction: [f32; 2]) {
+        self.0[45..47].copy_from_slice(&direction);
+    }
+
+    pub fn set_image_blur_filter_sigma(&mut self, sigma: f32) {
+        self.0[47] = sigma;
+    }
+
+    pub fn set_image_blur_filter_coeff(&mut self, coeff: [f32; 3]) {
+        self.0[48..51].copy_from_slice(&coeff);
     }
 }
 
@@ -93,7 +105,10 @@ impl From<&Params> for UniformArray {
         arr.set_stroke_thr(params.stroke_thr);
         arr.set_shader_type(params.shader_type);
         arr.set_tex_type(params.tex_type);
-        arr.set_has_mask(params.has_mask);
+        arr.set_glyph_texture_type(params.glyph_texture_type);
+        arr.set_image_blur_filter_direction(params.image_blur_filter_direction);
+        arr.set_image_blur_filter_sigma(params.image_blur_filter_sigma);
+        arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
 
         arr
     }

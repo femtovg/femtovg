@@ -1,3 +1,9 @@
+[![Crates.io](https://img.shields.io/crates/v/femtovg?color=4d76ae)](https://crates.io/crates/femtovg)
+[![API](https://docs.rs/femtovg/badge.svg)](https://docs.rs/femtovg)
+[![dependency status](https://deps.rs/repo/github/femtovg/femtovg/status.svg)](https://deps.rs/repo/github/femtovg/femtovg)
+[![rust: 1.49](https://img.shields.io/badge/MSRV-1.49-success.svg)](#msrv)
+[![Discord](https://img.shields.io/discord/691716054560407592)](https://discord.gg/V69VdVu)
+
 # femtovg
 
 [Join the femtovg Discord channel](https://discord.gg/V69VdVu)
@@ -43,6 +49,7 @@ Run with `cargo run --example text`
 * [x] Text alignment: (left center right), (top, middle, alphabetic, bottom)
 * [x] Nearest font matching
 * [x] Path hit testing
+* [x] OpenGl ES2 backend
 
 ## In progress
 * [ ] [Metal backend](https://github.com/adamnemecek/gpucanvas/)
@@ -52,7 +59,6 @@ Run with `cargo run --example text`
 * [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
-* [ ] OpenGl ES2 backend
 * [ ] Color fonts
 
 ## License

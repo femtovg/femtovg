@@ -237,13 +237,22 @@ impl<T> ImageStore<T> {
 
     pub fn remove<R: Renderer<Image = T>>(&mut self, renderer: &mut R, id: ImageId) {
         if let Some(image) = self.0.remove(id.0) {
-            renderer.delete_image(image.1);
+            renderer.delete_image(image.1, id);
         }
     }
 
     pub fn clear<R: Renderer<Image = T>>(&mut self, renderer: &mut R) {
-        for (_idx, image) in self.0.drain() {
-            renderer.delete_image(image.1);
+        for (idx, image) in self.0.drain() {
+            renderer.delete_image(image.1, ImageId(idx));
         }
     }
+}
+
+/// ImageFilter allows specifying the type of filter to apply to images with
+/// [`crate::Canvas::filter_image`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum ImageFilter {
+    /// The filter shall be a gaussian blur with given sigma as standard deviation.
+    GaussianBlur { sigma: f32 },
 }

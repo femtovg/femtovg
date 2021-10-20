@@ -394,8 +394,8 @@ impl Game {
 
                 let mut rng = thread_rng();
 
-                let x: f32 = rng.gen_range(150.0, 250.0);
-                let y: f32 = rng.gen_range(-350.0, -250.0);
+                let x: f32 = rng.gen_range(150.0..250.0);
+                let y: f32 = rng.gen_range(-350.0..-250.0);
 
                 match powerup.ty {
                     PowerupType::Multiply => {
@@ -741,7 +741,7 @@ enum PowerupType {
 
 impl Distribution<PowerupType> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PowerupType {
-        match rng.gen_range(0, 7) {
+        match rng.gen_range(0..7) {
             0 => PowerupType::Enlarge,
             1 => PowerupType::Shrink,
             3 => PowerupType::Slow,

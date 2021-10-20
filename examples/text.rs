@@ -50,6 +50,8 @@ fn main() {
     // searching for fallbacks
     let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
 
+    let supports_emojis = canvas.add_font("/System/Library/Fonts/Apple Color Emoji.ttc").is_ok();
+
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
     let image_id = canvas
         .load_image_file("examples/assets/pattern.jpg", flags)
@@ -76,10 +78,8 @@ fn main() {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
-                },
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit
-                },
+                }
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 WindowEvent::KeyboardInput {
                     input:
                         KeyboardInput {
@@ -112,24 +112,20 @@ fn main() {
                     if *keycode == VirtualKeyCode::NumpadSubtract {
                         font_size -= 1.0;
                     }
-                },
+                }
+                #[cfg(feature = "debug_inspector")]
                 WindowEvent::MouseInput {
-                    device_id: _, state: ElementState::Pressed, ..
+                    device_id: _,
+                    state: ElementState::Pressed,
+                    ..
                 } => {
-                    #[cfg(feature = "debug_inspector")]
-                    {
-                        let len = canvas.debug_inspector_get_font_textures().len();
-                        let next = match font_texture_to_show {
-                            None    => 0,
-                            Some(i) => i + 1
-                        };
-                        font_texture_to_show = if next < len {
-                            Some(next)
-                        } else {
-                            None
-                        };
-                    }
-                },
+                    let len = canvas.debug_inspector_get_font_textures().len();
+                    let next = match font_texture_to_show {
+                        None => 0,
+                        Some(i) => i + 1,
+                    };
+                    font_texture_to_show = if next < len { Some(next) } else { None };
+                }
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
@@ -154,7 +150,7 @@ fn main() {
 
                 perf.update(dt);
 
-                draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size);
+                draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size, supports_emojis);
                 draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
                 draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
                 draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
@@ -208,12 +204,24 @@ fn main() {
     });
 }
 
-fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, font_size: f32) {
+fn draw_baselines<T: Renderer>(
+    canvas: &mut Canvas<T>,
+    fonts: &Fonts,
+    x: f32,
+    y: f32,
+    font_size: f32,
+    supports_emojis: bool,
+) {
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
     let mut paint = Paint::color(Color::black());
     paint.set_font(&[fonts.sans]);
     paint.set_font_size(font_size);
+
+    let mut base_text = "AbcpKjgF".to_string();
+    if supports_emojis {
+        base_text.push_str("🚀🌳");
+    }
 
     for (i, baseline) in baselines.iter().enumerate() {
         let y = y + i as f32 * 40.0;
@@ -225,7 +233,7 @@ fn draw_baselines<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y:
 
         paint.set_text_baseline(*baseline);
 
-        if let Ok(res) = canvas.fill_text(x, y, format!("AbcpKjgF Baseline::{:?}", baseline), paint) {
+        if let Ok(res) = canvas.fill_text(x, y, format!("{} Baseline::{:?}", base_text, baseline), paint) {
             //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
             let mut path = Path::new();

@@ -1,1 +1,4 @@
 max_width = 120
+reorder_modules = true
+# Only available in +nightly.
+#imports_layout = "Vertical"

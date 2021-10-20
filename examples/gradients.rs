@@ -7,7 +7,7 @@ use glutin::{
     ContextBuilder,
 };
 
-use femtovg::{Align, Baseline, Canvas, Color, Paint, Path, Renderer, renderer::OpenGl};
+use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, Paint, Path, Renderer};
 
 fn main() {
     let window_size = glutin::dpi::PhysicalSize::new(1000, 670);
@@ -27,9 +27,10 @@ fn main() {
         window_size.height as u32,
         windowed_context.window().scale_factor() as f32,
     );
-    canvas.add_font("examples/assets/Roboto-Regular.ttf")
+    canvas
+        .add_font("examples/assets/Roboto-Regular.ttf")
         .expect("Cannot add font");
-    
+
     let start = Instant::now();
     let mut prevt = start;
 
@@ -92,590 +93,693 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
 
     // OPAQUE LINEAR
     r(
-        x, y,
+        x,
+        y,
         "x linear opaque",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "y linear opaque",
         Paint::linear_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "xy linear opaque",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
 
     // 50% LINEAR
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "x linear 50%",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "y linear 50%",
         Paint::linear_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "xy linear 50%",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
 
     // TRANSPARENT TO OPAQUE LINEAR
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "x linear 0-100",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "y linear 0-100",
         Paint::linear_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "xy linear 0-100",
         Paint::linear_gradient(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
 
     y += 130.0;
     x = 10.0;
     // OPAQUE RADIAL
     r(
-        x, y,
+        x,
+        y,
         "radial opaque",
         Paint::radial_gradient(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "0,0 rad opaque",
         Paint::radial_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "fill rad opaque",
         Paint::radial_gradient(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             Color::rgba(255, 0, 0, 255),
-            Color::rgba(0, 0, 255, 255)
-        )
+            Color::rgba(0, 0, 255, 255),
+        ),
     );
 
     // 50% LINEAR
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "radial 50%",
         Paint::radial_gradient(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "0,0 rad 50%",
         Paint::radial_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "fill rad 50%",
         Paint::radial_gradient(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             Color::rgba(255, 0, 0, 128),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
 
     // TRANSPARENT TO OPAQUE LINEAR
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "radial 0-100",
         Paint::radial_gradient(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "0,0 rad 0-100",
         Paint::radial_gradient(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "fill rad 0-100",
         Paint::radial_gradient(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             Color::rgba(255, 0, 0, 0),
-            Color::rgba(0, 0, 255, 128)
-        )
+            Color::rgba(0, 0, 255, 128),
+        ),
     );
 
     // Multistop!
     y += 130.0;
     x = 10.0;
     r(
-        x, y,
+        x,
+        y,
         "ms x linear op",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms y linear op",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms xy linear op",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     // Multistop linear 50%
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms x linear 50%",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms y linear 50%",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms xy linear 50%",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     // Multistop linear transparent & opaque
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms x linear 0-100",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms y linear 0-100",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms xy linear 0-100%",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 100.0,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     // Multistop radial
     y += 130.0;
     x = 10.0;
     r(
-        x, y,
+        x,
+        y,
         "ms radial opq",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms 0,0 rad opq",
         Paint::radial_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms rad opq",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
     );
     // Multistop radial 50%
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms radial 50%",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms 0,0 rad 50%",
         Paint::radial_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms rad 50%",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     // Multistop radial transparent
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms radial 0-100",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            0.0, 50.0,
+            50.0,
+            50.0,
+            0.0,
+            50.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms 0,0 rad 0-100",
         Paint::radial_gradient_stops(
-            0.0, 0.0,
-            0.0, 100.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms rad 0-100",
         Paint::radial_gradient_stops(
-            50.0, 50.0,
-            25.0, 75.0,
+            50.0,
+            50.0,
+            25.0,
+            75.0,
             &[
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 128))
-            ]
-        )
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
     );
 
     // Multistop padding cases
     x = 10.0;
     y += 130.0;
     r(
-        x, y,
+        x,
+        y,
         "ms pad start",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.5, Color::rgba(255, 0, 0, 255)),
-                (1.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.5, Color::rgba(255, 0, 0, 255)), (1.0, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms pad both",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.4, Color::rgba(255, 0, 0, 255)),
-                (0.6, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.4, Color::rgba(255, 0, 0, 255)), (0.6, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms pad end",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.0, Color::rgba(255, 0, 0, 255)),
-                (0.5, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.0, Color::rgba(255, 0, 0, 255)), (0.5, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms same stop",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.5, Color::rgba(255, 0, 0, 255)),
-                (0.5, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.5, Color::rgba(255, 0, 0, 255)), (0.5, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms one stop",
-        Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.5, Color::rgba(255, 0, 0, 255)),
-            ]
-        )
+        Paint::linear_gradient_stops(0.0, 0.0, 100.0, 0.0, &[(0.5, Color::rgba(255, 0, 0, 255))]),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms zero stops",
-        Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[]
-        )
+        Paint::linear_gradient_stops(0.0, 0.0, 100.0, 0.0, &[]),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms non-seq 1",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.5, Color::rgba(255, 0, 0, 255)),
-                (0.0, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.5, Color::rgba(255, 0, 0, 255)), (0.0, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms non-seq 2",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
-            &[
-                (0.5, Color::rgba(255, 0, 0, 255)),
-                (0.3, Color::rgba(0, 0, 255, 255))
-            ]
-        )
+            0.0,
+            0.0,
+            100.0,
+            0.0,
+            &[(0.5, Color::rgba(255, 0, 0, 255)), (0.3, Color::rgba(0, 0, 255, 255))],
+        ),
     );
     x += 110.0;
     r(
-        x, y,
+        x,
+        y,
         "ms non-seq 3",
         Paint::linear_gradient_stops(
-            0.0, 0.0,
-            100.0, 0.0,
+            0.0,
+            0.0,
+            100.0,
+            0.0,
             &[
                 (0.5, Color::rgba(255, 0, 0, 255)),
                 (0.6, Color::rgba(0, 255, 0, 255)),
                 (0.3, Color::rgba(0, 0, 255, 255)),
-            ]
-        )
+            ],
+        ),
     );
 }
 

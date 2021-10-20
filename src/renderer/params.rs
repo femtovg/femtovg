@@ -1,4 +1,7 @@
-use crate::{Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D, paint::GradientColors};
+use crate::{
+    paint::{GlyphTexture, GradientColors},
+    Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
+};
 
 use super::ShaderType;
 
@@ -17,7 +20,10 @@ pub struct Params {
     pub(crate) stroke_thr: f32,
     pub(crate) tex_type: f32,
     pub(crate) shader_type: f32,
-    pub(crate) has_mask: f32,
+    pub(crate) glyph_texture_type: f32, // 0 -> no glyph rendering, 1 -> alpha mask, 2 -> color texture
+    pub(crate) image_blur_filter_direction: [f32; 2],
+    pub(crate) image_blur_filter_sigma: f32,
+    pub(crate) image_blur_filter_coeff: [f32; 3],
 }
 
 impl Params {
@@ -57,7 +63,11 @@ impl Params {
         params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
 
-        params.has_mask = if paint.alpha_mask().is_some() { 1.0 } else { 0.0 };
+        params.glyph_texture_type = match paint.glyph_texture() {
+            GlyphTexture::None => 0.0,
+            GlyphTexture::AlphaMask(_) => 1.0,
+            GlyphTexture::ColorTexture(_) => 2.0,
+        };
 
         let inv_transform;
 
@@ -163,7 +173,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }
@@ -176,7 +186,7 @@ impl Params {
                 height,
                 radius,
                 feather,
-                colors
+                colors,
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform.multiply(&paint.transform);
@@ -191,7 +201,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }
@@ -220,7 +230,7 @@ impl Params {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
                         params.shader_type = ShaderType::FillGradient.to_f32();
-                    },
+                    }
                     GradientColors::MultiStop { .. } => {
                         params.shader_type = ShaderType::FillImageGradient.to_f32();
                     }
