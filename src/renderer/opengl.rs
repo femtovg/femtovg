@@ -9,33 +9,14 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    renderer::{
-        GlyphTexture,
-        ImageId,
-        Vertex,
-    },
-    BlendFactor,
-    Color,
-    CompositeOperationState,
-    ErrorKind,
-    FillRule,
-    ImageFilter,
-    ImageInfo,
-    ImageSource,
-    ImageStore,
+    renderer::{GlyphTexture, ImageId, Vertex},
+    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageInfo, ImageSource, ImageStore,
     Scissor,
 };
 
 use glow::HasContext;
 
-use super::{
-    Command,
-    CommandType,
-    Params,
-    RenderTarget,
-    Renderer,
-    ShaderType,
-};
+use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType};
 
 mod program;
 use program::MainProgram;

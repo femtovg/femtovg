@@ -1,34 +1,13 @@
 use std::time::Instant;
 
 use glutin::{
-    event::{
-        ElementState,
-        Event,
-        KeyboardInput,
-        VirtualKeyCode,
-        WindowEvent,
-    },
-    event_loop::{
-        ControlFlow,
-        EventLoop,
-    },
+    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     ContextBuilder,
 };
 
-use femtovg::{
-    renderer::OpenGl,
-    Align,
-    Baseline,
-    Canvas,
-    Color,
-    FontId,
-    ImageFlags,
-    ImageId,
-    Paint,
-    Path,
-    Renderer,
-};
+use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
 
 struct Fonts {
     sans: FontId,

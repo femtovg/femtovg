@@ -1,14 +1,8 @@
 use fnv::FnvHashMap;
 use ouroboros::self_referencing;
-use ttf_parser::{
-    Face as TtfFont,
-    GlyphId,
-};
+use ttf_parser::{Face as TtfFont, GlyphId};
 
-use crate::{
-    ErrorKind,
-    Path,
-};
+use crate::{ErrorKind, Path};
 
 pub struct GlyphMetrics {
     pub width: f32,

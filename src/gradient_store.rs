@@ -4,14 +4,7 @@ use imgref;
 use rgb;
 
 use crate::{
-    image::ImageStore,
-    paint::MultiStopGradient,
-    Color,
-    ErrorKind,
-    ImageFlags,
-    ImageId,
-    ImageInfo,
-    ImageSource,
+    image::ImageStore, paint::MultiStopGradient, Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource,
     Renderer,
 };
 
