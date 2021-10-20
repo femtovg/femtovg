@@ -3,18 +3,8 @@ use std::f32::consts::PI;
 use resource::resource;
 
 use instant::Instant;
-use winit::event::{
-    ElementState,
-    Event,
-    KeyboardInput,
-    MouseButton,
-    VirtualKeyCode,
-    WindowEvent,
-};
-use winit::event_loop::{
-    ControlFlow,
-    EventLoop,
-};
+use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
 //use glutin::{GlRequest, Api};
 
@@ -254,12 +244,21 @@ fn main() {
                 let width = size.width as f32;
 
                 let pt = canvas.transform().inversed().transform_point(mousex, mousey);
-                let mousex = pt.0;
-                let mousey = pt.1;
+                let rel_mousex = pt.0;
+                let rel_mousey = pt.1;
 
                 draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
 
-                draw_eyes(&mut canvas, width - 250.0, 50.0, 150.0, 100.0, mousex, mousey, t);
+                draw_eyes(
+                    &mut canvas,
+                    width - 250.0,
+                    50.0,
+                    150.0,
+                    100.0,
+                    rel_mousex,
+                    rel_mousey,
+                    t,
+                );
 
                 draw_paragraph(
                     &mut canvas,
@@ -268,8 +267,8 @@ fn main() {
                     50.0,
                     150.0,
                     100.0,
-                    mousex,
-                    mousey,
+                    rel_mousex,
+                    rel_mousey,
                 );
 
                 draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
