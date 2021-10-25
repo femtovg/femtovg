@@ -5,6 +5,7 @@ use std::ops::Range;
 use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
+use crate::position::Position;
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
 use crate::{FillRule, LineCap, LineJoin, Solidity};
@@ -19,12 +20,6 @@ bitflags! {
         const BEVEL         = 0x04;
         const INNERBEVEL    = 0x08;
     }
-}
-
-#[derive(Copy, Clone, Debug, Default)]
-struct Position {
-    x: f32,
-    y: f32,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
