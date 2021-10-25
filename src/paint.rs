@@ -2,6 +2,7 @@
 // so that they are easier to find when autocompleting
 
 use crate::geometry::Transform2D;
+use crate::position::Position;
 use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
@@ -95,23 +96,19 @@ pub(crate) enum PaintFlavor {
     #[cfg_attr(feature = "serde", serde(skip))]
     Image {
         id: ImageId,
-        cx: f32,
-        cy: f32,
+        center: Position,
         width: f32,
         height: f32,
         angle: f32,
         alpha: f32,
     },
     LinearGradient {
-        start_x: f32,
-        start_y: f32,
-        end_x: f32,
-        end_y: f32,
+        start: Position,
+        end: Position,
         colors: GradientColors,
     },
     BoxGradient {
-        x: f32,
-        y: f32,
+        pos: Position,
         width: f32,
         height: f32,
         radius: f32,
@@ -119,8 +116,7 @@ pub(crate) enum PaintFlavor {
         colors: GradientColors,
     },
     RadialGradient {
-        cx: f32,
-        cy: f32,
+        center: Position,
         in_radius: f32,
         out_radius: f32,
         colors: GradientColors,
@@ -256,8 +252,7 @@ impl Paint {
         let mut new = Self::default();
         new.flavor = PaintFlavor::Image {
             id,
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             width,
             height,
             angle,
@@ -292,10 +287,8 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::TwoStop { start_color, end_color },
         };
 
@@ -326,10 +319,8 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::from_stops(stops),
         };
 
@@ -378,8 +369,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::BoxGradient {
-            x,
-            y,
+            pos: Position { x, y },
             width,
             height,
             radius,
@@ -429,8 +419,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::TwoStop {
@@ -476,8 +465,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::from_stops(stops),
