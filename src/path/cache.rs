@@ -22,34 +22,36 @@ bitflags! {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-pub struct Point {
+struct Position {
     x: f32,
     y: f32,
-    dx: f32,
-    dy: f32,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Point {
+    pos: Position,
+    dpos: Position,
     len: f32,
-    dmx: f32,
-    dmy: f32,
+    dmpos: Position,
     flags: PointFlags,
 }
 
 impl Point {
     pub fn new(x: f32, y: f32, flags: PointFlags) -> Self {
         Self {
-            x,
-            y,
+            pos: Position { x, y },
             flags,
             ..Default::default()
         }
     }
 
     pub fn is_left(p0: &Self, p1: &Self, x: f32, y: f32) -> f32 {
-        (p1.x - p0.x) * (y - p0.y) - (x - p0.x) * (p1.y - p0.y)
+        (p1.pos.x - p0.pos.x) * (y - p0.pos.y) - (x - p0.pos.x) * (p1.pos.y - p0.pos.y)
     }
 
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
-        let dx = other.x - self.x;
-        let dy = other.y - self.y;
+        let dx = other.pos.x - self.pos.x;
+        let dy = other.pos.y - self.pos.y;
 
         dx * dx + dy * dy < tolerance * tolerance
     }
@@ -105,7 +107,7 @@ impl Contour {
         let mut area = 0.0;
 
         for (p0, p1) in (PointPairsIter { curr: 0, points }) {
-            area += (p1.x - p0.x) * (p1.y + p0.y);
+            area += (p1.pos.x - p0.pos.x) * (p1.pos.y + p0.pos.y);
         }
 
         area * 0.5
@@ -169,8 +171,8 @@ impl PathCache {
                         let (x, y) = transform.transform_point(x, y);
 
                         cache.tesselate_bezier(
-                            last.x,
-                            last.y,
+                            last.pos.x,
+                            last.pos.y,
                             c1x,
                             c1y,
                             c2x,
@@ -184,8 +186,8 @@ impl PathCache {
                         );
 
                         // cache.tesselate_bezier_afd(
-                        //     last.x,
-                        //     last.y,
+                        //     last.pos.x,
+                        //     last.pos.y,
                         //     c1x,
                         //     c1y,
                         //     c2x,
@@ -255,14 +257,14 @@ impl PathCache {
                     points.get_mut(i - 1).unwrap()
                 };
 
-                p0.dx = p1.x - p0.x;
-                p0.dy = p1.y - p0.y;
-                p0.len = geometry::normalize(&mut p0.dx, &mut p0.dy);
+                p0.dpos.x = p1.pos.x - p0.pos.x;
+                p0.dpos.y = p1.pos.y - p0.pos.y;
+                p0.len = geometry::normalize(&mut p0.dpos.x, &mut p0.dpos.y);
 
-                bounds.minx = bounds.minx.min(p0.x);
-                bounds.miny = bounds.miny.min(p0.y);
-                bounds.maxx = bounds.maxx.max(p0.x);
-                bounds.maxy = bounds.maxy.max(p0.y);
+                bounds.minx = bounds.minx.min(p0.pos.x);
+                bounds.miny = bounds.miny.min(p0.pos.y);
+                bounds.maxx = bounds.maxx.max(p0.pos.x);
+                bounds.maxy = bounds.maxy.max(p0.pos.y);
             }
 
             true
@@ -492,7 +494,9 @@ impl PathCache {
                 let mut crossing = false;
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
-                    if (p1.y > y) != (p0.y > y) && (x < (p0.x - p1.x) * (y - p1.y) / (p0.y - p1.y) + p1.x) {
+                    if (p1.pos.y > y) != (p0.pos.y > y)
+                        && (x < (p0.pos.x - p1.pos.x) * (y - p1.pos.y) / (p0.pos.y - p1.pos.y) + p1.pos.x)
+                    {
                         crossing = !crossing;
                     }
                 }
@@ -509,11 +513,11 @@ impl PathCache {
                 let mut winding_number: i32 = 0;
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
-                    if p0.y <= y {
-                        if p1.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                    if p0.pos.y <= y {
+                        if p1.pos.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
                             winding_number = winding_number.wrapping_add(1);
                         }
-                    } else if p1.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                    } else if p1.pos.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
                         winding_number = winding_number.wrapping_sub(1);
                     }
                 }
@@ -559,28 +563,31 @@ impl PathCache {
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL) {
                         if p1.flags.contains(PointFlags::LEFT) {
-                            let lx = p1.x + p1.dmx * woff;
-                            let ly = p1.y + p1.dmy * woff;
+                            let lx = p1.pos.x + p1.dmpos.x * woff;
+                            let ly = p1.pos.y + p1.dmpos.y * woff;
                             contour.fill.push(Vertex::new(lx, ly, 0.5, 1.0));
                         } else {
-                            let lx0 = p1.x + p0.dy * woff;
-                            let ly0 = p1.y - p0.dx * woff;
-                            let lx1 = p1.x + p1.dy * woff;
-                            let ly1 = p1.y - p1.dx * woff;
+                            let lx0 = p1.pos.x + p0.dpos.y * woff;
+                            let ly0 = p1.pos.y - p0.dpos.x * woff;
+                            let lx1 = p1.pos.x + p1.dpos.y * woff;
+                            let ly1 = p1.pos.y - p1.dpos.x * woff;
                             contour.fill.push(Vertex::new(lx0, ly0, 0.5, 1.0));
                             contour.fill.push(Vertex::new(lx1, ly1, 0.5, 1.0));
                         }
                     } else {
-                        contour
-                            .fill
-                            .push(Vertex::new(p1.x + (p1.dmx * woff), p1.y + (p1.dmy * woff), 0.5, 1.0));
+                        contour.fill.push(Vertex::new(
+                            p1.pos.x + (p1.dmpos.x * woff),
+                            p1.pos.y + (p1.dmpos.y * woff),
+                            0.5,
+                            1.0,
+                        ));
                     }
                 }
             } else {
                 let points = &self.points[contour.point_range.clone()];
 
                 for point in points {
-                    contour.fill.push(Vertex::new(point.x, point.y, 0.5, 1.0));
+                    contour.fill.push(Vertex::new(point.pos.x, point.pos.y, 0.5, 1.0));
                 }
             }
 
@@ -600,12 +607,18 @@ impl PathCache {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
                         bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, ru);
                     } else {
-                        contour
-                            .stroke
-                            .push(Vertex::new(p1.x + (p1.dmx * lw), p1.y + (p1.dmy * lw), lu, 1.0));
-                        contour
-                            .stroke
-                            .push(Vertex::new(p1.x - (p1.dmx * rw), p1.y - (p1.dmy * rw), ru, 1.0));
+                        contour.stroke.push(Vertex::new(
+                            p1.pos.x + (p1.dmpos.x * lw),
+                            p1.pos.y + (p1.dmpos.y * lw),
+                            lu,
+                            1.0,
+                        ));
+                        contour.stroke.push(Vertex::new(
+                            p1.pos.x - (p1.dmpos.x * rw),
+                            p1.pos.y - (p1.dmpos.y * rw),
+                            ru,
+                            1.0,
+                        ));
                     }
                 }
 
@@ -688,14 +701,14 @@ impl PathCache {
                         }
                     } else {
                         contour.stroke.push(Vertex::new(
-                            p1.x + (p1.dmx * stroke_width),
-                            p1.y + (p1.dmy * stroke_width),
+                            p1.pos.x + (p1.dmpos.x * stroke_width),
+                            p1.pos.y + (p1.dmpos.y * stroke_width),
                             u0,
                             1.0,
                         ));
                         contour.stroke.push(Vertex::new(
-                            p1.x - (p1.dmx * stroke_width),
-                            p1.y - (p1.dmy * stroke_width),
+                            p1.pos.x - (p1.dmpos.x * stroke_width),
+                            p1.pos.y - (p1.dmpos.y * stroke_width),
                             u1,
                             1.0,
                         ));
@@ -768,21 +781,21 @@ impl PathCache {
 
                 let p1 = points.get_mut(i).unwrap();
 
-                let dlx0 = p0.dy;
-                let dly0 = -p0.dx;
-                let dlx1 = p1.dy;
-                let dly1 = -p1.dx;
+                let dlx0 = p0.dpos.y;
+                let dly0 = -p0.dpos.x;
+                let dlx1 = p1.dpos.y;
+                let dly1 = -p1.dpos.x;
 
                 // Calculate extrusions
-                p1.dmx = (dlx0 + dlx1) * 0.5;
-                p1.dmy = (dly0 + dly1) * 0.5;
-                let dmr2 = p1.dmx * p1.dmx + p1.dmy * p1.dmy;
+                p1.dmpos.x = (dlx0 + dlx1) * 0.5;
+                p1.dmpos.y = (dly0 + dly1) * 0.5;
+                let dmr2 = p1.dmpos.x * p1.dmpos.x + p1.dmpos.y * p1.dmpos.y;
 
                 if dmr2 > 0.000_001 {
                     let scale = (1.0 / dmr2).min(600.0);
 
-                    p1.dmx *= scale;
-                    p1.dmy *= scale;
+                    p1.dmpos.x *= scale;
+                    p1.dmpos.y *= scale;
                 }
 
                 // Clear flags, but keep the corner.
@@ -793,7 +806,7 @@ impl PathCache {
                 };
 
                 // Keep track of left turns.
-                let cross = p1.dx * p0.dy - p0.dx * p1.dy;
+                let cross = p1.dpos.x * p0.dpos.y - p0.dpos.x * p1.dpos.y;
 
                 if cross > 0.0 {
                     nleft += 1;
@@ -801,7 +814,7 @@ impl PathCache {
                 }
 
                 // Determine sign for convexity
-                match p1.dx.partial_cmp(&0.0) {
+                match p1.dpos.x.partial_cmp(&0.0) {
                     Some(Ordering::Greater) => {
                         match x_sign.cmp(&0) {
                             Ordering::Equal => x_first_sign = 1,
@@ -823,7 +836,7 @@ impl PathCache {
                     _ => (),
                 }
 
-                match p1.dy.partial_cmp(&0.0) {
+                match p1.dpos.y.partial_cmp(&0.0) {
                     Some(Ordering::Greater) => {
                         match y_sign.cmp(&0) {
                             Ordering::Equal => y_first_sign = 1,
@@ -893,20 +906,20 @@ fn curve_divisions(radius: f32, arc: f32, tol: f32) -> u32 {
 }
 
 fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
-    let px = p0.x - p1.dx * d;
-    let py = p0.y - p1.dy * d;
-    let dlx = p1.dy;
-    let dly = -p1.dx;
+    let px = p0.pos.x - p1.dpos.x * d;
+    let py = p0.pos.y - p1.dpos.y * d;
+    let dlx = p1.dpos.y;
+    let dly = -p1.dpos.x;
 
     verts.push(Vertex::new(
-        px + dlx * w - p1.dx * aa,
-        py + dly * w - p1.dy * aa,
+        px + dlx * w - p1.dpos.x * aa,
+        py + dly * w - p1.dpos.y * aa,
         u0,
         0.0,
     ));
     verts.push(Vertex::new(
-        px - dlx * w - p1.dx * aa,
-        py - dly * w - p1.dy * aa,
+        px - dlx * w - p1.dpos.x * aa,
+        py - dly * w - p1.dpos.y * aa,
         u1,
         0.0,
     ));
@@ -915,32 +928,32 @@ fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f3
 }
 
 fn butt_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
-    let px = p0.x + p1.dx * d;
-    let py = p0.y + p1.dy * d;
-    let dlx = p1.dy;
-    let dly = -p1.dx;
+    let px = p0.pos.x + p1.dpos.x * d;
+    let py = p0.pos.y + p1.dpos.y * d;
+    let dlx = p1.dpos.y;
+    let dly = -p1.dpos.x;
 
     verts.push(Vertex::new(px + dlx * w, py + dly * w, u0, 1.0));
     verts.push(Vertex::new(px - dlx * w, py - dly * w, u1, 1.0));
     verts.push(Vertex::new(
-        px + dlx * w + p1.dx * aa,
-        py + dly * w + p1.dy * aa,
+        px + dlx * w + p1.dpos.x * aa,
+        py + dly * w + p1.dpos.y * aa,
         u0,
         0.0,
     ));
     verts.push(Vertex::new(
-        px - dlx * w + p1.dx * aa,
-        py - dly * w + p1.dy * aa,
+        px - dlx * w + p1.dpos.x * aa,
+        py - dly * w + p1.dpos.y * aa,
         u1,
         0.0,
     ));
 }
 
 fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, u0: f32, u1: f32) {
-    let px = p0.x;
-    let py = p0.y;
-    let dlx = p1.dy;
-    let dly = -p1.dx;
+    let px = p0.pos.x;
+    let py = p0.pos.y;
+    let dlx = p1.dpos.y;
+    let dly = -p1.dpos.x;
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
@@ -948,8 +961,8 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
         let ay = a.sin() * w;
 
         verts.push(Vertex::new(
-            px - dlx * ax - p1.dx * ay,
-            py - dly * ax - p1.dy * ay,
+            px - dlx * ax - p1.dpos.x * ay,
+            py - dly * ax - p1.dpos.y * ay,
             u0,
             1.0,
         ));
@@ -961,10 +974,10 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
 }
 
 fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: usize, u0: f32, u1: f32) {
-    let px = p0.x;
-    let py = p0.y;
-    let dlx = p1.dy;
-    let dly = -p1.dx;
+    let px = p0.pos.x;
+    let py = p0.pos.y;
+    let dlx = p1.dpos.y;
+    let dly = -p1.dpos.x;
 
     verts.push(Vertex::new(px + dlx * w, py + dly * w, u0, 1.0));
     verts.push(Vertex::new(px - dlx * w, py - dly * w, u1, 1.0));
@@ -976,8 +989,8 @@ fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: 
 
         verts.push(Vertex::new(px, py, 0.5, 1.0));
         verts.push(Vertex::new(
-            px - dlx * ax + p1.dx * ay,
-            py - dly * ax + p1.dy * ay,
+            px - dlx * ax + p1.dpos.x * ay,
+            py - dly * ax + p1.dpos.y * ay,
             u0,
             1.0,
         ));
@@ -986,22 +999,27 @@ fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: 
 
 fn choose_bevel(bevel: bool, p0: &Point, p1: &Point, w: f32) -> (f32, f32, f32, f32) {
     if bevel {
-        (p1.x + p0.dy * w, p1.y - p0.dx * w, p1.x + p1.dy * w, p1.y - p1.dx * w)
+        (
+            p1.pos.x + p0.dpos.y * w,
+            p1.pos.y - p0.dpos.x * w,
+            p1.pos.x + p1.dpos.y * w,
+            p1.pos.y - p1.dpos.x * w,
+        )
     } else {
         (
-            p1.x + p1.dmx * w,
-            p1.y + p1.dmy * w,
-            p1.x + p1.dmx * w,
-            p1.y + p1.dmy * w,
+            p1.pos.x + p1.dmpos.x * w,
+            p1.pos.y + p1.dmpos.y * w,
+            p1.pos.x + p1.dmpos.x * w,
+            p1.pos.y + p1.dmpos.y * w,
         )
     }
 }
 
 fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32, ncap: usize) {
-    let dlx0 = p0.dy;
-    let dly0 = -p0.dx;
-    let dlx1 = p1.dy;
-    let dly1 = -p1.dx;
+    let dlx0 = p0.dpos.y;
+    let dly0 = -p0.dpos.x;
+    let dlx1 = p1.dpos.y;
+    let dly1 = -p1.dpos.x;
 
     let a0;
     let mut a1;
@@ -1016,22 +1034,22 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         }
 
         verts.push(Vertex::new(lx0, ly0, lu, 1.0));
-        verts.push(Vertex::new(p1.x - dlx0 * rw, p1.y - dly0 * rw, ru, 1.0));
+        verts.push(Vertex::new(p1.pos.x - dlx0 * rw, p1.pos.y - dly0 * rw, ru, 1.0));
 
         let n = ((((a0 - a1) / PI) * ncap as f32).ceil() as usize).max(2).min(ncap);
 
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let rx = p1.x + a.cos() * rw;
-            let ry = p1.y + a.sin() * rw;
+            let rx = p1.pos.x + a.cos() * rw;
+            let ry = p1.pos.y + a.sin() * rw;
 
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
             verts.push(Vertex::new(rx, ry, ru, 1.0));
         }
 
         verts.push(Vertex::new(lx1, ly1, lu, 1.0));
-        verts.push(Vertex::new(p1.x - dlx1 * rw, p1.y - dly1 * rw, ru, 1.0));
+        verts.push(Vertex::new(p1.pos.x - dlx1 * rw, p1.pos.y - dly1 * rw, ru, 1.0));
     } else {
         let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, -rw);
         a0 = dly0.atan2(dlx0);
@@ -1041,7 +1059,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
             a1 += PI * 2.0;
         }
 
-        verts.push(Vertex::new(p1.x + dlx0 * rw, p1.y + dly0 * rw, lu, 1.0));
+        verts.push(Vertex::new(p1.pos.x + dlx0 * rw, p1.pos.y + dly0 * rw, lu, 1.0));
         verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
         let n = ((((a1 - a0) / PI) * ncap as f32).ceil() as usize).max(2).min(ncap);
@@ -1049,79 +1067,79 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let lx = p1.x + a.cos() * lw;
-            let ly = p1.y + a.sin() * lw;
+            let lx = p1.pos.x + a.cos() * lw;
+            let ly = p1.pos.y + a.sin() * lw;
 
             verts.push(Vertex::new(lx, ly, lu, 1.0));
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
         }
 
-        verts.push(Vertex::new(p1.x + dlx1 * rw, p1.y + dly1 * rw, lu, 1.0));
+        verts.push(Vertex::new(p1.pos.x + dlx1 * rw, p1.pos.y + dly1 * rw, lu, 1.0));
         verts.push(Vertex::new(rx1, ry1, ru, 1.0));
     }
 }
 
 fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32) {
-    let dlx0 = p0.dy;
-    let dly0 = -p0.dx;
-    let dlx1 = p1.dy;
-    let dly1 = -p1.dx;
+    let dlx0 = p0.dpos.y;
+    let dly0 = -p0.dpos.x;
+    let dlx1 = p1.dpos.y;
+    let dly1 = -p1.dpos.x;
 
     if p1.flags.contains(PointFlags::LEFT) {
         let (lx0, ly0, lx1, ly1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
 
         verts.push(Vertex::new(lx0, ly0, lu, 1.0));
-        verts.push(Vertex::new(p1.x - dlx0 * rw, p1.y - dly0 * rw, ru, 1.0));
+        verts.push(Vertex::new(p1.pos.x - dlx0 * rw, p1.pos.y - dly0 * rw, ru, 1.0));
 
         if p1.flags.contains(PointFlags::BEVEL) {
             verts.push(Vertex::new(lx0, ly0, lu, 1.0));
-            verts.push(Vertex::new(p1.x - dlx0 * rw, p1.y - dly0 * rw, ru, 1.0));
+            verts.push(Vertex::new(p1.pos.x - dlx0 * rw, p1.pos.y - dly0 * rw, ru, 1.0));
 
             verts.push(Vertex::new(lx1, ly1, lu, 1.0));
-            verts.push(Vertex::new(p1.x - dlx1 * rw, p1.y - dly1 * rw, ru, 1.0));
+            verts.push(Vertex::new(p1.pos.x - dlx1 * rw, p1.pos.y - dly1 * rw, ru, 1.0));
         } else {
-            let rx0 = p1.x - p1.dmx * rw;
-            let ry0 = p1.y - p1.dmy * rw;
+            let rx0 = p1.pos.x - p1.dmpos.x * rw;
+            let ry0 = p1.pos.y - p1.dmpos.y * rw;
 
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
-            verts.push(Vertex::new(p1.x - dlx0 * rw, p1.y - dly0 * rw, ru, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x - dlx0 * rw, p1.pos.y - dly0 * rw, ru, 1.0));
 
             verts.push(Vertex::new(rx0, ry0, ru, 1.0));
             verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
-            verts.push(Vertex::new(p1.x - dlx1 * rw, p1.y - dly1 * rw, ru, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x - dlx1 * rw, p1.pos.y - dly1 * rw, ru, 1.0));
         }
 
         verts.push(Vertex::new(lx1, ly1, lu, 1.0));
-        verts.push(Vertex::new(p1.x - dlx1 * rw, p1.y - dly1 * rw, ru, 1.0));
+        verts.push(Vertex::new(p1.pos.x - dlx1 * rw, p1.pos.y - dly1 * rw, ru, 1.0));
     } else {
         let (rx0, ry0, rx1, ry1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, -rw);
 
-        verts.push(Vertex::new(p1.x + dlx0 * lw, p1.y + dly0 * lw, lu, 1.0));
+        verts.push(Vertex::new(p1.pos.x + dlx0 * lw, p1.pos.y + dly0 * lw, lu, 1.0));
         verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
         if p1.flags.contains(PointFlags::BEVEL) {
-            verts.push(Vertex::new(p1.x + dlx0 * lw, p1.y + dly0 * lw, lu, 1.0));
+            verts.push(Vertex::new(p1.pos.x + dlx0 * lw, p1.pos.y + dly0 * lw, lu, 1.0));
             verts.push(Vertex::new(rx0, ry0, ru, 1.0));
 
-            verts.push(Vertex::new(p1.x + dlx1 * lw, p1.y + dly1 * lw, lu, 1.0));
+            verts.push(Vertex::new(p1.pos.x + dlx1 * lw, p1.pos.y + dly1 * lw, lu, 1.0));
             verts.push(Vertex::new(rx1, ry1, ru, 1.0));
         } else {
-            let lx0 = p1.x + p1.dmx * lw;
-            let ly0 = p1.y + p1.dmy * lw;
+            let lx0 = p1.pos.x + p1.dmpos.x * lw;
+            let ly0 = p1.pos.y + p1.dmpos.y * lw;
 
-            verts.push(Vertex::new(p1.x + dlx0 * lw, p1.y + dly0 * lw, lu, 1.0));
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x + dlx0 * lw, p1.pos.y + dly0 * lw, lu, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
 
             verts.push(Vertex::new(lx0, ly0, lu, 1.0));
             verts.push(Vertex::new(lx0, ly0, lu, 1.0));
 
-            verts.push(Vertex::new(p1.x + dlx1 * lw, p1.y + dly1 * lw, lu, 1.0));
-            verts.push(Vertex::new(p1.x, p1.y, 0.5, 1.0));
+            verts.push(Vertex::new(p1.pos.x + dlx1 * lw, p1.pos.y + dly1 * lw, lu, 1.0));
+            verts.push(Vertex::new(p1.pos.x, p1.pos.y, 0.5, 1.0));
         }
 
-        verts.push(Vertex::new(p1.x + dlx1 * lw, p1.y + dly1 * lw, lu, 1.0));
+        verts.push(Vertex::new(p1.pos.x + dlx1 * lw, p1.pos.y + dly1 * lw, lu, 1.0));
         verts.push(Vertex::new(rx1, ry1, ru, 1.0));
     }
 }
