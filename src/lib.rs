@@ -22,6 +22,8 @@ use std::{cell::RefCell, ops::Range, path::Path as FilePath, rc::Rc};
 use imgref::ImgVec;
 use rgb::RGBA8;
 
+mod position;
+
 mod utils;
 
 mod text;

@@ -4,6 +4,7 @@ use bitflags::bitflags;
 
 use crate::{
     geometry::{self, Bounds, Transform2D},
+    position::Position,
     renderer::Vertex,
     utils::VecRetainMut,
     FillRule, LineCap, LineJoin, Solidity,
@@ -19,12 +20,6 @@ bitflags! {
         const BEVEL         = 0x04;
         const INNERBEVEL    = 0x08;
     }
-}
-
-#[derive(Copy, Clone, Debug, Default)]
-struct Position {
-    x: f32,
-    y: f32,
 }
 
 #[derive(Copy, Clone, Debug, Default)]
