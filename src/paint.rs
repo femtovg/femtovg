@@ -1,7 +1,9 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
-use crate::{geometry::Transform2D, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{
+    geometry::Transform2D, position::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -101,23 +103,19 @@ pub(crate) enum PaintFlavor {
     #[cfg_attr(feature = "serde", serde(skip))]
     Image {
         id: ImageId,
-        cx: f32,
-        cy: f32,
+        center: Position,
         width: f32,
         height: f32,
         angle: f32,
         tint: Color,
     },
     LinearGradient {
-        start_x: f32,
-        start_y: f32,
-        end_x: f32,
-        end_y: f32,
+        start: Position,
+        end: Position,
         colors: GradientColors,
     },
     BoxGradient {
-        x: f32,
-        y: f32,
+        pos: Position,
         width: f32,
         height: f32,
         radius: f32,
@@ -125,8 +123,7 @@ pub(crate) enum PaintFlavor {
         colors: GradientColors,
     },
     RadialGradient {
-        cx: f32,
-        cy: f32,
+        center: Position,
         in_radius: f32,
         out_radius: f32,
         colors: GradientColors,
@@ -266,8 +263,7 @@ impl Paint {
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         Paint::with_flavor(PaintFlavor::Image {
             id,
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             width,
             height,
             angle,
@@ -280,8 +276,7 @@ impl Paint {
     pub fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
         Paint::with_flavor(PaintFlavor::Image {
             id,
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             width,
             height,
             angle,
@@ -313,10 +308,8 @@ impl Paint {
         end_color: Color,
     ) -> Self {
         Paint::with_flavor(PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::TwoStop { start_color, end_color },
         })
     }
@@ -345,10 +338,8 @@ impl Paint {
     /// ```
     pub fn linear_gradient_stops(start_x: f32, start_y: f32, end_x: f32, end_y: f32, stops: &[(f32, Color)]) -> Self {
         Paint::with_flavor(PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::from_stops(stops),
         })
     }
@@ -394,8 +385,7 @@ impl Paint {
         outer_color: Color,
     ) -> Self {
         Paint::with_flavor(PaintFlavor::BoxGradient {
-            x,
-            y,
+            pos: Position { x, y },
             width,
             height,
             radius,
@@ -441,8 +431,7 @@ impl Paint {
         outer_color: Color,
     ) -> Self {
         Paint::with_flavor(PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::TwoStop {
@@ -484,8 +473,7 @@ impl Paint {
     /// ```
     pub fn radial_gradient_stops(cx: f32, cy: f32, in_radius: f32, out_radius: f32, stops: &[(f32, Color)]) -> Self {
         Paint::with_flavor(PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::from_stops(stops),
