@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 use std::slice;
 
 use crate::geometry::{self, Transform2D};
+use crate::position::Position;
 
 mod cache;
 pub use cache::{Convexity, PathCache};
@@ -75,8 +76,7 @@ impl Verb {
 pub struct Path {
     verbs: Vec<PackedVerb>,
     coords: Vec<f32>,
-    lastx: f32,
-    lasty: f32,
+    last_pos: Position,
     dist_tol: f32,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) cache: Option<(u64, PathCache)>,
@@ -152,8 +152,7 @@ impl Path {
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
-        let x0 = self.lastx;
-        let y0 = self.lasty;
+        let Position { x: x0, y: y0 } = self.last_pos;
 
         self.append(
             &[PackedVerb::BezierTo],
@@ -255,8 +254,7 @@ impl Path {
             return;
         }
 
-        let x0 = self.lastx;
-        let y0 = self.lasty;
+        let Position { x: x0, y: y0 } = self.last_pos;
 
         // Handle degenerate cases.
         if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol)
@@ -460,8 +458,9 @@ impl Path {
     /// Appends a slice of verbs to the path
     fn append(&mut self, verbs: &[PackedVerb], coords: &[f32]) {
         if coords.len() > 1 {
-            self.lastx = coords[coords.len() - 2];
-            self.lasty = coords[coords.len() - 1];
+            let x = coords[coords.len() - 2];
+            let y = coords[coords.len() - 1];
+            self.last_pos = Position { x, y };
         }
 
         self.verbs.extend_from_slice(verbs);
