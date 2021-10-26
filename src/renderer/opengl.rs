@@ -61,6 +61,7 @@ impl OpenGl {
         unsafe { Self::new_from_function(load_fn) }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub unsafe fn new_from_function<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
