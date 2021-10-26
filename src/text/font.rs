@@ -98,7 +98,7 @@ pub(crate) struct Font {
     // that uses the same ttf_parser/Face as we do.
     #[borrows(data)]
     #[covariant]
-    ttf_data: ttf_parser::Face<'this>,    
+    ttf_data: ttf_parser::Face<'this>,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
