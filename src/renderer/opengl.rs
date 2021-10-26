@@ -50,7 +50,18 @@ pub struct OpenGl {
 
 impl OpenGl {
     #[cfg(not(target_arch = "wasm32"))]
-    pub unsafe fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
+    #[deprecated(
+        since = "0.3",
+        note = "This function unsafe. Use OpenGl::new_from_function or OpenGl::new_glutin"
+    )]
+    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
+    where
+        F: FnMut(&str) -> *const c_void,
+    {
+        unsafe { Self::new_from_function(load_fn) }
+    }
+
+    pub unsafe fn new_from_function<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
     {
@@ -62,7 +73,7 @@ impl OpenGl {
 
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
     pub fn new_glutin(windowed_context: &ContextWrapper<PossiblyCurrent, Window>) -> Result<Self, ErrorKind> {
-        unsafe { OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _) }
+        unsafe { OpenGl::new_from_function(|s| windowed_context.get_proc_address(s) as *const _) }
     }
 
     #[cfg(target_arch = "wasm32")]
