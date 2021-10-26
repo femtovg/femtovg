@@ -4,6 +4,9 @@ use std::rc::Rc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::c_void;
 
+#[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
+use glutin::{window::Window, ContextWrapper, PossiblyCurrent};
+
 use fnv::FnvHashMap;
 use imgref::ImgVec;
 use rgb::RGBA8;
@@ -47,14 +50,19 @@ pub struct OpenGl {
 
 impl OpenGl {
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
+    pub unsafe fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
     {
-        let context = unsafe { glow::Context::from_loader_function(load_fn) };
-        let version = unsafe { context.get_parameter_string(glow::VERSION) };
+        let context = glow::Context::from_loader_function(load_fn);
+        let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
         Self::new_from_context(context, is_opengles_2_0)
+    }
+
+    #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
+    pub fn new_glutin(windowed_context: &ContextWrapper<PossiblyCurrent, Window>) -> Result<Self, ErrorKind> {
+        unsafe { OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _) }
     }
 
     #[cfg(target_arch = "wasm32")]
