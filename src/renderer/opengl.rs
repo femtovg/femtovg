@@ -73,7 +73,9 @@ impl OpenGl {
     }
 
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-    pub fn new_glutin(windowed_context: &ContextWrapper<PossiblyCurrent, Window>) -> Result<Self, ErrorKind> {
+    pub fn new_from_glutin_context(
+        windowed_context: &ContextWrapper<PossiblyCurrent, Window>,
+    ) -> Result<Self, ErrorKind> {
         unsafe { OpenGl::new_from_function(|s| windowed_context.get_proc_address(s) as *const _) }
     }
 
