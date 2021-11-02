@@ -252,7 +252,7 @@ impl Paint {
         let mut new = Self::default();
         new.flavor = PaintFlavor::Image {
             id,
-            center: Position { x: cx, y: cy },
+            center: Position::new(cx, cy),
             width,
             height,
             angle,
@@ -287,8 +287,8 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start: Position { x: start_x, y: start_y },
-            end: Position { x: end_x, y: end_y },
+            start: Position::new(start_x, start_y),
+            end: Position::new(end_x, end_y),
             colors: GradientColors::TwoStop { start_color, end_color },
         };
 
@@ -319,8 +319,8 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start: Position { x: start_x, y: start_y },
-            end: Position { x: end_x, y: end_y },
+            start: Position::new(start_x, start_y),
+            end: Position::new(end_x, end_y),
             colors: GradientColors::from_stops(stops),
         };
 
@@ -369,7 +369,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::BoxGradient {
-            pos: Position { x, y },
+            pos: Position::new(x, y),
             width,
             height,
             radius,
@@ -419,7 +419,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            center: Position { x: cx, y: cy },
+            center: Position::new(cx, cy),
             in_radius,
             out_radius,
             colors: GradientColors::TwoStop {
@@ -465,7 +465,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            center: Position { x: cx, y: cy },
+            center: Position::new(cx, cy),
             in_radius,
             out_radius,
             colors: GradientColors::from_stops(stops),

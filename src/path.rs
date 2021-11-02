@@ -152,7 +152,7 @@ impl Path {
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
-        let Position { x: x0, y: y0 } = self.last_pos;
+        let Position { x: x0, y: y0, .. } = self.last_pos;
 
         self.append(
             &[PackedVerb::BezierTo],
@@ -254,7 +254,7 @@ impl Path {
             return;
         }
 
-        let Position { x: x0, y: y0 } = self.last_pos;
+        let Position { x: x0, y: y0, .. } = self.last_pos;
 
         // Handle degenerate cases.
         if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol)
@@ -460,7 +460,7 @@ impl Path {
         if coords.len() > 1 {
             let x = coords[coords.len() - 2];
             let y = coords[coords.len() - 1];
-            self.last_pos = Position { x, y };
+            self.last_pos = Position::new(x, y);
         }
 
         self.verbs.extend_from_slice(verbs);

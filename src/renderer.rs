@@ -114,7 +114,7 @@ pub struct Vertex {
 
 impl Vertex {
     pub(crate) fn pos(position: Position, u: f32, v: f32) -> Self {
-        let Position { x, y } = position;
+        let Position { x, y, .. } = position;
         Self { x, y, u, v }
     }
 

@@ -5,7 +5,7 @@ use std::ops::Range;
 use bitflags::bitflags;
 
 use crate::geometry::{self, Bounds, Transform2D};
-use crate::position::Position;
+use crate::position::{Position, PositionExt};
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
 use crate::{FillRule, LineCap, LineJoin, Solidity};
@@ -34,19 +34,19 @@ pub struct Point {
 impl Point {
     pub fn new(x: f32, y: f32, flags: PointFlags) -> Self {
         Self {
-            pos: Position { x, y },
+            pos: Position::new(x, y),
             flags,
             ..Default::default()
         }
     }
 
     pub fn is_left(p0: &Self, p1: &Self, x: f32, y: f32) -> f32 {
-        let pos = Position { x, y };
+        let pos = Position::new(x, y);
         (p1.pos - p0.pos).dot((pos - p0.pos).orthogonal())
     }
 
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
-        let Position { x: dx, y: dy } = other.pos - self.pos;
+        let Position { x: dx, y: dy, .. } = other.pos - self.pos;
 
         dx * dx + dy * dy < tolerance * tolerance
     }
