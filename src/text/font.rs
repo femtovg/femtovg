@@ -1,5 +1,6 @@
 use fnv::FnvHashMap;
 use ouroboros::self_referencing;
+use std::collections::hash_map::Entry;
 use ttf_parser::{Face as TtfFont, GlyphId};
 
 use crate::{ErrorKind, Path};
@@ -101,8 +102,7 @@ pub(crate) struct Font {
 
 impl Font {
     pub fn new_with_data<T: AsRef<[u8]> + 'static>(data: T, face_index: u32) -> Result<Self, ErrorKind> {
-        let ttf_font =
-            TtfFont::from_slice(data.as_ref().as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
+        let ttf_font = TtfFont::from_slice(data.as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
 
         let units_per_em = ttf_font.units_per_em();
 
@@ -146,7 +146,7 @@ impl Font {
 
     pub fn glyph(&mut self, codepoint: u16) -> Option<&mut Glyph> {
         self.with_mut(|fields| {
-            if !fields.glyphs.contains_key(&codepoint) {
+            if let Entry::Vacant(entry) = fields.glyphs.entry(codepoint) {
                 let mut path = Path::new();
 
                 let id = GlyphId(codepoint);
@@ -170,8 +170,8 @@ impl Font {
                             bearing_y: (image.y as f32 + image.height as f32) * scale,
                         },
                     })
-                } else if let Some(bbox) = fields.face_data.outline_glyph(id, &mut path) {
-                    Some(Glyph {
+                } else {
+                    fields.face_data.outline_glyph(id, &mut path).map(|bbox| Glyph {
                         path: Some(path),
                         metrics: GlyphMetrics {
                             width: bbox.width() as f32,
@@ -180,12 +180,10 @@ impl Font {
                             bearing_y: bbox.y_max as f32,
                         },
                     })
-                } else {
-                    None
                 };
 
                 if let Some(glyph) = maybe_glyph {
-                    fields.glyphs.insert(codepoint, glyph);
+                    entry.insert(glyph);
                 }
             }
 
