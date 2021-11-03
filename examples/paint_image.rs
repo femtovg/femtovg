@@ -34,7 +34,7 @@ fn main() {
     let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
-    let renderer = OpenGl::new(|s| windowed_context.get_proc_address(s) as *const _).expect("Cannot create renderer");
+    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
     canvas.set_size(
         window_size.width as u32,
