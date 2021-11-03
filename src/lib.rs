@@ -1063,7 +1063,7 @@ where
 
     /// Returns information on how the provided text will be drawn with the specified paint.
     pub fn measure_text<S: AsRef<str>>(
-        &mut self,
+        &self,
         x: f32,
         y: f32,
         text: S,
@@ -1073,10 +1073,9 @@ where
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
-        let invscale = 1.0 / scale;
+        let invscale = scale.recip();
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .measure_text(x * scale, y * scale, text, paint)
             .map(|mut metrics| {
@@ -1086,10 +1085,10 @@ where
     }
 
     /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
-        self.text_context.as_ref().borrow_mut().measure_font(paint)
+        self.text_context.borrow().measure_font(paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
