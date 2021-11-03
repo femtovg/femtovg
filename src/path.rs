@@ -7,7 +7,7 @@ mod cache;
 pub use cache::{Convexity, PathCache};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
-const KAPPA90: f32 = 0.5522847493;
+const KAPPA90: f32 = 0.552_284_8; // 0.552_284_749_3;
 
 /// Used to specify Solid/Hole when adding shapes to a path.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
@@ -126,7 +126,7 @@ impl Path {
         }
 
         if needs_rebuild {
-            let path_cache = PathCache::new(self.verbs(), &transform, tess_tol, dist_tol);
+            let path_cache = PathCache::new(self.verbs(), transform, tess_tol, dist_tol);
             self.cache = Some((key, path_cache));
         }
 
@@ -315,11 +315,13 @@ impl Path {
         );
     }
 
+    #[allow(clippy::many_single_char_names)]
     /// Creates new rounded rectangle shaped sub-path.
     pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
         self.rounded_rect_varying(x, y, w, h, r, r, r, r);
     }
 
+    #[allow(clippy::too_many_arguments)]
     /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
     pub fn rounded_rect_varying(
         &mut self,

@@ -1,8 +1,5 @@
 use std::collections::BTreeMap;
 
-use imgref;
-use rgb;
-
 use crate::{
     image::ImageStore, paint::MultiStopGradient, Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource,
     Renderer,
@@ -68,6 +65,7 @@ impl GradientStore {
     }
 }
 
+#[allow(clippy::many_single_char_names)]
 // Gradient filling, adapted from https://github.com/lieff/lvg/blob/master/render/common.c#L147
 fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, offset0: f32, offset1: f32) {
     let s0o = offset0.max(0.0).min(1.0);
@@ -92,6 +90,7 @@ fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, off
     let db = (color1.b - b) / steps;
     let da = (color1.a - a) / steps;
 
+    #[allow(clippy::needless_range_loop)]
     for i in s..e {
         // The output must be premultiplied, but we don't premultiply until this point
         // so that we can do gradients from transparent colors correctly -- for example

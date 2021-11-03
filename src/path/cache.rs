@@ -224,7 +224,7 @@ impl PathCache {
 
             // If the first and last points are the same, remove the last, mark as closed contour.
             if let (Some(p0), Some(p1)) = (points.last(), points.first()) {
-                if p0.approx_eq(&p1, dist_tol) {
+                if p0.approx_eq(p1, dist_tol) {
                     contour.point_range.end -= 1;
                     contour.closed = true;
                     points = &mut all_points[contour.point_range.clone()];
@@ -297,6 +297,7 @@ impl PathCache {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn tesselate_bezier(
         &mut self,
         x1: f32,
@@ -598,7 +599,7 @@ impl PathCache {
 
                 for (p0, p1) in contour.point_pairs(&self.points) {
                     if p1.flags.contains(PointFlags::BEVEL | PointFlags::INNERBEVEL) {
-                        bevel_join(&mut contour.stroke, p0, &p1, lw, rw, lu, ru);
+                        bevel_join(&mut contour.stroke, p0, p1, lw, rw, lu, ru);
                     } else {
                         contour
                             .stroke
@@ -618,6 +619,7 @@ impl PathCache {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn expand_stroke(
         &mut self,
         stroke_width: f32,
@@ -646,8 +648,8 @@ impl PathCache {
                     match line_cap_start {
                         LineCap::Butt => butt_cap_start(
                             &mut contour.stroke,
-                            &p0,
-                            &p0,
+                            p0,
+                            p0,
                             stroke_width,
                             -fringe_width * 0.5,
                             fringe_width,
@@ -656,8 +658,8 @@ impl PathCache {
                         ),
                         LineCap::Square => butt_cap_start(
                             &mut contour.stroke,
-                            &p0,
-                            &p0,
+                            p0,
+                            p0,
                             stroke_width,
                             stroke_width - fringe_width,
                             fringe_width,
@@ -665,7 +667,7 @@ impl PathCache {
                             u1,
                         ),
                         LineCap::Round => {
-                            round_cap_start(&mut contour.stroke, &p0, &p0, stroke_width, ncap as usize, u0, u1)
+                            round_cap_start(&mut contour.stroke, p0, p0, stroke_width, ncap as usize, u0, u1)
                         }
                     }
                 }
@@ -675,8 +677,8 @@ impl PathCache {
                         if line_join == LineJoin::Round {
                             round_join(
                                 &mut contour.stroke,
-                                &p0,
-                                &p1,
+                                p0,
+                                p1,
                                 stroke_width,
                                 stroke_width,
                                 u0,
@@ -684,7 +686,7 @@ impl PathCache {
                                 ncap as usize,
                             );
                         } else {
-                            bevel_join(&mut contour.stroke, &p0, &p1, stroke_width, stroke_width, u0, u1);
+                            bevel_join(&mut contour.stroke, p0, p1, stroke_width, stroke_width, u0, u1);
                         }
                     } else {
                         contour.stroke.push(Vertex::new(
@@ -707,8 +709,8 @@ impl PathCache {
                     match line_cap_end {
                         LineCap::Butt => butt_cap_end(
                             &mut contour.stroke,
-                            &p1,
-                            &p0,
+                            p1,
+                            p0,
                             stroke_width,
                             -fringe_width * 0.5,
                             fringe_width,
@@ -717,8 +719,8 @@ impl PathCache {
                         ),
                         LineCap::Square => butt_cap_end(
                             &mut contour.stroke,
-                            &p1,
-                            &p0,
+                            p1,
+                            p0,
                             stroke_width,
                             stroke_width - fringe_width,
                             fringe_width,
@@ -726,7 +728,7 @@ impl PathCache {
                             u1,
                         ),
                         LineCap::Round => {
-                            round_cap_end(&mut contour.stroke, &p1, &p0, stroke_width, ncap as usize, u0, u1)
+                            round_cap_end(&mut contour.stroke, p1, p0, stroke_width, ncap as usize, u0, u1)
                         }
                     }
                 }
@@ -852,6 +854,7 @@ impl PathCache {
                     p1.flags |= PointFlags::INNERBEVEL;
                 }
 
+                #[allow(clippy::collapsible_if)]
                 // Check to see if the corner needs to be beveled.
                 if p1.flags.contains(PointFlags::CORNER) {
                     if (dmr2 * miter_limit * miter_limit) < 1.0
@@ -924,6 +927,7 @@ fn curve_divisions(radius: f32, arc: f32, tol: f32) -> u32 {
     ((arc / da).ceil() as u32).max(2)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
     let px = p0.x - p1.dx * d;
     let py = p0.y - p1.dy * d;
@@ -946,6 +950,7 @@ fn butt_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f3
     verts.push(Vertex::new(px - dlx * w, py - dly * w, u1, 1.0));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn butt_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, d: f32, aa: f32, u0: f32, u1: f32) {
     let px = p0.x + p1.dx * d;
     let py = p0.y + p1.dy * d;
@@ -1029,6 +1034,7 @@ fn choose_bevel(bevel: bool, p0: &Point, p1: &Point, w: f32) -> (f32, f32, f32, 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32, ncap: usize) {
     let dlx0 = p0.dy;
     let dly0 = -p0.dx;
@@ -1093,6 +1099,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
     }
 }
 
+#[allow(clippy::branches_sharing_code)]
 fn bevel_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32, lu: f32, ru: f32) {
     let dlx0 = p0.dy;
     let dly0 = -p0.dx;
