@@ -52,7 +52,7 @@ impl OpenGl {
     #[cfg(not(target_arch = "wasm32"))]
     #[deprecated(
         since = "0.3",
-        note = "This function unsafe. Use OpenGl::new_from_function or OpenGl::new_glutin"
+        note = "This function unsafe. Use OpenGl::new_from_function or OpenGl::new_from_glutin_context"
     )]
     pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
