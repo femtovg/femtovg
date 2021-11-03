@@ -10,7 +10,7 @@ use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId
 fn main() {
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
-        .with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600))
+        .with_inner_size(glutin::dpi::LogicalSize::new(1000, 600))
         .with_title("femtovg demo");
 
     let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
@@ -51,6 +51,13 @@ fn main() {
     }
 
     println!("Path mem usage: {}kb", total_sisze_bytes / 1024);
+
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+        let dpi_factor = window.scale_factor();
+        canvas.scale(dpi_factor as f32, dpi_factor as f32);
+    }
 
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -94,7 +101,14 @@ fn main() {
                         canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
                         canvas.translate(-pt.0, -pt.1);
                     }
-                    _ => (),
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        let y = pos.y as f32;
+                        let pt = canvas.transform().inversed().transform_point(mousex, mousey);
+                        let rate = 2000.0;
+                        canvas.translate(pt.0, pt.1);
+                        canvas.scale(1.0 + (y / rate), 1.0 + (y / rate));
+                        canvas.translate(-pt.0, -pt.1);
+                    }
                 },
                 WindowEvent::KeyboardInput {
                     input:
@@ -154,6 +168,7 @@ fn main() {
 
                 canvas.save();
                 canvas.reset();
+                canvas.scale(dpi_factor as f32, dpi_factor as f32);
                 perf.render(&mut canvas, roboto_regular, roboto_light, 5.0, 5.0);
                 canvas.restore();
 

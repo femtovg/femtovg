@@ -16,7 +16,7 @@ struct Fonts {
 }
 
 fn main() {
-    let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
+    let window_size = glutin::dpi::LogicalSize::new(1000, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
         .with_inner_size(window_size)
@@ -69,6 +69,13 @@ fn main() {
 
     let mut x = 5.0;
     let mut y = 380.0;
+
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+        let dpi_factor = window.scale_factor();
+        canvas.scale(dpi_factor as f32, dpi_factor as f32);
+    }
 
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -143,6 +150,8 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
 
+                let winit::dpi::LogicalSize { width, height: _ } = size.to_logical::<f32>(dpi_factor);
+
                 let elapsed = start.elapsed().as_secs_f32();
                 let now = Instant::now();
                 let dt = (now - prevt).as_secs_f32();
@@ -157,23 +166,23 @@ fn main() {
 
                 draw_complex(&mut canvas, 300.0, 340.0, font_size);
 
-                draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
-                draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
-                draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                draw_stroked(&mut canvas, &fonts, width - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, &fonts, width - 200.0, 180.0);
+                draw_image_fill(&mut canvas, &fonts, width - 200.0, 260.0, image_id, elapsed);
 
                 let mut paint = Paint::color(Color::hex("B7410E"));
                 paint.set_font(&[fonts.bold]);
                 paint.set_text_baseline(Baseline::Top);
                 paint.set_text_align(Align::Right);
                 let _ = canvas.fill_text(
-                    size.width as f32 - 10.0,
+                    width - 10.0,
                     10.0,
                     format!("Scroll to increase / decrease font size. Current: {}", font_size),
                     paint,
                 );
                 #[cfg(feature = "debug_inspector")]
                 let _ = canvas.fill_text(
-                    size.width as f32 - 10.0,
+                    width - 10.0,
                     24.0,
                     format!("Click to show font atlas texture. Current: {:?}", font_texture_to_show),
                     paint,
@@ -181,6 +190,7 @@ fn main() {
 
                 canvas.save();
                 canvas.reset();
+                canvas.scale(dpi_factor as f32, dpi_factor as f32);
                 perf.render(&mut canvas, 5.0, 5.0);
                 canvas.restore();
 
