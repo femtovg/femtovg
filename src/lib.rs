@@ -1086,8 +1086,6 @@ where
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
-        self.transform_text_paint(&mut paint);
-
         self.text_context.borrow().measure_font(paint)
     }
 
