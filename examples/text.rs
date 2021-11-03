@@ -33,6 +33,7 @@ fn main() {
         window_size.height as u32,
         windowed_context.window().scale_factor() as f32,
     );
+    canvas.reset();
 
     let fonts = Fonts {
         sans: canvas
@@ -69,13 +70,6 @@ fn main() {
 
     let mut x = 5.0;
     let mut y = 380.0;
-
-    {
-        #[cfg(not(target_arch = "wasm32"))]
-        let window = windowed_context.window();
-        let dpi_factor = window.scale_factor();
-        canvas.scale(dpi_factor as f32, dpi_factor as f32);
-    }
 
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -147,6 +141,7 @@ fn main() {
             Event::RedrawRequested(_) => {
                 let dpi_factor = windowed_context.window().scale_factor();
                 let size = windowed_context.window().inner_size();
+
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
 
@@ -190,7 +185,6 @@ fn main() {
 
                 canvas.save();
                 canvas.reset();
-                canvas.scale(dpi_factor as f32, dpi_factor as f32);
                 perf.render(&mut canvas, 5.0, 5.0);
                 canvas.restore();
 

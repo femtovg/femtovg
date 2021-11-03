@@ -901,7 +901,7 @@ impl GlyphAtlas {
 
         // render glyph to image
         canvas.save();
-        canvas.reset();
+        canvas.hard_reset();
 
         let rendered_bearing_y = glyph.bearing_y.round();
         let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);

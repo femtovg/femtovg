@@ -160,7 +160,8 @@ fn main() {
         #[cfg(not(target_arch = "wasm32"))]
         let window = windowed_context.window();
         let dpi_factor = window.scale_factor();
-        canvas.scale(dpi_factor as f32, dpi_factor as f32);
+        canvas.set_size(0, 0, dpi_factor as f32);
+        canvas.reset();
     }
 
     el.run(move |event, _, control_flow| {
@@ -380,7 +381,6 @@ fn main() {
 
                 canvas.save_with(|canvas| {
                     canvas.reset();
-                    canvas.scale(dpi_factor as f32, dpi_factor as f32);
                     perf.render(canvas, 5.0, 5.0);
                 });
 

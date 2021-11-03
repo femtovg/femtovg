@@ -15,7 +15,7 @@ use glutin::{
 use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path};
 
 fn main() {
-    let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
+    let window_size = glutin::dpi::LogicalSize::new(1000, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
         .with_inner_size(window_size)
@@ -27,11 +27,9 @@ fn main() {
 
     let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
+    let size = windowed_context.window().inner_size();
+    canvas.set_size(size.width, size.height, windowed_context.window().scale_factor() as f32);
+    canvas.reset();
 
     let image_id = canvas
         .load_image_mem(&resource!("examples/assets/rust-logo.png"), ImageFlags::empty())
@@ -92,8 +90,8 @@ fn main() {
 
                     let width = size.0 as f32;
                     let height = size.1 as f32;
-                    let x = window_size.width as f32 / 2.0;
-                    let y = window_size.height as f32 / 2.0;
+                    let x = canvas.logical_width() / 2.0;
+                    let y = canvas.logical_height() / 2.0;
 
                     let mut path = Path::new();
                     path.rect(x - width / 2.0, y - height / 2.0, width, height);

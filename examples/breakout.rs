@@ -112,7 +112,7 @@ impl Game {
             logo_image_id: image_id,
             fonts: fonts,
             paddle_rect: paddle_rect,
-            size: Size::new(canvas.width(), canvas.height()),
+            size: Size::new(canvas.logical_width(), canvas.logical_height()),
             bricks: Vec::new(),
             levels: levels,
             powerups: Vec::new(),
@@ -130,10 +130,7 @@ impl Game {
         // Bricks
         let brick_padding = 5.0;
 
-        let brick_size = Size::new(
-            self.size.width as f32 / self.levels[self.current_level][0].len() as f32,
-            30.0,
-        );
+        let brick_size = Size::new(self.size.width / self.levels[self.current_level][0].len() as f32, 30.0);
         let mut brick_loc = Point::new(0.0, 0.0);
 
         for row in &self.levels[self.current_level] {
@@ -492,20 +489,20 @@ impl Game {
 
     fn draw(&mut self, canvas: &mut Canvas) {
         // draw background
-        let step_size_x = canvas.width() / 50.0;
+        let step_size_x = canvas.logical_width() / 50.0;
 
         let mut path = Path::new();
 
         for i in 0..50 {
             path.move_to(i as f32 * step_size_x, 0.0);
-            path.line_to(i as f32 * step_size_x, canvas.height());
+            path.line_to(i as f32 * step_size_x, canvas.logical_height());
         }
 
         let paint = Paint::radial_gradient(
-            canvas.width() / 2.0,
-            canvas.height() / 2.0,
+            canvas.logical_width() / 2.0,
+            canvas.logical_height() / 2.0,
             10.0,
-            canvas.height() / 2.0,
+            canvas.logical_height() / 2.0,
             Color::rgb(90, 90, 90),
             Color::rgb(30, 30, 30),
         );
@@ -524,11 +521,14 @@ impl Game {
     fn draw_title_screen(&self, canvas: &mut Canvas) {
         // curtain
         let mut path = Path::new();
-        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        path.rect(0.0, 0.0, canvas.logical_width(), canvas.logical_height());
         canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 180)));
 
         // rust logo
-        let logo_pos = Point::new((canvas.width() / 2.0) - 50.0, (canvas.height() / 2.0) - 180.0);
+        let logo_pos = Point::new(
+            (canvas.logical_width() / 2.0) - 50.0,
+            (canvas.logical_height() / 2.0) - 180.0,
+        );
         let logo_paint = Paint::image(self.logo_image_id, logo_pos.x, logo_pos.y, 100.0, 100.0, 0.0, 1.0);
         let mut path = Path::new();
         path.circle(logo_pos.x + 50.0, logo_pos.y + 50.0, 60.0);
@@ -544,10 +544,20 @@ impl Game {
         paint.set_font_size(80.0);
 
         paint.set_line_width(4.0);
-        let _ = canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
+        let _ = canvas.stroke_text(
+            canvas.logical_width() / 2.0,
+            canvas.logical_height() / 2.0,
+            "rsBREAKOUT",
+            paint,
+        );
 
         paint.set_color(Color::rgb(143, 80, 49));
-        let _ = canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", paint);
+        let _ = canvas.fill_text(
+            canvas.logical_width() / 2.0,
+            canvas.logical_height() / 2.0,
+            "rsBREAKOUT",
+            paint,
+        );
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -555,7 +565,12 @@ impl Game {
         paint.set_font(&[self.fonts.regular]);
         paint.set_font_size(16.0);
         let text = "Click anywhere to START.";
-        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, paint);
+        let _ = canvas.fill_text(
+            canvas.logical_width() / 2.0,
+            (canvas.logical_height() / 2.0) + 40.0,
+            text,
+            paint,
+        );
     }
 
     fn draw_game(&self, canvas: &mut Canvas) {
@@ -651,7 +666,12 @@ impl Game {
         paint.set_text_align(Align::Right);
         paint.set_font(&[self.fonts.bold]);
         paint.set_font_size(22.0);
-        let _ = canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), paint);
+        let _ = canvas.fill_text(
+            canvas.logical_width() - 20.0,
+            25.0,
+            &format!("Lives: {}", self.lives),
+            paint,
+        );
 
         // score
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -698,7 +718,7 @@ impl Game {
 
         // curtain
         let mut path = Path::new();
-        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        path.rect(0.0, 0.0, canvas.logical_width(), canvas.logical_height());
         canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 32)));
 
         // title
@@ -710,10 +730,20 @@ impl Game {
         let offset = 30.0;
 
         paint.set_line_width(4.0);
-        let _ = canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+        let _ = canvas.stroke_text(
+            canvas.logical_width() / 2.0,
+            (canvas.logical_height() / 2.0) + offset,
+            heading,
+            paint,
+        );
 
         paint.set_color(Color::rgb(143, 80, 49));
-        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, paint);
+        let _ = canvas.fill_text(
+            canvas.logical_width() / 2.0,
+            (canvas.logical_height() / 2.0) + offset,
+            heading,
+            paint,
+        );
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -721,8 +751,8 @@ impl Game {
         paint.set_font(&[self.fonts.regular]);
         paint.set_font_size(16.0);
         let _ = canvas.fill_text(
-            canvas.width() / 2.0,
-            (canvas.height() / 2.0) + offset * 2.0,
+            canvas.logical_width() / 2.0,
+            (canvas.logical_height() / 2.0) + offset * 2.0,
             subtext,
             paint,
         );
@@ -1241,7 +1271,7 @@ fn main() {
         ],
     ]);
 
-    let window_size = glutin::dpi::PhysicalSize::new(800, 600);
+    let window_size = glutin::dpi::LogicalSize::new(800, 600);
     let el = EventLoop::new();
     let wb = WindowBuilder::new()
         .with_inner_size(window_size)
@@ -1253,13 +1283,13 @@ fn main() {
 
     let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
+    let dpi_factor = windowed_context.window().scale_factor();
+    let size = windowed_context.window().inner_size();
+    canvas.set_size(size.width, size.height, dpi_factor as f32);
+    canvas.reset();
 
     let mut game = Game::new(&mut canvas, levels);
+
     game.size = Size::new(window_size.width as f32, window_size.height as f32);
 
     let start = Instant::now();
@@ -1275,7 +1305,9 @@ fn main() {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
-                    game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
+                    let dpi_factor = windowed_context.window().scale_factor();
+                    let winit::dpi::LogicalSize { width, height } = physical_size.to_logical(dpi_factor);
+                    game.size = Size::new(width, height);
                 }
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => (),
