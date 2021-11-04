@@ -1,7 +1,6 @@
 use std::{f32::consts::PI, slice};
 
-use crate::geometry::{self, Transform2D};
-use crate::position::Position;
+use crate::geometry::{self, Position, Transform2D};
 
 mod cache;
 pub use cache::{Convexity, PathCache};
