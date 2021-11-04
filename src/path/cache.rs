@@ -755,13 +755,12 @@ impl PathCache {
 
                 // Calculate extrusions
                 p1.dmpos = (dlpos0 + dlpos1) * 0.5;
-                let dmr2 = p1.dmpos.x * p1.dmpos.x + p1.dmpos.y * p1.dmpos.y;
+                let dmr2 = p1.dmpos.dot(p1.dmpos);
 
                 if dmr2 > 0.000_001 {
                     let scale = (1.0 / dmr2).min(600.0);
 
-                    p1.dmpos.x *= scale;
-                    p1.dmpos.y *= scale;
+                    p1.dmpos *= scale;
                 }
 
                 // Clear flags, but keep the corner.
@@ -772,7 +771,7 @@ impl PathCache {
                 };
 
                 // Keep track of left turns.
-                let cross = p1.dpos.x * p0.dpos.y - p0.dpos.x * p1.dpos.y;
+                let cross = p0.dpos.cross(p1.dpos);
 
                 if cross > 0.0 {
                     nleft += 1;
