@@ -270,10 +270,10 @@ impl Path {
         let mut dpos0 = pos0 - pos1;
         let mut dpos1 = pos2 - pos1;
 
-        geometry::normalize(&mut dpos0.x, &mut dpos0.y);
-        geometry::normalize(&mut dpos1.x, &mut dpos1.y);
+        dpos0.normalize();
+        dpos1.normalize();
 
-        let a = (dpos0.x * dpos1.x + dpos0.y * dpos1.y).acos();
+        let a = dpos0.dot(dpos1).acos();
         let d = radius / (a / 2.0).tan();
 
         if d > 10000.0 {

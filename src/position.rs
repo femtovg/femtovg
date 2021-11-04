@@ -34,6 +34,18 @@ impl Position {
     pub fn angle(&self) -> f32 {
         self.y.atan2(self.x)
     }
+
+    pub fn normalize(&mut self) -> f32 {
+        let d = (self.x * self.x + self.y * self.y).sqrt();
+
+        if d > 1e-6 {
+            let id = 1.0 / d;
+            self.x *= id;
+            self.y *= id;
+        }
+
+        d
+    }
 }
 
 impl Add for Position {
