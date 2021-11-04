@@ -1,6 +1,6 @@
 use std::{
     hash::{Hash, Hasher},
-    ops::{Add, Index, IndexMut, Mul, Neg, Sub},
+    ops::{Add, Index, IndexMut, Mul, MulAssign, Neg, Sub},
 };
 
 use fnv::FnvHasher;
@@ -149,6 +149,14 @@ impl Mul<f32> for Vector {
             x: self.x * other,
             y: self.y * other,
         }
+    }
+}
+
+impl MulAssign<f32> for Vector {
+    #[inline]
+    fn mul_assign(&mut self, other: f32) {
+        self.x *= other;
+        self.y *= other;
     }
 }
 
