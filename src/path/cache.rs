@@ -3,7 +3,7 @@ use std::{cmp::Ordering, f32::consts::PI, ops::Range};
 use bitflags::bitflags;
 
 use crate::{
-    geometry::{self, Bounds, Transform2D},
+    geometry::{Bounds, Transform2D},
     position::Position,
     renderer::Vertex,
     utils::VecRetainMut,
@@ -253,9 +253,8 @@ impl PathCache {
                     points.get_mut(i - 1).unwrap()
                 };
 
-                p0.dpos.x = p1.pos.x - p0.pos.x;
-                p0.dpos.y = p1.pos.y - p0.pos.y;
-                p0.len = geometry::normalize(&mut p0.dpos.x, &mut p0.dpos.y);
+                p0.dpos = p1.pos - p0.pos;
+                p0.len = p0.dpos.normalize();
 
                 bounds.minx = bounds.minx.min(p0.pos.x);
                 bounds.miny = bounds.miny.min(p0.pos.y);

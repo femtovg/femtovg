@@ -44,19 +44,6 @@ pub fn dist_pt_segment(x: f32, y: f32, px: f32, py: f32, qx: f32, qy: f32) -> f3
     dx * dx + dy * dy
 }
 
-// TODO: fix this.. move it to point
-pub fn normalize(x: &mut f32, y: &mut f32) -> f32 {
-    let d = ((*x) * (*x) + (*y) * (*y)).sqrt();
-
-    if d > 1e-6 {
-        let id = 1.0 / d;
-        *x *= id;
-        *y *= id;
-    }
-
-    d
-}
-
 /// 2×3 matrix (2 rows, 3 columns) used for 2D linear transformations. It can represent transformations such as translation, rotation, or scaling.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
