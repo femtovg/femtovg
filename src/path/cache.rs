@@ -5,9 +5,9 @@ use std::ops::Range;
 use bitflags::bitflags;
 
 use crate::geometry::{Bounds, Transform2D};
-use crate::position::Position;
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
+use crate::vector::Vector;
 use crate::{FillRule, LineCap, LineJoin, Solidity};
 
 use super::Verb;
@@ -24,29 +24,29 @@ bitflags! {
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Point {
-    pos: Position,
-    dpos: Position,
+    pos: Vector,
+    dpos: Vector,
     len: f32,
-    dmpos: Position,
+    dmpos: Vector,
     flags: PointFlags,
 }
 
 impl Point {
     pub fn new(x: f32, y: f32, flags: PointFlags) -> Self {
         Self {
-            pos: Position { x, y },
+            pos: Vector { x, y },
             flags,
             ..Default::default()
         }
     }
 
     pub fn is_left(p0: &Self, p1: &Self, x: f32, y: f32) -> f32 {
-        let pos = Position { x, y };
+        let pos = Vector { x, y };
         (p1.pos - p0.pos).dot((pos - p0.pos).orthogonal())
     }
 
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
-        let Position { x: dx, y: dy } = other.pos - self.pos;
+        let Vector { x: dx, y: dy } = other.pos - self.pos;
 
         dx * dx + dy * dy < tolerance * tolerance
     }
@@ -899,7 +899,7 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
-        let apos = Position::from_angle(a) * w;
+        let apos = Vector::from_angle(a) * w;
 
         verts.push(Vertex::pos(ppos - dlpos * apos.x - p1.dpos * apos.y, u0, 1.0));
         verts.push(Vertex::pos(ppos, 0.5, 1.0));
@@ -918,14 +918,14 @@ fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: 
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
-        let apos = Position::from_angle(a) * w;
+        let apos = Vector::from_angle(a) * w;
 
         verts.push(Vertex::pos(ppos, 0.5, 1.0));
         verts.push(Vertex::pos(ppos - dlpos * apos.x + p1.dpos * apos.y, u0, 1.0));
     }
 }
 
-fn choose_bevel(bevel: bool, p0: &Point, p1: &Point, w: f32) -> (Position, Position) {
+fn choose_bevel(bevel: bool, p0: &Point, p1: &Point, w: f32) -> (Vector, Vector) {
     if bevel {
         (p1.pos + p0.dpos.orthogonal() * w, p1.pos + p1.dpos.orthogonal() * w)
     } else {
@@ -958,7 +958,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let rpos = p1.pos + Position::from_angle(a) * rw;
+            let rpos = p1.pos + Vector::from_angle(a) * rw;
 
             verts.push(Vertex::pos(p1.pos, 0.5, 1.0));
             verts.push(Vertex::pos(rpos, ru, 1.0));
@@ -983,7 +983,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let lpos = p1.pos + Position::from_angle(a) * lw;
+            let lpos = p1.pos + Vector::from_angle(a) * lw;
 
             verts.push(Vertex::pos(lpos, lu, 1.0));
             verts.push(Vertex::pos(p1.pos, 0.5, 1.0));

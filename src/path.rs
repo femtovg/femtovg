@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 use std::slice;
 
 use crate::geometry::{self, Transform2D};
-use crate::position::Position;
+use crate::vector::Vector;
 
 mod cache;
 pub use cache::{Convexity, PathCache};
@@ -57,7 +57,7 @@ impl Verb {
         }
     }
 
-    fn from_packed(packed: &PackedVerb, coords: &[Position]) -> Self {
+    fn from_packed(packed: &PackedVerb, coords: &[Vector]) -> Self {
         match *packed {
             PackedVerb::MoveTo => Self::MoveTo(coords[0].x, coords[0].y),
             PackedVerb::LineTo => Self::LineTo(coords[0].x, coords[0].y),
@@ -82,8 +82,8 @@ impl Verb {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
     verbs: Vec<PackedVerb>,
-    coords: Vec<Position>,
-    last_pos: Position,
+    coords: Vec<Vector>,
+    last_pos: Vector,
     dist_tol: f32,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) cache: Option<(u64, PathCache)>,
@@ -144,31 +144,27 @@ impl Path {
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
-        self.append(&[PackedVerb::MoveTo], &[Position { x, y }]);
+        self.append(&[PackedVerb::MoveTo], &[Vector { x, y }]);
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
-        self.append(&[PackedVerb::LineTo], &[Position { x, y }]);
+        self.append(&[PackedVerb::LineTo], &[Vector { x, y }]);
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
         self.append(
             &[PackedVerb::BezierTo],
-            &[
-                Position { x: c1x, y: c1y },
-                Position { x: c2x, y: c2y },
-                Position { x, y },
-            ],
+            &[Vector { x: c1x, y: c1y }, Vector { x: c2x, y: c2y }, Vector { x, y }],
         );
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
         let pos0 = self.last_pos;
-        let cpos = Position { x: cx, y: cy };
-        let pos = Position { x, y };
+        let cpos = Vector { x: cx, y: cy };
+        let pos = Vector { x, y };
         let pos1 = pos0 + (cpos - pos0) * (2.0 / 3.0);
         let pos2 = pos + (cpos - pos) * (2.0 / 3.0);
 
@@ -192,7 +188,7 @@ impl Path {
     /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
     /// Angles are specified in radians.
     pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Solidity) {
-        let cpos = Position { x: cx, y: cy };
+        let cpos = Vector { x: cx, y: cy };
 
         let mut da = a1 - a0;
 
@@ -224,11 +220,11 @@ impl Path {
             kappa = -kappa;
         }
 
-        let (mut ppos, mut ptanpos) = (Position { x: 0f32, y: 0f32 }, Position { x: 0f32, y: 0f32 });
+        let (mut ppos, mut ptanpos) = (Vector { x: 0f32, y: 0f32 }, Vector { x: 0f32, y: 0f32 });
 
         for i in 0..=ndivs {
             let a = a0 + da * (i as f32 / ndivs as f32);
-            let dpos = Position::from_angle(a);
+            let dpos = Vector::from_angle(a);
             let pos = cpos + dpos * r;
             let tanpos = -dpos.orthogonal() * r * kappa;
 
@@ -262,8 +258,8 @@ impl Path {
         }
 
         let pos0 = self.last_pos;
-        let pos1 = Position { x: x1, y: y1 };
-        let pos2 = Position { x: x2, y: y2 };
+        let pos1 = Vector { x: x1, y: y1 };
+        let pos2 = Vector { x: x2, y: y2 };
 
         // Handle degenerate cases.
         if geometry::pt_equals(pos0.x, pos0.y, pos1.x, pos1.y, self.dist_tol)
@@ -315,10 +311,10 @@ impl Path {
                 PackedVerb::Close,
             ],
             &{
-                let hoffset = Position { x: w, y: 0.0 };
-                let voffset = Position { x: 0.0, y: h };
+                let hoffset = Vector { x: w, y: 0.0 };
+                let voffset = Vector { x: 0.0, y: h };
 
-                let tl = Position { x, y };
+                let tl = Vector { x, y };
                 let tr = tl + hoffset;
                 let br = tr + voffset;
                 let bl = tl + voffset;
@@ -377,60 +373,60 @@ impl Path {
                     PackedVerb::Close,
                 ],
                 &[
-                    Position { x, y: y + ry_tl },
-                    Position { x, y: y + h - ry_bl },
+                    Vector { x, y: y + ry_tl },
+                    Vector { x, y: y + h - ry_bl },
                     //
-                    Position {
+                    Vector {
                         x,
                         y: y + h - ry_bl * (1.0 - KAPPA90),
                     },
-                    Position {
+                    Vector {
                         x: x + rx_bl * (1.0 - KAPPA90),
                         y: y + h,
                     },
-                    Position { x: x + rx_bl, y: y + h },
+                    Vector { x: x + rx_bl, y: y + h },
                     //
-                    Position {
+                    Vector {
                         x: x + w - rx_br,
                         y: y + h,
                     },
                     //
-                    Position {
+                    Vector {
                         x: x + w - rx_br * (1.0 - KAPPA90),
                         y: y + h,
                     },
-                    Position {
+                    Vector {
                         x: x + w,
                         y: y + h - ry_br * (1.0 - KAPPA90),
                     },
-                    Position {
+                    Vector {
                         x: x + w,
                         y: y + h - ry_br,
                     },
                     //
-                    Position { x: x + w, y: y + ry_tr },
+                    Vector { x: x + w, y: y + ry_tr },
                     //
-                    Position {
+                    Vector {
                         x: x + w,
                         y: y + ry_tr * (1.0 - KAPPA90),
                     },
-                    Position {
+                    Vector {
                         x: x + w - rx_tr * (1.0 - KAPPA90),
                         y,
                     },
-                    Position { x: x + w - rx_tr, y },
+                    Vector { x: x + w - rx_tr, y },
                     //
-                    Position { x: x + rx_tl, y },
+                    Vector { x: x + rx_tl, y },
                     //
-                    Position {
+                    Vector {
                         x: x + rx_tl * (1.0 - KAPPA90),
                         y,
                     },
-                    Position {
+                    Vector {
                         x,
                         y: y + ry_tl * (1.0 - KAPPA90),
                     },
-                    Position { x, y: y + ry_tl },
+                    Vector { x, y: y + ry_tl },
                 ],
             );
         }
@@ -448,9 +444,9 @@ impl Path {
                 PackedVerb::Close,
             ],
             &{
-                let cpos = Position { x: cx, y: cy };
-                let hoffset = Position { x: rx, y: 0.0 };
-                let voffset = Position { x: 0.0, y: ry };
+                let cpos = Vector { x: cx, y: cy };
+                let hoffset = Vector { x: rx, y: 0.0 };
+                let voffset = Vector { x: 0.0, y: ry };
                 [
                     cpos - hoffset,
                     cpos - hoffset + voffset * KAPPA90,
@@ -476,7 +472,7 @@ impl Path {
     }
 
     /// Appends a slice of verbs to the path
-    fn append(&mut self, verbs: &[PackedVerb], coords: &[Position]) {
+    fn append(&mut self, verbs: &[PackedVerb], coords: &[Vector]) {
         if coords.len() > 1 {
             self.last_pos = coords[coords.len() - 1];
         }
@@ -488,7 +484,7 @@ impl Path {
 
 pub struct PathIter<'a> {
     verbs: slice::Iter<'a, PackedVerb>,
-    coords: &'a [Position],
+    coords: &'a [Vector],
 }
 
 impl<'a> Iterator for PathIter<'a> {

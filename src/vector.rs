@@ -1,12 +1,12 @@
 use std::ops::{Add, Mul, Neg, Sub};
 
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct Position {
+pub(crate) struct Vector {
     pub x: f32,
     pub y: f32,
 }
 
-impl Position {
+impl Vector {
     #[inline]
     pub fn dot(self, other: Self) -> f32 {
         self.x * other.x + self.y * other.y
@@ -48,7 +48,7 @@ impl Position {
     }
 }
 
-impl Add for Position {
+impl Add for Vector {
     type Output = Self;
 
     #[inline]
@@ -60,7 +60,7 @@ impl Add for Position {
     }
 }
 
-impl Sub for Position {
+impl Sub for Vector {
     type Output = Self;
 
     #[inline]
@@ -72,7 +72,7 @@ impl Sub for Position {
     }
 }
 
-impl Neg for Position {
+impl Neg for Vector {
     type Output = Self;
 
     #[inline]
@@ -81,7 +81,7 @@ impl Neg for Position {
     }
 }
 
-impl Mul<f32> for Position {
+impl Mul<f32> for Vector {
     type Output = Self;
 
     #[inline]

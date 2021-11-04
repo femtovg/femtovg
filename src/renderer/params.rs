@@ -1,6 +1,6 @@
 use crate::{
     paint::{GlyphTexture, GradientColors},
-    position::Position,
+    vector::Vector,
     Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
@@ -82,7 +82,7 @@ impl Params {
             }
             PaintFlavor::Image {
                 id,
-                center: Position { x: cx, y: cy },
+                center: Vector { x: cx, y: cy },
                 width,
                 height,
                 angle,
@@ -139,8 +139,8 @@ impl Params {
                 };
             }
             PaintFlavor::LinearGradient {
-                start: Position { x: start_x, y: start_y },
-                end: Position { x: end_x, y: end_y },
+                start: Vector { x: start_x, y: start_y },
+                end: Vector { x: end_x, y: end_y },
                 colors,
             } => {
                 let large = 1e5f32;
@@ -178,7 +178,7 @@ impl Params {
                 }
             }
             PaintFlavor::BoxGradient {
-                pos: Position { x, y },
+                pos: Vector { x, y },
                 width,
                 height,
                 radius,
@@ -205,7 +205,7 @@ impl Params {
                 }
             }
             PaintFlavor::RadialGradient {
-                center: Position { x: cx, y: cy },
+                center: Vector { x: cx, y: cy },
                 in_radius,
                 out_radius,
                 colors,
