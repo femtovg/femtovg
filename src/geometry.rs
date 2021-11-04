@@ -79,6 +79,11 @@ impl Vector {
     }
 
     #[inline]
+    pub fn mag2(self) -> f32 {
+        self.dot(self)
+    }
+
+    #[inline]
     pub fn orthogonal(self) -> Self {
         Self { x: self.y, y: -self.x }
     }
