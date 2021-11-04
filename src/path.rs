@@ -153,18 +153,12 @@ impl Path {
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
         let pos0 = self.last_pos;
+        let cpos = Position { x: cx, y: cy };
+        let pos = Position { x, y };
+        let pos1 = pos0 + (cpos - pos0) * (2.0 / 3.0);
+        let pos2 = pos + (cpos - pos) * (2.0 / 3.0);
 
-        self.append(
-            &[PackedVerb::BezierTo],
-            &[
-                pos0.x + 2.0 / 3.0 * (cx - pos0.x),
-                pos0.y + 2.0 / 3.0 * (cy - pos0.y),
-                x + 2.0 / 3.0 * (cx - x),
-                y + 2.0 / 3.0 * (cy - y),
-                x,
-                y,
-            ],
-        );
+        self.append(&[PackedVerb::BezierTo], &[pos1.x, pos1.y, pos2.x, pos2.y, pos.x, pos.y]);
     }
 
     /// Closes current sub-path with a line segment.
@@ -184,6 +178,8 @@ impl Path {
     /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
     /// Angles are specified in radians.
     pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Solidity) {
+        let cpos = Position { x: cx, y: cy };
+
         let mut da = a1 - a0;
 
         if dir == Solidity::Hole {
@@ -214,16 +210,13 @@ impl Path {
             kappa = -kappa;
         }
 
-        let (mut px, mut py, mut ptanx, mut ptany) = (0f32, 0f32, 0f32, 0f32);
+        let (mut ppos, mut ptanpos) = (Position { x: 0f32, y: 0f32 }, Position { x: 0f32, y: 0f32 });
 
         for i in 0..=ndivs {
             let a = a0 + da * (i as f32 / ndivs as f32);
-            let dx = a.cos();
-            let dy = a.sin();
-            let x = cx + dx * r;
-            let y = cy + dy * r;
-            let tanx = -dy * r * kappa;
-            let tany = dx * r * kappa;
+            let dpos = Position::from_angle(a);
+            let pos = cpos + dpos * r;
+            let tanpos = -dpos.orthogonal() * r * kappa;
 
             if i == 0 {
                 let first_move = if !self.verbs.is_empty() {
@@ -233,16 +226,16 @@ impl Path {
                 };
 
                 commands.push(first_move);
-                coords.extend_from_slice(&[x, y]);
+                coords.extend_from_slice(&[pos.x, pos.y]);
             } else {
                 commands.push(PackedVerb::BezierTo);
-                coords.extend_from_slice(&[px + ptanx, py + ptany, x - tanx, y - tany, x, y]);
+                let pos1 = ppos + ptanpos;
+                let pos2 = pos - tanpos;
+                coords.extend_from_slice(&[pos1.x, pos1.y, pos2.x, pos2.y, pos.x, pos.y]);
             }
 
-            px = x;
-            py = y;
-            ptanx = tanx;
-            ptany = tany;
+            ppos = pos;
+            ptanpos = tanpos;
         }
 
         self.append(&commands, &coords);
