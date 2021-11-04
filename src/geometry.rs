@@ -29,10 +29,8 @@ impl Position {
 
     #[inline]
     pub fn from_angle(angle: f32) -> Self {
-        Self {
-            x: angle.cos(),
-            y: angle.sin(),
-        }
+        let (y, x) = angle.sin_cos();
+        Self { x, y }
     }
 
     #[inline]
