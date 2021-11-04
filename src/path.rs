@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 use std::slice;
 
-use crate::geometry::{self, Position, Transform2D};
+use crate::geometry::{self, Position, Transform2D, Vector};
 
 mod cache;
 pub use cache::{Convexity, PathCache};
@@ -223,11 +223,11 @@ impl Path {
             kappa = -kappa;
         }
 
-        let (mut ppos, mut ptanpos) = (Position { x: 0f32, y: 0f32 }, Position { x: 0f32, y: 0f32 });
+        let (mut ppos, mut ptanpos) = (Position { x: 0.0, y: 0.0 }, Vector::zero());
 
         for i in 0..=ndivs {
             let a = a0 + da * (i as f32 / ndivs as f32);
-            let dpos = Position::from_angle(a);
+            let dpos = Vector::from_angle(a);
             let pos = cpos + dpos * r;
             let tanpos = -dpos.orthogonal() * r * kappa;
 
@@ -288,7 +288,7 @@ impl Path {
 
         let (cpos, a0, a1, dir);
 
-        if geometry::cross(dpos0.x, dpos0.y, dpos1.x, dpos1.y) > 0.0 {
+        if dpos0.cross(dpos1) > 0.0 {
             cpos = pos1 + dpos0 * d + dpos0.orthogonal() * radius;
             a0 = dpos0.angle();
             a1 = (-dpos1).angle();
@@ -314,8 +314,8 @@ impl Path {
                 PackedVerb::Close,
             ],
             &{
-                let hoffset = Position { x: w, y: 0.0 };
-                let voffset = Position { x: 0.0, y: h };
+                let hoffset = Vector::x(w);
+                let voffset = Vector::y(h);
 
                 let tl = Position { x, y };
                 let tr = tl + hoffset;
@@ -448,8 +448,8 @@ impl Path {
             ],
             &{
                 let cpos = Position { x: cx, y: cy };
-                let hoffset = Position { x: rx, y: 0.0 };
-                let voffset = Position { x: 0.0, y: ry };
+                let hoffset = Vector::x(rx);
+                let voffset = Vector::y(ry);
                 [
                     cpos - hoffset,
                     cpos - hoffset + voffset * KAPPA90,

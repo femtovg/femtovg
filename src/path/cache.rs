@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use bitflags::bitflags;
 
-use crate::geometry::{Bounds, Position, Transform2D};
+use crate::geometry::{Bounds, Position, Transform2D, Vector};
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
 use crate::{FillRule, LineCap, LineJoin, Solidity};
@@ -24,9 +24,9 @@ bitflags! {
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Point {
     pos: Position,
-    dpos: Position,
+    dpos: Vector,
     len: f32,
-    dmpos: Position,
+    dmpos: Vector,
     flags: PointFlags,
 }
 
@@ -45,9 +45,9 @@ impl Point {
     }
 
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
-        let Position { x: dx, y: dy } = other.pos - self.pos;
+        let offset = other.pos - self.pos;
 
-        dx * dx + dy * dy < tolerance * tolerance
+        offset.dot(offset) < tolerance * tolerance
     }
 }
 
@@ -101,8 +101,7 @@ impl Contour {
         let mut area = 0.0;
 
         for (p0, p1) in (PointPairsIter { curr: 0, points }) {
-            let sides = p1.pos + p0.pos.mirror();
-            area += sides.x * sides.y;
+            area += (p1.pos.x - p0.pos.x) * (p1.pos.y + p0.pos.y);
         }
 
         area * 0.5
@@ -898,9 +897,9 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
-        let apos = Position::from_angle(a) * w;
+        let offset = Vector::from_angle(a).with_basis(-dlpos, p1.dpos) * w;
 
-        verts.push(Vertex::pos(ppos - dlpos * apos.x - p1.dpos * apos.y, u0, 1.0));
+        verts.push(Vertex::pos(ppos + offset, u0, 1.0));
         verts.push(Vertex::pos(ppos, 0.5, 1.0));
     }
 
@@ -917,10 +916,10 @@ fn round_cap_end(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap: 
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
-        let apos = Position::from_angle(a) * w;
+        let offset = Vector::from_angle(a).with_basis(-dlpos, p1.dpos) * w;
 
         verts.push(Vertex::pos(ppos, 0.5, 1.0));
-        verts.push(Vertex::pos(ppos - dlpos * apos.x + p1.dpos * apos.y, u0, 1.0));
+        verts.push(Vertex::pos(ppos + offset, u0, 1.0));
     }
 }
 
@@ -957,7 +956,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let rpos = p1.pos + Position::from_angle(a) * rw;
+            let rpos = p1.pos + Vector::from_angle(a) * rw;
 
             verts.push(Vertex::pos(p1.pos, 0.5, 1.0));
             verts.push(Vertex::pos(rpos, ru, 1.0));
@@ -982,7 +981,7 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         for i in 0..n {
             let u = i as f32 / (n - 1) as f32;
             let a = a0 + u * (a1 - a0);
-            let lpos = p1.pos + Position::from_angle(a) * lw;
+            let lpos = p1.pos + Vector::from_angle(a) * lw;
 
             verts.push(Vertex::pos(lpos, lu, 1.0));
             verts.push(Vertex::pos(p1.pos, 0.5, 1.0));
