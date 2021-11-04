@@ -45,9 +45,7 @@ impl Point {
     }
 
     pub fn approx_eq(&self, other: &Self, tolerance: f32) -> bool {
-        let offset = other.pos - self.pos;
-
-        offset.dot(offset) < tolerance * tolerance
+        (other.pos - self.pos).mag2() < tolerance * tolerance
     }
 }
 
@@ -755,7 +753,7 @@ impl PathCache {
 
                 // Calculate extrusions
                 p1.dmpos = (dlpos0 + dlpos1) * 0.5;
-                let dmr2 = p1.dmpos.dot(p1.dmpos);
+                let dmr2 = p1.dmpos.mag2();
 
                 if dmr2 > 0.000_001 {
                     let scale = (1.0 / dmr2).min(600.0);
