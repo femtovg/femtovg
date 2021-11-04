@@ -48,20 +48,27 @@ pub enum Verb {
 impl Verb {
     fn num_coordinates(&self) -> usize {
         match *self {
-            Self::MoveTo(..) => 2,
-            Self::LineTo(..) => 2,
-            Self::BezierTo(..) => 6,
+            Self::MoveTo(..) => 1,
+            Self::LineTo(..) => 1,
+            Self::BezierTo(..) => 3,
             Self::Solid => 0,
             Self::Hole => 0,
             Self::Close => 0,
         }
     }
 
-    fn from_packed(packed: &PackedVerb, coords: &[f32]) -> Self {
+    fn from_packed(packed: &PackedVerb, coords: &[Position]) -> Self {
         match *packed {
-            PackedVerb::MoveTo => Self::MoveTo(coords[0], coords[1]),
-            PackedVerb::LineTo => Self::LineTo(coords[0], coords[1]),
-            PackedVerb::BezierTo => Self::BezierTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]),
+            PackedVerb::MoveTo => Self::MoveTo(coords[0].x, coords[0].y),
+            PackedVerb::LineTo => Self::LineTo(coords[0].x, coords[0].y),
+            PackedVerb::BezierTo => Self::BezierTo(
+                coords[0].x,
+                coords[0].y,
+                coords[1].x,
+                coords[1].y,
+                coords[2].x,
+                coords[2].y,
+            ),
             PackedVerb::Solid => Self::Solid,
             PackedVerb::Hole => Self::Hole,
             PackedVerb::Close => Self::Close,
@@ -75,7 +82,7 @@ impl Verb {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
     verbs: Vec<PackedVerb>,
-    coords: Vec<f32>,
+    coords: Vec<Position>,
     last_pos: Position,
     dist_tol: f32,
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -137,17 +144,24 @@ impl Path {
 
     /// Starts new sub-path with specified point as first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
-        self.append(&[PackedVerb::MoveTo], &[x, y]);
+        self.append(&[PackedVerb::MoveTo], &[Position { x, y }]);
     }
 
     /// Adds line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
-        self.append(&[PackedVerb::LineTo], &[x, y]);
+        self.append(&[PackedVerb::LineTo], &[Position { x, y }]);
     }
 
     /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
-        self.append(&[PackedVerb::BezierTo], &[c1x, c1y, c2x, c2y, x, y]);
+        self.append(
+            &[PackedVerb::BezierTo],
+            &[
+                Position { x: c1x, y: c1y },
+                Position { x: c2x, y: c2y },
+                Position { x, y },
+            ],
+        );
     }
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
@@ -158,7 +172,7 @@ impl Path {
         let pos1 = pos0 + (cpos - pos0) * (2.0 / 3.0);
         let pos2 = pos + (cpos - pos) * (2.0 / 3.0);
 
-        self.append(&[PackedVerb::BezierTo], &[pos1.x, pos1.y, pos2.x, pos2.y, pos.x, pos.y]);
+        self.append(&[PackedVerb::BezierTo], &[pos1, pos2, pos]);
     }
 
     /// Closes current sub-path with a line segment.
@@ -226,12 +240,12 @@ impl Path {
                 };
 
                 commands.push(first_move);
-                coords.extend_from_slice(&[pos.x, pos.y]);
+                coords.extend_from_slice(&[pos]);
             } else {
                 commands.push(PackedVerb::BezierTo);
                 let pos1 = ppos + ptanpos;
                 let pos2 = pos - tanpos;
-                coords.extend_from_slice(&[pos1.x, pos1.y, pos2.x, pos2.y, pos.x, pos.y]);
+                coords.extend_from_slice(&[pos1, pos2, pos]);
             }
 
             ppos = pos;
@@ -300,7 +314,17 @@ impl Path {
                 PackedVerb::LineTo,
                 PackedVerb::Close,
             ],
-            &[x, y, x, y + h, x + w, y + h, x + w, y],
+            &{
+                let hoffset = Position { x: w, y: 0.0 };
+                let voffset = Position { x: 0.0, y: h };
+
+                let tl = Position { x, y };
+                let tr = tl + hoffset;
+                let br = tr + voffset;
+                let bl = tl + voffset;
+
+                [tl, tr, br, bl]
+            },
         );
     }
 
@@ -353,47 +377,60 @@ impl Path {
                     PackedVerb::Close,
                 ],
                 &[
-                    x,
-                    y + ry_tl,
-                    x,
-                    y + h - ry_bl,
+                    Position { x, y: y + ry_tl },
+                    Position { x, y: y + h - ry_bl },
                     //
-                    x,
-                    y + h - ry_bl * (1.0 - KAPPA90),
-                    x + rx_bl * (1.0 - KAPPA90),
-                    y + h,
-                    x + rx_bl,
-                    y + h,
+                    Position {
+                        x,
+                        y: y + h - ry_bl * (1.0 - KAPPA90),
+                    },
+                    Position {
+                        x: x + rx_bl * (1.0 - KAPPA90),
+                        y: y + h,
+                    },
+                    Position { x: x + rx_bl, y: y + h },
                     //
-                    x + w - rx_br,
-                    y + h,
+                    Position {
+                        x: x + w - rx_br,
+                        y: y + h,
+                    },
                     //
-                    x + w - rx_br * (1.0 - KAPPA90),
-                    y + h,
-                    x + w,
-                    y + h - ry_br * (1.0 - KAPPA90),
-                    x + w,
-                    y + h - ry_br,
+                    Position {
+                        x: x + w - rx_br * (1.0 - KAPPA90),
+                        y: y + h,
+                    },
+                    Position {
+                        x: x + w,
+                        y: y + h - ry_br * (1.0 - KAPPA90),
+                    },
+                    Position {
+                        x: x + w,
+                        y: y + h - ry_br,
+                    },
                     //
-                    x + w,
-                    y + ry_tr,
+                    Position { x: x + w, y: y + ry_tr },
                     //
-                    x + w,
-                    y + ry_tr * (1.0 - KAPPA90),
-                    x + w - rx_tr * (1.0 - KAPPA90),
-                    y,
-                    x + w - rx_tr,
-                    y,
+                    Position {
+                        x: x + w,
+                        y: y + ry_tr * (1.0 - KAPPA90),
+                    },
+                    Position {
+                        x: x + w - rx_tr * (1.0 - KAPPA90),
+                        y,
+                    },
+                    Position { x: x + w - rx_tr, y },
                     //
-                    x + rx_tl,
-                    y,
+                    Position { x: x + rx_tl, y },
                     //
-                    x + rx_tl * (1.0 - KAPPA90),
-                    y,
-                    x,
-                    y + ry_tl * (1.0 - KAPPA90),
-                    x,
-                    y + ry_tl,
+                    Position {
+                        x: x + rx_tl * (1.0 - KAPPA90),
+                        y,
+                    },
+                    Position {
+                        x,
+                        y: y + ry_tl * (1.0 - KAPPA90),
+                    },
+                    Position { x, y: y + ry_tl },
                 ],
             );
         }
@@ -410,34 +447,26 @@ impl Path {
                 PackedVerb::BezierTo,
                 PackedVerb::Close,
             ],
-            &[
-                cx - rx,
-                cy,
-                cx - rx,
-                cy + ry * KAPPA90,
-                cx - rx * KAPPA90,
-                cy + ry,
-                cx,
-                cy + ry,
-                cx + rx * KAPPA90,
-                cy + ry,
-                cx + rx,
-                cy + ry * KAPPA90,
-                cx + rx,
-                cy,
-                cx + rx,
-                cy - ry * KAPPA90,
-                cx + rx * KAPPA90,
-                cy - ry,
-                cx,
-                cy - ry,
-                cx - rx * KAPPA90,
-                cy - ry,
-                cx - rx,
-                cy - ry * KAPPA90,
-                cx - rx,
-                cy,
-            ],
+            &{
+                let cpos = Position { x: cx, y: cy };
+                let hoffset = Position { x: rx, y: 0.0 };
+                let voffset = Position { x: 0.0, y: ry };
+                [
+                    cpos - hoffset,
+                    cpos - hoffset + voffset * KAPPA90,
+                    cpos - hoffset * KAPPA90 + voffset,
+                    cpos + voffset,
+                    cpos + hoffset * KAPPA90 + voffset,
+                    cpos + hoffset + voffset * KAPPA90,
+                    cpos + hoffset,
+                    cpos + hoffset - voffset * KAPPA90,
+                    cpos + hoffset * KAPPA90 - voffset,
+                    cpos - voffset,
+                    cpos - hoffset * KAPPA90 - voffset,
+                    cpos - hoffset - voffset * KAPPA90,
+                    cpos - hoffset,
+                ]
+            },
         );
     }
 
@@ -447,11 +476,9 @@ impl Path {
     }
 
     /// Appends a slice of verbs to the path
-    fn append(&mut self, verbs: &[PackedVerb], coords: &[f32]) {
+    fn append(&mut self, verbs: &[PackedVerb], coords: &[Position]) {
         if coords.len() > 1 {
-            let x = coords[coords.len() - 2];
-            let y = coords[coords.len() - 1];
-            self.last_pos = Position { x, y };
+            self.last_pos = coords[coords.len() - 1];
         }
 
         self.verbs.extend_from_slice(verbs);
@@ -461,7 +488,7 @@ impl Path {
 
 pub struct PathIter<'a> {
     verbs: slice::Iter<'a, PackedVerb>,
-    coords: &'a [f32],
+    coords: &'a [Position],
 }
 
 impl<'a> Iterator for PathIter<'a> {
