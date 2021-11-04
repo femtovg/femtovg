@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, slice};
 
-use crate::geometry::{self, Position, Transform2D, Vector};
+use crate::geometry::{Position, Transform2D, Vector};
 
 mod cache;
 pub use cache::{Convexity, PathCache};
@@ -264,9 +264,9 @@ impl Path {
         let pos2 = Position { x: x2, y: y2 };
 
         // Handle degenerate cases.
-        if geometry::pt_equals(pos0.x, pos0.y, pos1.x, pos1.y, self.dist_tol)
-            || geometry::pt_equals(pos1.x, pos1.y, pos2.x, pos2.y, self.dist_tol)
-            || geometry::dist_pt_segment(pos1.x, pos1.y, pos0.x, pos0.y, pos2.x, pos2.y) < self.dist_tol * self.dist_tol
+        if Position::equals(pos0, pos1, self.dist_tol)
+            || Position::equals(pos1, pos2, self.dist_tol)
+            || Position::segment_distance(pos1, pos0, pos2) < self.dist_tol * self.dist_tol
             || radius < self.dist_tol
         {
             self.line_to(pos1.x, pos1.y);
