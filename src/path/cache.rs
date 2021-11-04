@@ -3,8 +3,7 @@ use std::{cmp::Ordering, f32::consts::PI, ops::Range};
 use bitflags::bitflags;
 
 use crate::{
-    geometry::{Bounds, Transform2D},
-    position::Position,
+    geometry::{Bounds, Position, Transform2D},
     renderer::Vertex,
     utils::VecRetainMut,
     FillRule, LineCap, LineJoin, Solidity,

@@ -2,7 +2,8 @@
 // so that they are easier to find when autocompleting
 
 use crate::{
-    geometry::Transform2D, position::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+    geometry::{Position, Transform2D},
+    Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
