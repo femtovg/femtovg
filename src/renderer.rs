@@ -4,7 +4,7 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    paint::GlyphTexture, position::Position, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
+    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
     ImageInfo, ImageSource, ImageStore,
 };
 

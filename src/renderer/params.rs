@@ -1,6 +1,6 @@
 use crate::{
+    geometry::Position,
     paint::{GlyphTexture, GradientColors},
-    position::Position,
     Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 

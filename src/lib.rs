@@ -25,8 +25,6 @@ use std::rc::Rc;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
-mod position;
-
 mod utils;
 
 mod text;

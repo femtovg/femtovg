@@ -4,8 +4,7 @@ use std::ops::Range;
 
 use bitflags::bitflags;
 
-use crate::geometry::{Bounds, Transform2D};
-use crate::position::Position;
+use crate::geometry::{Bounds, Position, Transform2D};
 use crate::renderer::Vertex;
 use crate::utils::VecRetainMut;
 use crate::{FillRule, LineCap, LineJoin, Solidity};
