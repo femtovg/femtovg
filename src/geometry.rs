@@ -45,6 +45,33 @@ impl Sub for Position {
     }
 }
 
+impl Position {
+    pub(crate) fn equals(p1: Self, p2: Self, tol: f32) -> bool {
+        (p2 - p1).mag2() < tol * tol
+    }
+
+    pub(crate) fn segment_distance(pos: Self, ppos: Self, qpos: Self) -> f32 {
+        let pq = qpos - ppos;
+        let dpos = pos - ppos;
+        let d = pq.mag2();
+        let mut t = pq.dot(dpos);
+
+        if d > 0.0 {
+            t /= d;
+        }
+
+        if t < 0.0 {
+            t = 0.0;
+        } else if t > 1.0 {
+            t = 1.0;
+        }
+
+        let dpos = (ppos - pos) + pq * t;
+
+        dpos.mag2()
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct Vector {
     pub x: f32,
@@ -163,39 +190,8 @@ impl MulAssign<f32> for Vector {
     }
 }
 
-pub fn quantize(a: f32, d: f32) -> f32 {
+pub(crate) fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
-}
-
-pub fn pt_equals(x1: f32, y1: f32, x2: f32, y2: f32, tol: f32) -> bool {
-    let dx = x2 - x1;
-    let dy = y2 - y1;
-
-    dx * dx + dy * dy < tol * tol
-}
-
-pub fn dist_pt_segment(x: f32, y: f32, px: f32, py: f32, qx: f32, qy: f32) -> f32 {
-    let pqx = qx - px;
-    let pqy = qy - py;
-    let dx = x - px;
-    let dy = y - py;
-    let d = pqx * pqx + pqy * pqy;
-    let mut t = pqx * dx + pqy * dy;
-
-    if d > 0.0 {
-        t /= d;
-    }
-
-    if t < 0.0 {
-        t = 0.0;
-    } else if t > 1.0 {
-        t = 1.0;
-    }
-
-    let dx = px + t * pqx - x;
-    let dy = py + t * pqy - y;
-
-    dx * dx + dy * dy
 }
 
 /// 2×3 matrix (2 rows, 3 columns) used for 2D linear transformations. It can represent transformations such as translation, rotation, or scaling.
