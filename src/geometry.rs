@@ -11,15 +11,71 @@ pub(crate) struct Position {
     pub y: f32,
 }
 
-impl Position {
+impl Add<Vector> for Position {
+    type Output = Self;
+
     #[inline]
-    pub fn dot(self, other: Self) -> f32 {
-        self.x * other.x + self.y * other.y
+    fn add(self, other: Vector) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+impl Sub<Vector> for Position {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Vector) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Sub for Position {
+    type Output = Vector;
+
+    #[inline]
+    fn sub(self, other: Self) -> Vector {
+        Vector {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct Vector {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Vector {
+    pub fn zero() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+
+    pub fn x(x: f32) -> Self {
+        Self { x, y: 0.0 }
+    }
+    pub fn y(y: f32) -> Self {
+        Self { x: 0.0, y }
+    }
+
+    pub fn with_basis(self, basis_x: Self, basis_y: Self) -> Self {
+        basis_x * self.x + basis_y * self.y
+    }
+
+    pub fn cross(self, other: Self) -> f32 {
+        self.orthogonal().dot(other)
     }
 
     #[inline]
-    pub fn mirror(self) -> Self {
-        Self { x: -self.x, y: self.y }
+    pub fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y
     }
 
     #[inline]
@@ -51,7 +107,7 @@ impl Position {
     }
 }
 
-impl Add for Position {
+impl Add for Vector {
     type Output = Self;
 
     #[inline]
@@ -63,7 +119,7 @@ impl Add for Position {
     }
 }
 
-impl Sub for Position {
+impl Sub for Vector {
     type Output = Self;
 
     #[inline]
@@ -75,7 +131,7 @@ impl Sub for Position {
     }
 }
 
-impl Neg for Position {
+impl Neg for Vector {
     type Output = Self;
 
     #[inline]
@@ -84,7 +140,7 @@ impl Neg for Position {
     }
 }
 
-impl Mul<f32> for Position {
+impl Mul<f32> for Vector {
     type Output = Self;
 
     #[inline]
@@ -105,10 +161,6 @@ pub fn pt_equals(x1: f32, y1: f32, x2: f32, y2: f32, tol: f32) -> bool {
     let dy = y2 - y1;
 
     dx * dx + dy * dy < tol * tol
-}
-
-pub fn cross(dx0: f32, dy0: f32, dx1: f32, dy1: f32) -> f32 {
-    dx1 * dy0 - dx0 * dy1
 }
 
 pub fn dist_pt_segment(x: f32, y: f32, px: f32, py: f32, qx: f32, qy: f32) -> f32 {
