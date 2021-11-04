@@ -1,4 +1,4 @@
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Mul, Neg, Sub};
 
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct Position {
@@ -29,6 +29,11 @@ impl Position {
             y: angle.sin(),
         }
     }
+
+    #[inline]
+    pub fn angle(&self) -> f32 {
+        self.y.atan2(self.x)
+    }
 }
 
 impl Add for Position {
@@ -52,6 +57,15 @@ impl Sub for Position {
             x: self.x - other.x,
             y: self.y - other.y,
         }
+    }
+}
+
+impl Neg for Position {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        Self { x: -self.x, y: -self.y }
     }
 }
 

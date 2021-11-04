@@ -152,13 +152,13 @@ impl Path {
 
     /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
-        let Position { x: x0, y: y0 } = self.last_pos;
+        let pos0 = self.last_pos;
 
         self.append(
             &[PackedVerb::BezierTo],
             &[
-                x0 + 2.0 / 3.0 * (cx - x0),
-                y0 + 2.0 / 3.0 * (cy - y0),
+                pos0.x + 2.0 / 3.0 * (cx - pos0.x),
+                pos0.y + 2.0 / 3.0 * (cy - pos0.y),
                 x + 2.0 / 3.0 * (cx - x),
                 y + 2.0 / 3.0 * (cy - y),
                 x,
@@ -254,49 +254,47 @@ impl Path {
             return;
         }
 
-        let Position { x: x0, y: y0 } = self.last_pos;
+        let pos0 = self.last_pos;
+        let pos1 = Position { x: x1, y: y1 };
+        let pos2 = Position { x: x2, y: y2 };
 
         // Handle degenerate cases.
-        if geometry::pt_equals(x0, y0, x1, y1, self.dist_tol)
-            || geometry::pt_equals(x1, y1, x2, y2, self.dist_tol)
-            || geometry::dist_pt_segment(x1, y1, x0, y0, x2, y2) < self.dist_tol * self.dist_tol
+        if geometry::pt_equals(pos0.x, pos0.y, pos1.x, pos1.y, self.dist_tol)
+            || geometry::pt_equals(pos1.x, pos1.y, pos2.x, pos2.y, self.dist_tol)
+            || geometry::dist_pt_segment(pos1.x, pos1.y, pos0.x, pos0.y, pos2.x, pos2.y) < self.dist_tol * self.dist_tol
             || radius < self.dist_tol
         {
-            self.line_to(x1, y1);
+            self.line_to(pos1.x, pos1.y);
         }
 
-        let mut dx0 = x0 - x1;
-        let mut dy0 = y0 - y1;
-        let mut dx1 = x2 - x1;
-        let mut dy1 = y2 - y1;
+        let mut dpos0 = pos0 - pos1;
+        let mut dpos1 = pos2 - pos1;
 
-        geometry::normalize(&mut dx0, &mut dy0);
-        geometry::normalize(&mut dx1, &mut dy1);
+        geometry::normalize(&mut dpos0.x, &mut dpos0.y);
+        geometry::normalize(&mut dpos1.x, &mut dpos1.y);
 
-        let a = (dx0 * dx1 + dy0 * dy1).acos();
+        let a = (dpos0.x * dpos1.x + dpos0.y * dpos1.y).acos();
         let d = radius / (a / 2.0).tan();
 
         if d > 10000.0 {
-            return self.line_to(x1, y1);
+            return self.line_to(pos1.x, pos1.y);
         }
 
-        let (cx, cy, a0, a1, dir);
+        let (cpos, a0, a1, dir);
 
-        if geometry::cross(dx0, dy0, dx1, dy1) > 0.0 {
-            cx = x1 + dx0 * d + dy0 * radius;
-            cy = y1 + dy0 * d + -dx0 * radius;
-            a0 = dx0.atan2(-dy0);
-            a1 = -dx1.atan2(dy1);
+        if geometry::cross(dpos0.x, dpos0.y, dpos1.x, dpos1.y) > 0.0 {
+            cpos = pos1 + dpos0 * d + dpos0.orthogonal() * radius;
+            a0 = dpos0.angle();
+            a1 = (-dpos1).angle();
             dir = Solidity::Hole;
         } else {
-            cx = x1 + dx0 * d + -dy0 * radius;
-            cy = y1 + dy0 * d + dx0 * radius;
-            a0 = -dx0.atan2(dy0);
-            a1 = dx1.atan2(-dy1);
+            cpos = pos1 + dpos0 * d - dpos0.orthogonal() * radius;
+            a0 = (-dpos0).angle();
+            a1 = dpos1.angle();
             dir = Solidity::Solid;
         }
 
-        self.arc(cx, cy, radius, a0, a1, dir);
+        self.arc(cpos.x, cpos.y, radius, a0 + PI / 2.0, a1 + PI / 2.0, dir);
     }
 
     /// Creates new rectangle shaped sub-path.
