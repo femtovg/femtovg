@@ -982,8 +982,8 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
 
     if p1.flags.contains(PointFlags::LEFT) {
         let (lpos0, lpos1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, lw);
-        a0 = (-dlpos0.y).atan2(-dlpos0.x);
-        a1 = (-dlpos1.y).atan2(-dlpos1.x);
+        a0 = (-dlpos0).angle();
+        a1 = (-dlpos1).angle();
 
         if a1 > a0 {
             a1 -= PI * 2.0;
@@ -1007,8 +1007,8 @@ fn round_join(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, lw: f32, rw: f32,
         verts.push(Vertex::pos(p1.pos - dlpos1 * rw, ru, 1.0));
     } else {
         let (rpos0, rpos1) = choose_bevel(p1.flags.contains(PointFlags::INNERBEVEL), p0, p1, -rw);
-        a0 = dlpos0.y.atan2(dlpos0.x);
-        a1 = dlpos1.y.atan2(dlpos1.x);
+        a0 = dlpos0.angle();
+        a1 = dlpos1.angle();
 
         if a1 < a0 {
             a1 += PI * 2.0;
