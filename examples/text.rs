@@ -237,7 +237,7 @@ fn draw_baselines<T: Renderer>(
             //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
             let mut path = Path::new();
-            path.rect([res.x, res.y], res.width(), res.height());
+            path.rect(res.pos, res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
@@ -260,7 +260,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
 
         if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint) {
             let mut path = Path::new();
-            path.rect([res.x, res.y], res.width(), res.height());
+            path.rect(res.pos, res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
