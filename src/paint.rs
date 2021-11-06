@@ -168,7 +168,7 @@ impl Default for GlyphTexture {
 /// stroke_paint.set_line_width(4.0);
 ///
 /// let mut path = Path::new();
-/// path.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
+/// path.rounded_rect([10.0, 10.0], 100.0, 100.0, 20.0);
 /// canvas.fill_path(&mut path, fill_paint);
 /// canvas.stroke_path(&mut path, stroke_paint);
 /// ```
@@ -244,7 +244,7 @@ impl Paint {
     /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
     ///
     /// let mut path = Path::new();
-    /// path.rect(10.0, 10.0, 85.0, 85.0);
+    /// path.rect([10.0, 10.0], 85.0, 85.0);
     /// canvas.fill_path(&mut path, fill_paint);
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
@@ -272,7 +272,7 @@ impl Paint {
     ///
     /// let bg = Paint::linear_gradient(0.0, 0.0, 0.0, 100.0, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn linear_gradient(
@@ -311,7 +311,7 @@ impl Paint {
     ///         (1.0, Color::rgba(255, 0, 0, 16))
     ///    ]);
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn linear_gradient_stops(start_x: f32, start_y: f32, end_x: f32, end_y: f32, stops: &[(f32, Color)]) -> Self {
@@ -352,7 +352,7 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn box_gradient(
@@ -404,7 +404,7 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.circle(50.0, 50.0, 20.0);
+    /// path.circle([50.0, 50.0], 20.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn radial_gradient(
@@ -457,7 +457,7 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.circle(50.0, 50.0, 20.0);
+    /// path.circle([50.0, 50.0], 20.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn radial_gradient_stops(cx: f32, cy: f32, in_radius: f32, out_radius: f32, stops: &[(f32, Color)]) -> Self {

@@ -1060,11 +1060,11 @@ mod tests {
     fn self_intersecting_polygon_is_concave() {
         // star
         let mut path = Path::new();
-        path.move_to(50.0, 0.0);
-        path.line_to(21.0, 90.0);
-        path.line_to(98.0, 35.0);
-        path.line_to(2.0, 35.0);
-        path.line_to(79.0, 90.0);
+        path.move_to([50.0, 0.0]);
+        path.line_to([21.0, 90.0]);
+        path.line_to([98.0, 35.0]);
+        path.line_to([2.0, 35.0]);
+        path.line_to([79.0, 90.0]);
         path.close();
 
         let transform = Transform2D::identity();

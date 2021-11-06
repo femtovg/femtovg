@@ -72,6 +72,20 @@ impl Position {
     }
 }
 
+impl From<[f32; 2]> for Position {
+    fn from(value: [f32; 2]) -> Self {
+        let [x, y] = value;
+        Self { x, y }
+    }
+}
+
+impl From<Position> for [f32; 2] {
+    fn from(value: Position) -> Self {
+        let Position { x, y } = value;
+        [x, y]
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct Vector {
     pub x: f32,

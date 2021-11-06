@@ -79,7 +79,7 @@ fn main() {
 fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
     let mut r = |x, y, name, paint| {
         let mut p = Path::new();
-        p.rect(0.0, 0.0, 100.0, 100.0);
+        p.rect([0.0, 0.0], 100.0, 100.0);
         canvas.translate(x, y);
         canvas.fill_path(&mut p, paint);
         canvas.translate(-x, -y);
@@ -814,11 +814,11 @@ impl PerfGraph {
         let h = 35.0;
 
         let mut path = Path::new();
-        path.rect(x, y, w, h);
+        path.rect([x, y], w, h);
         canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 128)));
 
         let mut path = Path::new();
-        path.move_to(x, y + h);
+        path.move_to([x, y + h]);
 
         for i in 0..self.history_count {
             let mut v = 1.0 / (0.00001 + self.values[(self.head + i) % self.history_count]);
@@ -827,10 +827,10 @@ impl PerfGraph {
             }
             let vx = x + (i as f32 / (self.history_count - 1) as f32) * w;
             let vy = y + h - ((v / 80.0) * h);
-            path.line_to(vx, vy);
+            path.line_to([vx, vy]);
         }
 
-        path.line_to(x + w, y + h);
+        path.line_to([x + w, y + h]);
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));

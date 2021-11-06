@@ -227,8 +227,8 @@ fn draw_baselines<T: Renderer>(
         let y = y + i as f32 * 40.0;
 
         let mut path = Path::new();
-        path.move_to(x, y + 0.5);
-        path.line_to(x + 250., y + 0.5);
+        path.move_to([x, y + 0.5]);
+        path.line_to([x + 250., y + 0.5]);
         canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
         paint.set_text_baseline(*baseline);
@@ -237,7 +237,7 @@ fn draw_baselines<T: Renderer>(
             //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), paint);
 
             let mut path = Path::new();
-            path.rect(res.x, res.y, res.width(), res.height());
+            path.rect([res.x, res.y], res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
@@ -247,8 +247,8 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     let alignments = [Align::Left, Align::Center, Align::Right];
 
     let mut path = Path::new();
-    path.move_to(x + 0.5, y - 20.);
-    path.line_to(x + 0.5, y + 80.);
+    path.move_to([x + 0.5, y - 20.]);
+    path.line_to([x + 0.5, y + 80.]);
     canvas.stroke_path(&mut path, Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
@@ -260,7 +260,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
 
         if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), paint) {
             let mut path = Path::new();
-            path.rect(res.x, res.y, res.width(), res.height());
+            path.rect([res.x, res.y], res.width(), res.height());
             canvas.stroke_path(&mut path, Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
@@ -363,8 +363,8 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     let mut paint = Paint::color(Color::hex("#7300AB"));
     paint.set_line_width(3.0);
     let mut path = Path::new();
-    path.move_to(x, y - 2.0);
-    path.line_to(x + 180.0, y - 2.0);
+    path.move_to([x, y - 2.0]);
+    path.line_to([x + 180.0, y - 2.0]);
     canvas.stroke_path(&mut path, paint);
 
     let text = "RUST";
@@ -427,11 +427,11 @@ impl PerfGraph {
         let h = 35.0;
 
         let mut path = Path::new();
-        path.rect(x, y, w, h);
+        path.rect([x, y], w, h);
         canvas.fill_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 128)));
 
         let mut path = Path::new();
-        path.move_to(x, y + h);
+        path.move_to([x, y + h]);
 
         for i in 0..self.history_count {
             let mut v = 1.0 / (0.00001 + self.values[(self.head + i) % self.history_count]);
@@ -440,10 +440,10 @@ impl PerfGraph {
             }
             let vx = x + (i as f32 / (self.history_count - 1) as f32) * w;
             let vy = y + h - ((v / 80.0) * h);
-            path.line_to(vx, vy);
+            path.line_to([vx, vy]);
         }
 
-        path.line_to(x + w, y + h);
+        path.line_to([x + w, y + h]);
         canvas.fill_path(&mut path, Paint::color(Color::rgba(255, 192, 0, 128)));
 
         let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
