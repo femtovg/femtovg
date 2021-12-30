@@ -9,10 +9,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-11, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         rust:
           - stable
-          - beta
           - 1.49.0  # MSRV
     steps:
       - name: Checkout
