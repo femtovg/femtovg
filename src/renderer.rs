@@ -90,7 +90,7 @@ pub enum RenderTarget {
 pub trait Renderer {
     type Image;
 
-    fn set_size(&mut self, width: u32, height: u32, dpi: f32);
+    fn set_size(&mut self, width: u32, height: u32);
 
     fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>);
 

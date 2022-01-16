@@ -445,7 +445,7 @@ impl TextContextImpl {
         Ok(res)
     }
 
-    pub fn measure_font(&mut self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = paint.font_ids.get(0) {
             if let Some(font) = self.font(*id) {
                 return Ok(font.metrics(paint.font_size));
@@ -901,7 +901,7 @@ impl GlyphAtlas {
 
         // render glyph to image
         canvas.save();
-        canvas.reset();
+        canvas.hard_reset();
 
         let rendered_bearing_y = glyph.bearing_y.round();
         let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);

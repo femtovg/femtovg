@@ -251,6 +251,14 @@ struct State {
     alpha: f32,
 }
 
+impl State {
+    fn with_pixel_ratio(pixel_ratio: f32) -> Self {
+        let mut state = State::default();
+        state.transform.scale(pixel_ratio, pixel_ratio);
+        state
+    }
+}
+
 impl Default for State {
     fn default() -> Self {
         Self {
@@ -345,12 +353,9 @@ where
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
         self.width = width;
         self.height = height;
-        self.fringe_width = 1.0 / dpi;
-        self.tess_tol = 0.25 / dpi;
-        self.dist_tol = 0.01 / dpi;
         self.device_px_ratio = dpi;
 
-        self.renderer.set_size(width, height, dpi);
+        self.renderer.set_size(width, height);
 
         self.append_cmd(Command::new(CommandType::SetRenderTarget(RenderTarget::Screen)));
     }
@@ -384,6 +389,16 @@ where
         }
     }
 
+    /// Returns the width of the current render target.
+    pub fn logical_width(&self) -> f32 {
+        self.width() / self.device_px_ratio
+    }
+
+    /// Returns the height of the current render target.
+    pub fn logical_height(&self) -> f32 {
+        self.height() / self.device_px_ratio
+    }
+
     /// Tells the renderer to execute all drawing commands and clears the current internal state
     ///
     /// Call this at the end of each frame.
@@ -409,7 +424,10 @@ where
     ///
     /// A matching restore() must be used to restore the state.
     pub fn save(&mut self) {
-        let state = self.state_stack.last().map_or_else(State::default, |state| *state);
+        let state = self
+            .state_stack
+            .last()
+            .map_or_else(|| State::with_pixel_ratio(self.device_px_ratio), |state| *state);
 
         self.state_stack.push(state);
     }
@@ -427,7 +445,12 @@ where
 
     /// Resets current state to default values. Does not affect the state stack.
     pub fn reset(&mut self) {
-        *self.state_mut() = Default::default();
+        *self.state_mut() = State::with_pixel_ratio(self.device_px_ratio);
+    }
+
+    /// Resets current state to default values, ignoring the pixel ratio. Does not affect the state stack.
+    pub fn hard_reset(&mut self) {
+        *self.state_mut() = State::default();
     }
 
     /// Saves the current state before calling the callback and restores it afterwards
@@ -646,6 +669,7 @@ where
     /// Resets current transform to a identity matrix.
     pub fn reset_transform(&mut self) {
         self.state_mut().transform = Transform2D::identity();
+        self.scale(self.device_px_ratio, self.device_px_ratio);
     }
 
     /// Premultiplies current coordinate system by specified matrix.
@@ -1063,7 +1087,7 @@ where
 
     /// Returns information on how the provided text will be drawn with the specified paint.
     pub fn measure_text<S: AsRef<str>>(
-        &mut self,
+        &self,
         x: f32,
         y: f32,
         text: S,
@@ -1073,10 +1097,9 @@ where
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
-        let invscale = 1.0 / scale;
+        let invscale = scale.recip();
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .measure_text(x * scale, y * scale, text, paint)
             .map(|mut metrics| {
@@ -1086,10 +1109,8 @@ where
     }
 
     /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
-        self.transform_text_paint(&mut paint);
-
-        self.text_context.as_ref().borrow_mut().measure_font(paint)
+    pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+        self.text_context.borrow().measure_font(paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.

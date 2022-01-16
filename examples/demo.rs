@@ -50,7 +50,7 @@ fn main() {
         use glutin::ContextBuilder;
 
         let wb = WindowBuilder::new()
-            .with_inner_size(winit::dpi::PhysicalSize::new(1000, 600))
+            .with_inner_size(winit::dpi::LogicalSize::new(1000, 600))
             .with_title("femtovg demo");
 
         //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
@@ -156,6 +156,14 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+        let dpi_factor = window.scale_factor();
+        canvas.set_size(0, 0, dpi_factor as f32);
+        canvas.reset();
+    }
+
     el.run(move |event, _, control_flow| {
         #[cfg(not(target_arch = "wasm32"))]
         let window = windowed_context.window();
@@ -194,7 +202,14 @@ fn main() {
                         canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
                         canvas.translate(-pt.0, -pt.1);
                     }
-                    _ => (),
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => {
+                        let y = pos.y as f32;
+                        let pt = canvas.transform().inversed().transform_point(mousex, mousey);
+                        let rate = 2000.0;
+                        canvas.translate(pt.0, pt.1);
+                        canvas.scale(1.0 + (y / rate), 1.0 + (y / rate));
+                        canvas.translate(-pt.0, -pt.1);
+                    }
                 },
                 WindowEvent::MouseInput {
                     button: MouseButton::Left,
@@ -239,8 +254,7 @@ fn main() {
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
 
-                let height = size.height as f32;
-                let width = size.width as f32;
+                let winit::dpi::LogicalSize { width, height } = size.to_logical(dpi_factor);
 
                 let pt = canvas.transform().inversed().transform_point(mousex, mousey);
                 let rel_mousex = pt.0;

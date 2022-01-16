@@ -13,7 +13,7 @@ pub struct Void;
 impl Renderer for Void {
     type Image = VoidImage;
 
-    fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
+    fn set_size(&mut self, width: u32, height: u32) {}
 
     fn render(&mut self, images: &mut ImageStore<VoidImage>, verts: &[Vertex], commands: Vec<Command>) {}
 
