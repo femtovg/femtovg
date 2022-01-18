@@ -1,6 +1,6 @@
 use crate::{
     paint::{GlyphTexture, GradientColors},
-    Color, ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
+    ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
 use super::ShaderType;
@@ -86,7 +86,7 @@ impl Params {
                 width,
                 height,
                 angle,
-                alpha,
+                tint,
             } => {
                 let image_info = match images.info(id) {
                     Some(info) => info,
@@ -96,7 +96,7 @@ impl Params {
                 params.extent[0] = width;
                 params.extent[1] = height;
 
-                let color = Color::rgbaf(1.0, 1.0, 1.0, alpha);
+                let color = tint;
 
                 params.inner_col = color.premultiplied().to_array();
                 params.outer_col = color.premultiplied().to_array();
