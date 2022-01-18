@@ -100,7 +100,7 @@ pub(crate) enum PaintFlavor {
         width: f32,
         height: f32,
         angle: f32,
-        alpha: f32,
+        tint: Color,
     },
     LinearGradient {
         start_x: f32,
@@ -261,7 +261,23 @@ impl Paint {
             width,
             height,
             angle,
-            alpha,
+            tint: Color::rgbaf(1.0, 1.0, 1.0, alpha),
+        };
+        new
+    }
+
+    /// Like `image`, but allows for adding a tint, or a color which will transform each pixel's
+    /// color via channel-wise multiplication.
+    pub fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
+        let mut new = Self::default();
+        new.flavor = PaintFlavor::Image {
+            id,
+            cx,
+            cy,
+            width,
+            height,
+            angle,
+            tint,
         };
         new
     }
@@ -754,8 +770,8 @@ impl Paint {
             PaintFlavor::Color(color) => {
                 color.a *= a;
             }
-            PaintFlavor::Image { alpha, .. } => {
-                *alpha *= a;
+            PaintFlavor::Image { tint, .. } => {
+                tint.a *= a;
             }
             PaintFlavor::LinearGradient { colors, .. } => {
                 colors.mul_alpha(a);
