@@ -9,6 +9,10 @@ keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
 categories = ["graphics"]
 repository = "https://github.com/femtovg/femtovg"
 edition = "2018"
+exclude = [
+    "assets",
+    "examples",
+]
 
 [profile.release]
 debug = true
