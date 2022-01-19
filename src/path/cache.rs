@@ -219,7 +219,7 @@ impl PathCache {
         let all_points = &mut cache.points;
         let bounds = &mut cache.bounds;
 
-        cache.contours.retain_mut(|contour| {
+        VecRetainMut::retain_mut(&mut cache.contours, |contour| {
             let mut points = &mut all_points[contour.point_range.clone()];
 
             // If the first and last points are the same, remove the last, mark as closed contour.
