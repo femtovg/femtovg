@@ -124,7 +124,6 @@ pub(crate) struct RenderedGlyph {
     bearing_y: i32,
     atlas_x: u32,
     atlas_y: u32,
-    padding: u32,
     color_glyph: bool,
 }
 
@@ -915,7 +914,6 @@ impl GlyphAtlas {
             atlas_x: dst_x as u32 + GLYPH_MARGIN,
             atlas_y: dst_y as u32 + GLYPH_MARGIN,
             texture_index: dst_index,
-            padding: padding - GLYPH_MARGIN,
             color_glyph,
         };
 
