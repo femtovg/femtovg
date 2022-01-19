@@ -18,7 +18,7 @@ fnv = "1.0.7"
 rgb = "0.8.20"
 imgref = "1.6.1"
 bitflags = "1.2.1"
-ttf-parser = "0.13.0"
+ttf-parser = "0.14.0"
 # Note: When upgrading rustbuzz, make sure it uses the same ttf-parser version, remove the ttf_data field in font.rs
 # and remove this comment :)
 rustybuzz = "0.4.0"
