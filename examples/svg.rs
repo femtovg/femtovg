@@ -189,12 +189,7 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
                 }
 
                 let to_femto_color = |usvg_paint: &usvg::Paint| match usvg_paint {
-                    usvg::Paint::Color(usvg::Color {
-                        red,
-                        green,
-                        blue,
-                        alpha,
-                    }) => Some(Color::rgba(*red, *green, *blue, *alpha)),
+                    usvg::Paint::Color(usvg::Color { red, green, blue }) => Some(Color::rgb(*red, *green, *blue)),
                     _ => None,
                 };
 

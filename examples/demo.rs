@@ -50,7 +50,7 @@ fn main() {
         use glutin::ContextBuilder;
 
         let wb = WindowBuilder::new()
-            .with_inner_size(winit::dpi::PhysicalSize::new(1000, 600))
+            .with_inner_size(winit::dpi::PhysicalSize::<f32>::new(1000., 600.))
             .with_title("femtovg demo");
 
         //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
