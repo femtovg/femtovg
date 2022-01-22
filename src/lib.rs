@@ -875,6 +875,7 @@ where
         // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
+        cmd.drawables.reserve_exact(path_cache.contours.len());
         for contour in &path_cache.contours {
             let mut drawable = Drawable::default();
 
@@ -1029,6 +1030,7 @@ where
         // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
+        cmd.drawables.reserve_exact(path_cache.contours.len());
         for contour in &path_cache.contours {
             let mut drawable = Drawable::default();
 
