@@ -50,18 +50,6 @@ pub struct OpenGl {
 
 impl OpenGl {
     #[cfg(not(target_arch = "wasm32"))]
-    #[deprecated(
-        since = "0.3",
-        note = "This function unsafe. Use OpenGl::new_from_function or OpenGl::new_from_glutin_context"
-    )]
-    pub fn new<F>(load_fn: F) -> Result<Self, ErrorKind>
-    where
-        F: FnMut(&str) -> *const c_void,
-    {
-        unsafe { Self::new_from_function(load_fn) }
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     pub unsafe fn new_from_function<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,

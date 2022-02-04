@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
  - **Breaking:** The dependency to the `image` crate was bumped from `0.23` to `0.24`.
    Since the types of this crate are used in public femtovg API, users need to upgrade
    their dependency to the `image` crate as well.
+ - **Breaking**: Removed deprecated `renderer::OpenGL::new` function. Use `renderer::OpenGl::new_from_function`
+   or `renderer::OpenGl::new_from_glutin_context`.
 
 ### Added
 
