@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.1] - 2022-02-08
+
 ### Fixed
 
  - Don't require default features of glutin. We don't need any and this way other users of glutin
@@ -27,3 +29,4 @@ All notable changes to this project will be documented in this file.
  - Improved performance of `fill_path` and `stroke_path`
 
 [0.3.0]: https://github.com/femtovg/femtovg/releases/tag/v0.3.0
+[0.3.1]: https://github.com/femtovg/femtovg/releases/tag/v0.3.1
