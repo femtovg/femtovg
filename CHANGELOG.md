@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
  - Don't require default features of glutin. We don't need any and this way other users of glutin
    have the ability to opt out.
 
+## [0.3.0] - 2022-02-04
+
 ### Changed
 
  - **Breaking:** The dependency to the `image` crate was bumped from `0.23` to `0.24`.
