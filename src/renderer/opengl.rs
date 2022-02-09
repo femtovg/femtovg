@@ -74,12 +74,14 @@ impl OpenGl {
         attrs.antialias(false);
 
         use wasm_bindgen::JsCast;
-        let webgl1_context = canvas
-            .get_context_with_context_options("webgl", attrs.as_ref())
-            .map_err(|_| ErrorKind::GeneralError("Canvas::getContext failed to retrieve WebGL 1 context".to_owned()))?
-            .unwrap()
-            .dyn_into::<web_sys::WebGlRenderingContext>()
-            .unwrap();
+        let webgl1_context = match canvas.get_context_with_context_options("webgl", attrs.as_ref()) {
+            Ok(Some(context)) => context.dyn_into::<web_sys::WebGlRenderingContext>().unwrap(),
+            _ => {
+                return Err(ErrorKind::GeneralError(
+                    "Canvas::getContext failed to retrieve WebGL 1 context".to_owned(),
+                ))
+            }
+        };
 
         let context = glow::Context::from_webgl1_context(webgl1_context);
         Self::new_from_context(context, true)

@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+ - Correctly detect when WebGL is disabled in a web browser in the `renderer::OpenGL::new_from_html_canvas` function.
+
 ## [0.3.1] - 2022-02-08
 
 ### Fixed
