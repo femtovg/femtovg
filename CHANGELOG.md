@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.2] - 2022-02-09
+
 ### Fixed
 
  - Correctly detect when WebGL is disabled in a web browser in the `renderer::OpenGL::new_from_html_canvas` function.
@@ -34,3 +36,4 @@ All notable changes to this project will be documented in this file.
 
 [0.3.0]: https://github.com/femtovg/femtovg/releases/tag/v0.3.0
 [0.3.1]: https://github.com/femtovg/femtovg/releases/tag/v0.3.1
+[0.3.2]: https://github.com/femtovg/femtovg/releases/tag/v0.3.2
