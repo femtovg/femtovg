@@ -184,7 +184,16 @@ impl<T> ImageStore<T> {
 
     pub fn alloc<R: Renderer<Image = T>>(&mut self, renderer: &mut R, info: ImageInfo) -> Result<ImageId, ErrorKind> {
         let image = renderer.alloc_image(info)?;
+        Ok(ImageId(self.0.insert((info, image))))
+    }
 
+    pub fn register_native_texture<R: Renderer<Image = T>>(
+        &mut self,
+        renderer: &mut R,
+        texture: R::NativeTexture,
+        info: ImageInfo,
+    ) -> Result<ImageId, ErrorKind> {
+        let image = renderer.create_image_from_native_texture(texture, info)?;
         Ok(ImageId(self.0.insert((info, image))))
     }
 

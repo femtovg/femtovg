@@ -503,6 +503,21 @@ where
         self.images.alloc(&mut self.renderer, info)
     }
 
+    /// Allocates an image that wraps the given backend-specific texture.
+    /// Use this function to import external textures into the rendering of a scene
+    /// with femtovg.
+    ///
+    /// It is necessary to call `[Self::delete_image`] to free femtovg specific
+    /// book-keeping data structures, the underlying backend-specific texture memory
+    /// will not be freed. It is the caller's responsible to delete it.
+    pub fn create_image_from_native_texture(
+        &mut self,
+        texture: T::NativeTexture,
+        info: ImageInfo,
+    ) -> Result<ImageId, ErrorKind> {
+        self.images.register_native_texture(&mut self.renderer, texture, info)
+    }
+
     /// Creates image from specified image data.
     pub fn create_image<'a, S: Into<ImageSource<'a>>>(
         &mut self,

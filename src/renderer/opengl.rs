@@ -553,6 +553,7 @@ impl OpenGl {
 
 impl Renderer for OpenGl {
     type Image = GlTexture;
+    type NativeTexture = <glow::Context as glow::HasContext>::Texture;
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -665,6 +666,18 @@ impl Renderer for OpenGl {
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Self::Image::new(&self.context, info, self.is_opengles_2_0)
+    }
+
+    fn create_image_from_native_texture(
+        &mut self,
+        native_texture: Self::NativeTexture,
+        info: ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Ok(Self::Image::new_from_native_texture(
+            &self.context,
+            native_texture,
+            info,
+        ))
     }
 
     fn update_image(

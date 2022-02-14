@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+ - Added support for importing backend-specific textures into the rendering of a scene with `Canvas::create_image_from_native_texture`.
+
 ## [0.3.3] - 2022-02-21
 
 ### Changed

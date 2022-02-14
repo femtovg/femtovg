@@ -8,9 +8,22 @@ pub struct GlTexture {
     context: Rc<glow::Context>,
     id: <glow::Context as glow::HasContext>::Texture,
     info: ImageInfo,
+    owned: bool,
 }
 
 impl GlTexture {
+    pub fn new_from_native_texture(
+        context: &Rc<glow::Context>,
+        texture: <glow::Context as glow::HasContext>::Texture,
+        info: ImageInfo,
+    ) -> Self {
+        Self {
+            context: context.clone(),
+            id: texture,
+            info,
+            owned: false,
+        }
+    }
     pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles_2_0: bool) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
@@ -30,6 +43,7 @@ impl GlTexture {
             context: context.clone(),
             id,
             info,
+            owned: true,
         };
 
         match info.format() {
@@ -268,8 +282,10 @@ impl GlTexture {
     }
 
     pub fn delete(self) {
-        unsafe {
-            self.context.delete_texture(self.id);
+        if self.owned {
+            unsafe {
+                self.context.delete_texture(self.id);
+            }
         }
     }
 
