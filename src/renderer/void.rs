@@ -12,6 +12,7 @@ pub struct Void;
 
 impl Renderer for Void {
     type Image = VoidImage;
+    type NativeTexture = ();
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 
@@ -19,6 +20,14 @@ impl Renderer for Void {
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Ok(VoidImage { info })
+    }
+
+    fn create_image_from_native_texture(
+        &mut self,
+        _native_texture: Self::NativeTexture,
+        _info: ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Err(ErrorKind::UnsuportedImageFromat)
     }
 
     fn update_image(
