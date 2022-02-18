@@ -70,7 +70,8 @@ fn main() {
     let context = create_window(&event_loop);
 }
 
-fn create_window(event_loop: &EventLoop<()>) -> ContextWrapper<PossiblyCurrent, Window> {
+fn create_window(event_loop: &EventLoop<()>) 
+    -> ContextWrapper<PossiblyCurrent, Window> {
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize::new(1000., 600.))
         .with_title("Femtovg");
@@ -95,7 +96,8 @@ It compiles, runs, and immediately exits successfully.
 We have an OpenGL context now – the Femtovg renderer can use it as output for rendering things. Let's create a renderer from the context we have:
 
 ```rust
-let renderer = OpenGl::new_from_glutin_context(&context).expect("Cannot create renderer");
+let renderer = OpenGl::new_from_glutin_context(&context)
+    .expect("Cannot create renderer");
 ```
 
 The renderer is responsible for drawing things, but we can't draw on it directly – instead, we need to create a Canvas object:
