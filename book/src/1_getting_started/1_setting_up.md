@@ -1,6 +1,8 @@
-# Creating an OpenGL Context
+# Setting Up
 
-Femtovg uses OpenGL to talk to the GPU. We'll need to give Femtovg an [OpenGL context](https://www.khronos.org/opengl/wiki/OpenGL_Context) – an object that stores a bunch of stuff needed to draw things.
+Femtovg uses OpenGL to talk to the GPU. We'll need to give Femtovg an [OpenGL context](https://www.khronos.org/opengl/wiki/OpenGL_Context) – an object that stores a bunch of stuff needed to draw things. Then, we can create a Canvas to draw things on!
+
+## Creating an OpenGL Context
 
 > If you're new to graphics, maybe this part will feel a bit overwhelming. Don't worry, we'll wrap all the weird code in a function and never worry about it again.
 
@@ -88,3 +90,18 @@ fn create_window(event_loop: &EventLoop<()>) -> ContextWrapper<PossiblyCurrent, 
 ```
 
 It compiles, runs, and immediately exits successfully.
+
+## Creating a Canvas
+We have an OpenGL context now – the Femtovg renderer can use it as output for rendering things. Let's create a renderer from the context we have:
+
+```rust
+let renderer = OpenGl::new_from_glutin_context(&context).expect("Cannot create renderer");
+```
+
+The renderer is responsible for drawing things, but we can't draw on it directly – instead, we need to create a Canvas object:
+
+```rust
+let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
+```
+
+Finally, we have what we need to proceed to the next section – `canvas` has methods like `fill_path` and `fill_text` that actually draw stuff.
