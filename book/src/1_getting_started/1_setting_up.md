@@ -1,4 +1,4 @@
-**# Setting Up
+# Setting Up
 
 Femtovg uses OpenGL to talk to the GPU. We'll need to give Femtovg an [OpenGL context](https://www.khronos.org/opengl/wiki/OpenGL_Context) – an object that stores a bunch of stuff needed to draw things. Then, we can create a Canvas to draw things on!
 
@@ -79,4 +79,4 @@ The renderer is responsible for drawing things, but we can't draw on it directly
 let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 ```
 
-Finally, we have what we need to proceed to the next section – `canvas` has methods like `fill_path` and `fill_text` that actually draw stuff.**
+Finally, we have what we need to proceed to the next section – `canvas` has methods like `fill_path` and `fill_text` that actually draw stuff.

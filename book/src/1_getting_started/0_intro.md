@@ -1,6 +1,6 @@
 # Getting Started
 
-Let's start with a simple program – we'll create a window and paint some text on it!
+Let's start with a simple program – we'll create a window and paint a simple shape on it!
 
 If you don't have one already, make a new crate named `hello_femtovg`:
 
