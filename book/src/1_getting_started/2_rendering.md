@@ -2,7 +2,7 @@
 
 Now that we have a `canvas`, we can start drawing things! To keep things organized, let's create a `render` function that will do all the rendering:
 
-```rust
+```rust,ignore
 fn main() {
     // [...]
     let mut canvas = ..;
@@ -18,7 +18,7 @@ fn render<T: Renderer>(
 
 In `render`, first let's make sure that the canvas has the right size – it should match the dimensions and DPI of the window:
 
-```rust
+```rust,ignore
 let window = context.window();
 let size = window.inner_size();
 canvas.set_size(size.width, size.height, window.scale_factor() as f32);
@@ -26,7 +26,7 @@ canvas.set_size(size.width, size.height, window.scale_factor() as f32);
 
 Next, let's do some actual drawing. As an example, we'll fill a smol red rectangle:
 
-```rust
+```rust,ignore
 canvas.clear_rect(30, 30, 30, 30, Color::rgbf(1., 0., 0.));
 ```
 
@@ -36,7 +36,7 @@ canvas.clear_rect(30, 30, 30, 30, Color::rgbf(1., 0., 0.));
 
 Even if you consider your minimalist abstract masterpiece complete, there's actually some more code we need to write. We have to call [`canvas.flush()`](https://docs.rs/femtovg/latest/femtovg/struct.Canvas.html#method.flush) to tell the renderer to execute all drawing commands. Then, we must call [`swap_buffers`](https://docs.rs/glutin/latest/glutin/struct.ContextWrapper.html#method.swap_buffers) to display what we've rendered: 
 
-```rust
+```rust,ignore
 context.swap_buffers().expect("Could not swap buffers");
 ```
 
