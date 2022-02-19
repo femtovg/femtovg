@@ -73,3 +73,7 @@ getrandom = { version = "0.2.2", features = ["js"] }
 [[example]]
 name = "book_example_1_1"
 path = "book/src/1_getting_started/1_setting_up.rs"
+
+[[example]]
+name = "book_example_1_2"
+path = "book/src/1_getting_started/2_rendering.rs"
