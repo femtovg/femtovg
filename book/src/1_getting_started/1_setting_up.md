@@ -59,7 +59,7 @@ let current_context = unsafe {
 
 We'll need the `event_loop` and `current_context` for the next step, but as promised, we can hide everything else in a function. Here's the code we have so far:
 
-```rust
+```rust,ignore
 {{#include 1_setting_up.rs}}
 ```
 

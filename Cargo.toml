@@ -77,3 +77,7 @@ path = "book/src/1_getting_started/1_setting_up.rs"
 [[example]]
 name = "book_example_1_2"
 path = "book/src/1_getting_started/2_rendering.rs"
+
+[[example]]
+name = "book_example_1_3"
+path = "book/src/1_getting_started/3_event_loop.rs"

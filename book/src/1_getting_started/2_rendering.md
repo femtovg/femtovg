@@ -44,8 +44,8 @@ The `render` function is finished, but if you run your program, you won't get to
 
 Our program now looks like this:
 
-```rust
-
+```rust,ignore
+{{#include 2_rendering.rs}}
 ```
 
 And when we run it, we see the red square we rendered:
