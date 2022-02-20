@@ -121,7 +121,7 @@ impl Font {
 
         Ok(Self::new(
             Box::new(data),
-            |data| rustybuzz::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),            
+            |data| rustybuzz::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),
             units_per_em,
             metrics,
             Default::default(),
