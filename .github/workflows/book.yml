@@ -26,6 +26,6 @@ jobs:
         if: ${{ github.ref == 'refs/heads/master' }}
         with:
             deploy_key: ${{ secrets.ACTIONS_DEPLOY_KEY }}
-            external_repository: rMazeiks/femtovg.github.io
+            external_repository: femtovg/femtovg.github.io
             publish_branch: main
             publish_dir: ./
