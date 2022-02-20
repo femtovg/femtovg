@@ -39,11 +39,7 @@ fn create_window(event_loop: &EventLoop<()>) -> ContextWrapper<PossiblyCurrent, 
         .with_vsync(false)
         .build_windowed(window_builder, &event_loop)
         .unwrap();
-    let current_context = unsafe {
-        context
-            .make_current()
-            .expect("Could not make the context current")
-    };
+    let current_context = unsafe { context.make_current().expect("Could not make the context current") };
 
     current_context
 }

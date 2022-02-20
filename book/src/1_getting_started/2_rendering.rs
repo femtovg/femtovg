@@ -9,8 +9,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let context = create_window(&event_loop);
 
-    let renderer = OpenGl::new_from_glutin_context(&context)
-        .expect("Cannot create renderer");
+    let renderer = OpenGl::new_from_glutin_context(&context).expect("Cannot create renderer");
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
     render(&context, &mut canvas);
@@ -18,8 +17,7 @@ fn main() {
     loop {}
 }
 
-fn create_window(event_loop: &EventLoop<()>)
-                 -> ContextWrapper<PossiblyCurrent, Window> {
+fn create_window(event_loop: &EventLoop<()>) -> ContextWrapper<PossiblyCurrent, Window> {
     let window_builder = WindowBuilder::new()
         .with_inner_size(PhysicalSize::new(1000., 600.))
         .with_title("Femtovg");
@@ -27,19 +25,12 @@ fn create_window(event_loop: &EventLoop<()>)
         .with_vsync(false)
         .build_windowed(window_builder, &event_loop)
         .unwrap();
-    let current_context = unsafe {
-        context
-            .make_current()
-            .expect("Could not make the context current")
-    };
+    let current_context = unsafe { context.make_current().expect("Could not make the context current") };
 
     current_context
 }
 
-fn render<T: Renderer>(
-    context: &ContextWrapper<PossiblyCurrent, Window>,
-    canvas: &mut Canvas<T>
-) {
+fn render<T: Renderer>(context: &ContextWrapper<PossiblyCurrent, Window>, canvas: &mut Canvas<T>) {
     // Make sure the canvas has the right size:
     let window = context.window();
     let size = window.inner_size();
