@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+ - Bumped rustybuzz and ttf-parser dependencies.
+
 ## [0.3.2] - 2022-02-09
 
 ### Fixed

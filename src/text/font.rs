@@ -94,11 +94,6 @@ pub(crate) struct Font {
     #[borrows(data)]
     #[covariant]
     face_data: rustybuzz::Face<'this>,
-    // FIXME: Remove the ttf_data field again when upgrading to new rustybuzz
-    // that uses the same ttf_parser/Face as we do.
-    #[borrows(data)]
-    #[covariant]
-    ttf_data: ttf_parser::Face<'this>,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: FnvHashMap<u16, Glyph>,
@@ -126,8 +121,7 @@ impl Font {
 
         Ok(Self::new(
             Box::new(data),
-            |data| rustybuzz::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),
-            |data| ttf_parser::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),
+            |data| rustybuzz::Face::from_slice(data.as_ref().as_ref(), face_index).unwrap(),            
             units_per_em,
             metrics,
             Default::default(),
@@ -158,7 +152,7 @@ impl Font {
                 let id = GlyphId(codepoint);
 
                 let maybe_glyph = if let Some(image) = fields
-                    .ttf_data
+                    .face_data
                     .glyph_raster_image(id, std::u16::MAX)
                     .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
                 {
@@ -176,7 +170,7 @@ impl Font {
                             bearing_y: (image.y as f32 + image.height as f32) * scale,
                         },
                     })
-                } else if let Some(bbox) = fields.ttf_data.outline_glyph(id, &mut path) {
+                } else if let Some(bbox) = fields.face_data.outline_glyph(id, &mut path) {
                     Some(Glyph {
                         path: Some(path),
                         metrics: GlyphMetrics {
@@ -202,7 +196,7 @@ impl Font {
     pub fn glyph_rendering_representation(&mut self, codepoint: u16, _pixels_per_em: u16) -> Option<GlyphRendering> {
         #[cfg(feature = "image-loading")]
         if let Some(image) = self
-            .borrow_ttf_data()
+            .borrow_face_data()
             .glyph_raster_image(GlyphId(codepoint), _pixels_per_em)
             .and_then(|raster_glyph_image| {
                 image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
