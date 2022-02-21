@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.3] - 2022-02-21
+
 ### Changed
 
  - Bumped rustybuzz and ttf-parser dependencies.
@@ -41,3 +43,4 @@ All notable changes to this project will be documented in this file.
 [0.3.0]: https://github.com/femtovg/femtovg/releases/tag/v0.3.0
 [0.3.1]: https://github.com/femtovg/femtovg/releases/tag/v0.3.1
 [0.3.2]: https://github.com/femtovg/femtovg/releases/tag/v0.3.2
+[0.3.3]: https://github.com/femtovg/femtovg/releases/tag/v0.3.3
