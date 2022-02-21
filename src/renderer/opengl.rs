@@ -673,11 +673,7 @@ impl Renderer for OpenGl {
         native_texture: Self::NativeTexture,
         info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
-        Ok(Self::Image::new_from_native_texture(
-            &self.context,
-            native_texture,
-            info,
-        ))
+        Ok(Self::Image::new_from_native_texture(native_texture, info))
     }
 
     fn update_image(
@@ -687,12 +683,12 @@ impl Renderer for OpenGl {
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        image.update(data, x, y, self.is_opengles_2_0)
+        image.update(&self.context, data, x, y, self.is_opengles_2_0)
     }
 
     fn delete_image(&mut self, image: Self::Image, image_id: ImageId) {
         self.framebuffers.remove(&image_id);
-        image.delete();
+        image.delete(&self.context);
     }
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {

@@ -5,20 +5,14 @@ use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
 use glow::HasContext;
 
 pub struct GlTexture {
-    context: Rc<glow::Context>,
     id: <glow::Context as glow::HasContext>::Texture,
     info: ImageInfo,
     owned: bool,
 }
 
 impl GlTexture {
-    pub fn new_from_native_texture(
-        context: &Rc<glow::Context>,
-        texture: <glow::Context as glow::HasContext>::Texture,
-        info: ImageInfo,
-    ) -> Self {
+    pub fn new_from_native_texture(texture: <glow::Context as glow::HasContext>::Texture, info: ImageInfo) -> Self {
         Self {
-            context: context.clone(),
             id: texture,
             info,
             owned: false,
@@ -39,12 +33,7 @@ impl GlTexture {
             id
         };
 
-        let texture = Self {
-            context: context.clone(),
-            id,
-            info,
-            owned: true,
-        };
+        let texture = Self { id, info, owned: true };
 
         match info.format() {
             PixelFormat::Gray8 => unsafe {
@@ -182,7 +171,14 @@ impl GlTexture {
         self.id
     }
 
-    pub fn update(&mut self, src: ImageSource, x: usize, y: usize, opengles_2_0: bool) -> Result<(), ErrorKind> {
+    pub fn update(
+        &mut self,
+        context: &Rc<glow::Context>,
+        src: ImageSource,
+        x: usize,
+        y: usize,
+        opengles_2_0: bool,
+    ) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
         if x + size.0 > self.info.width() {
@@ -198,10 +194,10 @@ impl GlTexture {
         }
 
         unsafe {
-            self.context.bind_texture(glow::TEXTURE_2D, Some(self.id));
-            self.context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            context.bind_texture(glow::TEXTURE_2D, Some(self.id));
+            context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             if !opengles_2_0 {
-                self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.0 as i32);
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.0 as i32);
             }
         }
 
@@ -209,7 +205,7 @@ impl GlTexture {
             ImageSource::Gray(data) => unsafe {
                 let format = if opengles_2_0 { glow::LUMINANCE } else { glow::R8 };
 
-                self.context.tex_sub_image_2d(
+                context.tex_sub_image_2d(
                     glow::TEXTURE_2D,
                     0,
                     x as i32,
@@ -222,7 +218,7 @@ impl GlTexture {
                 );
             },
             ImageSource::Rgb(data) => unsafe {
-                self.context.tex_sub_image_2d(
+                context.tex_sub_image_2d(
                     glow::TEXTURE_2D,
                     0,
                     x as i32,
@@ -235,7 +231,7 @@ impl GlTexture {
                 );
             },
             ImageSource::Rgba(data) => unsafe {
-                self.context.tex_sub_image_2d(
+                context.tex_sub_image_2d(
                     glow::TEXTURE_2D,
                     0,
                     x as i32,
@@ -249,7 +245,7 @@ impl GlTexture {
             },
             #[cfg(target_arch = "wasm32")]
             ImageSource::HtmlImageElement(image_element) => unsafe {
-                self.context.tex_sub_image_2d_with_html_image(
+                context.tex_sub_image_2d_with_html_image(
                     glow::TEXTURE_2D,
                     0,
                     x as i32,
@@ -263,28 +259,28 @@ impl GlTexture {
 
         if self.info.flags().contains(ImageFlags::GENERATE_MIPMAPS) {
             unsafe {
-                self.context.generate_mipmap(glow::TEXTURE_2D);
+                context.generate_mipmap(glow::TEXTURE_2D);
                 //glow::TexParameteri(glow::TEXTURE_2D, glow::GENERATE_MIPMAP, glow::TRUE);
             }
         }
 
         unsafe {
-            self.context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
+            context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
             if !opengles_2_0 {
-                self.context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
             }
             //glow::PixelStorei(glow::UNPACK_SKIP_PIXELS, 0);
             //glow::PixelStorei(glow::UNPACK_SKIP_ROWS, 0);
-            self.context.bind_texture(glow::TEXTURE_2D, None);
+            context.bind_texture(glow::TEXTURE_2D, None);
         }
 
         Ok(())
     }
 
-    pub fn delete(self) {
+    pub fn delete(self, context: &Rc<glow::Context>) {
         if self.owned {
             unsafe {
-                self.context.delete_texture(self.id);
+                context.delete_texture(self.id);
             }
         }
     }
