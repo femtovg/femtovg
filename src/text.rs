@@ -270,14 +270,14 @@ impl TextContext {
 
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
     /// strings.
-    pub fn resize_shaping_run_cache(&mut self, capacity: usize) {
+    pub fn resize_shaping_run_cache(&self, capacity: usize) {
         self.0.as_ref().borrow_mut().resize_shaping_run_cache(capacity)
     }
 
     /// Adjusts the capacity of the shaped words cache. This is a cache for measurements of
     /// individual words. Words are separated by
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries).
-    pub fn resize_shaped_words_cache(&mut self, capacity: usize) {
+    pub fn resize_shaped_words_cache(&self, capacity: usize) {
         self.0.as_ref().borrow_mut().resize_shaped_words_cache(capacity)
     }
 }
