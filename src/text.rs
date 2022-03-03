@@ -36,7 +36,7 @@ const GLYPH_PADDING: u32 = 1;
 const GLYPH_MARGIN: u32 = 1;
 
 const TEXTURE_SIZE: usize = 512;
-const LRU_CACHE_CAPACITY: usize = 1000;
+const DEFAULT_LRU_CACHE_CAPACITY: usize = 1000;
 
 /// A font handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -267,6 +267,14 @@ impl TextContext {
     pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.0.as_ref().borrow_mut().measure_font(paint)
     }
+
+    pub fn resize_shaping_run_cache(&mut self, capacity: usize) {
+        self.0.as_ref().borrow_mut().resize_shaping_run_cache(capacity)
+    }
+
+    pub fn resize_shaped_words_cache(&mut self, capacity: usize) {
+        self.0.as_ref().borrow_mut().resize_shaped_words_cache(capacity)
+    }
 }
 
 pub(crate) struct TextContextImpl {
@@ -282,13 +290,21 @@ impl Default for TextContextImpl {
 
         Self {
             fonts: Default::default(),
-            shaping_run_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_run),
-            shaped_words_cache: LruCache::with_hasher(LRU_CACHE_CAPACITY, fnv_words),
+            shaping_run_cache: LruCache::with_hasher(DEFAULT_LRU_CACHE_CAPACITY, fnv_run),
+            shaped_words_cache: LruCache::with_hasher(DEFAULT_LRU_CACHE_CAPACITY, fnv_words),
         }
     }
 }
 
 impl TextContextImpl {
+    pub fn resize_shaping_run_cache(&mut self, capacity: usize) {
+        self.shaping_run_cache.resize(capacity);
+    }
+
+    pub fn resize_shaped_words_cache(&mut self, capacity: usize) {
+        self.shaped_words_cache.resize(capacity);
+    }
+
     pub fn add_font_dir<T: AsRef<FilePath>>(&mut self, path: T) -> Result<Vec<FontId>, ErrorKind> {
         let path = path.as_ref();
         let mut fonts = Vec::new();
