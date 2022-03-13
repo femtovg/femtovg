@@ -560,6 +560,9 @@ fn shape_run(
 
     let bidi_info = BidiInfo::new(&text, Some(unicode_bidi::Level::ltr()));
 
+    // this controls whether we should break within words
+    let mut first_word_in_paragraph = true;
+
     if let Some(paragraph) = bidi_info.paragraphs.get(0) {
         let line = paragraph.range.clone();
 
@@ -582,11 +585,11 @@ fn shape_run(
             let mut word_break_reached = false;
             let mut byte_index = run.start;
 
-            for word in sub_text.split_word_bounds() {
-                let id = ShapingId::new(paint, word, max_width);
+            for word_txt in sub_text.split_word_bounds() {
+                let id = ShapingId::new(paint, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
-                    let word = shape_word(word, hb_direction, context, paint);
+                    let word = shape_word(word_txt, hb_direction, context, paint);
                     context.shaped_words_cache.put(id, word);
                 }
 
@@ -596,7 +599,53 @@ fn shape_run(
                     if let Some(max_width) = max_width {
                         if result.width + word.width >= max_width {
                             word_break_reached = true;
-                            break;
+                            if first_word_in_paragraph {
+                                // search for the largest prefix of the word that can fit
+                                let mut bytes_included = 0;
+                                let mut subword_width = 0.0;
+                                let target_width = max_width - result.width;
+                                for glyph in word.glyphs.iter() {
+                                    bytes_included = glyph.byte_index;
+                                    let glyph_width = glyph.advance_x + paint.letter_spacing;
+
+                                    // nuance: we want to include the first glyph even if it breaks
+                                    // the bounds. this is to allow pathologically small bounds to
+                                    // at least complete rendering
+                                    if subword_width + glyph_width > target_width &&
+                                        bytes_included != 0
+                                    {
+                                        break;
+                                    } else {
+                                        subword_width += glyph_width;
+                                    }
+                                }
+
+                                if bytes_included == 0 {
+                                    // just in case - never mind!
+                                    break;
+                                }
+
+                                let subword_txt = &word_txt[..bytes_included];
+                                let id = ShapingId::new(paint, subword_txt, Some(max_width));
+                                if !context.shaped_words_cache.contains(&id) {
+                                    let subword = shape_word(
+                                        subword_txt,
+                                        hb_direction,
+                                        context,
+                                        paint
+                                    );
+                                    context.shaped_words_cache.put(id, subword);
+                                }
+
+                                if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
+                                    // replace the outer variable so we can continue normally
+                                    word = subword.clone();
+                                    byte_index += subword_txt.len();
+                                }
+                            } else {
+                                // we are not breaking up words - discard this word
+                                break;
+                            }
                         }
                     }
 
@@ -608,9 +657,13 @@ fn shape_run(
                     }
 
                     words.push(word);
+                    first_word_in_paragraph = false;
+                    if word_break_reached {
+                        break;
+                    }
                 }
 
-                byte_index += word.len();
+                byte_index += word_txt.len();
             }
 
             if levels[run.start].is_rtl() {
