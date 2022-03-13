@@ -611,9 +611,7 @@ fn shape_run(
                                     // nuance: we want to include the first glyph even if it breaks
                                     // the bounds. this is to allow pathologically small bounds to
                                     // at least complete rendering
-                                    if subword_width + glyph_width > target_width &&
-                                        bytes_included != 0
-                                    {
+                                    if subword_width + glyph_width > target_width && bytes_included != 0 {
                                         break;
                                     } else {
                                         subword_width += glyph_width;
@@ -628,12 +626,7 @@ fn shape_run(
                                 let subword_txt = &word_txt[..bytes_included];
                                 let id = ShapingId::new(paint, subword_txt, Some(max_width));
                                 if !context.shaped_words_cache.contains(&id) {
-                                    let subword = shape_word(
-                                        subword_txt,
-                                        hb_direction,
-                                        context,
-                                        paint
-                                    );
+                                    let subword = shape_word(subword_txt, hb_direction, context, paint);
                                     context.shaped_words_cache.put(id, subword);
                                 }
 
