@@ -585,7 +585,7 @@ fn shape_run(
             let mut word_break_reached = false;
             let mut byte_index = run.start;
 
-            for word_txt in sub_text.split_word_bounds() {
+            for mut word_txt in sub_text.split_word_bounds() {
                 let id = ShapingId::new(paint, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
@@ -631,9 +631,11 @@ fn shape_run(
                                 }
 
                                 if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
-                                    // replace the outer variable so we can continue normally
+                                    // replace the outer variables so we can continue normally
                                     word = subword.clone();
-                                    byte_index += subword_txt.len();
+                                    word_txt = subword_txt;
+                                } else {
+                                    break;
                                 }
                             } else {
                                 // we are not breaking up words - discard this word
@@ -651,12 +653,13 @@ fn shape_run(
 
                     words.push(word);
                     first_word_in_paragraph = false;
-                    if word_break_reached {
-                        break;
-                    }
                 }
 
                 byte_index += word_txt.len();
+
+                if word_break_reached {
+                    break;
+                }
             }
 
             if levels[run.start].is_rtl() {
