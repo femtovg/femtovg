@@ -611,7 +611,7 @@ fn shape_run(
                                     // nuance: we want to include the first glyph even if it breaks
                                     // the bounds. this is to allow pathologically small bounds to
                                     // at least complete rendering
-                                    if subword_width + glyph_width > target_width && bytes_included != 0 {
+                                    if subword_width + glyph_width >= target_width && bytes_included != 0 {
                                         break;
                                     } else {
                                         subword_width += glyph_width;
