@@ -637,6 +637,9 @@ fn shape_run(
                                 } else {
                                     break;
                                 }
+                            } else if word.glyphs.iter().all(|g| g.c.is_whitespace()) {
+                                // the last word we've broken in the middle of is whitespace.
+                                // include this word for now, but we will discard its metrics in a moment.
                             } else {
                                 // we are not breaking up words - discard this word
                                 break;
@@ -644,13 +647,15 @@ fn shape_run(
                         }
                     }
 
-                    result.width += word.width;
+                    // if we have broken in the middle of whitespace, do not include this word in metrics
+                    if !word_break_reached || !word.glyphs.iter().all(|g| g.c.is_whitespace()) {
+                        result.width += word.width;
+                    }
 
                     for glyph in &mut word.glyphs {
                         glyph.byte_index += byte_index;
                         debug_assert!(text.get(glyph.byte_index..).is_some());
                     }
-
                     words.push(word);
                     first_word_in_paragraph = false;
                 }
