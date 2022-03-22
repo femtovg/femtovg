@@ -224,6 +224,6 @@ fn break_text_without_canvas() {
             .iter()
             .map(|range| &text[range.start..range.end])
             .collect::<Vec<_>>(),
-        vec!["Multiple", " Lines ", "Broken"]
+        vec!["Multiple ", "Lines ", "Broken"]
     );
 }
