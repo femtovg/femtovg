@@ -101,6 +101,9 @@ void main(void) {
         color *= innerCol;
 
         result = color;
+    } else if (shaderType == 5) {
+        // Plain color fill
+        result = innerCol;
     } else if (shaderType == 2) {
         // Stencil fill
         result = vec4(1,1,1,1);

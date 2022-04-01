@@ -76,7 +76,7 @@ impl Params {
                 let color = color.premultiplied().to_array();
                 params.inner_col = color;
                 params.outer_col = color;
-                params.shader_type = ShaderType::FillGradient.to_f32();
+                params.shader_type = ShaderType::FillColor.to_f32();
                 inv_transform = paint.transform.inversed();
             }
             PaintFlavor::Image {
