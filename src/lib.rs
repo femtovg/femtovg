@@ -1115,7 +1115,7 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, x: f32, y: f32, width: f32, height: f32, image: ImageId, tint: Color) {
+    fn render_unclipped_image_blit(&mut self, post_transform_x: f32, post_transform_y: f32, width: f32, height: f32, image: ImageId, tint: Color) {
         let image_info = match self.images.info(image) {
             Some(info) => info,
             None => return,
@@ -1136,17 +1136,15 @@ where
         cmd.composite_operation = self.state().composite_operation;
         cmd.glyph_texture = paint.glyph_texture();
 
-        let transform = self.state().transform;
+        let x0 = post_transform_x;
+        let y0 = post_transform_y;
+        let x1 = post_transform_x + width;
+        let y1 = post_transform_y + height;
 
-        let x0 = x;
-        let y0 = y;
-        let x1 = x + width;
-        let y1 = y + height;
-
-        let (p0, p1) = transform.transform_point(x0, y0);
-        let (p2, p3) = transform.transform_point(x1, y0);
-        let (p4, p5) = transform.transform_point(x1, y1);
-        let (p6, p7) = transform.transform_point(x0, y1);
+        let (p0, p1) = (x0, y0);
+        let (p2, p3) = (x1, y0);
+        let (p4, p5) = (x1, y1);
+        let (p6, p7) = (x0, y1);
 
         let s0 = 0.;
         let mut t0 = 0.;
