@@ -1115,7 +1115,15 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, post_transform_x: f32, post_transform_y: f32, width: f32, height: f32, image: ImageId, tint: Color) {
+    fn render_unclipped_image_blit(
+        &mut self,
+        post_transform_x: f32,
+        post_transform_y: f32,
+        width: f32,
+        height: f32,
+        image: ImageId,
+        tint: Color,
+    ) {
         let image_info = match self.images.info(image) {
             Some(info) => info,
             None => return,
