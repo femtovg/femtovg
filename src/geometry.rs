@@ -234,7 +234,7 @@ impl Rect {
     }
 
     pub fn contains_rect(&self, other: &Rect) -> bool {
-        (self.w <= 0. || self.h <= 0.)
+        (other.w <= 0. || other.h <= 0.)
             || (self.x <= other.x
                 && other.x + other.w <= self.x + self.w
                 && self.y <= other.y
