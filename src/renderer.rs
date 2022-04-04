@@ -136,6 +136,7 @@ pub enum ShaderType {
     FillImageGradient,
     FilterImage,
     FillColor,
+    TextureCopyUnclipped,
 }
 
 impl Default for ShaderType {
@@ -153,6 +154,7 @@ impl ShaderType {
             Self::FillImageGradient => 3.0,
             Self::FilterImage => 4.0,
             Self::FillColor => 5.0,
+            Self::TextureCopyUnclipped => 6.0,
         }
     }
 }

@@ -197,6 +197,35 @@ impl Default for Scissor {
     }
 }
 
+impl Scissor {
+    /// Returns the bounding rect if the scissor clip if it's an untransformed rectangular clip
+    fn as_rect(&self, canvas_width: f32, canvas_height: f32) -> Option<Rect> {
+        let extent = match self.extent {
+            Some(extent) => extent,
+            None => return Some(Rect::new(0., 0., canvas_width, canvas_height)),
+        };
+
+        // Abort if we're skewing (usually doesn't happen)
+        if self.transform[1] != 0.0 || self.transform[2] != 0.0 {
+            return None;
+        }
+
+        // Abort if we're scaling
+        if self.transform[0] != 1.0 || self.transform[3] != 1.0 {
+            return None;
+        }
+
+        let half_width = extent[0];
+        let half_height = extent[1];
+        Some(Rect::new(
+            self.transform[4] - half_width,
+            self.transform[5] - half_height,
+            half_width * 2.0,
+            half_height * 2.0,
+        ))
+    }
+}
+
 /// Determines the shape used to draw the end points of lines:
 /// `Butt` (default), `Round`, `Square`.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -817,11 +846,14 @@ where
         // The path cache saves a flattened and transformed version of the path.
         let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
+        let canvas_width = self.width();
+        let canvas_height = self.height();
+
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.minx > canvas_width
             || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > self.height()
+            || path_cache.bounds.miny > canvas_height
         {
             return;
         }
@@ -839,6 +871,28 @@ where
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
         let fringe_width = if paint.anti_alias() { self.fringe_width } else { 0.0 };
         path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
+
+        // Detect if this path fill is in fact just an unclipped image copy
+        match (
+            path_cache.path_fill_is_rect(),
+            scissor.as_rect(canvas_width, canvas_height),
+            paint.as_straight_tinted_image(),
+        ) {
+            (Some(path_rect), Some(scissor_rect), Some((image_id, image_tint)))
+                if scissor_rect.contains_rect(&path_rect) =>
+            {
+                self.render_unclipped_image_blit(
+                    path_rect.x,
+                    path_rect.y,
+                    path_rect.w,
+                    path_rect.h,
+                    image_id,
+                    image_tint,
+                );
+                return;
+            }
+            _ => {}
+        }
 
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
@@ -1059,6 +1113,64 @@ where
         }
 
         self.append_cmd(cmd);
+    }
+
+    fn render_unclipped_image_blit(&mut self, x: f32, y: f32, width: f32, height: f32, image: ImageId, tint: Color) {
+        let image_info = match self.images.info(image) {
+            Some(info) => info,
+            None => return,
+        };
+
+        let scissor = self.state().scissor;
+
+        let mut paint = Paint::image_tint(image, 0., 0., width, height, 0., tint).with_anti_alias(false);
+        // Apply global alpha
+        paint.mul_alpha(self.state().alpha);
+
+        paint.transform = self.state().transform;
+
+        let mut params = Params::new(&self.images, &paint, &scissor, 1.0, 1.0, -1.0);
+        params.shader_type = ShaderType::TextureCopyUnclipped.to_f32();
+
+        let mut cmd = Command::new(CommandType::Triangles { params });
+        cmd.composite_operation = self.state().composite_operation;
+        cmd.glyph_texture = paint.glyph_texture();
+
+        let transform = self.state().transform;
+
+        let x0 = x;
+        let y0 = y;
+        let x1 = x + width;
+        let y1 = y + height;
+
+        let (p0, p1) = transform.transform_point(x0, y0);
+        let (p2, p3) = transform.transform_point(x1, y0);
+        let (p4, p5) = transform.transform_point(x1, y1);
+        let (p6, p7) = transform.transform_point(x0, y1);
+
+        let s0 = 0.;
+        let mut t0 = 0.;
+        let s1 = 1.; // / width;
+        let mut t1 = 1.; // / height;
+
+        if image_info.flags().contains(ImageFlags::FLIP_Y) {
+            std::mem::swap(&mut t0, &mut t1);
+        }
+
+        let verts = [
+            Vertex::new(p0, p1, s0, t0),
+            Vertex::new(p4, p5, s1, t1),
+            Vertex::new(p2, p3, s1, t0),
+            Vertex::new(p0, p1, s0, t0),
+            Vertex::new(p6, p7, s0, t1),
+            Vertex::new(p4, p5, s1, t1),
+        ];
+
+        cmd.image = Some(image);
+        cmd.triangles_verts = Some((self.verts.len(), verts.len()));
+        self.append_cmd(cmd);
+
+        self.verts.extend_from_slice(&verts);
     }
 
     // Text

@@ -56,12 +56,12 @@ float strokeMask() {
 void main(void) {
     vec4 result;
 
-    float scissor = scissorMask(fpos);
-
 #ifdef EDGE_AA
-    float strokeAlpha = strokeMask();
-
-    if (strokeAlpha < strokeThr) discard;
+    float strokeAlpha = 1.0;
+    if (shaderType != 6) {
+        strokeAlpha = strokeMask();
+        if (strokeAlpha < strokeThr) discard;
+    }
 #else
     float strokeAlpha = 1.0;
 #endif
@@ -104,6 +104,15 @@ void main(void) {
     } else if (shaderType == 5) {
         // Plain color fill
         result = innerCol;
+    } else if (shaderType == 6) {
+        // Plain texture copy, unclipped
+        vec4 color = texture2D(tex, ftcoord);
+        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+        if (texType == 2) color = vec4(color.x);
+        // Apply color tint and alpha.
+        color *= innerCol;
+        gl_FragColor = color;
+        return;        
     } else if (shaderType == 2) {
         // Stencil fill
         result = vec4(1,1,1,1);
@@ -140,6 +149,8 @@ void main(void) {
 
         result = color;
     }
+
+    float scissor = scissorMask(fpos);
 
     if (glyphTextureType > 0) {
         // Textured tris
