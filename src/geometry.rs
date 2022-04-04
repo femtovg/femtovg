@@ -232,6 +232,14 @@ impl Rect {
 
         Rect::new(minx, miny, 0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny))
     }
+
+    pub fn contains_rect(&self, other: &Rect) -> bool {
+        (self.w <= 0. || self.h <= 0.)
+            || (self.x <= other.x
+                && other.x + other.w <= self.x + self.w
+                && self.y <= other.y
+                && other.y + other.h <= self.y + self.h)
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]

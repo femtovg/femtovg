@@ -884,6 +884,38 @@ impl PathCache {
             };
         }
     }
+
+    /// If this path is merely a rectangle, return it
+    pub(crate) fn path_fill_is_rect(&self) -> Option<crate::Rect> {
+        if self.contours.len() != 1 {
+            return None;
+        }
+
+        let vertices = &self.contours[0].fill;
+        if vertices.len() != 4 {
+            return None;
+        }
+
+        let maybe_top_left = vertices[0];
+        let maybe_bottom_left = vertices[1];
+        let maybe_bottom_right = vertices[2];
+        let maybe_top_right = vertices[3];
+
+        if maybe_top_left.x == maybe_bottom_left.x
+            && maybe_top_left.y == maybe_top_right.y
+            && maybe_bottom_right.x == maybe_top_right.x
+            && maybe_bottom_right.y == maybe_bottom_left.y
+        {
+            Some(crate::Rect::new(
+                maybe_top_left.x,
+                maybe_top_left.y,
+                maybe_top_right.x - maybe_top_left.x,
+                maybe_bottom_left.y - maybe_top_left.y,
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 fn curve_divisions(radius: f32, arc: f32, tol: f32) -> u32 {

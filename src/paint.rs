@@ -784,4 +784,21 @@ impl Paint {
             }
         }
     }
+
+    /// Returns the image id and associated tint if this paint is an untransformed
+    /// image paint without anti-aliasing at the edges in case of a fill
+    pub(crate) fn as_straight_tinted_image(&self) -> Option<(ImageId, Color)> {
+        match self.flavor {
+            PaintFlavor::Image {
+                id: image_id,
+                cx,
+                cy,
+                width: _image_width,
+                height: _image_height,
+                angle,
+                tint,
+            } if cx == 0.0 && cy == 0.0 && angle == 0.0 && !self.shape_anti_alias => Some((image_id, tint)),
+            _ => None,
+        }
+    }
 }
