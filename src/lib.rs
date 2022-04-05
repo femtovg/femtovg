@@ -878,7 +878,7 @@ where
             scissor.as_rect(canvas_width, canvas_height),
             paint.as_straight_tinted_image(),
         ) {
-            (Some(path_rect), Some(scissor_rect), Some((image_id, image_tint)))
+            (Some(path_rect), Some(scissor_rect), Some((image_id, image_width, image_height, image_tint)))
                 if scissor_rect.contains_rect(&path_rect) =>
             {
                 self.render_unclipped_image_blit(
@@ -887,6 +887,8 @@ where
                     path_rect.w,
                     path_rect.h,
                     image_id,
+                    image_width,
+                    image_height,
                     image_tint,
                 );
                 return;
@@ -1122,6 +1124,8 @@ where
         width: f32,
         height: f32,
         image: ImageId,
+        image_width: f32,
+        image_height: f32,
         tint: Color,
     ) {
         let image_info = match self.images.info(image) {
@@ -1156,8 +1160,8 @@ where
 
         let s0 = 0.;
         let mut t0 = 0.;
-        let s1 = 1.; // / width;
-        let mut t1 = 1.; // / height;
+        let s1 = image_width / image_info.width() as f32;
+        let mut t1 = image_height / image_info.height() as f32;
 
         if image_info.flags().contains(ImageFlags::FLIP_Y) {
             std::mem::swap(&mut t0, &mut t1);
