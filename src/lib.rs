@@ -879,7 +879,9 @@ where
             paint.as_straight_tinted_image(),
         ) {
             (Some(path_rect), Some(scissor_rect), Some((image_id, image_width, image_height, image_tint)))
-                if scissor_rect.contains_rect(&path_rect) =>
+                if scissor_rect.contains_rect(&path_rect)
+                    && image_width == path_rect.w
+                    && image_height == path_rect.h =>
             {
                 self.render_unclipped_image_blit(
                     path_rect.x,
