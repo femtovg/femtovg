@@ -13,6 +13,11 @@ All notable changes to this project will be documented in this file.
  - Added optimized rendering code path for the common case of filling a rectangular path with an image and anti-aliasing
    on the paint disabled.
 
+### Fixed
+
+ - Fixed line breaking to permit a break in the middle of a word if it is the first word in the paragraph
+   and it doesn't fit otherwise.
+
 ## [0.3.3] - 2022-02-21
 
 ### Changed
