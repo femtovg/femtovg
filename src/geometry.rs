@@ -234,11 +234,29 @@ impl Rect {
     }
 
     pub fn contains_rect(&self, other: &Rect) -> bool {
-        (other.w <= 0. || other.h <= 0.)
+        other.is_empty()
             || (self.x <= other.x
                 && other.x + other.w <= self.x + self.w
                 && self.y <= other.y
                 && other.y + other.h <= self.y + self.h)
+    }
+
+    pub fn intersection(&self, other: &Rect) -> Option<Self> {
+        let x = self.x.max(other.x);
+        let y = self.y.max(other.y);
+        let w = (self.x + self.w).min(other.x + other.w) - x;
+        let h = (self.y + self.h).min(other.y + other.h) - y;
+
+        let result = Self { x, y, w, h };
+        if !result.is_empty() {
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.w <= 0. || self.h <= 0.
     }
 }
 

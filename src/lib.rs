@@ -876,24 +876,18 @@ where
         match (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width, canvas_height),
-            paint.as_straight_tinted_image(),
+            paint.is_straight_tinted_image(),
         ) {
-            (Some(path_rect), Some(scissor_rect), Some((image_id, image_width, image_height, image_tint)))
-                if scissor_rect.contains_rect(&path_rect)
-                    && image_width == path_rect.w
-                    && image_height == path_rect.h =>
-            {
-                self.render_unclipped_image_blit(
-                    path_rect.x,
-                    path_rect.y,
-                    path_rect.w,
-                    path_rect.h,
-                    image_id,
-                    image_width,
-                    image_height,
-                    image_tint,
-                );
-                return;
+            (Some(path_rect), Some(scissor_rect), true) => {
+                if scissor_rect.contains_rect(&path_rect) {
+                    self.render_unclipped_image_blit(&path_rect, paint);
+                    return;
+                } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
+                    self.render_unclipped_image_blit(&intersection, paint);
+                    return;
+                } else {
+                    return;
+                }
             }
             _ => {}
         }
@@ -1119,55 +1113,42 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(
-        &mut self,
-        post_transform_x: f32,
-        post_transform_y: f32,
-        width: f32,
-        height: f32,
-        image: ImageId,
-        image_width: f32,
-        image_height: f32,
-        tint: Color,
-    ) {
-        let image_info = match self.images.info(image) {
-            Some(info) => info,
-            None => return,
-        };
-
+    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, paint: Paint) {
         let scissor = self.state().scissor;
 
-        let mut paint = Paint::image_tint(image, 0., 0., width, height, 0., tint).with_anti_alias(false);
-        // Apply global alpha
-        paint.mul_alpha(self.state().alpha);
-
-        paint.transform = self.state().transform;
-
-        let mut params = Params::new(&self.images, &paint, &scissor, 1.0, 1.0, -1.0);
+        let mut params = Params::new(&self.images, &paint, &scissor, 0., 0., -1.0);
         params.shader_type = ShaderType::TextureCopyUnclipped.to_f32();
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
         cmd.glyph_texture = paint.glyph_texture();
 
-        let x0 = post_transform_x;
-        let y0 = post_transform_y;
-        let x1 = post_transform_x + width;
-        let y1 = post_transform_y + height;
+        let x0 = target_rect.x;
+        let y0 = target_rect.y;
+        let x1 = x0 + target_rect.w;
+        let y1 = y0 + target_rect.h;
 
         let (p0, p1) = (x0, y0);
         let (p2, p3) = (x1, y0);
         let (p4, p5) = (x1, y1);
         let (p6, p7) = (x0, y1);
 
-        let s0 = 0.;
-        let mut t0 = 0.;
-        let s1 = image_width / image_info.width() as f32;
-        let mut t1 = image_height / image_info.height() as f32;
+        // Apply the same mapping from vertex coordinates to texture coordinates as in the fragment shader,
+        // but now ahead of time.
+        let mut to_texture_space_transform = Transform2D::identity();
+        to_texture_space_transform.scale(1. / params.extent[0], 1. / params.extent[1]);
+        to_texture_space_transform.premultiply(&Transform2D([
+            params.paint_mat[0],
+            params.paint_mat[1],
+            params.paint_mat[4],
+            params.paint_mat[5],
+            params.paint_mat[8],
+            params.paint_mat[9],
+        ]));
 
-        if image_info.flags().contains(ImageFlags::FLIP_Y) {
-            std::mem::swap(&mut t0, &mut t1);
-        }
+        let (s0, t0) = to_texture_space_transform.transform_point(target_rect.x, target_rect.y);
+        let (s1, t1) =
+            to_texture_space_transform.transform_point(target_rect.x + target_rect.w, target_rect.y + target_rect.h);
 
         let verts = [
             Vertex::new(p0, p1, s0, t0),
@@ -1178,7 +1159,10 @@ where
             Vertex::new(p4, p5, s1, t1),
         ];
 
-        cmd.image = Some(image);
+        if let PaintFlavor::Image { id, .. } = paint.flavor {
+            cmd.image = Some(id);
+        }
+
         cmd.triangles_verts = Some((self.verts.len(), verts.len()));
         self.append_cmd(cmd);
 
