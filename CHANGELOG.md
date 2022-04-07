@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
  - Added support for importing backend-specific textures into the rendering of a scene with `Canvas::create_image_from_native_texture`.
  - Added functions to `TextContext` to configure the text shaping caches: `resize_shaping_run_cache` and `resize_shaped_words_cache`.
 
+### Changed
+
+ - Added optimized rendering code path for the common case of filling a rectangular path with an image and anti-aliasing
+   on the paint disabled.
+
 ## [0.3.3] - 2022-02-21
 
 ### Changed
