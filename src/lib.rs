@@ -1382,7 +1382,6 @@ where
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        let bitmap_glyphs = layout.has_bitmap_glyphs();
         let need_direct_rendering = text_settings.font_size > 92.0;
 
         let glyphs = layout
@@ -1395,7 +1394,19 @@ where
                 (glyph_x, glyph_y, shaped_glyph.font_id, shaped_glyph.glyph_id)
             });
 
-        if need_direct_rendering && !bitmap_glyphs {
+        let have_bitmap_glyphs = {
+            let text_context = self.text_context.clone();
+            let mut text_context = text_context.borrow_mut();
+
+            glyphs.clone().any(|(_, _, font_id, glyph_id)| {
+                text_context
+                    .font_mut(font_id)
+                    .and_then(|font| font.glyph(&font.face_ref(), glyph_id))
+                    .map(|glyph| glyph.path.is_none())
+                    .unwrap_or(false)
+            })
+        };
+        if need_direct_rendering && !have_bitmap_glyphs {
             text::render_direct(
                 self,
                 glyphs,
@@ -1407,7 +1418,7 @@ where
                 invscale,
             )?;
         } else {
-            let atlas = if bitmap_glyphs && need_direct_rendering {
+            let atlas = if have_bitmap_glyphs && need_direct_rendering {
                 self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
             } else {
                 self.glyph_atlas.clone()
