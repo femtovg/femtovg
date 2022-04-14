@@ -20,7 +20,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     paint::{PaintFlavor, StrokeSettings, TextSettings},
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, PositionedGlyph,
+    RenderTarget, Renderer,
 };
 
 mod atlas;
@@ -890,6 +891,7 @@ pub struct Quad {
 }
 
 /// Represents the drawing commands for glyphs, separated into alpha and color glyphs.
+#[derive(Default)]
 pub struct GlyphDrawCommands {
     /// Drawing commands for alpha (opacity) glyphs.
     pub alpha_glyphs: Vec<DrawCommand>,
@@ -907,7 +909,7 @@ impl GlyphAtlas {
     pub(crate) fn render_atlas<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
-        glyphs: impl IntoIterator<Item = (f32, f32, FontId, u16)>,
+        glyphs: impl Iterator<Item = PositionedGlyph>,
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
@@ -923,13 +925,22 @@ impl GlyphAtlas {
 
         let initial_render_target = canvas.current_render_target;
 
-        for (glyph_x, glyph_y, font_id, glyph_id) in glyphs.into_iter() {
-            let subpixel_location = crate::geometry::quantize(glyph_x.fract(), 0.1) * 10.0;
+        for glyph in glyphs {
+            let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
 
-            let id = RenderedGlyphId::new(glyph_id, font_id, font_size, line_width, mode, subpixel_location as u8);
+            let id = RenderedGlyphId::new(
+                glyph.glyph_id,
+                glyph.font_id,
+                font_size,
+                line_width,
+                mode,
+                subpixel_location as u8,
+            );
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                if let Some(glyph) = self.render_glyph(canvas, font_size, line_width, mode, font_id, glyph_id)? {
+                if let Some(glyph) =
+                    self.render_glyph(canvas, font_size, line_width, mode, glyph.font_id, glyph.glyph_id)?
+                {
                     self.rendered_glyphs.borrow_mut().insert(id, glyph);
                 } else {
                     continue;
@@ -960,8 +971,8 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                q.x0 = glyph_x.trunc() - line_width_offset - GLYPH_PADDING as f32;
-                q.y0 = glyph_y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
+                q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
+                q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
                 q.x1 = q.x0 + rendered.width as f32;
                 q.y1 = q.y0 + rendered.height as f32;
 
@@ -1240,25 +1251,25 @@ impl GlyphAtlas {
 
 pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
-    glyphs: impl IntoIterator<Item = (f32, f32, FontId, u16)>,
+    glyphs: impl Iterator<Item = PositionedGlyph>,
     paint_flavor: &PaintFlavor,
     anti_alias: bool,
     stroke: &StrokeSettings,
     font_size: f32,
     mode: RenderMode,
-    invscale: f32,
 ) -> Result<(), ErrorKind> {
     let text_context = canvas.text_context.clone();
-    let mut text_context = text_context.borrow_mut();
 
-    for (glyph_x, glyph_y, font_id, glyph_id) in glyphs.into_iter() {
+    for glyph in glyphs {
+        let mut text_context = text_context.borrow_mut();
         let (glyph_rendering, scale) = {
-            let font = text_context.font_mut(font_id).ok_or(ErrorKind::NoFontFound)?;
+            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let face = font.face_ref();
 
             let scale = font.scale(font_size);
 
-            let Some(glyph_rendering) = font.glyph_rendering_representation(&face, glyph_id, font_size as u16) else {
+            let Some(glyph_rendering) = font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16)
+            else {
                 continue;
             };
 
@@ -1272,8 +1283,8 @@ pub fn render_direct<T: Renderer>(
             RenderMode::Stroke => stroke.line_width / scale,
         };
 
-        canvas.translate(glyph_x * invscale, glyph_y * invscale);
-        canvas.scale(scale * invscale, -scale * invscale);
+        canvas.translate(glyph.x, glyph.y);
+        canvas.scale(scale, -scale);
 
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {

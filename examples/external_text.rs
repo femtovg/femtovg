@@ -220,7 +220,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
                     buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
                     let cmds = cache.fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0));
-                    canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()), 1.0);
+                    canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()));
 
                     surface.present(&mut canvas);
                 }
