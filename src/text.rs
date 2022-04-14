@@ -944,9 +944,11 @@ impl GlyphAtlas {
             );
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                let glyph = self.render_glyph(canvas, font_size, line_width, mode, glyph)?;
-
-                self.rendered_glyphs.borrow_mut().insert(id, glyph);
+                if let Some(glyph) = self.render_glyph(canvas, font_size, line_width, mode, glyph)? {
+                    self.rendered_glyphs.borrow_mut().insert(id, glyph);
+                } else {
+                    continue;
+                }
             }
 
             let rendered_glyphs = self.rendered_glyphs.borrow();
@@ -998,6 +1000,8 @@ impl GlyphAtlas {
         })
     }
 
+    // Renders the glyph into the atlas and returns the RenderedGlyph struct for it.
+    // Returns Ok(None) if there exists no path or image for the glyph in the font (missing glyph).
     fn render_glyph<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
@@ -1005,24 +1009,28 @@ impl GlyphAtlas {
         line_width: f32,
         mode: RenderMode,
         glyph: &ShapedGlyph,
-    ) -> Result<RenderedGlyph, ErrorKind> {
+    ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
         let text_context = canvas.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        let (mut maybe_glyph_representation, scale) = {
+        let (mut glyph_representation, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let face = font.face_ref();
             let scale = font.scale(font_size);
 
-            let maybe_glyph_representation =
-                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16);
-            (maybe_glyph_representation, scale)
+            if let Some(glyph_representation) =
+                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16)
+            {
+                (glyph_representation, scale)
+            } else {
+                return Ok(None);
+            }
         };
 
         #[cfg(feature = "image-loading")]
-        let color_glyph = matches!(maybe_glyph_representation, Some(GlyphRendering::RenderAsImage(..)));
+        let color_glyph = matches!(glyph_representation, GlyphRendering::RenderAsImage(..));
         #[cfg(not(feature = "image-loading"))]
         let color_glyph = false;
 
@@ -1059,8 +1067,8 @@ impl GlyphAtlas {
             color_glyph,
         };
 
-        match maybe_glyph_representation.as_mut() {
-            Some(GlyphRendering::RenderAsPath(ref mut path)) => {
+        match glyph_representation {
+            GlyphRendering::RenderAsPath(ref mut path) => {
                 canvas.translate(x, y);
 
                 canvas.set_render_target(RenderTarget::Image(dst_image_id));
@@ -1127,7 +1135,7 @@ impl GlyphAtlas {
                 }
             }
             #[cfg(feature = "image-loading")]
-            Some(GlyphRendering::RenderAsImage(image_buffer)) => {
+            GlyphRendering::RenderAsImage(image_buffer) => {
                 let target_x = rendered_glyph.atlas_x as usize;
                 let target_y = rendered_glyph.atlas_y as usize;
                 let target_width = rendered_glyph.width;
@@ -1139,12 +1147,11 @@ impl GlyphAtlas {
                     canvas.update_image(dst_image_id, image, target_x, target_y).unwrap();
                 }
             }
-            _ => {}
         }
 
         canvas.restore();
 
-        Ok(rendered_glyph)
+        Ok(Some(rendered_glyph))
     }
 
     // Returns (texture index, image id, glyph padding box)
