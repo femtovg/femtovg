@@ -944,7 +944,9 @@ impl GlyphAtlas {
             );
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                if let Some(glyph) = self.render_glyph(canvas, font_size, line_width, mode, glyph)? {
+                if let Some(glyph) =
+                    self.render_glyph(canvas, font_size, line_width, mode, glyph.font_id, glyph.glyph_id)?
+                {
                     self.rendered_glyphs.borrow_mut().insert(id, glyph);
                 } else {
                     continue;
@@ -1008,22 +1010,25 @@ impl GlyphAtlas {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        glyph: &ShapedGlyph,
+        font_id: FontId,
+        glyph_id: u16,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
         let text_context = canvas.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        let (mut glyph_representation, scale) = {
-            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+        let (mut glyph_representation, glyph_metrics, scale) = {
+            let font = text_context.font_mut(font_id).ok_or(ErrorKind::NoFontFound)?;
             let face = font.face_ref();
             let scale = font.scale(font_size);
+            let maybe_glyph_metrics = font.glyph(&face, glyph_id).map(|g| g.metrics.clone());
 
-            if let Some(glyph_representation) =
-                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16)
-            {
-                (glyph_representation, scale)
+            if let (Some(glyph_representation), Some(glyph_metrics)) = (
+                font.glyph_rendering_representation(&face, glyph_id, font_size as u16),
+                maybe_glyph_metrics,
+            ) {
+                (glyph_representation, glyph_metrics, scale)
             } else {
                 return Ok(None);
             }
@@ -1042,8 +1047,8 @@ impl GlyphAtlas {
 
         let line_width_offset = (line_width / 2.0).ceil();
 
-        let width = glyph.width.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
-        let height = glyph.height.ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+        let width = (glyph_metrics.width * scale).ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+        let height = (glyph_metrics.height * scale).ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
 
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
             self.find_texture_or_alloc(canvas, width as usize, height as usize)?;
@@ -1052,9 +1057,8 @@ impl GlyphAtlas {
         canvas.save();
         canvas.reset();
 
-        let rendered_bearing_y = glyph.bearing_y.round();
-        let x_quant = crate::geometry::quantize(glyph.x.fract(), 0.1);
-        let x = dst_x as f32 - glyph.bearing_x + line_width_offset + padding as f32 + x_quant;
+        let rendered_bearing_y = (glyph_metrics.bearing_y * scale).round();
+        let x = dst_x as f32 - (glyph_metrics.bearing_x * scale) + line_width_offset + padding as f32;
         let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
 
         let rendered_glyph = RenderedGlyph {
