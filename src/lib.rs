@@ -1385,10 +1385,20 @@ where
         let bitmap_glyphs = layout.has_bitmap_glyphs();
         let need_direct_rendering = text_settings.font_size > 92.0;
 
+        let glyphs = layout
+            .glyphs
+            .iter()
+            .filter(|shaped_glyph| !shaped_glyph.c.is_control())
+            .map(|shaped_glyph| {
+                let glyph_x = shaped_glyph.x - shaped_glyph.bearing_x;
+                let glyph_y = shaped_glyph.y + shaped_glyph.bearing_y;
+                (glyph_x, glyph_y, shaped_glyph.font_id, shaped_glyph.glyph_id)
+            });
+
         if need_direct_rendering && !bitmap_glyphs {
             text::render_direct(
                 self,
-                &layout,
+                glyphs,
                 &paint.flavor,
                 paint.shape_anti_alias,
                 &stroke,
@@ -1404,7 +1414,7 @@ where
             };
 
             let draw_commands =
-                atlas.render_atlas(self, &layout, text_settings.font_size, stroke.line_width, render_mode)?;
+                atlas.render_atlas(self, glyphs, text_settings.font_size, stroke.line_width, render_mode)?;
             self.draw_glyph_commands(draw_commands, paint, scale);
         }
 
