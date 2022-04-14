@@ -1299,19 +1299,36 @@ where
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
+    /// Fills the provided glyphs with the specified Paint.
+    pub fn fill_glyphs(
+        &mut self,
+        glyphs: impl IntoIterator<Item = PositionedGlyph>,
+        paint: &Paint,
+    ) -> Result<(), ErrorKind> {
+        self.draw_glyphs(glyphs, &paint, RenderMode::Fill)
+    }
+
+    /// Strokes the provided glyphs with the specified Paint.
+    pub fn stroke_glyphs(
+        &mut self,
+        glyphs: impl IntoIterator<Item = PositionedGlyph>,
+        paint: &Paint,
+    ) -> Result<(), ErrorKind> {
+        self.draw_glyphs(glyphs, &paint, RenderMode::Stroke)
+    }
+
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
     /// using a custom font rasterizer/layout.
-    pub fn draw_glyph_commands(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint, scale: f32) {
+    pub fn draw_glyph_commands(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint) {
         let transform = self.state().transform;
-        let invscale = 1.0 / scale;
         let create_vertices = |quads: &Vec<text::Quad>| {
             let mut verts = Vec::with_capacity(quads.len() * 6);
 
             for quad in quads {
-                let left = quad.x0 * invscale;
-                let right = quad.x1 * invscale;
-                let top = quad.y0 * invscale;
-                let bottom = quad.y1 * invscale;
+                let left = quad.x0;
+                let right = quad.x1;
+                let top = quad.y0;
+                let bottom = quad.y1;
 
                 let (p0, p1) = transform.transform_point(left, top);
                 let (p2, p3) = transform.transform_point(right, top);
@@ -1363,9 +1380,6 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut stroke = paint.stroke.clone();
-        stroke.line_width *= scale;
-
         let mut text_settings = paint.text.clone();
         text_settings.font_size *= scale;
         text_settings.letter_spacing *= scale;
@@ -1378,60 +1392,108 @@ where
             text,
             None,
         )?;
-        //let layout = self.layout_text(x, y, text, &paint)?;
+
+        self.draw_glyphs(
+            layout
+                .glyphs
+                .iter()
+                .filter(|shaped_glyph| !shaped_glyph.c.is_control())
+                .map(|shaped_glyph| PositionedGlyph {
+                    x: (shaped_glyph.x - shaped_glyph.bearing_x) * invscale,
+                    y: (shaped_glyph.y + shaped_glyph.bearing_y) * invscale,
+                    font_id: shaped_glyph.font_id,
+                    glyph_id: shaped_glyph.glyph_id,
+                }),
+            &paint,
+            render_mode,
+        )?;
+
+        layout.scale(invscale);
+
+        Ok(layout)
+    }
+
+    fn draw_glyphs(
+        &mut self,
+        glyphs: impl IntoIterator<Item = PositionedGlyph>,
+        paint: &Paint,
+        render_mode: RenderMode,
+    ) -> Result<(), ErrorKind> {
+        let scale = self.font_scale() * self.device_px_ratio;
+
+        let mut stroke = paint.stroke.clone();
+        stroke.line_width *= scale;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
-        let need_direct_rendering = text_settings.font_size > 92.0;
+        let text_context = self.text_context.clone();
 
-        let glyphs = layout
-            .glyphs
-            .iter()
-            .filter(|shaped_glyph| !shaped_glyph.c.is_control())
-            .map(|shaped_glyph| {
-                let glyph_x = shaped_glyph.x - shaped_glyph.bearing_x;
-                let glyph_y = shaped_glyph.y + shaped_glyph.bearing_y;
-                (glyph_x, glyph_y, shaped_glyph.font_id, shaped_glyph.glyph_id)
-            });
+        let need_direct_rendering = paint.text.font_size > 92.0;
 
-        let have_bitmap_glyphs = {
-            let text_context = self.text_context.clone();
-            let mut text_context = text_context.borrow_mut();
+        // TODO: create on demand
 
-            glyphs.clone().any(|(_, _, font_id, glyph_id)| {
-                text_context
-                    .font_mut(font_id)
-                    .and_then(|font| font.glyph(&font.face_ref(), glyph_id))
-                    .map(|glyph| glyph.path.is_none())
-                    .unwrap_or(false)
-            })
-        };
-        if need_direct_rendering && !have_bitmap_glyphs {
+        let mut color_glyphs = Vec::new();
+
+        let glyphs_it = glyphs.into_iter();
+        let non_color_glyphs = glyphs_it.filter(|glyph| {
+            if text_context
+                .borrow_mut()
+                .font_mut(glyph.font_id)
+                .and_then(|font| font.glyph(&font.face_ref(), glyph.glyph_id))
+                .map(|glyph| glyph.path.is_none())
+                .unwrap_or(false)
+            {
+                color_glyphs.push(glyph.clone());
+
+                false
+            } else {
+                true
+            }
+        });
+
+        let mut draw_commands = if need_direct_rendering {
             text::render_direct(
                 self,
-                glyphs,
+                non_color_glyphs,
                 &paint.flavor,
                 paint.shape_anti_alias,
                 &stroke,
-                text_settings.font_size,
+                paint.text.font_size,
                 render_mode,
-                invscale,
             )?;
+            GlyphDrawCommands::default()
         } else {
-            let atlas = if have_bitmap_glyphs && need_direct_rendering {
+            self.glyph_atlas.clone().render_atlas(
+                self,
+                non_color_glyphs,
+                paint.text.font_size,
+                paint.stroke.line_width,
+                render_mode,
+            )?
+        };
+
+        let color_commands = {
+            let atlas = if need_direct_rendering {
                 self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
             } else {
                 self.glyph_atlas.clone()
             };
 
-            let draw_commands =
-                atlas.render_atlas(self, glyphs, text_settings.font_size, stroke.line_width, render_mode)?;
-            self.draw_glyph_commands(draw_commands, paint, scale);
-        }
+            atlas.render_atlas(
+                self,
+                color_glyphs.into_iter(),
+                paint.text.font_size,
+                paint.stroke.line_width,
+                render_mode,
+            )?
+        };
 
-        layout.scale(invscale);
+        draw_commands.alpha_glyphs.extend(color_commands.alpha_glyphs);
+        draw_commands.color_glyphs.extend(color_commands.color_glyphs);
 
-        Ok(layout)
+        self.draw_glyph_commands(draw_commands, &paint);
+
+        Ok(())
     }
 
     fn render_triangles(
@@ -1536,6 +1598,21 @@ impl<T: Renderer> Drop for Canvas<T> {
     fn drop(&mut self) {
         self.images.clear(&mut self.renderer);
     }
+}
+
+/// This struct holds the parameter needs to draw a single glyph using the low-level fill_glyphs
+/// and stroke_glyphs API.
+#[derive(Clone)]
+pub struct PositionedGlyph {
+    /// The glyph will be drawn at the specified x position.
+    pub x: f32,
+    /// The glyph will be drawn at the specified x position.
+    pub y: f32,
+    /// The font to use for looking up the glyph outline.
+    pub font_id: FontId,
+    /// The TrueType glyph id to use when rendering the glyph. This is specific
+    /// to the font registered under the font_id field.
+    pub glyph_id: u16,
 }
 
 // re-exports
