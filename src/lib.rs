@@ -1439,3 +1439,10 @@ impl<T: Renderer> Drop for Canvas<T> {
         self.images.clear(&mut self.renderer);
     }
 }
+
+// re-exports
+#[cfg(feature = "image-loading")]
+pub use ::image as img;
+
+pub use imgref;
+pub use rgb;
