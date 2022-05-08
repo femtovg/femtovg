@@ -4,8 +4,8 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo,
-    ImageSource, ImageStore,
+    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
+    ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
@@ -119,6 +119,11 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    pub(crate) fn pos(position: Position, u: f32, v: f32) -> Self {
+        let Position { x, y } = position;
+        Self { x, y, u, v }
+    }
+
     pub fn new(x: f32, y: f32, u: f32, v: f32) -> Self {
         Self { x, y, u, v }
     }

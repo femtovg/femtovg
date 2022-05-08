@@ -1,58 +1,211 @@
 use std::hash::{Hash, Hasher};
-use std::ops::{Index, IndexMut};
+use std::ops::{Add, Index, IndexMut, Mul, MulAssign, Neg, Sub};
 
 use fnv::FnvHasher;
 
-pub fn quantize(a: f32, d: f32) -> f32 {
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct Position {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Add<Vector> for Position {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Vector) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+impl Sub<Vector> for Position {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Vector) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Sub for Position {
+    type Output = Vector;
+
+    #[inline]
+    fn sub(self, other: Self) -> Vector {
+        Vector {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Position {
+    pub(crate) fn equals(p1: Self, p2: Self, tol: f32) -> bool {
+        (p2 - p1).mag2() < tol * tol
+    }
+
+    pub(crate) fn segment_distance(pos: Self, ppos: Self, qpos: Self) -> f32 {
+        let pq = qpos - ppos;
+        let dpos = pos - ppos;
+        let d = pq.mag2();
+        let mut t = pq.dot(dpos);
+
+        if d > 0.0 {
+            t /= d;
+        }
+
+        if t < 0.0 {
+            t = 0.0;
+        } else if t > 1.0 {
+            t = 1.0;
+        }
+
+        let dpos = (ppos - pos) + pq * t;
+
+        dpos.mag2()
+    }
+}
+
+impl From<[f32; 2]> for Position {
+    fn from(value: [f32; 2]) -> Self {
+        let [x, y] = value;
+        Self { x, y }
+    }
+}
+
+impl From<Position> for [f32; 2] {
+    fn from(value: Position) -> Self {
+        let Position { x, y } = value;
+        [x, y]
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct Vector {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Vector {
+    pub fn zero() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+
+    pub fn x(x: f32) -> Self {
+        Self { x, y: 0.0 }
+    }
+    pub fn y(y: f32) -> Self {
+        Self { x: 0.0, y }
+    }
+
+    pub fn with_basis(self, basis_x: Self, basis_y: Self) -> Self {
+        basis_x * self.x + basis_y * self.y
+    }
+
+    pub fn cross(self, other: Self) -> f32 {
+        self.orthogonal().dot(other)
+    }
+
+    #[inline]
+    pub fn dot(self, other: Self) -> f32 {
+        self.x * other.x + self.y * other.y
+    }
+
+    #[inline]
+    pub fn mag2(self) -> f32 {
+        self.dot(self)
+    }
+
+    #[inline]
+    pub fn orthogonal(self) -> Self {
+        Self { x: self.y, y: -self.x }
+    }
+
+    #[inline]
+    pub fn from_angle(angle: f32) -> Self {
+        let (y, x) = angle.sin_cos();
+        Self { x, y }
+    }
+
+    #[inline]
+    pub fn angle(&self) -> f32 {
+        self.y.atan2(self.x)
+    }
+
+    pub fn normalize(&mut self) -> f32 {
+        let d = (self.x * self.x + self.y * self.y).sqrt();
+
+        if d > 1e-6 {
+            let id = 1.0 / d;
+            self.x *= id;
+            self.y *= id;
+        }
+
+        d
+    }
+}
+
+impl Add for Vector {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, other: Self) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+impl Sub for Vector {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, other: Self) -> Self {
+        Self {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+
+impl Neg for Vector {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        Self { x: -self.x, y: -self.y }
+    }
+}
+
+impl Mul<f32> for Vector {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, other: f32) -> Self {
+        Self {
+            x: self.x * other,
+            y: self.y * other,
+        }
+    }
+}
+
+impl MulAssign<f32> for Vector {
+    #[inline]
+    fn mul_assign(&mut self, other: f32) {
+        self.x *= other;
+        self.y *= other;
+    }
+}
+
+pub(crate) fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
-}
-
-pub fn pt_equals(x1: f32, y1: f32, x2: f32, y2: f32, tol: f32) -> bool {
-    let dx = x2 - x1;
-    let dy = y2 - y1;
-
-    dx * dx + dy * dy < tol * tol
-}
-
-pub fn cross(dx0: f32, dy0: f32, dx1: f32, dy1: f32) -> f32 {
-    dx1 * dy0 - dx0 * dy1
-}
-
-pub fn dist_pt_segment(x: f32, y: f32, px: f32, py: f32, qx: f32, qy: f32) -> f32 {
-    let pqx = qx - px;
-    let pqy = qy - py;
-    let dx = x - px;
-    let dy = y - py;
-    let d = pqx * pqx + pqy * pqy;
-    let mut t = pqx * dx + pqy * dy;
-
-    if d > 0.0 {
-        t /= d;
-    }
-
-    if t < 0.0 {
-        t = 0.0;
-    } else if t > 1.0 {
-        t = 1.0;
-    }
-
-    let dx = px + t * pqx - x;
-    let dy = py + t * pqy - y;
-
-    dx * dx + dy * dy
-}
-
-// TODO: fix this.. move it to point
-pub fn normalize(x: &mut f32, y: &mut f32) -> f32 {
-    let d = ((*x) * (*x) + (*y) * (*y)).sqrt();
-
-    if d > 1e-6 {
-        let id = 1.0 / d;
-        *x *= id;
-        *y *= id;
-    }
-
-    d
 }
 
 /// 2×3 matrix (2 rows, 3 columns) used for 2D linear transformations. It can represent transformations such as translation, rotation, or scaling.

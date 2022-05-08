@@ -171,12 +171,12 @@ fn main() {
                     let mut path = Path::new();
                     match &shape {
                         Shape::Rect => {
-                            path.rect(x - width / 2.0, y - height / 2.0, width, height);
+                            path.rect([x - width / 2.0, y - height / 2.0], width, height);
                         }
                         Shape::Ellipse => {
                             let rx = width / 2.0;
                             let ry = height / 2.0;
-                            path.ellipse(x, y, rx, ry);
+                            path.ellipse([x, y], rx, ry);
                         }
                         Shape::Polar => {
                             const TO_RADIANS: f32 = std::f32::consts::PI / 180.0;
@@ -186,13 +186,13 @@ fn main() {
                                 let x = x + r * theta.cos();
                                 let y = y + r * theta.sin();
                                 if path.is_empty() {
-                                    path.move_to(x, y);
+                                    path.move_to([x, y]);
                                 } else {
-                                    path.line_to(x, y);
+                                    path.line_to([x, y]);
                                 }
                             }
                             path.close();
-                            path.circle(x, y, width / 5.0);
+                            path.circle([x, y], width / 5.0);
                         }
                     }
 

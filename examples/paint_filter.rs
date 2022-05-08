@@ -96,7 +96,7 @@ fn main() {
                     let y = window_size.height as f32 / 2.0;
 
                     let mut path = Path::new();
-                    path.rect(x - width / 2.0, y - height / 2.0, width, height);
+                    path.rect([x - width / 2.0, y - height / 2.0], width, height);
 
                     // Get the bounding box of the path so that we can stretch
                     // the paint to cover it exactly:

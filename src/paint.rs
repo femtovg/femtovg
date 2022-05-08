@@ -1,7 +1,7 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
-use crate::geometry::Transform2D;
+use crate::geometry::{Position, Transform2D};
 use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
@@ -95,23 +95,19 @@ pub(crate) enum PaintFlavor {
     #[cfg_attr(feature = "serde", serde(skip))]
     Image {
         id: ImageId,
-        cx: f32,
-        cy: f32,
+        center: Position,
         width: f32,
         height: f32,
         angle: f32,
         tint: Color,
     },
     LinearGradient {
-        start_x: f32,
-        start_y: f32,
-        end_x: f32,
-        end_y: f32,
+        start: Position,
+        end: Position,
         colors: GradientColors,
     },
     BoxGradient {
-        x: f32,
-        y: f32,
+        pos: Position,
         width: f32,
         height: f32,
         radius: f32,
@@ -119,8 +115,7 @@ pub(crate) enum PaintFlavor {
         colors: GradientColors,
     },
     RadialGradient {
-        cx: f32,
-        cy: f32,
+        center: Position,
         in_radius: f32,
         out_radius: f32,
         colors: GradientColors,
@@ -173,7 +168,7 @@ impl Default for GlyphTexture {
 /// stroke_paint.set_line_width(4.0);
 ///
 /// let mut path = Path::new();
-/// path.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
+/// path.rounded_rect([10.0, 10.0], 100.0, 100.0, 20.0);
 /// canvas.fill_path(&mut path, fill_paint);
 /// canvas.stroke_path(&mut path, stroke_paint);
 /// ```
@@ -249,15 +244,14 @@ impl Paint {
     /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
     ///
     /// let mut path = Path::new();
-    /// path.rect(10.0, 10.0, 85.0, 85.0);
+    /// path.rect([10.0, 10.0], 85.0, 85.0);
     /// canvas.fill_path(&mut path, fill_paint);
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         let mut new = Self::default();
         new.flavor = PaintFlavor::Image {
             id,
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             width,
             height,
             angle,
@@ -294,7 +288,7 @@ impl Paint {
     ///
     /// let bg = Paint::linear_gradient(0.0, 0.0, 0.0, 100.0, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn linear_gradient(
@@ -308,10 +302,8 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::TwoStop { start_color, end_color },
         };
 
@@ -335,17 +327,15 @@ impl Paint {
     ///         (1.0, Color::rgba(255, 0, 0, 16))
     ///    ]);
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn linear_gradient_stops(start_x: f32, start_y: f32, end_x: f32, end_y: f32, stops: &[(f32, Color)]) -> Self {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::LinearGradient {
-            start_x,
-            start_y,
-            end_x,
-            end_y,
+            start: Position { x: start_x, y: start_y },
+            end: Position { x: end_x, y: end_y },
             colors: GradientColors::from_stops(stops),
         };
 
@@ -378,7 +368,7 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
+    /// path.rounded_rect([0.0, 0.0], 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn box_gradient(
@@ -394,8 +384,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::BoxGradient {
-            x,
-            y,
+            pos: Position { x, y },
             width,
             height,
             radius,
@@ -431,7 +420,7 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.circle(50.0, 50.0, 20.0);
+    /// path.circle([50.0, 50.0], 20.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn radial_gradient(
@@ -445,8 +434,7 @@ impl Paint {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::TwoStop {
@@ -485,15 +473,14 @@ impl Paint {
     /// );
     ///
     /// let mut path = Path::new();
-    /// path.circle(50.0, 50.0, 20.0);
+    /// path.circle([50.0, 50.0], 20.0);
     /// canvas.fill_path(&mut path, bg);
     /// ```
     pub fn radial_gradient_stops(cx: f32, cy: f32, in_radius: f32, out_radius: f32, stops: &[(f32, Color)]) -> Self {
         let mut new = Self::default();
 
         new.flavor = PaintFlavor::RadialGradient {
-            cx,
-            cy,
+            center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
             colors: GradientColors::from_stops(stops),

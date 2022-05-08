@@ -479,8 +479,7 @@ impl TextContextImpl {
 /// Result of a shaping run.
 #[derive(Clone, Default, Debug)]
 pub struct TextMetrics {
-    pub x: f32,
-    pub y: f32,
+    pub pos: [f32; 2],
     width: f32,
     height: f32,
     pub glyphs: Vec<ShapedGlyph>,
@@ -489,8 +488,8 @@ pub struct TextMetrics {
 
 impl TextMetrics {
     pub(crate) fn scale(&mut self, scale: f32) {
-        self.x *= scale;
-        self.y *= scale;
+        self.pos[0] *= scale;
+        self.pos[1] *= scale;
         self.width *= scale;
         self.height *= scale;
 
@@ -550,8 +549,7 @@ fn shape_run(
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
     let mut result = TextMetrics {
-        x: 0.0,
-        y: 0.0,
+        pos: [0.0, 0.0],
         width: 0.0,
         height: 0.0,
         glyphs: Vec::with_capacity(text.len()),
@@ -775,7 +773,7 @@ fn layout(
         _ => (),
     }
 
-    res.x = cursor_x;
+    res.pos[0] = cursor_x;
 
     let mut min_y = cursor_y;
     let mut max_y = cursor_y;
@@ -817,7 +815,7 @@ fn layout(
         cursor_y += glyph.advance_y;
     }
 
-    res.y = min_y;
+    res.pos[1] = min_y;
     res.height = max_y - min_y;
 
     Ok(())
