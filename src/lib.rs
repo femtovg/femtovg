@@ -182,19 +182,10 @@ impl Default for CompositeOperationState {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
-}
-
-impl Default for Scissor {
-    fn default() -> Self {
-        Self {
-            transform: Default::default(),
-            extent: None,
-        }
-    }
 }
 
 impl Scissor {
@@ -874,23 +865,21 @@ where
         path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
 
         // Detect if this path fill is in fact just an unclipped image copy
-        match (
+
+        if let (Some(path_rect), Some(scissor_rect), true) = (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width, canvas_height),
             paint.is_straight_tinted_image(),
         ) {
-            (Some(path_rect), Some(scissor_rect), true) => {
-                if scissor_rect.contains_rect(&path_rect) {
-                    self.render_unclipped_image_blit(&path_rect, paint);
-                    return;
-                } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                    self.render_unclipped_image_blit(&intersection, paint);
-                    return;
-                } else {
-                    return;
-                }
+            if scissor_rect.contains_rect(&path_rect) {
+                self.render_unclipped_image_blit(&path_rect, paint);
+                return;
+            } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
+                self.render_unclipped_image_blit(&intersection, paint);
+                return;
+            } else {
+                return;
             }
-            _ => {}
         }
 
         // GPU uniforms

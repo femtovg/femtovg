@@ -204,6 +204,6 @@ impl Font {
         };
 
         self.glyph(codepoint)
-            .and_then(|glyph| glyph.path.as_mut().map(|path| GlyphRendering::RenderAsPath(path)))
+            .and_then(|glyph| glyph.path.as_mut().map(GlyphRendering::RenderAsPath))
     }
 }
