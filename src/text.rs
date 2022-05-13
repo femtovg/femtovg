@@ -198,14 +198,8 @@ pub(crate) struct FontTexture {
 /// parameter. If you need measurements that take a [`crate::Canvas`]'s transform or dpi into
 /// account (see [`crate::Canvas::set_size()`]), you need to use the measurement functions
 /// on the canvas.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TextContext(pub(crate) Rc<RefCell<TextContextImpl>>);
-
-impl Default for TextContext {
-    fn default() -> Self {
-        Self(Default::default())
-    }
-}
 
 impl TextContext {
     /// Registers all .ttf files from a directory with this text context. If successful, the
@@ -355,7 +349,8 @@ impl TextContextImpl {
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new_with_data(data.to_owned(), face_index)?;
+        let data_copy = data.to_owned();
+        let font = Font::new_with_data(data_copy, face_index)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -1217,11 +1212,11 @@ pub(crate) fn render_direct<T: Renderer>(
         canvas.scale(scale * invscale, -scale * invscale);
 
         match glyph_rendering {
-            GlyphRendering::RenderAsPath(mut path) => {
+            GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
-                    canvas.stroke_path(&mut path, paint);
+                    canvas.stroke_path(path, paint);
                 } else {
-                    canvas.fill_path(&mut path, paint);
+                    canvas.fill_path(path, paint);
                 }
             }
             #[cfg(feature = "image-loading")]
