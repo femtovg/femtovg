@@ -41,6 +41,11 @@ jobs:
         with:
             toolchain: stable
             override: true
-            components: rustfmt
+            components: rustfmt, clippy
       - name: Run rustfmt
         run: cargo fmt --all -- --check
+      - name: Run clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
