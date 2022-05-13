@@ -290,7 +290,7 @@ pub struct Canvas<T: Renderer> {
     text_context: Rc<RefCell<TextContextImpl>>,
     glyph_atlas: Rc<GlyphAtlas>,
     // Glyph atlas used for direct rendering of color glyphs, dropped after flush()
-    emphemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
+    ephemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
     commands: Vec<Command>,
@@ -315,7 +315,7 @@ where
             renderer,
             text_context: Default::default(),
             glyph_atlas: Default::default(),
-            emphemeral_glyph_atlas: Default::default(),
+            ephemeral_glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -343,7 +343,7 @@ where
             renderer,
             text_context: text_context.0,
             glyph_atlas: Default::default(),
-            emphemeral_glyph_atlas: Default::default(),
+            ephemeral_glyph_atlas: Default::default(),
             current_render_target: RenderTarget::Screen,
             state_stack: Default::default(),
             commands: Default::default(),
@@ -413,7 +413,7 @@ where
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
-        if let Some(atlas) = self.emphemeral_glyph_atlas.take() {
+        if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
     }
@@ -1327,7 +1327,7 @@ where
             };
 
             let atlas = if bitmap_glyphs && need_direct_rendering {
-                self.emphemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
+                self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
             } else {
                 self.glyph_atlas.clone()
             };
