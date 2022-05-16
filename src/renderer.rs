@@ -146,15 +146,18 @@ impl Default for ShaderType {
 }
 
 impl ShaderType {
-    pub fn to_f32(self) -> f32 {
+    pub fn to_u8(self) -> u8 {
         match self {
-            Self::FillGradient => 0.0,
-            Self::FillImage => 1.0,
-            Self::Stencil => 2.0,
-            Self::FillImageGradient => 3.0,
-            Self::FilterImage => 4.0,
-            Self::FillColor => 5.0,
-            Self::TextureCopyUnclipped => 6.0,
+            Self::FillGradient => 0,
+            Self::FillImage => 1,
+            Self::Stencil => 2,
+            Self::FillImageGradient => 3,
+            Self::FilterImage => 4,
+            Self::FillColor => 5,
+            Self::TextureCopyUnclipped => 6,
         }
+    }
+    pub fn to_f32(self) -> f32 {
+        self.to_u8() as f32
     }
 }

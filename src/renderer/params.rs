@@ -19,7 +19,7 @@ pub struct Params {
     pub(crate) stroke_mult: f32,
     pub(crate) stroke_thr: f32,
     pub(crate) tex_type: f32,
-    pub(crate) shader_type: f32,
+    pub(crate) shader_type: ShaderType,
     pub(crate) glyph_texture_type: f32, // 0 -> no glyph rendering, 1 -> alpha mask, 2 -> color texture
     pub(crate) image_blur_filter_direction: [f32; 2],
     pub(crate) image_blur_filter_sigma: f32,
@@ -76,7 +76,7 @@ impl Params {
                 let color = color.premultiplied().to_array();
                 params.inner_col = color;
                 params.outer_col = color;
-                params.shader_type = ShaderType::FillColor.to_f32();
+                params.shader_type = ShaderType::FillColor;
                 inv_transform = paint.transform.inversed();
             }
             PaintFlavor::Image {
@@ -124,7 +124,7 @@ impl Params {
                     inv_transform = transform.inversed();
                 }
 
-                params.shader_type = ShaderType::FillImage.to_f32();
+                params.shader_type = ShaderType::FillImage;
 
                 params.tex_type = match image_info.format() {
                     PixelFormat::Rgba8 => {
@@ -172,10 +172,10 @@ impl Params {
                     GradientColors::TwoStop { start_color, end_color } => {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
-                        params.shader_type = ShaderType::FillGradient.to_f32();
+                        params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
-                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                        params.shader_type = ShaderType::FillImageGradient;
                     }
                 }
             }
@@ -200,10 +200,10 @@ impl Params {
                     GradientColors::TwoStop { start_color, end_color } => {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
-                        params.shader_type = ShaderType::FillGradient.to_f32();
+                        params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
-                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                        params.shader_type = ShaderType::FillImageGradient;
                     }
                 }
             }
@@ -229,10 +229,10 @@ impl Params {
                     GradientColors::TwoStop { start_color, end_color } => {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
-                        params.shader_type = ShaderType::FillGradient.to_f32();
+                        params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
-                        params.shader_type = ShaderType::FillImageGradient.to_f32();
+                        params.shader_type = ShaderType::FillImageGradient;
                     }
                 }
             }

@@ -897,7 +897,7 @@ where
         } else {
             let stencil_params = Params {
                 stroke_thr: -1.0,
-                shader_type: ShaderType::Stencil.to_f32(),
+                shader_type: ShaderType::Stencil,
                 ..Params::default()
             };
 
@@ -1109,7 +1109,7 @@ where
         let scissor = self.state().scissor;
 
         let mut params = Params::new(&self.images, &paint, &scissor, 0., 0., -1.0);
-        params.shader_type = ShaderType::TextureCopyUnclipped.to_f32();
+        params.shader_type = ShaderType::TextureCopyUnclipped;
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;

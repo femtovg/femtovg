@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::ErrorKind;
+use crate::{renderer::ShaderType, ErrorKind};
 
 use glow::HasContext;
 
@@ -116,8 +116,8 @@ impl Program {
         }
     }
 
-    fn uniform_location(&self, name: &str) -> Result<<glow::Context as glow::HasContext>::UniformLocation, ErrorKind> {
-        unsafe { Ok(self.context.get_uniform_location(self.id, name).unwrap()) }
+    fn uniform_location(&self, name: &str) -> Option<<glow::Context as glow::HasContext>::UniformLocation> {
+        unsafe { self.context.get_uniform_location(self.id, name) }
     }
 }
 
@@ -133,26 +133,37 @@ pub struct MainProgram {
     context: Rc<glow::Context>,
     program: Program,
     loc_viewsize: <glow::Context as glow::HasContext>::UniformLocation,
-    loc_tex: <glow::Context as glow::HasContext>::UniformLocation,
-    loc_glyphtex: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_tex: Option<<glow::Context as glow::HasContext>::UniformLocation>,
+    loc_glyphtex: Option<<glow::Context as glow::HasContext>::UniformLocation>,
     loc_frag: <glow::Context as glow::HasContext>::UniformLocation,
 }
 
 impl MainProgram {
-    pub(crate) fn new(context: &Rc<glow::Context>, antialias: bool) -> Result<Self, ErrorKind> {
+    pub(crate) fn new(
+        context: &Rc<glow::Context>,
+        antialias: bool,
+        shader_type: ShaderType,
+    ) -> Result<Self, ErrorKind> {
         let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
+        let select_shader_type = format!("#define SELECT_SHADER {}", shader_type.to_u8());
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
-        let frag_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-fs.glsl"));
+        let frag_shader_src = format!(
+            "{}\n{}\n{}\n{}",
+            GLSL_VERSION,
+            shader_defs,
+            select_shader_type,
+            include_str!("main-fs.glsl")
+        );
 
         let vert_shader = Shader::new(context, &vert_shader_src, glow::VERTEX_SHADER)?;
         let frag_shader = Shader::new(context, &frag_shader_src, glow::FRAGMENT_SHADER)?;
 
         let program = Program::new(context, &[vert_shader, frag_shader], &["vertex", "tcoord"])?;
 
-        let loc_viewsize = program.uniform_location("viewSize")?;
-        let loc_tex = program.uniform_location("tex")?;
-        let loc_glyphtex = program.uniform_location("glyphtex")?;
-        let loc_frag = program.uniform_location("frag")?;
+        let loc_viewsize = program.uniform_location("viewSize").unwrap();
+        let loc_tex = program.uniform_location("tex");
+        let loc_glyphtex = program.uniform_location("glyphtex");
+        let loc_frag = program.uniform_location("frag").unwrap();
 
         Ok(Self {
             context: context.clone(),
@@ -166,13 +177,13 @@ impl MainProgram {
 
     pub(crate) fn set_tex(&self, tex: i32) {
         unsafe {
-            self.context.uniform_1_i32(Some(&self.loc_tex), tex);
+            self.context.uniform_1_i32(self.loc_tex.as_ref(), tex);
         }
     }
 
     pub(crate) fn set_glyphtex(&self, tex: i32) {
         unsafe {
-            self.context.uniform_1_i32(Some(&self.loc_glyphtex), tex);
+            self.context.uniform_1_i32(self.loc_glyphtex.as_ref(), tex);
         }
     }
 
