@@ -39,7 +39,8 @@ pub struct OpenGl {
     is_opengles_2_0: bool,
     view: [f32; 2],
     screen_view: [f32; 2],
-    main_program: MainProgram,
+    main_programs: [MainProgram; 7],
+    current_program: u8,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
@@ -94,7 +95,15 @@ impl OpenGl {
 
         let context = Rc::new(context);
 
-        let main_program = MainProgram::new(&context, antialias)?;
+        let main_programs = [
+            MainProgram::new(&context, antialias, ShaderType::FillGradient)?,
+            MainProgram::new(&context, antialias, ShaderType::FillImage)?,
+            MainProgram::new(&context, antialias, ShaderType::Stencil)?,
+            MainProgram::new(&context, antialias, ShaderType::FillImageGradient)?,
+            MainProgram::new(&context, antialias, ShaderType::FilterImage)?,
+            MainProgram::new(&context, antialias, ShaderType::FillColor)?,
+            MainProgram::new(&context, antialias, ShaderType::TextureCopyUnclipped)?,
+        ];
 
         let mut opengl = OpenGl {
             debug,
@@ -102,7 +111,8 @@ impl OpenGl {
             is_opengles_2_0: false,
             view: [0.0, 0.0],
             screen_view: [0.0, 0.0],
-            main_program,
+            main_programs,
+            current_program: 0,
             vert_arr: Default::default(),
             vert_buff: Default::default(),
             framebuffers: Default::default(),
@@ -175,7 +185,7 @@ impl OpenGl {
         }
     }
 
-    fn convex_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
+    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
@@ -196,7 +206,13 @@ impl OpenGl {
         self.check_error("convex_fill");
     }
 
-    fn concave_fill(&self, images: &ImageStore<GlTexture>, cmd: &Command, stencil_paint: &Params, fill_paint: &Params) {
+    fn concave_fill(
+        &mut self,
+        images: &ImageStore<GlTexture>,
+        cmd: &Command,
+        stencil_paint: &Params,
+        fill_paint: &Params,
+    ) {
         unsafe {
             self.context.enable(glow::STENCIL_TEST);
             self.context.stencil_mask(0xff);
@@ -272,7 +288,7 @@ impl OpenGl {
         self.check_error("concave_fill");
     }
 
-    fn stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
+    fn stroke(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
@@ -287,7 +303,7 @@ impl OpenGl {
         self.check_error("stroke");
     }
 
-    fn stencil_stroke(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint1: &Params, paint2: &Params) {
+    fn stencil_stroke(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint1: &Params, paint2: &Params) {
         unsafe {
             self.context.enable(glow::STENCIL_TEST);
             self.context.stencil_mask(0xff);
@@ -349,7 +365,7 @@ impl OpenGl {
         self.check_error("stencil_stroke");
     }
 
-    fn triangles(&self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
+    fn triangles(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
         self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -362,14 +378,15 @@ impl OpenGl {
     }
 
     fn set_uniforms(
-        &self,
+        &mut self,
         images: &ImageStore<GlTexture>,
         paint: &Params,
         image_tex: Option<ImageId>,
         glyph_tex: GlyphTexture,
     ) {
+        self.select_main_program(paint.shader_type);
         let arr = UniformArray::from(paint);
-        self.main_program.set_config(arr.as_slice());
+        self.main_program().set_config(arr.as_slice());
         self.check_error("set_uniforms uniforms");
 
         let tex = image_tex.and_then(|id| images.get(id)).map(|tex| tex.id());
@@ -495,7 +512,7 @@ impl OpenGl {
             1.,
         );
         let mut blur_params = Params::new(images, &image_paint, &Scissor::default(), 0., 0., 0.);
-        blur_params.shader_type = ShaderType::FilterImage.to_f32();
+        blur_params.shader_type = ShaderType::FilterImage;
 
         let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
         let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
@@ -513,7 +530,7 @@ impl OpenGl {
 
         let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
         self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
-        self.main_program.set_view(self.view);
+        self.main_program().set_view(self.view);
 
         self.clear_rect(
             0,
@@ -526,7 +543,7 @@ impl OpenGl {
         self.triangles(images, &cmd, &blur_params);
 
         self.set_target(images, RenderTarget::Image(target_image));
-        self.main_program.set_view(self.view);
+        self.main_program().set_view(self.view);
 
         self.clear_rect(
             0,
@@ -546,7 +563,33 @@ impl OpenGl {
 
         // restore previous render target and view
         self.set_target(images, original_render_target);
-        self.main_program.set_view(self.view);
+        self.main_program().set_view(self.view);
+    }
+
+    fn main_program(&self) -> &MainProgram {
+        &self.main_programs[self.current_program as usize]
+    }
+
+    fn select_main_program(&mut self, shader_type: ShaderType) -> &MainProgram {
+        if shader_type.to_u8() != self.current_program {
+            unsafe {
+                self.context.active_texture(glow::TEXTURE0);
+                self.context.bind_texture(glow::TEXTURE_2D, None);
+                self.context.active_texture(glow::TEXTURE0 + 1);
+                self.context.bind_texture(glow::TEXTURE_2D, None);
+            }
+
+            self.main_programs[self.current_program as usize].unbind();
+            self.current_program = shader_type.to_u8();
+
+            let program = &self.main_programs[self.current_program as usize];
+            program.bind();
+            // Bind the two uniform samplers to texture units
+            program.set_tex(0);
+            program.set_glyphtex(1);
+            program.set_view(self.view);
+        }
+        &self.main_programs[self.current_program as usize]
     }
 }
 
@@ -566,7 +609,8 @@ impl Renderer for OpenGl {
     }
 
     fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
-        self.main_program.bind();
+        self.current_program = 0;
+        self.main_programs[self.current_program as usize].bind();
 
         unsafe {
             self.context.enable(glow::CULL_FACE);
@@ -608,10 +652,6 @@ impl Renderer for OpenGl {
             );
         }
 
-        // Bind the two uniform samplers to texture units
-        self.main_program.set_tex(0);
-        self.main_program.set_glyphtex(1);
-
         self.check_error("render prepare");
 
         for cmd in commands.into_iter() {
@@ -640,7 +680,7 @@ impl Renderer for OpenGl {
                 }
                 CommandType::SetRenderTarget(target) => {
                     self.set_target(images, target);
-                    self.main_program.set_view(self.view);
+                    self.main_program().set_view(self.view);
                 }
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
@@ -658,7 +698,7 @@ impl Renderer for OpenGl {
             self.context.bind_texture(glow::TEXTURE_2D, None);
         }
 
-        self.main_program.unbind();
+        self.main_program().unbind();
 
         self.check_error("render done");
     }

@@ -58,15 +58,15 @@ void main(void) {
 
 #ifdef EDGE_AA
     float strokeAlpha = 1.0;
-    if (shaderType != 6) {
-        strokeAlpha = strokeMask();
-        if (strokeAlpha < strokeThr) discard;
-    }
+#if SELECT_SHADER != 6
+    strokeAlpha = strokeMask();
+    if (strokeAlpha < strokeThr) discard;
+#endif
 #else
     float strokeAlpha = 1.0;
 #endif
 
-    if (shaderType == 0) {
+#if SELECT_SHADER == 0
         // Gradient
 
         // Calculate gradient color using box gradient
@@ -76,7 +76,8 @@ void main(void) {
         vec4 color = mix(innerCol,outerCol,d);
 
         result = color;
-    } else if (shaderType == 3) {
+#endif
+#if SELECT_SHADER == 3
         // Image-based Gradient; sample a texture using the gradient position.
 
         // Calculate gradient color using box gradient
@@ -86,7 +87,8 @@ void main(void) {
         vec4 color = texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
 
         result = color;
-    } else if (shaderType == 1) {
+#endif
+#if SELECT_SHADER == 1
         // Image
 
         // Calculate color from texture
@@ -101,10 +103,12 @@ void main(void) {
         color *= innerCol;
 
         result = color;
-    } else if (shaderType == 5) {
+#endif
+#if SELECT_SHADER == 5
         // Plain color fill
         result = innerCol;
-    } else if (shaderType == 6) {
+#endif
+#if SELECT_SHADER == 6
         // Plain texture copy, unclipped
         vec4 color = texture2D(tex, ftcoord);
         if (texType == 1) color = vec4(color.xyz * color.w, color.w);
@@ -112,11 +116,13 @@ void main(void) {
         // Apply color tint and alpha.
         color *= innerCol;
         gl_FragColor = color;
-        return;        
-    } else if (shaderType == 2) {
+        return;
+#endif
+#if SELECT_SHADER == 2
         // Stencil fill
         result = vec4(1,1,1,1);
-    } else if (shaderType == 4) {
+#endif
+#if SELECT_SHADER == 4
         // Filter Image
 
         float sampleCount = ceil(1.5 * imageBlurFilterSigma);
@@ -133,10 +139,10 @@ void main(void) {
             if (i >= sampleCount) {
                 break;
             }
-            color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
-            color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;         
+            color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
+            color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
             coefficient_sum += 2.0 * gaussian_coeff.x;
-            
+
             // Compute the coefficients incrementally:
             // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-40-incremental-computation-gaussian
             gaussian_coeff.xy *= gaussian_coeff.yz;
@@ -148,7 +154,7 @@ void main(void) {
         if (texType == 2) color = vec4(color.x);
 
         result = color;
-    }
+#endif
 
     float scissor = scissorMask(fpos);
 
@@ -165,9 +171,12 @@ void main(void) {
 
         mask *= scissor;
         result *= mask;
-    } else if (shaderType != 2 && shaderType != 4) { // Not stencil fill
+    } else {
+#if SELECT_SHADER != 2 && SELECT_SHADER != 4        
+        // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;
+#endif
     }
 
     gl_FragColor = result;
