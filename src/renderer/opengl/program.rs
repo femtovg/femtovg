@@ -143,9 +143,18 @@ impl MainProgram {
         context: &Rc<glow::Context>,
         antialias: bool,
         shader_type: ShaderType,
+        with_glyph_texture: bool,
     ) -> Result<Self, ErrorKind> {
         let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
-        let select_shader_type = format!("#define SELECT_SHADER {}", shader_type.to_u8());
+        let select_shader_type = format!(
+            "#define SELECT_SHADER {}\n{}",
+            shader_type.to_u8(),
+            if with_glyph_texture {
+                "#define ENABLE_GLYPH_TEXTURE"
+            } else {
+                ""
+            }
+        );
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
         let frag_shader_src = format!(
             "{}\n{}\n{}\n{}",
