@@ -53,6 +53,78 @@ float strokeMask() {
 }
 #endif
 
+vec4 renderGradient() {
+    // Calculate gradient color using box gradient
+    vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+
+    float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
+    return mix(innerCol,outerCol,d);
+}
+
+// Image-based Gradient; sample a texture using the gradient position.
+vec4 renderImageGradient() {
+    // Calculate gradient color using box gradient
+    vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+
+    float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
+    return texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
+}
+
+vec4 renderImage() {
+    // Calculate color from texture
+    vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
+
+    vec4 color = texture2D(tex, pt);
+
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (texType == 2) color = vec4(color.x);
+
+    // Apply color tint and alpha.
+    color *= innerCol;
+    return color;
+}
+
+vec4 renderPlainTextureCopy() {
+    vec4 color = texture2D(tex, ftcoord);
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (texType == 2) color = vec4(color.x);
+    // Apply color tint and alpha.
+    color *= innerCol;
+    return color;
+}
+
+vec4 renderFilteredImage() {
+    float sampleCount = ceil(1.5 * imageBlurFilterSigma);
+
+    vec3 gaussian_coeff = imageBlurFilterCoeff;
+
+    vec4 color_sum = texture2D(tex, fpos.xy / extent) * gaussian_coeff.x;
+    float coefficient_sum = gaussian_coeff.x;
+    gaussian_coeff.xy *= gaussian_coeff.yz;
+
+    for (float i = 1.0; i <= 12.0; i += 1.) {
+        // Work around GLES 2.0 limitation of only allowing constant loop indices
+        // by breaking here. Sigma has an upper bound of 8, imposed on the Rust side.
+        if (i >= sampleCount) {
+            break;
+        }
+        color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
+        color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
+        coefficient_sum += 2.0 * gaussian_coeff.x;
+
+        // Compute the coefficients incrementally:
+        // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-40-incremental-computation-gaussian
+        gaussian_coeff.xy *= gaussian_coeff.yz;
+    }
+
+    vec4 color = color_sum / coefficient_sum;
+
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (texType == 2) color = vec4(color.x);
+
+    return color;
+}
+
 void main(void) {
     vec4 result;
 
@@ -67,93 +139,33 @@ void main(void) {
 #endif
 
 #if SELECT_SHADER == 0
-        // Gradient
-
-        // Calculate gradient color using box gradient
-        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
-
-        float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-        vec4 color = mix(innerCol,outerCol,d);
-
-        result = color;
+    // Gradient
+    result = renderGradient();
 #endif
 #if SELECT_SHADER == 3
-        // Image-based Gradient; sample a texture using the gradient position.
-
-        // Calculate gradient color using box gradient
-        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
-
-        float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-        vec4 color = texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
-
-        result = color;
+    // Image-based Gradient; sample a texture using the gradient position.
+    result = renderImageGradient();
 #endif
 #if SELECT_SHADER == 1
-        // Image
-
-        // Calculate color from texture
-        vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
-
-        vec4 color = texture2D(tex, pt);
-
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
-
-        // Apply color tint and alpha.
-        color *= innerCol;
-
-        result = color;
+    // Image
+    result = renderImage();
 #endif
 #if SELECT_SHADER == 5
-        // Plain color fill
-        result = innerCol;
+    // Plain color fill
+    result = innerCol;
 #endif
 #if SELECT_SHADER == 6
-        // Plain texture copy, unclipped
-        vec4 color = texture2D(tex, ftcoord);
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
-        // Apply color tint and alpha.
-        color *= innerCol;
-        gl_FragColor = color;
-        return;
+    // Plain texture copy, unclipped
+    gl_FragColor = renderPlainTextureCopy();
+    return;
 #endif
 #if SELECT_SHADER == 2
-        // Stencil fill
-        result = vec4(1,1,1,1);
+    // Stencil fill
+    result = vec4(1,1,1,1);
 #endif
 #if SELECT_SHADER == 4
-        // Filter Image
-
-        float sampleCount = ceil(1.5 * imageBlurFilterSigma);
-
-        vec3 gaussian_coeff = imageBlurFilterCoeff;
-
-        vec4 color_sum = texture2D(tex, fpos.xy / extent) * gaussian_coeff.x;
-        float coefficient_sum = gaussian_coeff.x;
-        gaussian_coeff.xy *= gaussian_coeff.yz;
-
-        for (float i = 1.0; i <= 12.0; i += 1.) {
-            // Work around GLES 2.0 limitation of only allowing constant loop indices
-            // by breaking here. Sigma has an upper bound of 8, imposed on the Rust side.
-            if (i >= sampleCount) {
-                break;
-            }
-            color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
-            color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
-            coefficient_sum += 2.0 * gaussian_coeff.x;
-
-            // Compute the coefficients incrementally:
-            // https://developer.nvidia.com/gpugems/gpugems3/part-vi-gpu-computing/chapter-40-incremental-computation-gaussian
-            gaussian_coeff.xy *= gaussian_coeff.yz;
-        }
-
-        vec4 color = color_sum / coefficient_sum;
-
-        if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-        if (texType == 2) color = vec4(color.x);
-
-        result = color;
+    // Filter Image
+    result = renderFilteredImage();
 #endif
 
     float scissor = scissorMask(fpos);
