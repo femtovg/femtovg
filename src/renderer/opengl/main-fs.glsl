@@ -170,26 +170,26 @@ void main(void) {
 
     float scissor = scissorMask(fpos);
 
-    if (glyphTextureType > 0) {
-        // Textured tris
-        vec4 mask = texture2D(glyphtex, ftcoord);
+#ifdef ENABLE_GLYPH_TEXTURE
+    // Textured tris
+    vec4 mask = texture2D(glyphtex, ftcoord);
 
-        if (glyphTextureType == 1) {
-            mask = vec4(mask.x);
-        } else {
-            result = vec4(1, 1, 1, 1);
-            mask = vec4(mask.xyz * mask.w, mask.w);
-        }
-
-        mask *= scissor;
-        result *= mask;
+    if (glyphTextureType == 1) {
+        mask = vec4(mask.x);
     } else {
+        result = vec4(1, 1, 1, 1);
+        mask = vec4(mask.xyz * mask.w, mask.w);
+    }
+
+    mask *= scissor;
+    result *= mask;
+#else
 #if SELECT_SHADER != 2 && SELECT_SHADER != 4        
         // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;
 #endif
-    }
+#endif
 
     gl_FragColor = result;
 }

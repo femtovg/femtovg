@@ -105,7 +105,7 @@ impl From<&Params> for UniformArray {
         arr.set_stroke_thr(params.stroke_thr);
         arr.set_shader_type(params.shader_type.to_f32());
         arr.set_tex_type(params.tex_type);
-        arr.set_glyph_texture_type(params.glyph_texture_type);
+        arr.set_glyph_texture_type(params.glyph_texture_type as f32);
         arr.set_image_blur_filter_direction(params.image_blur_filter_direction);
         arr.set_image_blur_filter_sigma(params.image_blur_filter_sigma);
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);

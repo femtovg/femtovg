@@ -20,7 +20,7 @@ pub struct Params {
     pub(crate) stroke_thr: f32,
     pub(crate) tex_type: f32,
     pub(crate) shader_type: ShaderType,
-    pub(crate) glyph_texture_type: f32, // 0 -> no glyph rendering, 1 -> alpha mask, 2 -> color texture
+    pub(crate) glyph_texture_type: u8, // 0 -> no glyph rendering, 1 -> alpha mask, 2 -> color texture
     pub(crate) image_blur_filter_direction: [f32; 2],
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
@@ -64,9 +64,9 @@ impl Params {
         params.stroke_thr = stroke_thr;
 
         params.glyph_texture_type = match paint.glyph_texture() {
-            GlyphTexture::None => 0.0,
-            GlyphTexture::AlphaMask(_) => 1.0,
-            GlyphTexture::ColorTexture(_) => 2.0,
+            GlyphTexture::None => 0,
+            GlyphTexture::AlphaMask(_) => 1,
+            GlyphTexture::ColorTexture(_) => 2,
         };
 
         let inv_transform;

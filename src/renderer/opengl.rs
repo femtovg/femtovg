@@ -39,7 +39,8 @@ pub struct OpenGl {
     is_opengles_2_0: bool,
     view: [f32; 2],
     screen_view: [f32; 2],
-    main_programs: [MainProgram; 7],
+    // All types of the vertex/fragment shader, indexed by shader_type * 2 + has_glyph_texture
+    main_programs: [Option<MainProgram>; 7 * 2],
     current_program: u8,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
@@ -96,13 +97,35 @@ impl OpenGl {
         let context = Rc::new(context);
 
         let main_programs = [
-            MainProgram::new(&context, antialias, ShaderType::FillGradient)?,
-            MainProgram::new(&context, antialias, ShaderType::FillImage)?,
-            MainProgram::new(&context, antialias, ShaderType::Stencil)?,
-            MainProgram::new(&context, antialias, ShaderType::FillImageGradient)?,
-            MainProgram::new(&context, antialias, ShaderType::FilterImage)?,
-            MainProgram::new(&context, antialias, ShaderType::FillColor)?,
-            MainProgram::new(&context, antialias, ShaderType::TextureCopyUnclipped)?,
+            Some(MainProgram::new(&context, antialias, ShaderType::FillGradient, false)?),
+            Some(MainProgram::new(&context, antialias, ShaderType::FillGradient, true)?),
+            Some(MainProgram::new(&context, antialias, ShaderType::FillImage, false)?),
+            Some(MainProgram::new(&context, antialias, ShaderType::FillImage, true)?),
+            Some(MainProgram::new(&context, antialias, ShaderType::Stencil, false)?),
+            None, // No stencil fill with glyph texture
+            Some(MainProgram::new(
+                &context,
+                antialias,
+                ShaderType::FillImageGradient,
+                false,
+            )?),
+            Some(MainProgram::new(
+                &context,
+                antialias,
+                ShaderType::FillImageGradient,
+                true,
+            )?),
+            Some(MainProgram::new(&context, antialias, ShaderType::FilterImage, false)?),
+            None, // Image filter is unrelated to glyph rendering
+            Some(MainProgram::new(&context, antialias, ShaderType::FillColor, false)?),
+            Some(MainProgram::new(&context, antialias, ShaderType::FillColor, true)?),
+            Some(MainProgram::new(
+                &context,
+                antialias,
+                ShaderType::TextureCopyUnclipped,
+                false,
+            )?),
+            None, // Texture blitting is unrelated to glyph rendering
         ];
 
         let mut opengl = OpenGl {
@@ -384,7 +407,7 @@ impl OpenGl {
         image_tex: Option<ImageId>,
         glyph_tex: GlyphTexture,
     ) {
-        self.select_main_program(paint.shader_type);
+        self.select_main_program(paint);
         let arr = UniformArray::from(paint);
         self.main_program().set_config(arr.as_slice());
         self.check_error("set_uniforms uniforms");
@@ -568,10 +591,13 @@ impl OpenGl {
 
     fn main_program(&self) -> &MainProgram {
         &self.main_programs[self.current_program as usize]
+            .as_ref()
+            .expect("internal error: invalid shader program selected for given paint")
     }
 
-    fn select_main_program(&mut self, shader_type: ShaderType) -> &MainProgram {
-        if shader_type.to_u8() != self.current_program {
+    fn select_main_program(&mut self, params: &Params) {
+        let program_index = params.shader_type.to_u8() * 2 + if params.glyph_texture_type != 0 { 1 } else { 0 };
+        if program_index != self.current_program {
             unsafe {
                 self.context.active_texture(glow::TEXTURE0);
                 self.context.bind_texture(glow::TEXTURE_2D, None);
@@ -579,17 +605,16 @@ impl OpenGl {
                 self.context.bind_texture(glow::TEXTURE_2D, None);
             }
 
-            self.main_programs[self.current_program as usize].unbind();
-            self.current_program = shader_type.to_u8();
+            self.main_program().unbind();
+            self.current_program = program_index;
 
-            let program = &self.main_programs[self.current_program as usize];
+            let program = self.main_program();
             program.bind();
             // Bind the two uniform samplers to texture units
             program.set_tex(0);
             program.set_glyphtex(1);
             program.set_view(self.view);
         }
-        &self.main_programs[self.current_program as usize]
     }
 }
 
@@ -610,7 +635,7 @@ impl Renderer for OpenGl {
 
     fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
         self.current_program = 0;
-        self.main_programs[self.current_program as usize].bind();
+        self.main_program().bind();
 
         unsafe {
             self.context.enable(glow::CULL_FACE);
