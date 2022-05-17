@@ -30,6 +30,14 @@ uniform vec2 viewSize;
 varying vec2 ftcoord;
 varying vec2 fpos;
 
+ #define SHADER_TYPE_FillGradient 0
+ #define SHADER_TYPE_FillImage 1
+ #define SHADER_TYPE_Stencil 2
+ #define SHADER_TYPE_FillImageGradient 3
+ #define SHADER_TYPE_FilterImage 4
+ #define SHADER_TYPE_FillColor 5
+ #define SHADER_TYPE_TextureCopyUnclipped 6
+
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
     vec2 d = abs(pt) - ext2;
@@ -138,28 +146,28 @@ void main(void) {
     float strokeAlpha = 1.0;
 #endif
 
-#if SELECT_SHADER == 0
+#if SELECT_SHADER == SHADER_TYPE_FillGradient
     // Gradient
     result = renderGradient();
 #endif
-#if SELECT_SHADER == 3
+#if SELECT_SHADER == SHADER_TYPE_FillImageGradient
     // Image-based Gradient; sample a texture using the gradient position.
     result = renderImageGradient();
 #endif
-#if SELECT_SHADER == 1
+#if SELECT_SHADER == SHADER_TYPE_FillImage
     // Image
     result = renderImage();
 #endif
-#if SELECT_SHADER == 5
+#if SELECT_SHADER == SHADER_TYPE_FillColor
     // Plain color fill
     result = innerCol;
 #endif
-#if SELECT_SHADER == 6
+#if SELECT_SHADER == SHADER_TYPE_TextureCopyUnclipped
     // Plain texture copy, unclipped
     gl_FragColor = renderPlainTextureCopy();
     return;
 #endif
-#if SELECT_SHADER == 2
+#if SELECT_SHADER == SHADER_TYPE_Stencil
     // Stencil fill
     result = vec4(1,1,1,1);
 #endif
@@ -184,7 +192,7 @@ void main(void) {
     mask *= scissor;
     result *= mask;
 #else
-#if SELECT_SHADER != 2 && SELECT_SHADER != 4        
+#if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage
         // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;
