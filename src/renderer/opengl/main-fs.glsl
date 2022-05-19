@@ -149,31 +149,27 @@ void main(void) {
 #if SELECT_SHADER == SHADER_TYPE_FillGradient
     // Gradient
     result = renderGradient();
-#endif
-#if SELECT_SHADER == SHADER_TYPE_FillImageGradient
+#elif SELECT_SHADER == SHADER_TYPE_FillImageGradient
     // Image-based Gradient; sample a texture using the gradient position.
     result = renderImageGradient();
-#endif
-#if SELECT_SHADER == SHADER_TYPE_FillImage
+#elif SELECT_SHADER == SHADER_TYPE_FillImage
     // Image
     result = renderImage();
-#endif
-#if SELECT_SHADER == SHADER_TYPE_FillColor
+#elif SELECT_SHADER == SHADER_TYPE_FillColor
     // Plain color fill
     result = innerCol;
-#endif
-#if SELECT_SHADER == SHADER_TYPE_TextureCopyUnclipped
+#elif SELECT_SHADER == SHADER_TYPE_TextureCopyUnclipped
     // Plain texture copy, unclipped
     gl_FragColor = renderPlainTextureCopy();
     return;
-#endif
-#if SELECT_SHADER == SHADER_TYPE_Stencil
+#elif SELECT_SHADER == SHADER_TYPE_Stencil
     // Stencil fill
     result = vec4(1,1,1,1);
-#endif
-#if SELECT_SHADER == 4
+#elif SELECT_SHADER == 4
     // Filter Image
     result = renderFilteredImage();
+#else
+#error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
 
     float scissor = scissorMask(fpos);
