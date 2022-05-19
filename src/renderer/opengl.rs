@@ -623,7 +623,7 @@ impl OpenGl {
         } else {
             &self.main_programs_without_glyph_texture
         };
-        &programs[self.current_program as usize]
+        programs[self.current_program as usize]
             .as_ref()
             .expect("internal error: invalid shader program selected for given paint")
     }
