@@ -165,7 +165,7 @@ void main(void) {
 #elif SELECT_SHADER == SHADER_TYPE_Stencil
     // Stencil fill
     result = vec4(1,1,1,1);
-#elif SELECT_SHADER == 4
+#elif SELECT_SHADER == SHADER_TYPE_FilterImage
     // Filter Image
     result = renderFilteredImage();
 #else
