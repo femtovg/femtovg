@@ -29,7 +29,7 @@ impl PartialOrd for GradientStop {
     }
 }
 
-pub(crate) type MultiStopGradient = [GradientStop; 16];
+pub(crate) type MultiStopGradient = [GradientStop; 24];
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
@@ -82,8 +82,8 @@ impl GradientColors {
             // Actual multistop gradient. We copy out the stops and then use a stop with a
             // position > 1.0 as a sentinel. GradientStore ignores stop positions > 1.0
             // when synthesizing the gradient texture.
-            let mut out_stops: [GradientStop; 16] = Default::default();
-            for i in 0..16 {
+            let mut out_stops: [GradientStop; 24] = Default::default();
+            for i in 0..24 {
                 if i < stops.len() {
                     out_stops[i] = GradientStop(stops[i].0, stops[i].1);
                 } else {
@@ -324,6 +324,8 @@ impl Paint {
     /// Creates and returns a linear gradient paint with two or more stops.
     ///
     /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    /// If a gradient has more than 24 stops, then only the first 24 stops will be used.
+    ///
     /// # Example
     /// ```
     /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
@@ -455,7 +457,7 @@ impl Paint {
     ///
     /// Parameters (cx,cy) specify the center, in_radius and out_radius specify the inner and outer radius of the gradient,
     /// colors specifies a list of color stops with offsets. The first offset should be 0.0 and the last offset should be 1.0.
-    /// If a gradient has more than 16 stops, then only the first 16 stops will be used.
+    /// If a gradient has more than 24 stops, then only the first 24 stops will be used.
     ///
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
     ///
