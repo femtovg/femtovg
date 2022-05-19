@@ -135,7 +135,7 @@ pub struct MainProgram {
     loc_viewsize: <glow::Context as glow::HasContext>::UniformLocation,
     loc_tex: Option<<glow::Context as glow::HasContext>::UniformLocation>,
     loc_glyphtex: Option<<glow::Context as glow::HasContext>::UniformLocation>,
-    loc_frag: <glow::Context as glow::HasContext>::UniformLocation,
+    loc_frag: Option<<glow::Context as glow::HasContext>::UniformLocation>,
 }
 
 impl MainProgram {
@@ -172,7 +172,7 @@ impl MainProgram {
         let loc_viewsize = program.uniform_location("viewSize").unwrap();
         let loc_tex = program.uniform_location("tex");
         let loc_glyphtex = program.uniform_location("glyphtex");
-        let loc_frag = program.uniform_location("frag").unwrap();
+        let loc_frag = program.uniform_location("frag");
 
         Ok(Self {
             context: context.clone(),
@@ -204,7 +204,7 @@ impl MainProgram {
 
     pub(crate) fn set_config(&self, config: &[f32]) {
         unsafe {
-            self.context.uniform_4_f32_slice(Some(&self.loc_frag), config);
+            self.context.uniform_4_f32_slice(self.loc_frag.as_ref(), config);
         }
     }
 
