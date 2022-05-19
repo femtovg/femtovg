@@ -39,9 +39,12 @@ pub struct OpenGl {
     is_opengles_2_0: bool,
     view: [f32; 2],
     screen_view: [f32; 2],
-    // All types of the vertex/fragment shader, indexed by shader_type * 2 + has_glyph_texture
-    main_programs: [Option<MainProgram>; 7 * 2],
+    // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
+    main_programs_with_glyph_texture: [Option<MainProgram>; 7],
+    // Same shader programs but with has_glyph_texture being false
+    main_programs_without_glyph_texture: [Option<MainProgram>; 7],
     current_program: u8,
+    current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
@@ -96,37 +99,60 @@ impl OpenGl {
 
         let context = Rc::new(context);
 
-        let main_programs = [
-            Some(MainProgram::new(&context, antialias, ShaderType::FillGradient, false)?),
-            Some(MainProgram::new(&context, antialias, ShaderType::FillGradient, true)?),
-            Some(MainProgram::new(&context, antialias, ShaderType::FillImage, false)?),
-            Some(MainProgram::new(&context, antialias, ShaderType::FillImage, true)?),
-            Some(MainProgram::new(&context, antialias, ShaderType::Stencil, false)?),
-            None, // No stencil fill with glyph texture
-            Some(MainProgram::new(
-                &context,
-                antialias,
-                ShaderType::FillImageGradient,
-                false,
-            )?),
-            Some(MainProgram::new(
-                &context,
-                antialias,
-                ShaderType::FillImageGradient,
-                true,
-            )?),
-            Some(MainProgram::new(&context, antialias, ShaderType::FilterImage, false)?),
-            None, // Image filter is unrelated to glyph rendering
-            Some(MainProgram::new(&context, antialias, ShaderType::FillColor, false)?),
-            Some(MainProgram::new(&context, antialias, ShaderType::FillColor, true)?),
-            Some(MainProgram::new(
-                &context,
-                antialias,
-                ShaderType::TextureCopyUnclipped,
-                false,
-            )?),
-            None, // Texture blitting is unrelated to glyph rendering
-        ];
+        let generate_shader_program_variants = |with_glyph_texture| -> Result<_, ErrorKind> {
+            Ok([
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillGradient,
+                    with_glyph_texture,
+                )?),
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillImage,
+                    with_glyph_texture,
+                )?),
+                if with_glyph_texture {
+                    // No stencil fill with glyph texture
+                    None
+                } else {
+                    Some(MainProgram::new(&context, antialias, ShaderType::Stencil, false)?)
+                },
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillImageGradient,
+                    with_glyph_texture,
+                )?),
+                if with_glyph_texture {
+                    // Image filter is unrelated to glyph rendering
+                    None
+                } else {
+                    Some(MainProgram::new(&context, antialias, ShaderType::FilterImage, false)?)
+                },
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillColor,
+                    with_glyph_texture,
+                )?),
+                if with_glyph_texture {
+                    // Texture blitting is unrelated to glyph rendering
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::TextureCopyUnclipped,
+                        false,
+                    )?)
+                },
+            ])
+        };
+
+        let main_programs_with_glyph_texture = generate_shader_program_variants(true)?;
+        let main_programs_without_glyph_texture = generate_shader_program_variants(false)?;
 
         let mut opengl = OpenGl {
             debug,
@@ -134,8 +160,10 @@ impl OpenGl {
             is_opengles_2_0: false,
             view: [0.0, 0.0],
             screen_view: [0.0, 0.0],
-            main_programs,
+            main_programs_with_glyph_texture,
+            main_programs_without_glyph_texture,
             current_program: 0,
+            current_program_needs_glyph_texture: true,
             vert_arr: Default::default(),
             vert_buff: Default::default(),
             framebuffers: Default::default(),
@@ -590,14 +618,21 @@ impl OpenGl {
     }
 
     fn main_program(&self) -> &MainProgram {
-        &self.main_programs[self.current_program as usize]
+        let programs = if self.current_program_needs_glyph_texture {
+            &self.main_programs_with_glyph_texture
+        } else {
+            &self.main_programs_without_glyph_texture
+        };
+        &programs[self.current_program as usize]
             .as_ref()
             .expect("internal error: invalid shader program selected for given paint")
     }
 
     fn select_main_program(&mut self, params: &Params) {
-        let program_index = params.shader_type.to_u8() * 2 + if params.glyph_texture_type != 0 { 1 } else { 0 };
-        if program_index != self.current_program {
+        let program_index = params.shader_type.to_u8();
+        if program_index != self.current_program
+            || params.uses_glyph_texture() != self.current_program_needs_glyph_texture
+        {
             unsafe {
                 self.context.active_texture(glow::TEXTURE0);
                 self.context.bind_texture(glow::TEXTURE_2D, None);
@@ -607,6 +642,7 @@ impl OpenGl {
 
             self.main_program().unbind();
             self.current_program = program_index;
+            self.current_program_needs_glyph_texture = params.uses_glyph_texture();
 
             let program = self.main_program();
             program.bind();
