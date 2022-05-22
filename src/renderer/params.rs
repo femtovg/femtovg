@@ -74,7 +74,7 @@ impl Params {
 
         let inv_transform;
 
-        match paint_flavor {
+        match &paint_flavor {
             PaintFlavor::Color(color) => {
                 let color = color.premultiplied().to_array();
                 params.inner_col = color;
@@ -90,13 +90,13 @@ impl Params {
                 angle,
                 tint,
             } => {
-                let image_info = match images.info(id) {
+                let image_info = match images.info(*id) {
                     Some(info) => info,
                     None => return params,
                 };
 
-                params.extent[0] = width;
-                params.extent[1] = height;
+                params.extent[0] = *width;
+                params.extent[1] = *height;
 
                 let color = tint;
 
@@ -104,8 +104,8 @@ impl Params {
                 params.outer_col = color.premultiplied().to_array();
 
                 let mut transform = Transform2D::identity();
-                transform.rotate(angle);
-                transform.translate(cx, cy);
+                transform.rotate(*angle);
+                transform.translate(*cx, *cy);
                 transform.multiply(global_transform);
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {
@@ -193,8 +193,8 @@ impl Params {
 
                 params.extent[0] = width * 0.5;
                 params.extent[1] = height * 0.5;
-                params.radius = radius;
-                params.feather = feather;
+                params.radius = *radius;
+                params.feather = *feather;
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
                         params.inner_col = start_color.premultiplied().to_array();
@@ -215,7 +215,7 @@ impl Params {
                 let r = (in_radius + out_radius) * 0.5;
                 let f = out_radius - in_radius;
 
-                let mut transform = Transform2D::new_translation(cx, cy);
+                let mut transform = Transform2D::new_translation(*cx, *cy);
                 transform.multiply(global_transform);
                 inv_transform = transform.inversed();
 
