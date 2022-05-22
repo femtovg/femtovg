@@ -1,6 +1,8 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
+use std::rc::Rc;
+
 use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
@@ -28,20 +30,61 @@ impl PartialOrd for GradientStop {
     }
 }
 
-pub(crate) type MultiStopGradient = [GradientStop; 24];
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub(crate) struct MultiStopGradient {
+    shared_stops: Rc<[GradientStop]>,
+    tint: f32,
+}
+
+impl MultiStopGradient {
+    pub(crate) fn get(&self, index: usize) -> GradientStop {
+        let mut stop = self
+            .shared_stops
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| GradientStop(2.0, Color::black()));
+
+        stop.1.a *= self.tint;
+        stop
+    }
+
+    pub(crate) fn pairs(&self) -> impl Iterator<Item = [GradientStop; 2]> + '_ {
+        self.shared_stops.as_ref().windows(2).map(move |pair| {
+            let mut stops = [pair[0], pair[1]];
+            stops[0].1.a *= self.tint;
+            stops[1].1.a *= self.tint;
+            stops
+        })
+    }
+}
+
+impl Eq for MultiStopGradient {}
+
+impl PartialOrd for MultiStopGradient {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MultiStopGradient {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if (&other.shared_stops, other.tint) < (&self.shared_stops, self.tint) {
+            std::cmp::Ordering::Less
+        } else if (&self.shared_stops, self.tint) < (&other.shared_stops, other.tint) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    }
+}
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum GradientColors {
-    TwoStop {
-        start_color: Color,
-        end_color: Color,
-    },
-    MultiStop {
-        // We support up to 16 stops.
-        stops: MultiStopGradient,
-    },
+    TwoStop { start_color: Color, end_color: Color },
+    MultiStop { stops: MultiStopGradient },
 }
 impl GradientColors {
     fn mul_alpha(&mut self, a: f32) {
@@ -50,10 +93,8 @@ impl GradientColors {
                 start_color.a *= a;
                 end_color.a *= a;
             }
-            GradientColors::MultiStop { stops } => {
-                for stop in stops {
-                    stop.1.a *= a;
-                }
+            GradientColors::MultiStop { stops, .. } => {
+                stops.tint *= a;
             }
         }
     }
@@ -81,15 +122,13 @@ impl GradientColors {
             // Actual multistop gradient. We copy out the stops and then use a stop with a
             // position > 1.0 as a sentinel. GradientStore ignores stop positions > 1.0
             // when synthesizing the gradient texture.
-            let mut out_stops: [GradientStop; 24] = Default::default();
-            for i in 0..24 {
-                if i < stops.len() {
-                    out_stops[i] = GradientStop(stops[i].0, stops[i].1);
-                } else {
-                    out_stops[i] = GradientStop(2.0, Color::black());
-                }
+            let out_stops = stops.iter().map(|(stop, color)| GradientStop(*stop, *color)).collect();
+            GradientColors::MultiStop {
+                stops: MultiStopGradient {
+                    shared_stops: out_stops,
+                    tint: 1.0,
+                },
             }
-            GradientColors::MultiStop { stops: out_stops }
         }
     }
 }
@@ -362,7 +401,6 @@ impl Paint {
     /// Creates and returns a linear gradient paint with two or more stops.
     ///
     /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
-    /// If a gradient has more than 24 stops, then only the first 24 stops will be used.
     ///
     /// # Example
     /// ```
@@ -491,7 +529,6 @@ impl Paint {
     ///
     /// Parameters (cx,cy) specify the center, in_radius and out_radius specify the inner and outer radius of the gradient,
     /// colors specifies a list of color stops with offsets. The first offset should be 0.0 and the last offset should be 1.0.
-    /// If a gradient has more than 24 stops, then only the first 24 stops will be used.
     ///
     /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
     ///

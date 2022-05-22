@@ -926,7 +926,7 @@ where
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
-                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
                 .ok();
         }
 
@@ -1093,7 +1093,7 @@ where
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
-                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
                 .ok();
         }
 
@@ -1430,7 +1430,7 @@ where
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
-                .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
+                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
                 .ok();
         }
 
