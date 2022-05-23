@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.5] - 2022-05-23
+
+### Changed
+
+ - Optimized the OpenGL renderer to perform better on older GPUs by splitting the large fragment shader
+   into smaller programs.
+
 ## [0.3.4] - 2022-04-07
 
 ### Added
@@ -62,3 +69,4 @@ All notable changes to this project will be documented in this file.
 [0.3.2]: https://github.com/femtovg/femtovg/releases/tag/v0.3.2
 [0.3.3]: https://github.com/femtovg/femtovg/releases/tag/v0.3.3
 [0.3.4]: https://github.com/femtovg/femtovg/releases/tag/v0.3.4
+[0.3.5]: https://github.com/femtovg/femtovg/releases/tag/v0.3.5
