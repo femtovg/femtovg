@@ -581,8 +581,6 @@ where
     ) -> Result<ImageId, ErrorKind> {
         let image = ::image::open(filename)?;
 
-        use std::convert::TryFrom;
-
         let src = ImageSource::try_from(&image)?;
 
         self.create_image(src, flags)
@@ -592,8 +590,6 @@ where
     #[cfg(feature = "image-loading")]
     pub fn load_image_mem(&mut self, data: &[u8], flags: ImageFlags) -> Result<ImageId, ErrorKind> {
         let image = ::image::load_from_memory(data)?;
-
-        use std::convert::TryFrom;
 
         let src = ImageSource::try_from(&image)?;
 

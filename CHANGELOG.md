@@ -7,6 +7,10 @@ All notable changes to this project will be documented in this file.
 
  - Fixed erroneously multiply applied global alpha when mixing color glyphs with regular glyphs.
 
+### Changed
+
+ - MRSV was bumped to Rust 1.56, the crate now uses Rust Edition 2021.
+
 ## [0.3.5] - 2022-05-23
 
 ### Changed
