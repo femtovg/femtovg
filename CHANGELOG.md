@@ -3,11 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## [0.3.5] - 2022-05-23
-
 ### Fixed
 
  - Fixed erroneously multiply applied global alpha when mixing color glyphs with regular glyphs.
+
+## [0.3.5] - 2022-05-23
 
 ### Changed
 
