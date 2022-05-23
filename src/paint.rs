@@ -98,37 +98,57 @@ impl GradientColors {
             }
         }
     }
-    fn from_stops(stops: &[(f32, Color)]) -> GradientColors {
-        if stops.is_empty() {
-            // No stops, we use black.
-            GradientColors::TwoStop {
-                start_color: Color::black(),
-                end_color: Color::black(),
+    fn from_stops<Stops>(stops: Stops) -> GradientColors
+    where
+        Stops: IntoIterator<Item = (f32, Color)>,
+    {
+        let mut stops = stops.into_iter();
+        let first_stop = match stops.next() {
+            Some(stop) => stop,
+            None => {
+                // No stops, we use black.
+                return GradientColors::TwoStop {
+                    start_color: Color::black(),
+                    end_color: Color::black(),
+                };
             }
-        } else if stops.len() == 1 {
-            // One stop devolves to a solid color fill (but using the gradient shader variation).
-            GradientColors::TwoStop {
-                start_color: stops[0].1,
-                end_color: stops[0].1,
+        };
+        let second_stop = match stops.next() {
+            Some(stop) => stop,
+            None => {
+                // One stop devolves to a solid color fill (but using the gradient shader variation).
+                return GradientColors::TwoStop {
+                    start_color: first_stop.1,
+                    end_color: first_stop.1,
+                };
             }
-        } else if stops.len() == 2 && stops[0].0 <= 0.0 && stops[1].0 >= 1.0 {
+        };
+
+        let maybe_third_stop = stops.next();
+
+        if maybe_third_stop.is_none() && first_stop.0 <= 0.0 && second_stop.0 >= 1.0 {
             // Two stops takes the classic gradient path, so long as the stop positions are at
             // the extents (if the stop positions are inset then we'll fill to them).
-            GradientColors::TwoStop {
-                start_color: stops[0].1,
-                end_color: stops[1].1,
-            }
-        } else {
-            // Actual multistop gradient. We copy out the stops and then use a stop with a
-            // position > 1.0 as a sentinel. GradientStore ignores stop positions > 1.0
-            // when synthesizing the gradient texture.
-            let out_stops = stops.iter().map(|(stop, color)| GradientStop(*stop, *color)).collect();
-            GradientColors::MultiStop {
-                stops: MultiStopGradient {
-                    shared_stops: out_stops,
-                    tint: 1.0,
-                },
-            }
+            return GradientColors::TwoStop {
+                start_color: first_stop.1,
+                end_color: second_stop.1,
+            };
+        }
+
+        // Actual multistop gradient. We copy out the stops and then use a stop with a
+        // position > 1.0 as a sentinel. GradientStore ignores stop positions > 1.0
+        // when synthesizing the gradient texture.
+        let out_stops = [first_stop, second_stop]
+            .into_iter()
+            .chain(maybe_third_stop)
+            .chain(stops)
+            .map(|(stop, color)| GradientStop(stop, color))
+            .collect();
+        GradientColors::MultiStop {
+            stops: MultiStopGradient {
+                shared_stops: out_stops,
+                tint: 1.0,
+            },
         }
     }
 }
@@ -411,7 +431,7 @@ impl Paint {
     /// let bg = Paint::linear_gradient_stops(
     ///    0.0, 0.0,
     ///    0.0, 100.0,
-    ///    &[
+    ///    [
     ///         (0.0, Color::rgba(255, 255, 255, 16)),
     ///         (0.5, Color::rgba(0, 0, 0, 16)),
     ///         (1.0, Color::rgba(255, 0, 0, 16))
@@ -420,7 +440,13 @@ impl Paint {
     /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, &bg);
     /// ```
-    pub fn linear_gradient_stops(start_x: f32, start_y: f32, end_x: f32, end_y: f32, stops: &[(f32, Color)]) -> Self {
+    pub fn linear_gradient_stops(
+        start_x: f32,
+        start_y: f32,
+        end_x: f32,
+        end_y: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
         Paint::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
@@ -543,7 +569,7 @@ impl Paint {
     ///    50.0,
     ///    18.0,
     ///    24.0,
-    ///    &[
+    ///    [
     ///         (0.0, Color::rgba(0, 0, 0, 128)),
     ///         (0.5, Color::rgba(0, 0, 128, 128)),
     ///         (1.0, Color::rgba(0, 128, 0, 128))
@@ -554,7 +580,13 @@ impl Paint {
     /// path.circle(50.0, 50.0, 20.0);
     /// canvas.fill_path(&mut path, &bg);
     /// ```
-    pub fn radial_gradient_stops(cx: f32, cy: f32, in_radius: f32, out_radius: f32, stops: &[(f32, Color)]) -> Self {
+    pub fn radial_gradient_stops(
+        cx: f32,
+        cy: f32,
+        in_radius: f32,
+        out_radius: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
         Paint::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
             in_radius,
