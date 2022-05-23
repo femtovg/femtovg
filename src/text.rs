@@ -1046,7 +1046,6 @@ impl GlyphAtlas {
             }
             #[cfg(feature = "image-loading")]
             Some(GlyphRendering::RenderAsImage(image_buffer)) => {
-                use std::convert::TryFrom;
                 let target_x = rendered_glyph.atlas_x as usize;
                 let target_y = rendered_glyph.atlas_y as usize;
                 let target_width = rendered_glyph.width as u32;

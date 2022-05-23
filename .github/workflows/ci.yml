@@ -14,7 +14,7 @@ jobs:
         rust:
           - stable
           - beta
-          - 1.54.0  # MSRV
+          - 1.56.0  # MSRV
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -25,7 +25,7 @@ jobs:
           override: true
           profile: minimal
           target: wasm32-unknown-unknown
-      - run: cargo build --verbose
+      - run: cargo build --features glutin/wayland --verbose
       - run: cargo build --no-default-features --verbose
       - run: cargo build --verbose --target wasm32-unknown-unknown
       - run: cargo build --verbose --examples
@@ -48,4 +48,4 @@ jobs:
         uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --no-deps
+          args: --all-features --features glutin/wayland --no-deps
