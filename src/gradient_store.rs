@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    image::ImageStore, paint::MultiStopGradient, Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource,
-    Renderer,
+    image::ImageStore,
+    paint::{GradientStop, MultiStopGradient},
+    Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
 };
 
 /// GradientStore holds image ids for multi-stop gradients. The actual image/textures
@@ -125,12 +126,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
     // gradient. If the stop position is > 1.0 then we have exhausted the stops
     // and should break. As a special case, if the second stop is > 1.0 then we
     // fill the current color to the end of the gradient.
-    for stop in gradient.pairs() {
-        let s0 = stop[0].0;
-        let s1 = stop[1].0;
-        let color0 = stop[0].1;
-        let color1 = stop[1].1;
-
+    for [GradientStop(s0, color0), GradientStop(s1, color1)] in gradient.pairs() {
         // Catch the case where the last stop doesn't go all the way to 1.0 and
         // pad it.
         if s0 < 1.0 && s1 > 1.0 {

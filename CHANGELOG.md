@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+ - Changed `linear_gradient_stops` and `radial_gradient_stops` to take an `IntoIterator`
+   instead of a slice slice for the color stops.
+
 ## [0.5.0] - 2022-02-06
 
 ### Added
