@@ -1334,13 +1334,13 @@ where
 
             let draw_commands = atlas.render_atlas(self, &layout, &paint, render_mode)?;
 
+            // Apply global alpha
+            paint.mul_alpha(self.state().alpha);
+
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
 
                 paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
-
-                // Apply global alpha
-                paint.mul_alpha(self.state().alpha);
 
                 self.render_triangles(&verts, &paint);
             }
@@ -1349,9 +1349,6 @@ where
                 let verts = create_vertices(&cmd.quads);
 
                 paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
-
-                // Apply global alpha
-                paint.mul_alpha(self.state().alpha);
 
                 self.render_triangles(&verts, &paint);
             }

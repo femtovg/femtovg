@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.5] - 2022-05-23
 
+### Fixed
+
+ - Fixed erroneously multiply applied global alpha when mixing color glyphs with regular glyphs.
+
 ### Changed
 
  - Optimized the OpenGL renderer to perform better on older GPUs by splitting the large fragment shader
