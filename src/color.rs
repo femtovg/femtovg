@@ -17,7 +17,7 @@ impl Color {
     }
 
     /// Returns a color value from red, green, blue float values. Alpha will be set to 1.0.
-    pub fn rgbf(r: f32, g: f32, b: f32) -> Self {
+    pub const fn rgbf(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
 
@@ -27,7 +27,7 @@ impl Color {
     }
 
     /// Returns a color value from red, green, blue and alpha char values.
-    pub fn rgbaf(r: f32, g: f32, b: f32, a: f32) -> Self {
+    pub const fn rgbaf(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
@@ -81,12 +81,12 @@ impl Color {
     }
 
     /// Returns a white color
-    pub fn white() -> Self {
+    pub const fn white() -> Self {
         Self::rgbaf(1.0, 1.0, 1.0, 1.0)
     }
 
     /// Returns a black color
-    pub fn black() -> Self {
+    pub const fn black() -> Self {
         Self::rgbaf(0.0, 0.0, 0.0, 1.0)
     }
 
@@ -109,7 +109,7 @@ impl Color {
         }
     }
 
-    pub fn to_array(self) -> [f32; 4] {
+    pub const fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
 
