@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::ffi::c_void;
 
 #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-use glutin::{window::Window, ContextWrapper, PossiblyCurrent};
+use glutin::{Context, PossiblyCurrent};
 
 use fnv::FnvHashMap;
 use imgref::ImgVec;
@@ -67,10 +67,8 @@ impl OpenGl {
     }
 
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
-    pub fn new_from_glutin_context(
-        windowed_context: &ContextWrapper<PossiblyCurrent, Window>,
-    ) -> Result<Self, ErrorKind> {
-        unsafe { OpenGl::new_from_function(|s| windowed_context.get_proc_address(s) as *const _) }
+    pub fn new_from_glutin_context(context: &Context<PossiblyCurrent>) -> Result<Self, ErrorKind> {
+        unsafe { OpenGl::new_from_function(|s| context.get_proc_address(s) as *const _) }
     }
 
     #[cfg(target_arch = "wasm32")]
