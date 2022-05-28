@@ -1176,7 +1176,7 @@ where
 
     /// Returns information on how the provided text will be drawn with the specified paint.
     pub fn measure_text<S: AsRef<str>>(
-        &mut self,
+        &self,
         x: f32,
         y: f32,
         text: S,
@@ -1199,7 +1199,7 @@ where
     }
 
     /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&mut self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         self.text_context.as_ref().borrow_mut().measure_font(paint)
@@ -1208,7 +1208,7 @@ where
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
-    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
+    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -1223,7 +1223,7 @@ where
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
     pub fn break_text_vec<S: AsRef<str>>(
-        &mut self,
+        &self,
         max_width: f32,
         text: S,
         mut paint: Paint,
