@@ -11,7 +11,6 @@ use generational_arena::{Arena, Index};
 use lru::LruCache;
 
 use unicode_bidi::BidiInfo;
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
@@ -536,6 +535,56 @@ pub(crate) fn shape(
     Err(ErrorKind::UnknownError)
 }
 
+struct SplitTextIterator<'a> {
+    index: usize,
+    text: &'a str,
+}
+
+fn split_text<'a>(text: &'a str) -> impl IntoIterator<Item = &str> + 'a {
+    SplitTextIterator { index: 0, text }
+}
+
+impl<'a> Iterator for SplitTextIterator<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let start_index = self.index;
+        let mut chars = self.text[start_index..].chars();
+        if let Some(c) = chars.next() {
+            if c.is_whitespace() {
+                self.index += c.len_utf8();
+                for c in chars {
+                    if c.is_whitespace() {
+                        self.index += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                let mut is_symbol = false;
+
+                for c in self.text[start_index..].chars() {
+                    if c.is_whitespace() {
+                        break;
+                    } else if c.is_alphanumeric() {
+                        if is_symbol {
+                            break;
+                        }
+                    } else {
+                        is_symbol = true;
+                    };
+
+                    self.index += c.len_utf8();
+                }
+            }
+
+            Some(&self.text[start_index..self.index])
+        } else {
+            None
+        }
+    }
+}
+
 fn shape_run(
     context: &mut TextContextImpl,
     paint: &Paint,
@@ -578,7 +627,7 @@ fn shape_run(
             let mut word_break_reached = false;
             let mut byte_index = run.start;
 
-            for mut word_txt in sub_text.split_word_bounds() {
+            for mut word_txt in split_text(sub_text) {
                 let id = ShapingId::new(paint, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
