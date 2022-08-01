@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
- - MRSV was bumped to Rust 1.56, the crate now uses Rust Edition 2021.
+ - MRSV was bumped to Rust 1.60, the crate now uses Rust Edition 2021.
  - `new_from_glutin_context` can now be used with headless contexts.
  - All const-safe `Color` constructors are now const.
  - `Canvas`'s text layout methods no longer require a mutable reference.
