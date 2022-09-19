@@ -60,14 +60,14 @@ fn main() {
                 _ => {}
             },
             Event::RedrawRequested(_) => {
+                prepare_framebuffer_for_render(&context, framebuffer);
+
                 // draw red rectangle on white background
 
                 let dpi_factor = windowed_context.window().scale_factor();
                 let size = windowed_context.window().inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(1., 1., 1.));
-
-                prepare_framebuffer_for_render(&context, framebuffer);
 
                 canvas.save();
 
