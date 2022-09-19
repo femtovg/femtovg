@@ -4,7 +4,6 @@ use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture,
 use glutin::event::WindowEvent;
 use glutin::ContextBuilder;
 use glutin::{Api, GlRequest};
-use std::fs;
 use winit::event::Event;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
@@ -93,21 +92,21 @@ fn main() {
 fn create_shader_program(context: &glow::Context) -> NativeProgram {
     unsafe {
         let v_shader = context.create_shader(glow::VERTEX_SHADER).unwrap();
-        let vert_shader: String = fs::read_to_string("assets/screen.vert.glsl").unwrap().parse().unwrap();
-        context.shader_source(v_shader, vert_shader.as_str());
+        let vert_shader = include_str!("../assets/screen.vert.glsl");
+        context.shader_source(v_shader, vert_shader);
         context.compile_shader(v_shader);
         if context.get_shader_compile_status(v_shader) == false {
             let error_msg = context.get_shader_info_log(v_shader);
-            println!("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n{:?}", error_msg);
         }
 
         let f_shader = context.create_shader(glow::FRAGMENT_SHADER).unwrap();
-        let frag_shader: String = fs::read_to_string("assets/screen.frag.glsl").unwrap().parse().unwrap();
-        context.shader_source(f_shader, frag_shader.as_str());
+        let frag_shader = include_str!("../assets/screen.frag.glsl");
+        context.shader_source(f_shader, frag_shader);
         context.compile_shader(f_shader);
         if context.get_shader_compile_status(f_shader) == false {
             let error_msg = context.get_shader_info_log(f_shader);
-            println!("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n{:?}", error_msg);
         }
 
         let shader_program = context.create_program().unwrap();
@@ -117,7 +116,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
 
         if context.get_program_link_status(shader_program) == false {
             let error_msg = context.get_program_info_log(shader_program);
-            println!("ERROR::SHADER::PROGRAM::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::PROGRAM::COMPILATION_FAILED\n{:?}", error_msg);
         }
 
         context.use_program(Some(shader_program));
