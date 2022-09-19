@@ -690,13 +690,13 @@ fn shape_word(
     context.find_font(paint, |(font_id, font)| {
         // Call harfbuzz
         let output = {
-            let face = font.face_ref();
+            let face = font.face();
 
             let mut buffer = rustybuzz::UnicodeBuffer::new();
             buffer.push_str(word);
             buffer.set_direction(hb_direction);
 
-            rustybuzz::shape(face, &[], buffer)
+            rustybuzz::shape(&face, &[], buffer)
         };
 
         let positions = output.glyph_positions();
