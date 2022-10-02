@@ -1,13 +1,13 @@
-use std::cmp::Ordering;
-use std::f32::consts::PI;
-use std::ops::Range;
+use std::{cmp::Ordering, f32::consts::PI, ops::Range};
 
 use bitflags::bitflags;
 
-use crate::geometry::{self, Bounds, Transform2D};
-use crate::renderer::Vertex;
-use crate::utils::VecRetainMut;
-use crate::{FillRule, LineCap, LineJoin, Solidity};
+use crate::{
+    geometry::{self, Bounds, Transform2D},
+    renderer::Vertex,
+    utils::VecRetainMut,
+    FillRule, LineCap, LineJoin, Solidity,
+};
 
 use super::Verb;
 

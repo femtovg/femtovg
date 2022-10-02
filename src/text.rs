@@ -1,10 +1,12 @@
-use std::cell::RefCell;
-use std::ffi::OsStr;
-use std::fs;
-use std::hash::{Hash, Hasher};
-use std::ops::Range;
-use std::path::Path as FilePath;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    ffi::OsStr,
+    fs,
+    hash::{Hash, Hasher},
+    ops::Range,
+    path::Path as FilePath,
+    rc::Rc,
+};
 
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
@@ -21,10 +23,8 @@ mod atlas;
 pub use atlas::Atlas;
 
 mod font;
-use font::Font;
 pub use font::FontMetrics;
-
-use self::font::GlyphRendering;
+use font::{Font, GlyphRendering};
 
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().

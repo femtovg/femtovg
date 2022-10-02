@@ -1,8 +1,7 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
-use crate::geometry::Transform2D;
-use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{geometry::Transform2D, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
