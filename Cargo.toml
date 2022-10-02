@@ -41,7 +41,7 @@ web_sys = { version = "0.3", package = "web-sys", features = [
     "WebGlContextAttributes",
     "HtmlImageElement",
 ] }
-wasm-bindgen = { version = "0.2" }
+wasm-bindgen = "0.2"
 
 [features]
 default = ["image-loading", "glutin"]
