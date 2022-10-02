@@ -1,18 +1,15 @@
 /**
  * Shows how to use Canvas::filter_image() to apply a blur filter.
  */
-use instant::Instant;
-
-use resource::resource;
-
+use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path};
 use glutin::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     ContextBuilder,
 };
-
-use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path};
+use instant::Instant;
+use resource::resource;
 
 fn main() {
     let window_size = glutin::dpi::PhysicalSize::new(1000, 600);

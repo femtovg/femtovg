@@ -1,28 +1,15 @@
 use std::f32::consts::PI;
 
-use resource::resource;
-
-use instant::Instant;
-use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
-
 use femtovg::{
-    renderer::OpenGl,
-    Align,
-    Baseline,
-    Canvas,
-    Color,
-    FillRule,
-    FontId,
-    ImageFlags,
-    ImageId,
-    LineCap,
-    LineJoin,
-    Paint,
-    Path,
-    Renderer,
-    Solidity,
+    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, ImageId, LineCap, LineJoin, Paint,
+    Path, Renderer, Solidity,
+};
+use instant::Instant;
+use resource::resource;
+use winit::{
+    event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
 };
 
 pub fn quantize(a: f32, d: f32) -> f32 {
