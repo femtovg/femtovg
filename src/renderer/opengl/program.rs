@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
-use crate::{renderer::ShaderType, ErrorKind};
-
 use glow::HasContext;
+
+use crate::{renderer::ShaderType, ErrorKind};
 
 const GLSL_VERSION: &str = "#version 100";
 

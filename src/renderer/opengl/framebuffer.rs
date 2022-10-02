@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
-use super::GlTexture;
-
 use glow::HasContext;
 
 use crate::ErrorKind;
+
+use super::GlTexture;
 
 pub struct Framebuffer {
     context: Rc<glow::Context>,

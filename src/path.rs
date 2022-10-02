@@ -1,5 +1,4 @@
-use std::f32::consts::PI;
-use std::slice;
+use std::{f32::consts::PI, slice};
 
 use crate::geometry::{self, Transform2D};
 

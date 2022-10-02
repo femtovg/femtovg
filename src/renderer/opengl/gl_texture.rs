@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
-use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
-
 use glow::HasContext;
+
+use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
 
 pub struct GlTexture {
     id: <glow::Context as glow::HasContext>::Texture,

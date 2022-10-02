@@ -17,10 +17,7 @@ TODO:
 #[macro_use]
 extern crate serde;
 
-use std::cell::RefCell;
-use std::ops::Range;
-use std::path::Path as FilePath;
-use std::rc::Rc;
+use std::{cell::RefCell, ops::Range, path::Path as FilePath, rc::Rc};
 
 use imgref::ImgVec;
 use rgb::RGBA8;
