@@ -6,10 +6,8 @@ use instant::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowBuilder;
-//use glutin::{GlRequest, Api};
 
 use femtovg::{
-    //CompositeOperation,
     renderer::OpenGl,
     Align,
     Baseline,
@@ -53,8 +51,6 @@ fn main() {
             .with_inner_size(winit::dpi::PhysicalSize::<f32>::new(1000., 600.))
             .with_title("femtovg demo");
 
-        //let windowed_context = ContextBuilder::new().with_gl(GlRequest::Specific(Api::OpenGlEs, (2, 0))).with_vsync(false).build_windowed(wb, &el).unwrap();
-        //let windowed_context = ContextBuilder::new().with_vsync(false).with_multisampling(8).build_windowed(wb, &el).unwrap();
         let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
         let windowed_context = unsafe { windowed_context.make_current().unwrap() };
 
@@ -98,13 +94,6 @@ fn main() {
             .add_font_mem(&resource!("examples/assets/entypo.ttf"))
             .expect("Cannot add font"),
     };
-
-    //canvas.add_font("/usr/share/fonts/noto/NotoSansArabic-Regular.ttf").expect("Cannot add font");
-
-    //let image_id = canvas.create_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
-    //canvas.blur_image(image_id, 10, 1050, 710, 200, 200);
-
-    //let image_id = canvas.load_image_file("examples/assets/RoomRender.jpg", ImageFlags::FLIP_Y).expect("Cannot create image");
 
     let images = vec![
         canvas
@@ -342,10 +331,6 @@ fn main() {
 
                 draw_thumbnails(&mut canvas, 365.0, popy - 30.0, 160.0, 300.0, &images, t);
 
-                /*
-                draw_spinner(&mut canvas, 15.0, 285.0, 10.0, t);
-                */
-
                 if let Some(image_id) = screenshot_image_id {
                     let x = size.width as f32 - 512.0;
                     let y = size.height as f32 - 512.0;
@@ -358,28 +343,16 @@ fn main() {
                     canvas.stroke_path(&mut path, Paint::color(Color::hex("454545")));
                 }
 
-                // if true {
-                //     let paint = Paint::image(image_id, size.width as f32, 15.0, 1920.0, 1080.0, 0.0, 1.0);
-                //     let mut path = Path::new();
-                //     path.rect(size.width as f32, 15.0, 1920.0, 1080.0);
-                //     canvas.fill_path(&mut path, paint);
-                // }
-
                 canvas.save_with(|canvas| {
                     canvas.reset();
                     perf.render(canvas, 5.0, 5.0);
                 });
 
-                //canvas.restore();
-
                 canvas.flush();
                 #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => {
-                //scroll = 1.0;
-                window.request_redraw()
-            }
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
@@ -470,22 +443,6 @@ fn draw_paragraph<T: Renderer>(
             let _ = canvas.fill_text(x - 10.0, gutter_y, &text, paint);
         }
     }
-
-    // let mut start = 0;
-
-    // while start < text.len() {
-    //     let substr = &text[start..];
-
-    //     if let Ok(index) = canvas.break_text(width, substr, paint) {
-    //         if let Ok(res) = canvas.fill_text(x, y, &substr[0..index], paint) {
-    //             y += res.height;
-    //         }
-
-    //         start += &substr[0..index].len();
-    //     } else {
-    //         break;
-    //     }
-    // }
 
     canvas.restore();
 }
@@ -664,8 +621,6 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
 
     canvas.save();
 
-    //canvas.global_composite_operation(CompositeOperation::Lighter);
-
     // Window
     let mut path = Path::new();
     path.rounded_rect(x, y, w, h, corner_radius);
@@ -713,12 +668,6 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
     text_paint.set_color(Color::rgba(220, 220, 220, 160));
 
     let _ = canvas.fill_text(x + (w / 2.0), y + 19.0, title, text_paint);
-
-    // let bounds = canvas.text_bounds(x + (w / 2.0), y + 19.0, title, text_paint);
-    //
-    // let mut path = Path::new();
-    // path.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
-    // canvas.stroke_path(&mut path, Paint::color(Color::rgba(0, 0, 0, 255)));
 
     canvas.restore();
 }
