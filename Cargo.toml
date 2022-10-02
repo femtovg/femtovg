@@ -4,15 +4,15 @@ description = "Antialiased 2D vector drawing library"
 version = "0.3.5"
 license = "MIT/Apache-2.0"
 readme = "README.md"
-authors = ["Peter Todorov <ptodorov@cytec.bg>", "Adam Nemecek <adamnemecek@gmail.com>"]
+authors = [
+    "Peter Todorov <ptodorov@cytec.bg>",
+    "Adam Nemecek <adamnemecek@gmail.com>",
+]
 keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
 categories = ["graphics"]
 repository = "https://github.com/femtovg/femtovg"
 edition = "2021"
-exclude = [
-    "assets",
-    "examples",
-]
+exclude = ["assets", "examples"]
 
 [profile.release]
 debug = true
@@ -38,7 +38,10 @@ glutin = { version = "0.29.0", optional = true, default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 glow = { version = "0.11.0", default-features = false }
-web_sys = { version = "0.3", package = "web-sys", features = ["WebGlContextAttributes", "HtmlImageElement"] }
+web_sys = { version = "0.3", package = "web-sys", features = [
+    "WebGlContextAttributes",
+    "HtmlImageElement",
+] }
 wasm-bindgen = { version = "0.2" }
 
 [features]
@@ -51,10 +54,16 @@ winit = { version = "0.27.1", default-features = false }
 euclid = "0.22.3"
 rand = "0.8"
 svg = "0.10.0"
-usvg = { version = "0.23.0", default-features = false, features = ["export", "filter"] }
-instant = { version = "0.1", features = [ "now" ] }
+usvg = { version = "0.23.0", default-features = false, features = [
+    "export",
+    "filter",
+] }
+instant = { version = "0.1", features = ["now"] }
 resource = "0.5.0"
-image = { version = "0.24.0", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.24.0", default-features = false, features = [
+    "jpeg",
+    "png",
+] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.29.0"
@@ -62,8 +71,11 @@ glutin = "0.29.0"
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 winit = { version = "0.27.1", default-features = false }
 wasm-bindgen = { version = "0.2" }
-web_sys = { version = "0.3", package = "web-sys", features=["console", "WebGlContextAttributes"] }
+web_sys = { version = "0.3", package = "web-sys", features = [
+    "console",
+    "WebGlContextAttributes",
+] }
 console_error_panic_hook = "0.1.5"
-instant = { version = "0.1", features = [ "wasm-bindgen", "now" ] }
-resource = { version = "0.5.0", features = [ "force-static" ] }
+instant = { version = "0.1", features = ["wasm-bindgen", "now"] }
+resource = { version = "0.5.0", features = ["force-static"] }
 getrandom = { version = "0.2.2", features = ["js"] }
