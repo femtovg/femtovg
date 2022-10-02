@@ -68,8 +68,6 @@ image = { version = "0.24.0", default-features = false, features = [
 glutin = "0.29.0"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-winit = { version = "0.27.1", default-features = false }
-wasm-bindgen = { version = "0.2" }
 web_sys = { version = "0.3", package = "web-sys", features = [
     "console",
     "WebGlContextAttributes",
