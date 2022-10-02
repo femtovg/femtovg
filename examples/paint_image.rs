@@ -6,16 +6,14 @@
  * Canvas::path_bbox() and use it to set the cx, cy, width, height values
  * in Paint::image() as shown in this example.
  */
-use instant::Instant;
-
+use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 use glutin::{
     event::{ElementState, Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     ContextBuilder,
 };
-
-use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use instant::Instant;
 
 enum Shape {
     Rect,

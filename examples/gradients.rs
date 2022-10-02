@@ -1,13 +1,12 @@
 use std::time::Instant;
 
+use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, Paint, Path, Renderer};
 use glutin::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     ContextBuilder,
 };
-
-use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, Paint, Path, Renderer};
 
 fn main() {
     let window_size = glutin::dpi::PhysicalSize::new(1000, 670);

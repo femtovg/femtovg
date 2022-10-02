@@ -1,12 +1,11 @@
-use femtovg::renderer::OpenGl;
-use femtovg::{Canvas, Color, Paint, Path};
+use femtovg::{renderer::OpenGl, Canvas, Color, Paint, Path};
 use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture, Program};
-use glutin::event::WindowEvent;
-use glutin::ContextBuilder;
-use glutin::{Api, GlRequest};
-use winit::event::Event;
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowBuilder;
+use glutin::{event::WindowEvent, Api, ContextBuilder, GlRequest};
+use winit::{
+    event::Event,
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
 const WINDOW_WIDTH: f32 = 640.0;
 const WINDOW_HEIGHT: f32 = 480.0;
