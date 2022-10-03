@@ -9,8 +9,22 @@ use resource::resource;
 use winit::{
     event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
 };
+
+mod main;
+
+fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(1000, 600, "femtovg demo", true);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
+
+#[cfg(target_arch = "wasm32")]
+use winit::window::Window;
 
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
@@ -22,54 +36,12 @@ struct Fonts {
     icons: FontId,
 }
 
-fn main() {
-    // This provides better error messages in debug mode.
-    // It's disabled in release mode so it doesn't bloat up the file size.
-    #[cfg(all(debug_assertions, target_arch = "wasm32"))]
-    console_error_panic_hook::set_once();
-
-    let el = EventLoop::new();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let (renderer, windowed_context) = {
-        use glutin::ContextBuilder;
-
-        let wb = WindowBuilder::new()
-            .with_inner_size(winit::dpi::PhysicalSize::<f32>::new(1000., 600.))
-            .with_title("femtovg demo");
-
-        let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
-        let windowed_context = unsafe { windowed_context.make_current().unwrap() };
-
-        let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-
-        (renderer, windowed_context)
-    };
-
-    #[cfg(target_arch = "wasm32")]
-    let (renderer, window) = {
-        use wasm_bindgen::JsCast;
-
-        let canvas = web_sys::window()
-            .unwrap()
-            .document()
-            .unwrap()
-            .get_element_by_id("canvas")
-            .unwrap()
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .unwrap();
-
-        use winit::platform::web::WindowBuilderExtWebSys;
-
-        let renderer = OpenGl::new_from_html_canvas(&canvas).expect("Cannot create renderer");
-
-        let window = WindowBuilder::new().with_canvas(Some(canvas)).build(&el).unwrap();
-
-        (renderer, window)
-    };
-
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-
+fn run(
+    mut canvas: Canvas<OpenGl>,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     let fonts = Fonts {
         regular: canvas
             .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
