@@ -1,33 +1,34 @@
-use std::time::Instant;
-
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, Paint, Path, Renderer};
-use glutin::{
+use instant::Instant;
+use resource::resource;
+use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-    ContextBuilder,
 };
 
+mod main;
+
 fn main() {
-    let window_size = glutin::dpi::PhysicalSize::new(1000, 670);
-    let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(window_size)
-        .with_resizable(false)
-        .with_title("Gradient test");
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(1000, 670, "Gradient test", false);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
 
-    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
 
-    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
+#[cfg(target_arch = "wasm32")]
+use winit::window::Window;
+
+fn run(
+    mut canvas: Canvas<OpenGl>,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
+        .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
         .expect("Cannot add font");
 
     let start = Instant::now();
@@ -36,11 +37,15 @@ fn main() {
     let mut perf = PerfGraph::new();
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
@@ -48,8 +53,8 @@ fn main() {
                 _ => (),
             },
             Event::RedrawRequested(_) => {
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
 
@@ -67,9 +72,10 @@ fn main() {
                 canvas.restore();
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
