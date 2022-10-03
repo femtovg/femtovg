@@ -1,11 +1,9 @@
-use std::time::Instant;
-
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
-use glutin::{
+use instant::Instant;
+use resource::resource;
+use winit::{
     event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-    ContextBuilder,
 };
 
 struct Fonts {
@@ -14,46 +12,51 @@ struct Fonts {
     light: FontId,
 }
 
+mod main;
+
 fn main() {
-    let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
-    let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(window_size)
-        .with_resizable(false)
-        .with_title("Text demo");
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(1000, 600, "Text demo", false);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
 
-    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
 
-    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
+#[cfg(target_arch = "wasm32")]
+use winit::window::Window;
 
+fn run(
+    mut canvas: Canvas<OpenGl>,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     let fonts = Fonts {
         sans: canvas
-            .add_font("examples/assets/Roboto-Regular.ttf")
+            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
             .expect("Cannot add font"),
         bold: canvas
-            .add_font("examples/assets/Roboto-Bold.ttf")
+            .add_font_mem(&resource!("examples/assets/Roboto-Bold.ttf"))
             .expect("Cannot add font"),
         light: canvas
-            .add_font("examples/assets/Roboto-Light.ttf")
+            .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
             .expect("Cannot add font"),
     };
 
     // The fact that a font is added to the canvas is enough for it to be considered when
     // searching for fallbacks
-    let _ = canvas.add_font("examples/assets/amiri-regular.ttf");
+    let _ = canvas.add_font_mem(&resource!("examples/assets/amiri-regular.ttf"));
 
+    #[cfg(not(target_arch = "wasm32"))]
     let supports_emojis = canvas.add_font("/System/Library/Fonts/Apple Color Emoji.ttc").is_ok();
+    #[cfg(target_arch = "wasm32")]
+    let supports_emojis = false;
 
     let flags = ImageFlags::GENERATE_MIPMAPS | ImageFlags::REPEAT_X | ImageFlags::REPEAT_Y;
     let image_id = canvas
-        .load_image_file("examples/assets/pattern.jpg", flags)
+        .load_image_mem(&resource!("examples/assets/pattern.jpg"), flags)
         .expect("Cannot create image");
 
     let start = Instant::now();
@@ -70,11 +73,15 @@ fn main() {
     let mut y = 380.0;
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
@@ -128,7 +135,7 @@ fn main() {
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
-                    glutin::event::MouseScrollDelta::LineDelta(_, y) => {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
                         font_size = font_size + *y / 2.0;
                         font_size = font_size.max(2.0);
                     }
@@ -137,8 +144,8 @@ fn main() {
                 _ => (),
             },
             Event::RedrawRequested(_) => {
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
 
@@ -195,9 +202,10 @@ fn main() {
                 }
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
