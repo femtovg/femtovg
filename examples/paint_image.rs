@@ -7,13 +7,26 @@
  * in Paint::image() as shown in this example.
  */
 use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
-use glutin::{
+use instant::Instant;
+use winit::{
     event::{ElementState, Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-    ContextBuilder,
 };
-use instant::Instant;
+
+mod main;
+
+fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(1000, 600, "Paint::image example", false);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
+
+#[cfg(target_arch = "wasm32")]
+use winit::window::Window;
 
 enum Shape {
     Rect,
@@ -21,25 +34,12 @@ enum Shape {
     Polar,
 }
 
-fn main() {
-    let window_size = glutin::dpi::PhysicalSize::new(1000, 600);
-    let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(window_size)
-        .with_resizable(false)
-        .with_title("Paint::image example");
-
-    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
-
-    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
-
+fn run(
+    mut canvas: Canvas<OpenGl>,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     // Prepare the image, in this case a grid.
     let grid_size: usize = 16;
     let image_id = canvas
@@ -92,11 +92,15 @@ fn main() {
     let mut swap_directions = false;
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
@@ -107,7 +111,7 @@ fn main() {
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
-                    glutin::event::MouseScrollDelta::LineDelta(x, y) => {
+                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
                         if swap_directions {
                             time_warp += *y as i32;
                             zoom += *x as i32;
@@ -132,8 +136,8 @@ fn main() {
                 _ => (),
             },
             Event::RedrawRequested(_) => {
-                let dpi_factor = windowed_context.window().scale_factor();
-                let window_size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let window_size = window.inner_size();
                 canvas.set_size(window_size.width as u32, window_size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(
                     0,
@@ -212,9 +216,10 @@ fn main() {
                 canvas.restore();
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
