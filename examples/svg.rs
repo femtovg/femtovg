@@ -1,31 +1,38 @@
-use std::time::Instant;
-
 use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, Paint, Path, Renderer};
-use glutin::{
+use instant::Instant;
+use resource::resource;
+use winit::{
     event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-    ContextBuilder,
 };
 
+mod main;
+
 fn main() {
-    let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(glutin::dpi::PhysicalSize::new(1000, 600))
-        .with_title("femtovg demo");
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(1000, 600, "femtovg demo", true);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
 
-    let windowed_context = ContextBuilder::new().with_vsync(false).build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
 
-    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
+#[cfg(target_arch = "wasm32")]
+use winit::window::Window;
 
+fn run(
+    mut canvas: Canvas<OpenGl>,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     let roboto_light = canvas
-        .add_font("examples/assets/Roboto-Light.ttf")
+        .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
         .expect("Cannot add font");
 
     let roboto_regular = canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
+        .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
         .expect("Cannot add font");
 
     let mut screenshot_image_id = None;
@@ -39,7 +46,7 @@ fn main() {
 
     let mut perf = PerfGraph::new();
 
-    let svg_data = std::fs::read("examples/assets/Ghostscript_Tiger.svg").unwrap();
+    let svg_data = include_str!("assets/Ghostscript_Tiger.svg").as_bytes();
     let tree = usvg::Tree::from_data(&svg_data, &usvg::Options::default().to_ref()).unwrap();
 
     let mut paths = render_svg(tree);
@@ -54,11 +61,15 @@ fn main() {
     println!("Path mem usage: {}kb", total_sisze_bytes / 1024);
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+
         *control_flow = ControlFlow::Poll;
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
+                #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     windowed_context.resize(*physical_size);
                 }
@@ -89,7 +100,7 @@ fn main() {
                 WindowEvent::MouseWheel {
                     device_id: _, delta, ..
                 } => match delta {
-                    glutin::event::MouseScrollDelta::LineDelta(_, y) => {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
                         let pt = canvas.transform().inversed().transform_point(mousex, mousey);
                         canvas.translate(pt.0, pt.1);
                         canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
@@ -124,8 +135,8 @@ fn main() {
 
                 perf.update(dt);
 
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
 
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
@@ -159,9 +170,10 @@ fn main() {
                 canvas.restore();
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
