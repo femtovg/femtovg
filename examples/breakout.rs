@@ -1,16 +1,27 @@
-use std::time::Instant;
-
 use femtovg::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
-use glutin::{
-    event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
-    ContextBuilder,
-};
+use instant::Instant;
 use rand::{
     distributions::{Distribution, Standard},
     prelude::*,
 };
+use resource::resource;
+use winit::{
+    event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::Window,
+};
+
+mod main;
+
+fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    main::start(800, 600, "Breakout demo", false);
+    #[cfg(target_arch = "wasm32")]
+    main::start();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use glutin::PossiblyCurrent;
 
 type Canvas = femtovg::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
@@ -84,20 +95,23 @@ struct Game {
 impl Game {
     fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
         let image_id = canvas
-            .load_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS)
+            .load_image_mem(
+                &resource!("examples/assets/rust-logo.png"),
+                ImageFlags::GENERATE_MIPMAPS,
+            )
             .expect("Cannot create image");
 
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 
         let fonts = Fonts {
             regular: canvas
-                .add_font("examples/assets/Roboto-Regular.ttf")
+                .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
                 .expect("Cannot add font"),
             bold: canvas
-                .add_font("examples/assets/Roboto-Bold.ttf")
+                .add_font_mem(&resource!("examples/assets/Roboto-Bold.ttf"))
                 .expect("Cannot add font"),
             light: canvas
-                .add_font("examples/assets/Roboto-Light.ttf")
+                .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
                 .expect("Cannot add font"),
         };
 
@@ -881,7 +895,12 @@ enum Cmd {
     B(u8), // Brick Id
 }
 
-fn main() {
+fn run(
+    mut canvas: Canvas,
+    el: EventLoop<()>,
+    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
+    #[cfg(target_arch = "wasm32")] window: Window,
+) {
     let mut levels = Vec::new();
 
     levels.push(vec![
@@ -1241,39 +1260,30 @@ fn main() {
         ],
     ]);
 
-    let window_size = glutin::dpi::PhysicalSize::new(800, 600);
-    let el = EventLoop::new();
-    let wb = WindowBuilder::new()
-        .with_inner_size(window_size)
-        .with_resizable(false)
-        .with_title("Breakout demo");
-
-    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
-    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
-
-    let renderer = OpenGl::new_from_glutin_context(&windowed_context).expect("Cannot create renderer");
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(
-        window_size.width as u32,
-        window_size.height as u32,
-        windowed_context.window().scale_factor() as f32,
-    );
+    #[cfg(not(target_arch = "wasm32"))]
+    let window = windowed_context.window();
 
     let mut game = Game::new(&mut canvas, levels);
-    game.size = Size::new(window_size.width as f32, window_size.height as f32);
+    game.size = Size::new(window.inner_size().width as f32, window.inner_size().height as f32);
 
     let start = Instant::now();
     let mut prevt = start;
 
     el.run(move |event, _, control_flow| {
+        #[cfg(not(target_arch = "wasm32"))]
+        let window = windowed_context.window();
+        #[cfg(target_arch = "wasm32")]
+        let window = &window;
+
         *control_flow = ControlFlow::Poll;
 
-        game.handle_events(windowed_context.window(), &event, control_flow);
+        game.handle_events(window, &event, control_flow);
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
+                    #[cfg(not(target_arch = "wasm32"))]
                     windowed_context.resize(*physical_size);
                     game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
@@ -1281,8 +1291,8 @@ fn main() {
                 _ => (),
             },
             Event::RedrawRequested(_) => {
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(
                     0,
@@ -1300,9 +1310,10 @@ fn main() {
                 game.draw(&mut canvas);
 
                 canvas.flush();
+                #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
