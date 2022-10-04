@@ -6,6 +6,7 @@ use std::{
 use fnv::FnvHasher;
 
 #[derive(Copy, Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Position {
     pub x: f32,
     pub y: f32,
