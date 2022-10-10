@@ -864,10 +864,10 @@ where
             paint.is_straight_tinted_image(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, &paint);
+                self.render_unclipped_image_blit(&path_rect, &transform, paint.flavor, paint.glyph_texture);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, &paint);
+                self.render_unclipped_image_blit(&intersection, &transform, paint.flavor, paint.glyph_texture);
                 return;
             } else {
                 return;
@@ -1104,14 +1104,20 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint: &Paint) {
+    fn render_unclipped_image_blit(
+        &mut self,
+        target_rect: &Rect,
+        transform: &Transform2D,
+        paint_flavor: PaintFlavor,
+        glyph_texture: GlyphTexture,
+    ) {
         let scissor = self.state().scissor;
 
         let mut params = Params::new(
             &self.images,
             transform,
-            paint.flavor,
-            &paint.glyph_texture,
+            paint_flavor,
+            &glyph_texture,
             &scissor,
             0.,
             0.,
@@ -1121,7 +1127,7 @@ where
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.glyph_texture = paint.glyph_texture();
+        cmd.glyph_texture = glyph_texture;
 
         let x0 = target_rect.x;
         let y0 = target_rect.y;
@@ -1159,7 +1165,7 @@ where
             Vertex::new(p4, p5, s1, t1),
         ];
 
-        if let PaintFlavor::Image { id, .. } = paint.flavor {
+        if let PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
         }
 
