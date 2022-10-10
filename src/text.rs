@@ -109,7 +109,7 @@ impl RenderedGlyphId {
             glyph_index,
             font_id,
             size: (paint.font_size * 10.0).trunc() as u32,
-            line_width: (paint.line_width * 10.0).trunc() as u32,
+            line_width: (paint.stroke.line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
         }
@@ -865,7 +865,7 @@ impl GlyphAtlas {
         let mut color_cmd_map = FnvHashMap::default();
 
         let line_width_offset = if mode == RenderMode::Stroke {
-            (paint.line_width / 2.0).ceil()
+            (paint.stroke.line_width / 2.0).ceil()
         } else {
             0.0
         };
@@ -961,7 +961,7 @@ impl GlyphAtlas {
         let line_width = if color_glyph || mode != RenderMode::Stroke {
             0.0
         } else {
-            paint.line_width
+            paint.stroke.line_width
         };
 
         let line_width_offset = (line_width / 2.0).ceil();
@@ -1010,7 +1010,7 @@ impl GlyphAtlas {
                 mask_paint.set_anti_alias(false);
 
                 if mode == RenderMode::Stroke {
-                    mask_paint.line_width = line_width / scale;
+                    mask_paint.stroke.line_width = line_width / scale;
                 }
 
                 canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
@@ -1047,12 +1047,7 @@ impl GlyphAtlas {
                             mask_paint.flavor,
                             mask_paint.glyph_texture,
                             mask_paint.shape_anti_alias,
-                            mask_paint.line_width,
-                            mask_paint.line_cap_start,
-                            mask_paint.line_cap_end,
-                            mask_paint.line_join,
-                            mask_paint.miter_limit,
-                            mask_paint.stencil_strokes,
+                            &mask_paint.stroke,
                         );
                     } else {
                         canvas.fill_path_internal(
@@ -1223,7 +1218,7 @@ pub(crate) fn render_direct<T: Renderer>(
         canvas.save();
 
         if mode == RenderMode::Stroke && !scaled {
-            paint.line_width /= scale;
+            paint.stroke.line_width /= scale;
             scaled = true;
         }
 
@@ -1241,12 +1236,7 @@ pub(crate) fn render_direct<T: Renderer>(
                         paint.flavor,
                         paint.glyph_texture,
                         paint.shape_anti_alias,
-                        paint.line_width,
-                        paint.line_cap_start,
-                        paint.line_cap_end,
-                        paint.line_join,
-                        paint.miter_limit,
-                        paint.stencil_strokes,
+                        &paint.stroke,
                     );
                 } else {
                     canvas.fill_path_internal(

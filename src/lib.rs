@@ -51,7 +51,7 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::{GlyphTexture, PaintFlavor};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
 
 mod path;
 use path::Convexity;
@@ -1009,12 +1009,7 @@ where
             paint.flavor,
             paint.glyph_texture,
             paint.shape_anti_alias,
-            paint.line_width,
-            paint.line_cap_start,
-            paint.line_cap_end,
-            paint.line_join,
-            paint.miter_limit,
-            paint.stencil_strokes,
+            &paint.stroke,
         );
     }
 
@@ -1024,12 +1019,7 @@ where
         mut paint_flavor: PaintFlavor,
         glyph_texture: GlyphTexture,
         anti_alias: bool,
-        mut line_width: f32,
-        line_cap_start: LineCap,
-        line_cap_end: LineCap,
-        line_join: LineJoin,
-        miter_limit: f32,
-        stencil_strokes: bool,
+        stroke: &StrokeSettings,
     ) {
         let transform = self.state().transform;
 
@@ -1052,7 +1042,7 @@ where
         // look correct when zooming in. There was probably a good reson for doing so and I may have
         // introduced a bug by removing the upper bound.
         //paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0).min(200.0));
-        line_width = (line_width * transform.average_scale()).max(0.0);
+        let mut line_width = (stroke.line_width * transform.average_scale()).max(0.0);
 
         if line_width < self.fringe_width {
             // If the stroke width is less than pixel size, use alpha to emulate coverage.
@@ -1072,10 +1062,10 @@ where
         path_cache.expand_stroke(
             line_width * 0.5,
             fringe_with,
-            line_cap_start,
-            line_cap_end,
-            line_join,
-            miter_limit,
+            stroke.line_cap_start,
+            stroke.line_cap_end,
+            stroke.line_join,
+            stroke.miter_limit,
             self.tess_tol,
         );
 
@@ -1091,7 +1081,7 @@ where
             -1.0,
         );
 
-        let flavor = if stencil_strokes {
+        let flavor = if stroke.stencil_strokes {
             let params2 = Params::new(
                 &self.images,
                 &transform,
@@ -1330,7 +1320,7 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         paint.font_size *= scale;
         paint.letter_spacing *= scale;
-        paint.line_width *= scale;
+        paint.stroke.line_width *= scale;
     }
 
     fn draw_text(
