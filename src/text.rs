@@ -530,7 +530,14 @@ pub(crate) fn shape(
     let id = ShapingId::new(paint.font_size, paint.font_ids, text, max_width);
 
     if !context.shaping_run_cache.contains(&id) {
-        let metrics = shape_run(context, paint, text, max_width)?;
+        let metrics = shape_run(
+            context,
+            paint.font_size,
+            paint.font_ids,
+            paint.letter_spacing,
+            text,
+            max_width,
+        )?;
         context.shaping_run_cache.put(id, metrics);
     }
 
@@ -545,7 +552,9 @@ pub(crate) fn shape(
 
 fn shape_run(
     context: &mut TextContextImpl,
-    paint: &Paint,
+    font_size: f32,
+    font_ids: [Option<FontId>; 8],
+    letter_spacing: f32,
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
@@ -586,17 +595,10 @@ fn shape_run(
             let mut byte_index = run.start;
 
             for mut word_txt in sub_text.split_word_bounds() {
-                let id = ShapingId::new(paint.font_size, paint.font_ids, word_txt, max_width);
+                let id = ShapingId::new(font_size, font_ids, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
-                    let word = shape_word(
-                        word_txt,
-                        hb_direction,
-                        context,
-                        paint.font_size,
-                        paint.font_ids,
-                        paint.letter_spacing,
-                    );
+                    let word = shape_word(word_txt, hb_direction, context, font_size, font_ids, letter_spacing);
                     context.shaped_words_cache.put(id, word);
                 }
 
@@ -613,7 +615,7 @@ fn shape_run(
                                 let target_width = max_width - result.width;
                                 for glyph in word.glyphs.iter() {
                                     bytes_included = glyph.byte_index;
-                                    let glyph_width = glyph.advance_x + paint.letter_spacing;
+                                    let glyph_width = glyph.advance_x + letter_spacing;
 
                                     // nuance: we want to include the first glyph even if it breaks
                                     // the bounds. this is to allow pathologically small bounds to
@@ -631,15 +633,15 @@ fn shape_run(
                                 }
 
                                 let subword_txt = &word_txt[..bytes_included];
-                                let id = ShapingId::new(paint.font_size, paint.font_ids, subword_txt, Some(max_width));
+                                let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width));
                                 if !context.shaped_words_cache.contains(&id) {
                                     let subword = shape_word(
                                         subword_txt,
                                         hb_direction,
                                         context,
-                                        paint.font_size,
-                                        paint.font_ids,
-                                        paint.letter_spacing,
+                                        font_size,
+                                        font_ids,
+                                        letter_spacing,
                                     );
                                     context.shaped_words_cache.put(id, subword);
                                 }
