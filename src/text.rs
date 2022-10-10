@@ -105,12 +105,19 @@ pub(crate) struct RenderedGlyphId {
 }
 
 impl RenderedGlyphId {
-    fn new(glyph_index: u32, font_id: FontId, paint: &Paint, mode: RenderMode, subpixel_location: u8) -> Self {
+    fn new(
+        glyph_index: u32,
+        font_id: FontId,
+        font_size: f32,
+        line_width: f32,
+        mode: RenderMode,
+        subpixel_location: u8,
+    ) -> Self {
         Self {
             glyph_index,
             font_id,
-            size: (paint.text.font_size * 10.0).trunc() as u32,
-            line_width: (paint.stroke.line_width * 10.0).trunc() as u32,
+            size: (font_size * 10.0).trunc() as u32,
+            line_width: (line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
         }
@@ -894,7 +901,14 @@ impl GlyphAtlas {
         for glyph in &text_layout.glyphs {
             let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
 
-            let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
+            let id = RenderedGlyphId::new(
+                glyph.codepoint,
+                glyph.font_id,
+                paint.text.font_size,
+                paint.stroke.line_width,
+                mode,
+                subpixel_location as u8,
+            );
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
                 let glyph = self.render_glyph(canvas, paint.text.font_size, paint.stroke.line_width, mode, glyph)?;
