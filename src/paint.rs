@@ -252,8 +252,6 @@ impl Default for TextSettings {
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Paint {
     pub(crate) flavor: PaintFlavor,
-    #[cfg_attr(feature = "serialization", serde(skip))]
-    pub(crate) glyph_texture: GlyphTexture,
     pub(crate) shape_anti_alias: bool,
     pub(crate) stroke: StrokeSettings,
     pub(crate) text: TextSettings,
@@ -264,7 +262,6 @@ impl Default for Paint {
     fn default() -> Self {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
-            glyph_texture: Default::default(),
             shape_anti_alias: true,
             stroke: StrokeSettings::default(),
             text: TextSettings::default(),

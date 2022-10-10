@@ -829,7 +829,7 @@ where
         self.fill_path_internal(
             path,
             paint.flavor,
-            paint.glyph_texture,
+            Default::default(),
             paint.shape_anti_alias,
             paint.fill_rule,
         );
@@ -1007,7 +1007,7 @@ where
         self.stroke_path_internal(
             path,
             paint.flavor,
-            paint.glyph_texture,
+            Default::default(),
             paint.shape_anti_alias,
             &paint.stroke,
         );
@@ -1321,7 +1321,7 @@ where
             y,
             text.as_ref(),
             paint.flavor,
-            paint.glyph_texture,
+            Default::default(),
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1342,7 +1342,7 @@ where
             y,
             text.as_ref(),
             paint.flavor,
-            paint.glyph_texture,
+            Default::default(),
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
