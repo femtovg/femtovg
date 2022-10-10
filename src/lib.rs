@@ -872,10 +872,10 @@ where
             paint_flavor.is_straight_tinted_image(anti_alias),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor, Default::default());
+                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor, Default::default());
+                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor);
                 return;
             } else {
                 return;
@@ -1120,20 +1120,14 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(
-        &mut self,
-        target_rect: &Rect,
-        transform: &Transform2D,
-        paint_flavor: PaintFlavor,
-        glyph_texture: GlyphTexture,
-    ) {
+    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint_flavor: PaintFlavor) {
         let scissor = self.state().scissor;
 
         let mut params = Params::new(
             &self.images,
             transform,
             paint_flavor,
-            &glyph_texture,
+            &Default::default(),
             &scissor,
             0.,
             0.,
@@ -1143,7 +1137,6 @@ where
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.glyph_texture = glyph_texture;
 
         let x0 = target_rect.x;
         let y0 = target_rect.y;
