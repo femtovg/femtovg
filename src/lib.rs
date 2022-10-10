@@ -830,7 +830,7 @@ where
             path,
             paint.flavor,
             paint.glyph_texture,
-            paint.anti_alias(),
+            paint.shape_anti_alias,
             paint.is_straight_tinted_image(),
             paint.fill_rule,
         );
@@ -1010,7 +1010,7 @@ where
             path,
             paint.flavor,
             paint.glyph_texture,
-            paint.anti_alias(),
+            paint.shape_anti_alias,
             paint.line_width,
             paint.line_cap_start,
             paint.line_cap_end,
