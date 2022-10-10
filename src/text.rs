@@ -435,11 +435,11 @@ impl TextContextImpl {
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        shape(x, y, self, paint, text.as_ref(), None)
+        shape(x, y, self, &paint.text, text.as_ref(), None)
     }
 
     pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        let layout = shape(0.0, 0.0, self, paint, text.as_ref(), Some(max_width))?;
+        let layout = shape(0.0, 0.0, self, &paint.text, text.as_ref(), Some(max_width))?;
 
         Ok(layout.final_byte_index)
     }
@@ -530,18 +530,18 @@ pub(crate) fn shape(
     x: f32,
     y: f32,
     context: &mut TextContextImpl,
-    paint: &Paint,
+    text_settings: &TextSettings,
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
-    let id = ShapingId::new(paint.text.font_size, paint.text.font_ids, text, max_width);
+    let id = ShapingId::new(text_settings.font_size, text_settings.font_ids, text, max_width);
 
     if !context.shaping_run_cache.contains(&id) {
         let metrics = shape_run(
             context,
-            paint.text.font_size,
-            paint.text.font_ids,
-            paint.text.letter_spacing,
+            text_settings.font_size,
+            text_settings.font_ids,
+            text_settings.letter_spacing,
             text,
             max_width,
         )?;
@@ -549,7 +549,7 @@ pub(crate) fn shape(
     }
 
     if let Some(mut metrics) = context.shaping_run_cache.get(&id).cloned() {
-        layout(x, y, context, &mut metrics, &paint.text)?;
+        layout(x, y, context, &mut metrics, text_settings)?;
 
         return Ok(metrics);
     }
