@@ -831,7 +831,6 @@ where
             paint.flavor,
             paint.glyph_texture,
             paint.shape_anti_alias,
-            paint.is_straight_tinted_image(),
             paint.fill_rule,
         );
     }
@@ -842,7 +841,6 @@ where
         mut paint_flavor: PaintFlavor,
         glyph_texture: GlyphTexture,
         anti_alias: bool,
-        is_straight_tinted_image: bool,
         fill_rule: FillRule,
     ) {
         let transform = self.state().transform;
@@ -878,7 +876,7 @@ where
         if let (Some(path_rect), Some(scissor_rect), true) = (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width, canvas_height),
-            is_straight_tinted_image,
+            paint_flavor.is_straight_tinted_image(anti_alias),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor, glyph_texture);
