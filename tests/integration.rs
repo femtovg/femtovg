@@ -6,8 +6,8 @@ fn path_with_single_move_to() {
 
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -17,8 +17,8 @@ fn path_with_two_lines() {
     let mut path = Path::new();
     path.line_to(10.0, 10.0);
     path.line_to(10.0, 10.0);
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -29,8 +29,8 @@ fn path_with_close_points() {
     path.move_to(10.0, 10.0);
     path.line_to(10.0001, 10.0);
     path.line_to(10.0001, 10.000001);
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -54,8 +54,8 @@ fn path_with_points_at_limits() {
     );
     path.close();
 
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn path_with_points_around_zero() {
 
     path.close();
 
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn degenerate_stroke() {
     path.line_to(2., 2.);
     path.line_to(2., 2.);
     path.line_to(4., 2.);
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn degenerate_arc_to() {
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
     path.arc_to(10.0, 10.0001, 10.0, 10.0001, 2.0);
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -116,8 +116,8 @@ fn degenerate_arc() {
     path.move_to(10.0, 10.0);
     path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Solidity::Hole);
 
-    canvas.fill_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn text_location_respects_scale() {
     paint.set_text_baseline(Baseline::Top);
     canvas.scale(5.0, 5.0);
 
-    let res = canvas.measure_text(100.0, 100.0, "Hello", paint).unwrap();
+    let res = canvas.measure_text(100.0, 100.0, "Hello", &paint).unwrap();
 
     assert_eq!(res.x, 100.0);
     assert_eq!(res.y, 100.0);
@@ -175,7 +175,7 @@ fn text_measure_without_canvas() {
     test_paint.set_font_size(16.);
 
     let metrics = text_context
-        .measure_text(0., 0., "Hello World", test_paint)
+        .measure_text(0., 0., "Hello World", &test_paint)
         .expect("text shaping failed unexpectedly");
 
     assert_eq!(metrics.width().ceil(), 83.);
@@ -195,7 +195,7 @@ fn font_measure_without_canvas() {
     test_paint.set_font_size(16.);
 
     let metrics = text_context
-        .measure_font(test_paint)
+        .measure_font(&test_paint)
         .expect("font measuring failed unexpectedly");
 
     assert_eq!(metrics.ascender().ceil(), 17.);
@@ -216,7 +216,7 @@ fn break_text_without_canvas() {
     let text = "Multiple Lines Broken";
 
     let breaks = text_context
-        .break_text_vec(60., text, test_paint)
+        .break_text_vec(60., text, &test_paint)
         .expect("text shaping failed unexpectedly");
 
     assert_eq!(
