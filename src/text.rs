@@ -1042,9 +1042,27 @@ impl GlyphAtlas {
                     canvas.scale(scale, scale);
 
                     if mode == RenderMode::Stroke {
-                        canvas.stroke_path(path, &mask_paint);
+                        canvas.stroke_path_internal(
+                            path,
+                            mask_paint.flavor,
+                            mask_paint.glyph_texture,
+                            mask_paint.anti_alias(),
+                            mask_paint.line_width,
+                            mask_paint.line_cap_start,
+                            mask_paint.line_cap_end,
+                            mask_paint.line_join,
+                            mask_paint.miter_limit,
+                            mask_paint.stencil_strokes,
+                        );
                     } else {
-                        canvas.fill_path(path, &mask_paint);
+                        canvas.fill_path_internal(
+                            path,
+                            mask_paint.flavor,
+                            mask_paint.glyph_texture,
+                            mask_paint.anti_alias(),
+                            mask_paint.is_straight_tinted_image(),
+                            mask_paint.fill_rule,
+                        );
                     }
 
                     canvas.restore();
@@ -1219,9 +1237,27 @@ pub(crate) fn render_direct<T: Renderer>(
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
-                    canvas.stroke_path(path, &paint);
+                    canvas.stroke_path_internal(
+                        path,
+                        paint.flavor,
+                        paint.glyph_texture,
+                        paint.anti_alias(),
+                        paint.line_width,
+                        paint.line_cap_start,
+                        paint.line_cap_end,
+                        paint.line_join,
+                        paint.miter_limit,
+                        paint.stencil_strokes,
+                    );
                 } else {
-                    canvas.fill_path(path, &paint);
+                    canvas.fill_path_internal(
+                        path,
+                        paint.flavor,
+                        paint.glyph_texture,
+                        paint.anti_alias(),
+                        paint.is_straight_tinted_image(),
+                        paint.fill_rule,
+                    );
                 }
             }
             #[cfg(feature = "image-loading")]

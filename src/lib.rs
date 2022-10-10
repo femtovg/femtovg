@@ -826,8 +826,25 @@ where
 
     /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &mut Path, paint: &Paint) {
-        let mut paint = paint.clone();
+        self.fill_path_internal(
+            path,
+            paint.flavor,
+            paint.glyph_texture,
+            paint.anti_alias(),
+            paint.is_straight_tinted_image(),
+            paint.fill_rule,
+        );
+    }
 
+    fn fill_path_internal(
+        &mut self,
+        path: &mut Path,
+        mut paint_flavor: PaintFlavor,
+        glyph_texture: GlyphTexture,
+        anti_alias: bool,
+        is_straight_tinted_image: bool,
+        fill_rule: FillRule,
+    ) {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -846,14 +863,14 @@ where
         }
 
         // Apply global alpha
-        paint.flavor.mul_alpha(self.state().alpha);
+        paint_flavor.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
 
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_width = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        let fringe_width = if anti_alias { self.fringe_width } else { 0.0 };
         path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
 
         // Detect if this path fill is in fact just an unclipped image copy
@@ -861,13 +878,13 @@ where
         if let (Some(path_rect), Some(scissor_rect), true) = (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width, canvas_height),
-            paint.is_straight_tinted_image(),
+            is_straight_tinted_image,
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, paint.flavor, paint.glyph_texture);
+                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor, glyph_texture);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, paint.flavor, paint.glyph_texture);
+                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor, glyph_texture);
                 return;
             } else {
                 return;
@@ -879,8 +896,8 @@ where
             let params = Params::new(
                 &self.images,
                 &transform,
-                paint.flavor,
-                &paint.glyph_texture,
+                paint_flavor,
+                &glyph_texture,
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -898,8 +915,8 @@ where
             let fill_params = Params::new(
                 &self.images,
                 &transform,
-                paint.flavor,
-                &paint.glyph_texture,
+                paint_flavor,
+                &glyph_texture,
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -914,12 +931,12 @@ where
 
         // GPU command
         let mut cmd = Command::new(flavor);
-        cmd.fill_rule = paint.fill_rule;
+        cmd.fill_rule = fill_rule;
         cmd.composite_operation = self.state().composite_operation;
 
-        if let PaintFlavor::Image { id, .. } = paint.flavor {
+        if let PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
-        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
                 .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
@@ -989,8 +1006,33 @@ where
 
     /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &mut Path, paint: &Paint) {
-        let mut paint = paint.clone();
+        self.stroke_path_internal(
+            path,
+            paint.flavor,
+            paint.glyph_texture,
+            paint.anti_alias(),
+            paint.line_width,
+            paint.line_cap_start,
+            paint.line_cap_end,
+            paint.line_join,
+            paint.miter_limit,
+            paint.stencil_strokes,
+        );
+    }
 
+    fn stroke_path_internal(
+        &mut self,
+        path: &mut Path,
+        mut paint_flavor: PaintFlavor,
+        glyph_texture: GlyphTexture,
+        anti_alias: bool,
+        mut line_width: f32,
+        line_cap_start: LineCap,
+        line_cap_end: LineCap,
+        line_join: LineJoin,
+        miter_limit: f32,
+        stencil_strokes: bool,
+    ) {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1012,30 +1054,30 @@ where
         // look correct when zooming in. There was probably a good reson for doing so and I may have
         // introduced a bug by removing the upper bound.
         //paint.set_stroke_width((paint.stroke_width() * transform.average_scale()).max(0.0).min(200.0));
-        paint.line_width = (paint.line_width * transform.average_scale()).max(0.0);
+        line_width = (line_width * transform.average_scale()).max(0.0);
 
-        if paint.line_width < self.fringe_width {
+        if line_width < self.fringe_width {
             // If the stroke width is less than pixel size, use alpha to emulate coverage.
             // Since coverage is area, scale by alpha*alpha.
-            let alpha = (paint.line_width / self.fringe_width).max(0.0).min(1.0);
+            let alpha = (line_width / self.fringe_width).max(0.0).min(1.0);
 
-            paint.flavor.mul_alpha(alpha * alpha);
-            paint.line_width = self.fringe_width;
+            paint_flavor.mul_alpha(alpha * alpha);
+            line_width = self.fringe_width;
         }
 
         // Apply global alpha
-        paint.flavor.mul_alpha(self.state().alpha);
+        paint_flavor.mul_alpha(self.state().alpha);
 
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
-        let fringe_with = if paint.anti_alias() { self.fringe_width } else { 0.0 };
+        let fringe_with = if anti_alias { self.fringe_width } else { 0.0 };
         path_cache.expand_stroke(
-            paint.line_width * 0.5,
+            line_width * 0.5,
             fringe_with,
-            paint.line_cap_start,
-            paint.line_cap_end,
-            paint.line_join,
-            paint.miter_limit,
+            line_cap_start,
+            line_cap_end,
+            line_join,
+            miter_limit,
             self.tess_tol,
         );
 
@@ -1043,22 +1085,22 @@ where
         let params = Params::new(
             &self.images,
             &transform,
-            paint.flavor,
-            &paint.glyph_texture,
+            paint_flavor,
+            &glyph_texture,
             &scissor,
-            paint.line_width,
+            line_width,
             self.fringe_width,
             -1.0,
         );
 
-        let flavor = if paint.stencil_strokes() {
+        let flavor = if stencil_strokes {
             let params2 = Params::new(
                 &self.images,
                 &transform,
-                paint.flavor,
-                &paint.glyph_texture,
+                paint_flavor,
+                &glyph_texture,
                 &scissor,
-                paint.line_width,
+                line_width,
                 self.fringe_width,
                 1.0 - 0.5 / 255.0,
             );
@@ -1075,9 +1117,9 @@ where
         let mut cmd = Command::new(flavor);
         cmd.composite_operation = self.state().composite_operation;
 
-        if let PaintFlavor::Image { id, .. } = paint.flavor {
+        if let PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
-        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
                 .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
