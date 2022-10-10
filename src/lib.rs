@@ -1363,7 +1363,7 @@ where
             x * scale,
             y * scale,
             &mut self.text_context.as_ref().borrow_mut(),
-            &paint,
+            &paint.text,
             text,
             None,
         )?;
