@@ -51,7 +51,7 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings, TextSettings};
 
 mod path;
 use path::Convexity;
@@ -1316,7 +1316,17 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
+        self.draw_text(
+            x,
+            y,
+            text.as_ref(),
+            paint.flavor,
+            paint.glyph_texture,
+            paint.shape_anti_alias,
+            &paint.stroke,
+            &paint.text,
+            RenderMode::Fill,
+        )
     }
 
     /// Strokes the provided string with the specified Paint.
@@ -1327,7 +1337,17 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
+        self.draw_text(
+            x,
+            y,
+            text.as_ref(),
+            paint.flavor,
+            paint.glyph_texture,
+            paint.shape_anti_alias,
+            &paint.stroke,
+            &paint.text,
+            RenderMode::Stroke,
+        )
     }
 
     // Private
@@ -1344,26 +1364,31 @@ where
         x: f32,
         y: f32,
         text: &str,
-        paint: &Paint,
+        mut paint_flavor: PaintFlavor,
+        glyph_texture: GlyphTexture,
+        anti_alias: bool,
+        stroke: &StrokeSettings,
+        text_settings: &TextSettings,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
-        let mut paint = paint.clone();
-
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
+        let mut stroke = stroke.clone();
+        let mut text_settings = text_settings.clone();
+
         self.transform_text_paint(
-            &mut paint.text.font_size,
-            &mut paint.text.letter_spacing,
-            &mut paint.stroke.line_width,
+            &mut text_settings.font_size,
+            &mut text_settings.letter_spacing,
+            &mut stroke.line_width,
         );
 
         let mut layout = text::shape(
             x * scale,
             y * scale,
             &mut self.text_context.as_ref().borrow_mut(),
-            &paint.text,
+            &text_settings,
             text,
             None,
         )?;
@@ -1372,17 +1397,17 @@ where
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let bitmap_glyphs = layout.has_bitmap_glyphs();
-        let need_direct_rendering = paint.text.font_size > 92.0;
+        let need_direct_rendering = text_settings.font_size > 92.0;
 
         if need_direct_rendering && !bitmap_glyphs {
             text::render_direct(
                 self,
                 &layout,
-                paint.flavor,
-                paint.glyph_texture,
-                paint.shape_anti_alias,
-                &paint.stroke,
-                paint.text.font_size,
+                paint_flavor,
+                glyph_texture,
+                anti_alias,
+                &stroke,
+                text_settings.font_size,
                 render_mode,
                 invscale,
             )?;
@@ -1412,31 +1437,27 @@ where
                 self.glyph_atlas.clone()
             };
 
-            let draw_commands = atlas.render_atlas(
-                self,
-                &layout,
-                paint.text.font_size,
-                paint.stroke.line_width,
-                render_mode,
-            )?;
+            let draw_commands =
+                atlas.render_atlas(self, &layout, text_settings.font_size, stroke.line_width, render_mode)?;
 
             // Apply global alpha
-            paint.flavor.mul_alpha(self.state().alpha);
+            paint_flavor.mul_alpha(self.state().alpha);
 
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
 
-                paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
-
-                self.render_triangles(&verts, &transform, paint.flavor, paint.glyph_texture);
+                self.render_triangles(&verts, &transform, paint_flavor, GlyphTexture::AlphaMask(cmd.image_id));
             }
 
             for cmd in draw_commands.color_glyphs {
                 let verts = create_vertices(&cmd.quads);
 
-                paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
-
-                self.render_triangles(&verts, &transform, paint.flavor, paint.glyph_texture);
+                self.render_triangles(
+                    &verts,
+                    &transform,
+                    paint_flavor,
+                    GlyphTexture::ColorTexture(cmd.image_id),
+                );
             }
         }
 
