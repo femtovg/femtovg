@@ -743,7 +743,7 @@ impl PathCache {
 
             for i in 0..points.len() {
                 let p0 = if i == 0 {
-                    points.get(points.len() - 1).copied().unwrap()
+                    points.last().copied().unwrap()
                 } else {
                     points.get(i - 1).copied().unwrap()
                 };
