@@ -879,7 +879,8 @@ where
             let params = Params::new(
                 &self.images,
                 &transform,
-                &paint,
+                paint.flavor,
+                &paint.glyph_texture,
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -897,7 +898,8 @@ where
             let fill_params = Params::new(
                 &self.images,
                 &transform,
-                &paint,
+                paint.flavor,
+                &paint.glyph_texture,
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -1041,7 +1043,8 @@ where
         let params = Params::new(
             &self.images,
             &transform,
-            &paint,
+            paint.flavor,
+            &paint.glyph_texture,
             &scissor,
             paint.line_width,
             self.fringe_width,
@@ -1052,7 +1055,8 @@ where
             let params2 = Params::new(
                 &self.images,
                 &transform,
-                &paint,
+                paint.flavor,
+                &paint.glyph_texture,
                 &scissor,
                 paint.line_width,
                 self.fringe_width,
@@ -1103,7 +1107,16 @@ where
     fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint: &Paint) {
         let scissor = self.state().scissor;
 
-        let mut params = Params::new(&self.images, transform, paint, &scissor, 0., 0., -1.0);
+        let mut params = Params::new(
+            &self.images,
+            transform,
+            paint.flavor,
+            &paint.glyph_texture,
+            &scissor,
+            0.,
+            0.,
+            -1.0,
+        );
         params.shader_type = ShaderType::TextureCopyUnclipped;
 
         let mut cmd = Command::new(CommandType::Triangles { params });
@@ -1363,7 +1376,16 @@ where
     fn render_triangles(&mut self, verts: &[Vertex], transform: &Transform2D, paint: &Paint) {
         let scissor = self.state().scissor;
 
-        let params = Params::new(&self.images, transform, paint, &scissor, 1.0, 1.0, -1.0);
+        let params = Params::new(
+            &self.images,
+            transform,
+            paint.flavor,
+            &paint.glyph_texture,
+            &scissor,
+            1.0,
+            1.0,
+            -1.0,
+        );
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;

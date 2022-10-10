@@ -1,7 +1,7 @@
 use crate::{
     geometry::Position,
     paint::{GlyphTexture, GradientColors},
-    ImageFlags, ImageStore, Paint, PaintFlavor, PixelFormat, Scissor, Transform2D,
+    ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
 use super::ShaderType;
@@ -31,7 +31,8 @@ impl Params {
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
         global_transform: &Transform2D,
-        paint: &Paint,
+        paint_flavor: PaintFlavor,
+        glyph_texture: &GlyphTexture,
         scissor: &Scissor,
         stroke_width: f32,
         fringe_width: f32,
@@ -65,7 +66,7 @@ impl Params {
         params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
 
-        params.glyph_texture_type = match paint.glyph_texture() {
+        params.glyph_texture_type = match glyph_texture {
             GlyphTexture::None => 0,
             GlyphTexture::AlphaMask(_) => 1,
             GlyphTexture::ColorTexture(_) => 2,
@@ -73,7 +74,7 @@ impl Params {
 
         let inv_transform;
 
-        match paint.flavor {
+        match paint_flavor {
             PaintFlavor::Color(color) => {
                 let color = color.premultiplied().to_array();
                 params.inner_col = color;
