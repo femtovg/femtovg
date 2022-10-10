@@ -519,10 +519,6 @@ impl Paint {
         self
     }
 
-    pub(crate) fn glyph_texture(&self) -> GlyphTexture {
-        self.glyph_texture
-    }
-
     /// Set an alpha mask or color glyph texture; this is only used by draw_triangles which is used for text.
     // This is scoped to crate visibility because fill_path and stroke_path don't propagate
     // the alpha mask (so nothing draws), and the texture coordinates are used for antialiasing
