@@ -826,20 +826,13 @@ where
 
     /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &mut Path, paint: &Paint) {
-        self.fill_path_internal(
-            path,
-            paint.flavor,
-            Default::default(),
-            paint.shape_anti_alias,
-            paint.fill_rule,
-        );
+        self.fill_path_internal(path, paint.flavor, paint.shape_anti_alias, paint.fill_rule);
     }
 
     fn fill_path_internal(
         &mut self,
         path: &mut Path,
         mut paint_flavor: PaintFlavor,
-        glyph_texture: GlyphTexture,
         anti_alias: bool,
         fill_rule: FillRule,
     ) {
@@ -879,10 +872,10 @@ where
             paint_flavor.is_straight_tinted_image(anti_alias),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor, glyph_texture);
+                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor, Default::default());
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor, glyph_texture);
+                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor, Default::default());
                 return;
             } else {
                 return;
@@ -895,7 +888,7 @@ where
                 &self.images,
                 &transform,
                 paint_flavor,
-                &glyph_texture,
+                &Default::default(),
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -914,7 +907,7 @@ where
                 &self.images,
                 &transform,
                 paint_flavor,
-                &glyph_texture,
+                &Default::default(),
                 &scissor,
                 self.fringe_width,
                 self.fringe_width,
@@ -1004,20 +997,13 @@ where
 
     /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &mut Path, paint: &Paint) {
-        self.stroke_path_internal(
-            path,
-            paint.flavor,
-            Default::default(),
-            paint.shape_anti_alias,
-            &paint.stroke,
-        );
+        self.stroke_path_internal(path, paint.flavor, paint.shape_anti_alias, &paint.stroke);
     }
 
     fn stroke_path_internal(
         &mut self,
         path: &mut Path,
         mut paint_flavor: PaintFlavor,
-        glyph_texture: GlyphTexture,
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
@@ -1074,7 +1060,7 @@ where
             &self.images,
             &transform,
             paint_flavor,
-            &glyph_texture,
+            &Default::default(),
             &scissor,
             line_width,
             self.fringe_width,
@@ -1086,7 +1072,7 @@ where
                 &self.images,
                 &transform,
                 paint_flavor,
-                &glyph_texture,
+                &Default::default(),
                 &scissor,
                 line_width,
                 self.fringe_width,
@@ -1321,7 +1307,6 @@ where
             y,
             text.as_ref(),
             paint.flavor,
-            Default::default(),
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1342,7 +1327,6 @@ where
             y,
             text.as_ref(),
             paint.flavor,
-            Default::default(),
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1365,7 +1349,6 @@ where
         y: f32,
         text: &str,
         mut paint_flavor: PaintFlavor,
-        glyph_texture: GlyphTexture,
         anti_alias: bool,
         stroke: &StrokeSettings,
         text_settings: &TextSettings,
@@ -1404,7 +1387,6 @@ where
                 self,
                 &layout,
                 paint_flavor,
-                glyph_texture,
                 anti_alias,
                 &stroke,
                 text_settings.font_size,
