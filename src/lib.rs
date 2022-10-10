@@ -1287,7 +1287,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text_vec(max_width, text, &paint)
+            .break_text_vec(max_width, text, &paint.text)
     }
 
     /// Fills the provided string with the specified Paint.
