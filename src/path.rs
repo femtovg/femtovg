@@ -477,7 +477,7 @@ impl Path {
 
     /// Appends a slice of verbs to the path
     fn append(&mut self, verbs: &[PackedVerb], coords: &[Position]) {
-        if coords.len() > 1 {
+        if !coords.is_empty() {
             self.last_pos = coords[coords.len() - 1];
         }
 
