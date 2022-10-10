@@ -879,7 +879,7 @@ impl GlyphAtlas {
             let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                let glyph = self.render_glyph(canvas, paint, mode, glyph)?;
+                let glyph = self.render_glyph(canvas, paint.font_size, paint.stroke.line_width, mode, glyph)?;
 
                 self.rendered_glyphs.borrow_mut().insert(id, glyph);
             }
@@ -936,7 +936,8 @@ impl GlyphAtlas {
     fn render_glyph<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
-        paint: &Paint,
+        font_size: f32,
+        line_width: f32,
         mode: RenderMode,
         glyph: &ShapedGlyph,
     ) -> Result<RenderedGlyph, ErrorKind> {
@@ -947,10 +948,10 @@ impl GlyphAtlas {
 
         let (mut maybe_glyph_representation, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let scale = font.scale(paint.font_size);
+            let scale = font.scale(font_size);
 
             let maybe_glyph_representation =
-                font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16);
+                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16);
             (maybe_glyph_representation, scale)
         };
 
@@ -962,7 +963,7 @@ impl GlyphAtlas {
         let line_width = if color_glyph || mode != RenderMode::Stroke {
             0.0
         } else {
-            paint.stroke.line_width
+            line_width
         };
 
         let line_width_offset = (line_width / 2.0).ceil();
