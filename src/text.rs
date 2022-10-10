@@ -109,7 +109,7 @@ impl RenderedGlyphId {
         Self {
             glyph_index,
             font_id,
-            size: (paint.font_size * 10.0).trunc() as u32,
+            size: (paint.text.font_size * 10.0).trunc() as u32,
             line_width: (paint.stroke.line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
@@ -466,9 +466,9 @@ impl TextContextImpl {
     }
 
     pub fn measure_font(&mut self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
-        if let Some(Some(id)) = paint.font_ids.get(0) {
+        if let Some(Some(id)) = paint.text.font_ids.get(0) {
             if let Some(font) = self.font(*id) {
-                return Ok(font.metrics(paint.font_size));
+                return Ok(font.metrics(paint.text.font_size));
             }
         }
 
@@ -527,14 +527,14 @@ pub(crate) fn shape(
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
-    let id = ShapingId::new(paint.font_size, paint.font_ids, text, max_width);
+    let id = ShapingId::new(paint.text.font_size, paint.text.font_ids, text, max_width);
 
     if !context.shaping_run_cache.contains(&id) {
         let metrics = shape_run(
             context,
-            paint.font_size,
-            paint.font_ids,
-            paint.letter_spacing,
+            paint.text.font_size,
+            paint.text.font_ids,
+            paint.text.letter_spacing,
             text,
             max_width,
         )?;
@@ -547,11 +547,11 @@ pub(crate) fn shape(
             y,
             context,
             &mut metrics,
-            paint.font_size,
-            paint.font_ids,
-            paint.letter_spacing,
-            paint.text_align,
-            paint.text_baseline,
+            paint.text.font_size,
+            paint.text.font_ids,
+            paint.text.letter_spacing,
+            paint.text.text_align,
+            paint.text.text_baseline,
         )?;
 
         return Ok(metrics);
@@ -911,7 +911,7 @@ impl GlyphAtlas {
             let id = RenderedGlyphId::new(glyph.codepoint, glyph.font_id, paint, mode, subpixel_location as u8);
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                let glyph = self.render_glyph(canvas, paint.font_size, paint.stroke.line_width, mode, glyph)?;
+                let glyph = self.render_glyph(canvas, paint.text.font_size, paint.stroke.line_width, mode, glyph)?;
 
                 self.rendered_glyphs.borrow_mut().insert(id, glyph);
             }
@@ -1233,10 +1233,10 @@ pub(crate) fn render_direct<T: Renderer>(
         let (glyph_rendering, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
-            let scale = font.scale(paint.font_size);
+            let scale = font.scale(paint.text.font_size);
 
             let glyph_rendering = if let Some(glyph_rendering) =
-                font.glyph_rendering_representation(glyph.codepoint as u16, paint.font_size as u16)
+                font.glyph_rendering_representation(glyph.codepoint as u16, paint.text.font_size as u16)
             {
                 glyph_rendering
             } else {

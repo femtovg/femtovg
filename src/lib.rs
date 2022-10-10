@@ -1232,8 +1232,8 @@ where
     ) -> Result<TextMetrics, ErrorKind> {
         let mut paint = paint.clone();
         self.transform_text_paint(
-            &mut paint.font_size,
-            &mut paint.letter_spacing,
+            &mut paint.text.font_size,
+            &mut paint.text.letter_spacing,
             &mut paint.stroke.line_width,
         );
 
@@ -1255,8 +1255,8 @@ where
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         let mut paint = paint.clone();
         self.transform_text_paint(
-            &mut paint.font_size,
-            &mut paint.letter_spacing,
+            &mut paint.text.font_size,
+            &mut paint.text.letter_spacing,
             &mut paint.stroke.line_width,
         );
 
@@ -1269,8 +1269,8 @@ where
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         let mut paint = paint.clone();
         self.transform_text_paint(
-            &mut paint.font_size,
-            &mut paint.letter_spacing,
+            &mut paint.text.font_size,
+            &mut paint.text.letter_spacing,
             &mut paint.stroke.line_width,
         );
 
@@ -1293,8 +1293,8 @@ where
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let mut paint = paint.clone();
         self.transform_text_paint(
-            &mut paint.font_size,
-            &mut paint.letter_spacing,
+            &mut paint.text.font_size,
+            &mut paint.text.letter_spacing,
             &mut paint.stroke.line_width,
         );
 
@@ -1354,8 +1354,8 @@ where
         let invscale = 1.0 / scale;
 
         self.transform_text_paint(
-            &mut paint.font_size,
-            &mut paint.letter_spacing,
+            &mut paint.text.font_size,
+            &mut paint.text.letter_spacing,
             &mut paint.stroke.line_width,
         );
 
@@ -1372,7 +1372,7 @@ where
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let bitmap_glyphs = layout.has_bitmap_glyphs();
-        let need_direct_rendering = paint.font_size > 92.0;
+        let need_direct_rendering = paint.text.font_size > 92.0;
 
         if need_direct_rendering && !bitmap_glyphs {
             text::render_direct(self, &layout, &paint, render_mode, invscale)?;

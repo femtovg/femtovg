@@ -201,6 +201,28 @@ impl Default for StrokeSettings {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TextSettings {
+    #[cfg_attr(feature = "serialization", serde(skip))]
+    pub(crate) font_ids: [Option<FontId>; 8],
+    pub(crate) font_size: f32,
+    pub(crate) letter_spacing: f32,
+    pub(crate) text_baseline: Baseline,
+    pub(crate) text_align: Align,
+}
+
+impl Default for TextSettings {
+    fn default() -> Self {
+        Self {
+            font_ids: Default::default(),
+            font_size: 16.0,
+            letter_spacing: 0.0,
+            text_baseline: Default::default(),
+            text_align: Default::default(),
+        }
+    }
+}
+
 /// Struct controlling how graphical shapes are rendered.
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
@@ -234,12 +256,7 @@ pub struct Paint {
     pub(crate) glyph_texture: GlyphTexture,
     pub(crate) shape_anti_alias: bool,
     pub(crate) stroke: StrokeSettings,
-    #[cfg_attr(feature = "serialization", serde(skip))]
-    pub(crate) font_ids: [Option<FontId>; 8],
-    pub(crate) font_size: f32,
-    pub(crate) letter_spacing: f32,
-    pub(crate) text_baseline: Baseline,
-    pub(crate) text_align: Align,
+    pub(crate) text: TextSettings,
     pub(crate) fill_rule: FillRule,
 }
 
@@ -250,11 +267,7 @@ impl Default for Paint {
             glyph_texture: Default::default(),
             shape_anti_alias: true,
             stroke: StrokeSettings::default(),
-            font_ids: Default::default(),
-            font_size: 16.0,
-            letter_spacing: 0.0,
-            text_baseline: Default::default(),
-            text_align: Default::default(),
+            text: TextSettings::default(),
             fill_rule: Default::default(),
         }
     }
@@ -668,10 +681,10 @@ impl Paint {
     }
 
     pub fn set_font(&mut self, font_ids: &[FontId]) {
-        self.font_ids = Default::default();
+        self.text.font_ids = Default::default();
 
         for (i, id) in font_ids.iter().take(8).enumerate() {
-            self.font_ids[i] = Some(*id);
+            self.text.font_ids[i] = Some(*id);
         }
     }
 
@@ -685,14 +698,14 @@ impl Paint {
     ///
     /// Only has effect on canvas text operations
     pub fn font_size(&self) -> f32 {
-        self.font_size
+        self.text.font_size
     }
 
     /// Sets the font size.
     ///
     /// Only has effect on canvas text operations
     pub fn set_font_size(&mut self, size: f32) {
-        self.font_size = size;
+        self.text.font_size = size;
     }
 
     /// Returns the paint with the font size set to the specified value.
@@ -703,14 +716,14 @@ impl Paint {
 
     /// Returns the current letter spacing
     pub fn letter_spacing(&self) -> f32 {
-        self.letter_spacing
+        self.text.letter_spacing
     }
 
     /// Sets the letter spacing for this paint
     ///
     /// Only has effect on canvas text operations
     pub fn set_letter_spacing(&mut self, spacing: f32) {
-        self.letter_spacing = spacing;
+        self.text.letter_spacing = spacing;
     }
 
     /// Returns the paint with the letter spacing set to the specified value.
@@ -721,14 +734,14 @@ impl Paint {
 
     /// Returns the current vertical align
     pub fn text_baseline(&self) -> Baseline {
-        self.text_baseline
+        self.text.text_baseline
     }
 
     /// Sets the text vertical alignment for this paint
     ///
     /// Only has effect on canvas text operations
     pub fn set_text_baseline(&mut self, align: Baseline) {
-        self.text_baseline = align;
+        self.text.text_baseline = align;
     }
 
     /// Returns the paint with the text vertical alignment set to the specified value.
@@ -739,14 +752,14 @@ impl Paint {
 
     /// Returns the current horizontal align
     pub fn text_align(&self) -> Align {
-        self.text_align
+        self.text.text_align
     }
 
     /// Sets the text horizontal alignment for this paint
     ///
     /// Only has effect on canvas text operations
     pub fn set_text_align(&mut self, align: Align) {
-        self.text_align = align;
+        self.text.text_align = align;
     }
 
     /// Returns the paint with the text horizontal alignment set to the specified value.
