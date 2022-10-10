@@ -16,7 +16,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    paint::{GlyphTexture, PaintFlavor, StrokeSettings, TextSettings},
+    paint::{PaintFlavor, StrokeSettings, TextSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
 
@@ -1080,7 +1080,6 @@ impl GlyphAtlas {
                         canvas.stroke_path_internal(
                             path,
                             mask_flavor,
-                            Default::default(),
                             false,
                             &StrokeSettings {
                                 line_width,
@@ -1088,7 +1087,7 @@ impl GlyphAtlas {
                             },
                         );
                     } else {
-                        canvas.fill_path_internal(path, mask_flavor, Default::default(), false, FillRule::EvenOdd);
+                        canvas.fill_path_internal(path, mask_flavor, false, FillRule::EvenOdd);
                     }
 
                     canvas.restore();
@@ -1219,7 +1218,6 @@ pub(crate) fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
     text_layout: &TextMetrics,
     paint_flavor: PaintFlavor,
-    glyph_texture: GlyphTexture,
     anti_alias: bool,
     stroke: &StrokeSettings,
     font_size: f32,
@@ -1269,7 +1267,6 @@ pub(crate) fn render_direct<T: Renderer>(
                     canvas.stroke_path_internal(
                         path,
                         paint_flavor,
-                        glyph_texture,
                         anti_alias,
                         &StrokeSettings {
                             line_width,
@@ -1277,7 +1274,7 @@ pub(crate) fn render_direct<T: Renderer>(
                         },
                     );
                 } else {
-                    canvas.fill_path_internal(path, paint_flavor, glyph_texture, anti_alias, FillRule::EvenOdd);
+                    canvas.fill_path_internal(path, paint_flavor, anti_alias, FillRule::EvenOdd);
                 }
             }
             #[cfg(feature = "image-loading")]
