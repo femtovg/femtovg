@@ -849,7 +849,7 @@ where
         paint.transform = transform;
 
         // Apply global alpha
-        paint.mul_alpha(self.state().alpha);
+        paint.flavor.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
 
@@ -1021,12 +1021,12 @@ where
             // Since coverage is area, scale by alpha*alpha.
             let alpha = (paint.line_width / self.fringe_width).max(0.0).min(1.0);
 
-            paint.mul_alpha(alpha * alpha);
+            paint.flavor.mul_alpha(alpha * alpha);
             paint.line_width = self.fringe_width;
         }
 
         // Apply global alpha
-        paint.mul_alpha(self.state().alpha);
+        paint.flavor.mul_alpha(self.state().alpha);
 
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
@@ -1338,7 +1338,7 @@ where
             let draw_commands = atlas.render_atlas(self, &layout, &paint, render_mode)?;
 
             // Apply global alpha
-            paint.mul_alpha(self.state().alpha);
+            paint.flavor.mul_alpha(self.state().alpha);
 
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
