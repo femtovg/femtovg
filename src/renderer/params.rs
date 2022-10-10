@@ -31,7 +31,7 @@ impl Params {
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
         global_transform: &Transform2D,
-        paint_flavor: PaintFlavor,
+        paint_flavor: &PaintFlavor,
         glyph_texture: &GlyphTexture,
         scissor: &Scissor,
         stroke_width: f32,
@@ -82,7 +82,7 @@ impl Params {
                 params.shader_type = ShaderType::FillColor;
                 inv_transform = global_transform.inversed();
             }
-            PaintFlavor::Image {
+            &PaintFlavor::Image {
                 id,
                 center: Position { x: cx, y: cy },
                 width,
@@ -179,7 +179,7 @@ impl Params {
                     }
                 }
             }
-            PaintFlavor::BoxGradient {
+            &PaintFlavor::BoxGradient {
                 pos: Position { x, y },
                 width,
                 height,
@@ -206,7 +206,7 @@ impl Params {
                     }
                 }
             }
-            PaintFlavor::RadialGradient {
+            &PaintFlavor::RadialGradient {
                 center: Position { x: cx, y: cy },
                 in_radius,
                 out_radius,

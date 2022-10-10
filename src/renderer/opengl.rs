@@ -562,7 +562,7 @@ impl OpenGl {
         let mut blur_params = Params::new(
             images,
             &Default::default(),
-            image_paint.flavor,
+            &image_paint.flavor,
             &Default::default(),
             &Scissor::default(),
             0.,
