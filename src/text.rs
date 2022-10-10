@@ -16,6 +16,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
+    paint::{PaintFlavor, StrokeSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
 
@@ -1005,12 +1006,12 @@ impl GlyphAtlas {
                 );
                 let factor = 1.0 / 8.0;
 
-                let mut mask_paint = Paint::color(Color::rgbf(factor, factor, factor));
-                mask_paint.set_fill_rule(FillRule::EvenOdd);
-                mask_paint.set_anti_alias(false);
+                let mask_flavor = PaintFlavor::Color(Color::rgbf(factor, factor, factor));
+
+                let mut line_width = line_width;
 
                 if mode == RenderMode::Stroke {
-                    mask_paint.stroke.line_width = line_width / scale;
+                    line_width /= scale;
                 }
 
                 canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
@@ -1044,19 +1045,16 @@ impl GlyphAtlas {
                     if mode == RenderMode::Stroke {
                         canvas.stroke_path_internal(
                             path,
-                            mask_paint.flavor,
-                            mask_paint.glyph_texture,
-                            mask_paint.shape_anti_alias,
-                            &mask_paint.stroke,
+                            mask_flavor,
+                            Default::default(),
+                            false,
+                            &StrokeSettings {
+                                line_width,
+                                ..Default::default()
+                            },
                         );
                     } else {
-                        canvas.fill_path_internal(
-                            path,
-                            mask_paint.flavor,
-                            mask_paint.glyph_texture,
-                            mask_paint.shape_anti_alias,
-                            mask_paint.fill_rule,
-                        );
+                        canvas.fill_path_internal(path, mask_flavor, Default::default(), false, FillRule::EvenOdd);
                     }
 
                     canvas.restore();
