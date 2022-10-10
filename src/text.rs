@@ -46,7 +46,7 @@ pub struct FontId(Index);
 /// Text baseline vertical alignment:
 /// `Top`, `Middle`, `Alphabetic` (default), `Bottom`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Baseline {
     /// The text baseline is the top of the em square.
     Top,
@@ -66,7 +66,7 @@ impl Default for Baseline {
 
 /// Text horizontal alignment: `Left` (default), `Center`, `Right`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Align {
     /// The text is left-aligned.
     Left,

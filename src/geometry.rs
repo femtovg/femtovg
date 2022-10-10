@@ -199,7 +199,7 @@ pub(crate) fn quantize(a: f32, d: f32) -> f32 {
 
 /// 2×3 matrix (2 rows, 3 columns) used for 2D linear transformations. It can represent transformations such as translation, rotation, or scaling.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Transform2D(pub [f32; 6]);
 
 // TODO: Implement std::ops::* on this

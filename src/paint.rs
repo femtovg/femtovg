@@ -179,6 +179,7 @@ impl Default for GlyphTexture {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct StrokeSettings {
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
@@ -202,8 +203,9 @@ impl Default for StrokeSettings {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct TextSettings {
-    #[cfg_attr(feature = "serialization", serde(skip))]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,
     pub(crate) letter_spacing: f32,
@@ -249,7 +251,7 @@ impl Default for TextSettings {
 /// canvas.stroke_path(&mut path, &stroke_paint);
 /// ```
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Paint {
     pub(crate) flavor: PaintFlavor,
     pub(crate) shape_anti_alias: bool,
