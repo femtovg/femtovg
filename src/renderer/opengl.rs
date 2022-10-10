@@ -563,7 +563,7 @@ impl OpenGl {
             images,
             &Default::default(),
             image_paint.flavor,
-            &image_paint.glyph_texture,
+            &Default::default(),
             &Scissor::default(),
             0.,
             0.,
