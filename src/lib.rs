@@ -1412,7 +1412,13 @@ where
                 self.glyph_atlas.clone()
             };
 
-            let draw_commands = atlas.render_atlas(self, &layout, &paint, render_mode)?;
+            let draw_commands = atlas.render_atlas(
+                self,
+                &layout,
+                paint.text.font_size,
+                paint.stroke.line_width,
+                render_mode,
+            )?;
 
             // Apply global alpha
             paint.flavor.mul_alpha(self.state().alpha);

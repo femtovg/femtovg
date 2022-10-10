@@ -884,14 +884,15 @@ impl GlyphAtlas {
         &self,
         canvas: &mut Canvas<T>,
         text_layout: &TextMetrics,
-        paint: &Paint,
+        font_size: f32,
+        line_width: f32,
         mode: RenderMode,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
 
         let line_width_offset = if mode == RenderMode::Stroke {
-            (paint.stroke.line_width / 2.0).ceil()
+            (line_width / 2.0).ceil()
         } else {
             0.0
         };
@@ -904,14 +905,14 @@ impl GlyphAtlas {
             let id = RenderedGlyphId::new(
                 glyph.codepoint,
                 glyph.font_id,
-                paint.text.font_size,
-                paint.stroke.line_width,
+                font_size,
+                line_width,
                 mode,
                 subpixel_location as u8,
             );
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
-                let glyph = self.render_glyph(canvas, paint.text.font_size, paint.stroke.line_width, mode, glyph)?;
+                let glyph = self.render_glyph(canvas, font_size, line_width, mode, glyph)?;
 
                 self.rendered_glyphs.borrow_mut().insert(id, glyph);
             }
