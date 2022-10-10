@@ -1209,12 +1209,11 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        let mut paint = paint.clone();
-        self.transform_text_paint(
-            &mut paint.text.font_size,
-            &mut paint.text.letter_spacing,
-            &mut paint.stroke.line_width,
-        );
+        let scale = self.font_scale() * self.device_px_ratio;
+
+        let mut text_settings = paint.text.clone();
+        text_settings.font_size *= scale;
+        text_settings.letter_spacing *= scale;
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1223,7 +1222,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .measure_text(x * scale, y * scale, text, &paint.text)
+            .measure_text(x * scale, y * scale, text, &text_settings)
             .map(|mut metrics| {
                 metrics.scale(invscale);
                 metrics
@@ -1232,38 +1231,30 @@ where
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
-        let mut paint = paint.clone();
-        self.transform_text_paint(
-            &mut paint.text.font_size,
-            &mut paint.text.letter_spacing,
-            &mut paint.stroke.line_width,
-        );
+        let scale = self.font_scale() * self.device_px_ratio;
 
         self.text_context
             .as_ref()
             .borrow_mut()
-            .measure_font(paint.text.font_size, paint.text.font_ids)
+            .measure_font(paint.text.font_size * scale, paint.text.font_ids)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        let mut paint = paint.clone();
-        self.transform_text_paint(
-            &mut paint.text.font_size,
-            &mut paint.text.letter_spacing,
-            &mut paint.stroke.line_width,
-        );
-
-        let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
+
+        let mut text_settings = paint.text.clone();
+        text_settings.font_size *= scale;
+        text_settings.letter_spacing *= scale;
+
         let max_width = max_width * scale;
 
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text(max_width, text, &paint.text)
+            .break_text(max_width, text, &text_settings)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -1273,21 +1264,18 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
-        let mut paint = paint.clone();
-        self.transform_text_paint(
-            &mut paint.text.font_size,
-            &mut paint.text.letter_spacing,
-            &mut paint.stroke.line_width,
-        );
-
-        let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
+
+        let mut text_settings = paint.text.clone();
+        text_settings.font_size *= scale;
+        text_settings.letter_spacing *= scale;
+
         let max_width = max_width * scale;
 
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text_vec(max_width, text, &paint.text)
+            .break_text_vec(max_width, text, &text_settings)
     }
 
     /// Fills the provided string with the specified Paint.
@@ -1332,13 +1320,6 @@ where
 
     // Private
 
-    fn transform_text_paint(&self, font_size: &mut f32, letter_spacing: &mut f32, line_width: &mut f32) {
-        let scale = self.font_scale() * self.device_px_ratio;
-        *font_size *= scale;
-        *letter_spacing *= scale;
-        *line_width *= scale;
-    }
-
     fn draw_text(
         &mut self,
         x: f32,
@@ -1355,13 +1336,11 @@ where
         let invscale = 1.0 / scale;
 
         let mut stroke = stroke.clone();
-        let mut text_settings = text_settings.clone();
+        stroke.line_width *= scale;
 
-        self.transform_text_paint(
-            &mut text_settings.font_size,
-            &mut text_settings.letter_spacing,
-            &mut stroke.line_width,
-        );
+        let mut text_settings = text_settings.clone();
+        text_settings.font_size *= scale;
+        text_settings.letter_spacing *= scale;
 
         let mut layout = text::shape(
             x * scale,
