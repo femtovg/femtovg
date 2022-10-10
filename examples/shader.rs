@@ -72,7 +72,7 @@ fn main() {
                 let paint = Paint::color(Color::rgbf(1., 0., 0.));
                 let mut path = Path::new();
                 path.rect(WINDOW_WIDTH / 2. - 25., WINDOW_HEIGHT / 2. - 25., 50., 50.);
-                canvas.fill_path(&mut path, paint);
+                canvas.fill_path(&mut path, &paint);
                 canvas.restore();
 
                 canvas.flush();

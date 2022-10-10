@@ -825,7 +825,9 @@ where
     }
 
     /// Fills the provided Path with the specified Paint.
-    pub fn fill_path(&mut self, path: &mut Path, mut paint: Paint) {
+    pub fn fill_path(&mut self, path: &mut Path, paint: &Paint) {
+        let mut paint = paint.clone();
+
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -865,10 +867,10 @@ where
             paint.is_straight_tinted_image(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, paint);
+                self.render_unclipped_image_blit(&path_rect, &paint);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, paint);
+                self.render_unclipped_image_blit(&intersection, &paint);
                 return;
             } else {
                 return;
@@ -985,7 +987,9 @@ where
     }
 
     /// Strokes the provided Path with the specified Paint.
-    pub fn stroke_path(&mut self, path: &mut Path, mut paint: Paint) {
+    pub fn stroke_path(&mut self, path: &mut Path, paint: &Paint) {
+        let mut paint = paint.clone();
+
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1098,10 +1102,10 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, paint: Paint) {
+    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, paint: &Paint) {
         let scissor = self.state().scissor;
 
-        let mut params = Params::new(&self.images, &paint, &scissor, 0., 0., -1.0);
+        let mut params = Params::new(&self.images, paint, &scissor, 0., 0., -1.0);
         params.shader_type = ShaderType::TextureCopyUnclipped;
 
         let mut cmd = Command::new(CommandType::Triangles { params });
@@ -1177,8 +1181,9 @@ where
         x: f32,
         y: f32,
         text: S,
-        mut paint: Paint,
+        paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
+        let mut paint = paint.clone();
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -1188,7 +1193,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .measure_text(x * scale, y * scale, text, paint)
+            .measure_text(x * scale, y * scale, text, &paint)
             .map(|mut metrics| {
                 metrics.scale(invscale);
                 metrics
@@ -1196,16 +1201,18 @@ where
     }
 
     /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&self, mut paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
+        let mut paint = paint.clone();
         self.transform_text_paint(&mut paint);
 
-        self.text_context.as_ref().borrow_mut().measure_font(paint)
+        self.text_context.as_ref().borrow_mut().measure_font(&paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
-    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, mut paint: Paint) -> Result<usize, ErrorKind> {
+    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
+        let mut paint = paint.clone();
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -1215,7 +1222,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text(max_width, text, paint)
+            .break_text(max_width, text, &paint)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -1223,8 +1230,9 @@ where
         &self,
         max_width: f32,
         text: S,
-        mut paint: Paint,
+        paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
+        let mut paint = paint.clone();
         self.transform_text_paint(&mut paint);
 
         let text = text.as_ref();
@@ -1234,7 +1242,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text_vec(max_width, text, paint)
+            .break_text_vec(max_width, text, &paint)
     }
 
     /// Fills the provided string with the specified Paint.
@@ -1243,7 +1251,7 @@ where
         x: f32,
         y: f32,
         text: S,
-        paint: Paint,
+        paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
@@ -1254,7 +1262,7 @@ where
         x: f32,
         y: f32,
         text: S,
-        paint: Paint,
+        paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
@@ -1273,9 +1281,11 @@ where
         x: f32,
         y: f32,
         text: &str,
-        mut paint: Paint,
+        paint: &Paint,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
+        let mut paint = paint.clone();
+
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
@@ -1290,7 +1300,7 @@ where
             text,
             None,
         )?;
-        //let layout = self.layout_text(x, y, text, paint)?;
+        //let layout = self.layout_text(x, y, text, &paint)?;
 
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
@@ -1409,7 +1419,7 @@ where
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect(0f32, 0f32, width, height);
-            self.fill_path(&mut path, Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
+            self.fill_path(&mut path, &Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
 }
