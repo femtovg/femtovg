@@ -16,7 +16,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    paint::{PaintFlavor, StrokeSettings, TextSettings},
+    paint::{GlyphTexture, PaintFlavor, StrokeSettings, TextSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
 
@@ -1203,13 +1203,14 @@ impl GlyphAtlas {
 pub(crate) fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
     text_layout: &TextMetrics,
-    paint: &Paint,
+    paint_flavor: PaintFlavor,
+    glyph_texture: GlyphTexture,
+    anti_alias: bool,
+    stroke: &StrokeSettings,
+    font_size: f32,
     mode: RenderMode,
     invscale: f32,
 ) -> Result<(), ErrorKind> {
-    let mut paint = paint.clone();
-    paint.set_fill_rule(FillRule::EvenOdd);
-
     let text_context = canvas.text_context.clone();
     let mut text_context = text_context.borrow_mut();
 
@@ -1219,10 +1220,10 @@ pub(crate) fn render_direct<T: Renderer>(
         let (glyph_rendering, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
 
-            let scale = font.scale(paint.text.font_size);
+            let scale = font.scale(font_size);
 
             let glyph_rendering = if let Some(glyph_rendering) =
-                font.glyph_rendering_representation(glyph.codepoint as u16, paint.text.font_size as u16)
+                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16)
             {
                 glyph_rendering
             } else {
@@ -1234,8 +1235,10 @@ pub(crate) fn render_direct<T: Renderer>(
 
         canvas.save();
 
+        let mut line_width = stroke.line_width;
+
         if mode == RenderMode::Stroke && !scaled {
-            paint.stroke.line_width /= scale;
+            line_width /= scale;
             scaled = true;
         }
 
@@ -1250,19 +1253,16 @@ pub(crate) fn render_direct<T: Renderer>(
                 if mode == RenderMode::Stroke {
                     canvas.stroke_path_internal(
                         path,
-                        paint.flavor,
-                        paint.glyph_texture,
-                        paint.shape_anti_alias,
-                        &paint.stroke,
+                        paint_flavor,
+                        glyph_texture,
+                        anti_alias,
+                        &StrokeSettings {
+                            line_width,
+                            ..stroke.clone()
+                        },
                     );
                 } else {
-                    canvas.fill_path_internal(
-                        path,
-                        paint.flavor,
-                        paint.glyph_texture,
-                        paint.shape_anti_alias,
-                        paint.fill_rule,
-                    );
+                    canvas.fill_path_internal(path, paint_flavor, glyph_texture, anti_alias, FillRule::EvenOdd);
                 }
             }
             #[cfg(feature = "image-loading")]

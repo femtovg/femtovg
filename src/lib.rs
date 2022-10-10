@@ -1375,7 +1375,17 @@ where
         let need_direct_rendering = paint.text.font_size > 92.0;
 
         if need_direct_rendering && !bitmap_glyphs {
-            text::render_direct(self, &layout, &paint, render_mode, invscale)?;
+            text::render_direct(
+                self,
+                &layout,
+                paint.flavor,
+                paint.glyph_texture,
+                paint.shape_anti_alias,
+                &paint.stroke,
+                paint.text.font_size,
+                render_mode,
+                invscale,
+            )?;
         } else {
             let create_vertices = |quads: &Vec<text::Quad>| {
                 let mut verts = Vec::with_capacity(quads.len() * 6);
