@@ -236,14 +236,20 @@ impl TextContext {
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
-    pub fn measure_text<S: AsRef<str>>(&self, x: f32, y: f32, text: S, paint: Paint) -> Result<TextMetrics, ErrorKind> {
+    pub fn measure_text<S: AsRef<str>>(
+        &self,
+        x: f32,
+        y: f32,
+        text: S,
+        paint: &Paint,
+    ) -> Result<TextMetrics, ErrorKind> {
         self.0.as_ref().borrow_mut().measure_text(x, y, text, paint)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
-    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
+    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         self.0.as_ref().borrow_mut().break_text(max_width, text, paint)
     }
 
@@ -252,13 +258,13 @@ impl TextContext {
         &self,
         max_width: f32,
         text: S,
-        paint: Paint,
+        paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         self.0.as_ref().borrow_mut().break_text_vec(max_width, text, paint)
     }
 
     /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         self.0.as_ref().borrow_mut().measure_font(paint)
     }
 
@@ -419,13 +425,13 @@ impl TextContextImpl {
         x: f32,
         y: f32,
         text: S,
-        paint: Paint,
+        paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        shape(x, y, self, &paint, text.as_ref(), None)
+        shape(x, y, self, paint, text.as_ref(), None)
     }
 
-    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: Paint) -> Result<usize, ErrorKind> {
-        let layout = shape(0.0, 0.0, self, &paint, text.as_ref(), Some(max_width))?;
+    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
+        let layout = shape(0.0, 0.0, self, paint, text.as_ref(), Some(max_width))?;
 
         Ok(layout.final_byte_index)
     }
@@ -434,7 +440,7 @@ impl TextContextImpl {
         &mut self,
         max_width: f32,
         text: S,
-        paint: Paint,
+        paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let text = text.as_ref();
 
@@ -458,7 +464,7 @@ impl TextContextImpl {
         Ok(res)
     }
 
-    pub fn measure_font(&mut self, paint: Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&mut self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = paint.font_ids.get(0) {
             if let Some(font) = self.font(*id) {
                 return Ok(font.metrics(paint.font_size));
@@ -1036,9 +1042,9 @@ impl GlyphAtlas {
                     canvas.scale(scale, scale);
 
                     if mode == RenderMode::Stroke {
-                        canvas.stroke_path(path, mask_paint);
+                        canvas.stroke_path(path, &mask_paint);
                     } else {
-                        canvas.fill_path(path, mask_paint);
+                        canvas.fill_path(path, &mask_paint);
                     }
 
                     canvas.restore();
@@ -1172,7 +1178,7 @@ pub(crate) fn render_direct<T: Renderer>(
     mode: RenderMode,
     invscale: f32,
 ) -> Result<(), ErrorKind> {
-    let mut paint = *paint;
+    let mut paint = paint.clone();
     paint.set_fill_rule(FillRule::EvenOdd);
 
     let text_context = canvas.text_context.clone();
@@ -1213,9 +1219,9 @@ pub(crate) fn render_direct<T: Renderer>(
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
-                    canvas.stroke_path(path, paint);
+                    canvas.stroke_path(path, &paint);
                 } else {
-                    canvas.fill_path(path, paint);
+                    canvas.fill_path(path, &paint);
                 }
             }
             #[cfg(feature = "image-loading")]
