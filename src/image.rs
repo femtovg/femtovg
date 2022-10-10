@@ -105,17 +105,16 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     fn try_from(src: &'a DynamicImage) -> Result<Self, ErrorKind> {
         match src {
             ::image::DynamicImage::ImageLuma8(img) => {
-                let src: Img<&[GRAY8]> =
-                    Img::new(img.as_ref().as_pixels(), img.width() as usize, img.height() as usize);
+                let src: Img<&[GRAY8]> = Img::new(img.as_pixels(), img.width() as usize, img.height() as usize);
 
                 Ok(ImageSource::from(src))
             }
             ::image::DynamicImage::ImageRgb8(img) => {
-                let src = Img::new(img.as_ref().as_rgb(), img.width() as usize, img.height() as usize);
+                let src = Img::new(img.as_rgb(), img.width() as usize, img.height() as usize);
                 Ok(ImageSource::from(src))
             }
             ::image::DynamicImage::ImageRgba8(img) => {
-                let src = Img::new(img.as_ref().as_rgba(), img.width() as usize, img.height() as usize);
+                let src = Img::new(img.as_rgba(), img.width() as usize, img.height() as usize);
                 Ok(ImageSource::from(src))
             }
             // TODO: if format is not supported maybe we should convert it here,

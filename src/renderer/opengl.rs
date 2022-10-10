@@ -77,7 +77,7 @@ impl OpenGl {
         attrs.antialias(false);
 
         use wasm_bindgen::JsCast;
-        let webgl1_context = match canvas.get_context_with_context_options("webgl", attrs.as_ref()) {
+        let webgl1_context = match canvas.get_context_with_context_options("webgl", attrs) {
             Ok(Some(context)) => context.dyn_into::<web_sys::WebGlRenderingContext>().unwrap(),
             _ => {
                 return Err(ErrorKind::GeneralError(
