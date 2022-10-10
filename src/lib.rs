@@ -1392,7 +1392,7 @@ where
 
                 paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
 
-                self.render_triangles(&verts, &transform, &paint);
+                self.render_triangles(&verts, &transform, paint.flavor, paint.glyph_texture);
             }
 
             for cmd in draw_commands.color_glyphs {
@@ -1400,7 +1400,7 @@ where
 
                 paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
 
-                self.render_triangles(&verts, &transform, &paint);
+                self.render_triangles(&verts, &transform, paint.flavor, paint.glyph_texture);
             }
         }
 
@@ -1409,14 +1409,20 @@ where
         Ok(layout)
     }
 
-    fn render_triangles(&mut self, verts: &[Vertex], transform: &Transform2D, paint: &Paint) {
+    fn render_triangles(
+        &mut self,
+        verts: &[Vertex],
+        transform: &Transform2D,
+        paint_flavor: PaintFlavor,
+        glyph_texture: GlyphTexture,
+    ) {
         let scissor = self.state().scissor;
 
         let params = Params::new(
             &self.images,
             transform,
-            paint.flavor,
-            &paint.glyph_texture,
+            paint_flavor,
+            &glyph_texture,
             &scissor,
             1.0,
             1.0,
@@ -1425,11 +1431,11 @@ where
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
-        cmd.glyph_texture = paint.glyph_texture();
+        cmd.glyph_texture = glyph_texture;
 
-        if let PaintFlavor::Image { id, .. } = paint.flavor {
+        if let PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
-        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint.flavor.gradient_colors() {
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self
                 .gradients
                 .lookup_or_add(*stops, &mut self.images, &mut self.renderer)
