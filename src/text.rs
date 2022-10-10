@@ -380,15 +380,15 @@ impl TextContextImpl {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, paint: &Paint, mut callback: F) -> Result<T, ErrorKind>
+    pub fn find_font<F, T>(&mut self, font_ids: [Option<FontId>; 8], mut callback: F) -> Result<T, ErrorKind>
     where
         F: FnMut((FontId, &mut Font)) -> (bool, T),
     {
         // Try each font in the paint
-        for maybe_font_id in paint.font_ids.iter() {
+        for maybe_font_id in font_ids {
             if let Some(font_id) = maybe_font_id {
                 if let Some(font) = self.fonts.get_mut(font_id.0) {
-                    let (has_missing, result) = callback((*font_id, font));
+                    let (has_missing, result) = callback((font_id, font));
 
                     if !has_missing {
                         return Ok(result);
@@ -694,7 +694,7 @@ fn shape_word(
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
-    context.find_font(paint, |(font_id, font)| {
+    context.find_font(paint.font_ids, |(font_id, font)| {
         // Call harfbuzz
         let output = {
             let face = font.face_ref();
@@ -790,7 +790,7 @@ fn layout(
         descender = descender.min(metrics.descender());
     }
 
-    let primary_metrics = context.find_font(paint, |(_, font)| (false, font.metrics(paint.font_size)))?;
+    let primary_metrics = context.find_font(paint.font_ids, |(_, font)| (false, font.metrics(paint.font_size)))?;
     if ascender.abs() < std::f32::EPSILON {
         ascender = primary_metrics.ascender();
     }
