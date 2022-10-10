@@ -273,7 +273,10 @@ impl TextContext {
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
-        self.0.as_ref().borrow_mut().measure_font(paint)
+        self.0
+            .as_ref()
+            .borrow_mut()
+            .measure_font(paint.text.font_size, paint.text.font_ids)
     }
 
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
@@ -472,10 +475,10 @@ impl TextContextImpl {
         Ok(res)
     }
 
-    pub fn measure_font(&mut self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
-        if let Some(Some(id)) = paint.text.font_ids.get(0) {
+    pub fn measure_font(&mut self, font_size: f32, font_ids: [Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
+        if let Some(Some(id)) = font_ids.get(0) {
             if let Some(font) = self.font(*id) {
-                return Ok(font.metrics(paint.text.font_size));
+                return Ok(font.metrics(font_size));
             }
         }
 
