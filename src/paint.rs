@@ -1,10 +1,7 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
-use crate::{
-    geometry::{Position, Transform2D},
-    Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
-};
+use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -205,7 +202,6 @@ impl Default for GlyphTexture {
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 pub struct Paint {
     pub(crate) flavor: PaintFlavor,
-    pub(crate) transform: Transform2D,
     #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) glyph_texture: GlyphTexture,
     pub(crate) shape_anti_alias: bool,
@@ -228,7 +224,6 @@ impl Default for Paint {
     fn default() -> Self {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
-            transform: Default::default(),
             glyph_texture: Default::default(),
             shape_anti_alias: true,
             stencil_strokes: true,

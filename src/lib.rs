@@ -845,9 +845,6 @@ where
             return;
         }
 
-        // Transform paint
-        paint.transform = transform;
-
         // Apply global alpha
         paint.flavor.mul_alpha(self.state().alpha);
 
@@ -867,10 +864,10 @@ where
             paint.is_straight_tinted_image(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &paint);
+                self.render_unclipped_image_blit(&path_rect, &transform, &paint);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &paint);
+                self.render_unclipped_image_blit(&intersection, &transform, &paint);
                 return;
             } else {
                 return;
@@ -881,6 +878,7 @@ where
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
             let params = Params::new(
                 &self.images,
+                &transform,
                 &paint,
                 &scissor,
                 self.fringe_width,
@@ -898,6 +896,7 @@ where
 
             let fill_params = Params::new(
                 &self.images,
+                &transform,
                 &paint,
                 &scissor,
                 self.fringe_width,
@@ -1006,9 +1005,6 @@ where
 
         let scissor = self.state().scissor;
 
-        // Transform paint
-        paint.transform = transform;
-
         // Scale stroke width by current transform scale.
         // Note: I don't know why the original author clamped the max stroke width to 200, but it didn't
         // look correct when zooming in. There was probably a good reson for doing so and I may have
@@ -1044,6 +1040,7 @@ where
         // GPU uniforms
         let params = Params::new(
             &self.images,
+            &transform,
             &paint,
             &scissor,
             paint.line_width,
@@ -1054,6 +1051,7 @@ where
         let flavor = if paint.stencil_strokes() {
             let params2 = Params::new(
                 &self.images,
+                &transform,
                 &paint,
                 &scissor,
                 paint.line_width,
@@ -1102,10 +1100,10 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, paint: &Paint) {
+    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint: &Paint) {
         let scissor = self.state().scissor;
 
-        let mut params = Params::new(&self.images, paint, &scissor, 0., 0., -1.0);
+        let mut params = Params::new(&self.images, transform, paint, &scissor, 0., 0., -1.0);
         params.shader_type = ShaderType::TextureCopyUnclipped;
 
         let mut cmd = Command::new(CommandType::Triangles { params });
@@ -1345,7 +1343,7 @@ where
 
                 paint.set_glyph_texture(GlyphTexture::AlphaMask(cmd.image_id));
 
-                self.render_triangles(&verts, &paint);
+                self.render_triangles(&verts, &transform, &paint);
             }
 
             for cmd in draw_commands.color_glyphs {
@@ -1353,7 +1351,7 @@ where
 
                 paint.set_glyph_texture(GlyphTexture::ColorTexture(cmd.image_id));
 
-                self.render_triangles(&verts, &paint);
+                self.render_triangles(&verts, &transform, &paint);
             }
         }
 
@@ -1362,10 +1360,10 @@ where
         Ok(layout)
     }
 
-    fn render_triangles(&mut self, verts: &[Vertex], paint: &Paint) {
+    fn render_triangles(&mut self, verts: &[Vertex], transform: &Transform2D, paint: &Paint) {
         let scissor = self.state().scissor;
 
-        let params = Params::new(&self.images, paint, &scissor, 1.0, 1.0, -1.0);
+        let params = Params::new(&self.images, transform, paint, &scissor, 1.0, 1.0, -1.0);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;

@@ -30,6 +30,7 @@ pub struct Params {
 impl Params {
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
+        global_transform: &Transform2D,
         paint: &Paint,
         scissor: &Scissor,
         stroke_width: f32,
@@ -78,7 +79,7 @@ impl Params {
                 params.inner_col = color;
                 params.outer_col = color;
                 params.shader_type = ShaderType::FillColor;
-                inv_transform = paint.transform.inversed();
+                inv_transform = global_transform.inversed();
             }
             PaintFlavor::Image {
                 id,
@@ -104,7 +105,7 @@ impl Params {
                 let mut transform = Transform2D::identity();
                 transform.rotate(angle);
                 transform.translate(cx, cy);
-                transform.multiply(&paint.transform);
+                transform.multiply(global_transform);
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {
                     let mut m1 = Transform2D::identity();
@@ -158,7 +159,7 @@ impl Params {
 
                 let mut transform = Transform2D([dy, -dx, dx, dy, start_x - dx * large, start_y - dy * large]);
 
-                transform.multiply(&paint.transform);
+                transform.multiply(global_transform);
 
                 inv_transform = transform.inversed();
 
@@ -186,7 +187,7 @@ impl Params {
                 colors,
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
-                transform.multiply(&paint.transform);
+                transform.multiply(global_transform);
                 inv_transform = transform.inversed();
 
                 params.extent[0] = width * 0.5;
@@ -214,7 +215,7 @@ impl Params {
                 let f = out_radius - in_radius;
 
                 let mut transform = Transform2D::new_translation(cx, cy);
-                transform.multiply(&paint.transform);
+                transform.multiply(global_transform);
                 inv_transform = transform.inversed();
 
                 params.extent[0] = r;
