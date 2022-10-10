@@ -133,6 +133,26 @@ pub(crate) enum PaintFlavor {
 
 // Convenience method to fetch the GradientColors out of a PaintFlavor
 impl PaintFlavor {
+    pub(crate) fn mul_alpha(&mut self, a: f32) {
+        match self {
+            PaintFlavor::Color(color) => {
+                color.a *= a;
+            }
+            PaintFlavor::Image { tint, .. } => {
+                tint.a *= a;
+            }
+            PaintFlavor::LinearGradient { colors, .. } => {
+                colors.mul_alpha(a);
+            }
+            PaintFlavor::BoxGradient { colors, .. } => {
+                colors.mul_alpha(a);
+            }
+            PaintFlavor::RadialGradient { colors, .. } => {
+                colors.mul_alpha(a);
+            }
+        }
+    }
+
     pub(crate) fn gradient_colors(&self) -> Option<&GradientColors> {
         match self {
             PaintFlavor::LinearGradient { colors, .. } => Some(colors),
@@ -742,26 +762,6 @@ impl Paint {
     pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
         self.set_fill_rule(rule);
         self
-    }
-
-    pub(crate) fn mul_alpha(&mut self, a: f32) {
-        match &mut self.flavor {
-            PaintFlavor::Color(color) => {
-                color.a *= a;
-            }
-            PaintFlavor::Image { tint, .. } => {
-                tint.a *= a;
-            }
-            PaintFlavor::LinearGradient { colors, .. } => {
-                colors.mul_alpha(a);
-            }
-            PaintFlavor::BoxGradient { colors, .. } => {
-                colors.mul_alpha(a);
-            }
-            PaintFlavor::RadialGradient { colors, .. } => {
-                colors.mul_alpha(a);
-            }
-        }
     }
 
     /// Returns true if this paint is an untransformed image paint without anti-aliasing at the edges in case of a fill
