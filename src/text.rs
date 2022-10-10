@@ -251,7 +251,7 @@ impl TextContext {
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.0.as_ref().borrow_mut().measure_text(x, y, text, paint)
+        self.0.as_ref().borrow_mut().measure_text(x, y, text, &paint.text)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
@@ -439,9 +439,9 @@ impl TextContextImpl {
         x: f32,
         y: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<TextMetrics, ErrorKind> {
-        shape(x, y, self, &paint.text, text.as_ref(), None)
+        shape(x, y, self, text_settings, text.as_ref(), None)
     }
 
     pub fn break_text<S: AsRef<str>>(
