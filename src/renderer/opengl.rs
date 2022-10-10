@@ -559,7 +559,15 @@ impl OpenGl {
             0.,
             1.,
         );
-        let mut blur_params = Params::new(images, &image_paint, &Scissor::default(), 0., 0., 0.);
+        let mut blur_params = Params::new(
+            images,
+            &Default::default(),
+            &image_paint,
+            &Scissor::default(),
+            0.,
+            0.,
+            0.,
+        );
         blur_params.shader_type = ShaderType::FilterImage;
 
         let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
