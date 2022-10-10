@@ -158,6 +158,11 @@ impl PaintFlavor {
             _ => None,
         }
     }
+
+    /// Returns true if this paint is an untransformed image paint without anti-aliasing at the edges in case of a fill
+    pub(crate) fn is_straight_tinted_image(&self, shape_anti_alias: bool) -> bool {
+        matches!(self, &PaintFlavor::Image { angle, .. } if angle == 0.0 && !shape_anti_alias)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -757,10 +762,5 @@ impl Paint {
     pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
         self.set_fill_rule(rule);
         self
-    }
-
-    /// Returns true if this paint is an untransformed image paint without anti-aliasing at the edges in case of a fill
-    pub(crate) fn is_straight_tinted_image(&self) -> bool {
-        matches!(self.flavor, PaintFlavor::Image { angle, .. } if angle == 0.0 && !self.shape_anti_alias)
     }
 }

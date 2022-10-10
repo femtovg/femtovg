@@ -1060,7 +1060,6 @@ impl GlyphAtlas {
                             mask_paint.flavor,
                             mask_paint.glyph_texture,
                             mask_paint.shape_anti_alias,
-                            mask_paint.is_straight_tinted_image(),
                             mask_paint.fill_rule,
                         );
                     }
@@ -1255,7 +1254,6 @@ pub(crate) fn render_direct<T: Renderer>(
                         paint.flavor,
                         paint.glyph_texture,
                         paint.shape_anti_alias,
-                        paint.is_straight_tinted_image(),
                         paint.fill_rule,
                     );
                 }
