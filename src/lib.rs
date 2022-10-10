@@ -1231,7 +1231,11 @@ where
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
         let mut paint = paint.clone();
-        self.transform_text_paint(&mut paint);
+        self.transform_text_paint(
+            &mut paint.font_size,
+            &mut paint.letter_spacing,
+            &mut paint.stroke.line_width,
+        );
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1250,7 +1254,11 @@ where
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         let mut paint = paint.clone();
-        self.transform_text_paint(&mut paint);
+        self.transform_text_paint(
+            &mut paint.font_size,
+            &mut paint.letter_spacing,
+            &mut paint.stroke.line_width,
+        );
 
         self.text_context.as_ref().borrow_mut().measure_font(&paint)
     }
@@ -1260,7 +1268,11 @@ where
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         let mut paint = paint.clone();
-        self.transform_text_paint(&mut paint);
+        self.transform_text_paint(
+            &mut paint.font_size,
+            &mut paint.letter_spacing,
+            &mut paint.stroke.line_width,
+        );
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1280,7 +1292,11 @@ where
         paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let mut paint = paint.clone();
-        self.transform_text_paint(&mut paint);
+        self.transform_text_paint(
+            &mut paint.font_size,
+            &mut paint.letter_spacing,
+            &mut paint.stroke.line_width,
+        );
 
         let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1316,11 +1332,11 @@ where
 
     // Private
 
-    fn transform_text_paint(&self, paint: &mut Paint) {
+    fn transform_text_paint(&self, font_size: &mut f32, letter_spacing: &mut f32, line_width: &mut f32) {
         let scale = self.font_scale() * self.device_px_ratio;
-        paint.font_size *= scale;
-        paint.letter_spacing *= scale;
-        paint.stroke.line_width *= scale;
+        *font_size *= scale;
+        *letter_spacing *= scale;
+        *line_width *= scale;
     }
 
     fn draw_text(
@@ -1337,7 +1353,11 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        self.transform_text_paint(&mut paint);
+        self.transform_text_paint(
+            &mut paint.font_size,
+            &mut paint.letter_spacing,
+            &mut paint.stroke.line_width,
+        );
 
         let mut layout = text::shape(
             x * scale,
