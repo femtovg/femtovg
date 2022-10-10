@@ -258,7 +258,7 @@ impl TextContext {
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        self.0.as_ref().borrow_mut().break_text(max_width, text, paint)
+        self.0.as_ref().borrow_mut().break_text(max_width, text, &paint.text)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -441,8 +441,13 @@ impl TextContextImpl {
         shape(x, y, self, &paint.text, text.as_ref(), None)
     }
 
-    pub fn break_text<S: AsRef<str>>(&mut self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        let layout = shape(0.0, 0.0, self, &paint.text, text.as_ref(), Some(max_width))?;
+    pub fn break_text<S: AsRef<str>>(
+        &mut self,
+        max_width: f32,
+        text: S,
+        text_settings: &TextSettings,
+    ) -> Result<usize, ErrorKind> {
+        let layout = shape(0.0, 0.0, self, text_settings, text.as_ref(), Some(max_width))?;
 
         Ok(layout.final_byte_index)
     }
@@ -459,7 +464,7 @@ impl TextContextImpl {
         let mut start = 0;
 
         while start < text.len() {
-            if let Ok(index) = self.break_text(max_width, &text[start..], paint) {
+            if let Ok(index) = self.break_text(max_width, &text[start..], &paint.text) {
                 if index == 0 {
                     break;
                 }

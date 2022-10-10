@@ -1263,7 +1263,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .break_text(max_width, text, &paint)
+            .break_text(max_width, text, &paint.text)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
