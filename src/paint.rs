@@ -94,7 +94,7 @@ impl GradientColors {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) enum PaintFlavor {
     Color(Color),

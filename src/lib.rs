@@ -826,16 +826,17 @@ where
 
     /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &mut Path, paint: &Paint) {
-        self.fill_path_internal(path, paint.flavor, paint.shape_anti_alias, paint.fill_rule);
+        self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
     }
 
     fn fill_path_internal(
         &mut self,
         path: &mut Path,
-        mut paint_flavor: PaintFlavor,
+        paint_flavor: &PaintFlavor,
         anti_alias: bool,
         fill_rule: FillRule,
     ) {
+        let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -872,10 +873,10 @@ where
             paint_flavor.is_straight_tinted_image(anti_alias),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, paint_flavor);
+                self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
                 return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, paint_flavor);
+                self.render_unclipped_image_blit(&intersection, &transform, &paint_flavor);
                 return;
             } else {
                 return;
@@ -887,7 +888,7 @@ where
             let params = Params::new(
                 &self.images,
                 &transform,
-                paint_flavor,
+                &paint_flavor,
                 &Default::default(),
                 &scissor,
                 self.fringe_width,
@@ -906,7 +907,7 @@ where
             let fill_params = Params::new(
                 &self.images,
                 &transform,
-                paint_flavor,
+                &paint_flavor,
                 &Default::default(),
                 &scissor,
                 self.fringe_width,
@@ -997,16 +998,17 @@ where
 
     /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &mut Path, paint: &Paint) {
-        self.stroke_path_internal(path, paint.flavor, paint.shape_anti_alias, &paint.stroke);
+        self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
     }
 
     fn stroke_path_internal(
         &mut self,
         path: &mut Path,
-        mut paint_flavor: PaintFlavor,
+        paint_flavor: &PaintFlavor,
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
+        let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1059,7 +1061,7 @@ where
         let params = Params::new(
             &self.images,
             &transform,
-            paint_flavor,
+            &paint_flavor,
             &Default::default(),
             &scissor,
             line_width,
@@ -1071,7 +1073,7 @@ where
             let params2 = Params::new(
                 &self.images,
                 &transform,
-                paint_flavor,
+                &paint_flavor,
                 &Default::default(),
                 &scissor,
                 line_width,
@@ -1120,7 +1122,7 @@ where
         self.append_cmd(cmd);
     }
 
-    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint_flavor: PaintFlavor) {
+    fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint_flavor: &PaintFlavor) {
         let scissor = self.state().scissor;
 
         let mut params = Params::new(
@@ -1174,7 +1176,7 @@ where
             Vertex::new(p4, p5, s1, t1),
         ];
 
-        if let PaintFlavor::Image { id, .. } = paint_flavor {
+        if let &PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
         }
 
@@ -1285,7 +1287,7 @@ where
             x,
             y,
             text.as_ref(),
-            paint.flavor,
+            &paint.flavor,
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1305,7 +1307,7 @@ where
             x,
             y,
             text.as_ref(),
-            paint.flavor,
+            &paint.flavor,
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1320,12 +1322,14 @@ where
         x: f32,
         y: f32,
         text: &str,
-        mut paint_flavor: PaintFlavor,
+        paint_flavor: &PaintFlavor,
         anti_alias: bool,
         stroke: &StrokeSettings,
         text_settings: &TextSettings,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
+        let mut paint_flavor = paint_flavor.clone();
+
         let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
@@ -1356,7 +1360,7 @@ where
             text::render_direct(
                 self,
                 &layout,
-                paint_flavor,
+                &paint_flavor,
                 anti_alias,
                 &stroke,
                 text_settings.font_size,
@@ -1398,7 +1402,7 @@ where
             for cmd in draw_commands.alpha_glyphs {
                 let verts = create_vertices(&cmd.quads);
 
-                self.render_triangles(&verts, &transform, paint_flavor, GlyphTexture::AlphaMask(cmd.image_id));
+                self.render_triangles(&verts, &transform, &paint_flavor, GlyphTexture::AlphaMask(cmd.image_id));
             }
 
             for cmd in draw_commands.color_glyphs {
@@ -1407,7 +1411,7 @@ where
                 self.render_triangles(
                     &verts,
                     &transform,
-                    paint_flavor,
+                    &paint_flavor,
                     GlyphTexture::ColorTexture(cmd.image_id),
                 );
             }
@@ -1422,7 +1426,7 @@ where
         &mut self,
         verts: &[Vertex],
         transform: &Transform2D,
-        paint_flavor: PaintFlavor,
+        paint_flavor: &PaintFlavor,
         glyph_texture: GlyphTexture,
     ) {
         let scissor = self.state().scissor;
@@ -1442,7 +1446,7 @@ where
         cmd.composite_operation = self.state().composite_operation;
         cmd.glyph_texture = glyph_texture;
 
-        if let PaintFlavor::Image { id, .. } = paint_flavor {
+        if let &PaintFlavor::Image { id, .. } = paint_flavor {
             cmd.image = Some(id);
         } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
             cmd.image = self

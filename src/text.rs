@@ -1044,7 +1044,7 @@ impl GlyphAtlas {
                 );
                 let factor = 1.0 / 8.0;
 
-                let mask_flavor = PaintFlavor::Color(Color::rgbf(factor, factor, factor));
+                let mask_color = Color::rgbf(factor, factor, factor);
 
                 let mut line_width = line_width;
 
@@ -1083,7 +1083,7 @@ impl GlyphAtlas {
                     if mode == RenderMode::Stroke {
                         canvas.stroke_path_internal(
                             path,
-                            mask_flavor,
+                            &PaintFlavor::Color(mask_color),
                             false,
                             &StrokeSettings {
                                 line_width,
@@ -1091,7 +1091,7 @@ impl GlyphAtlas {
                             },
                         );
                     } else {
-                        canvas.fill_path_internal(path, mask_flavor, false, FillRule::EvenOdd);
+                        canvas.fill_path_internal(path, &PaintFlavor::Color(mask_color), false, FillRule::EvenOdd);
                     }
 
                     canvas.restore();
@@ -1221,7 +1221,7 @@ impl GlyphAtlas {
 pub(crate) fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
     text_layout: &TextMetrics,
-    paint_flavor: PaintFlavor,
+    paint_flavor: &PaintFlavor,
     anti_alias: bool,
     stroke: &StrokeSettings,
     font_size: f32,
