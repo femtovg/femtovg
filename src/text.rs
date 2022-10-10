@@ -542,7 +542,17 @@ pub(crate) fn shape(
     }
 
     if let Some(mut metrics) = context.shaping_run_cache.get(&id).cloned() {
-        layout(x, y, context, &mut metrics, paint)?;
+        layout(
+            x,
+            y,
+            context,
+            &mut metrics,
+            paint.font_size,
+            paint.font_ids,
+            paint.letter_spacing,
+            paint.text_align,
+            paint.text_baseline,
+        )?;
 
         return Ok(metrics);
     }
@@ -781,13 +791,17 @@ fn layout(
     y: f32,
     context: &mut TextContextImpl,
     res: &mut TextMetrics,
-    paint: &Paint,
+    font_size: f32,
+    font_ids: [Option<FontId>; 8],
+    letter_spacing: f32,
+    text_align: Align,
+    text_baseline: Baseline,
 ) -> Result<(), ErrorKind> {
     let mut cursor_x = x;
     let mut cursor_y = y;
 
     // Horizontal alignment
-    match paint.text_align {
+    match text_align {
         Align::Center => cursor_x -= res.width / 2.0,
         Align::Right => cursor_x -= res.width,
         _ => (),
@@ -803,12 +817,12 @@ fn layout(
 
     for glyph in &mut res.glyphs {
         let font = context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-        let metrics = font.metrics(paint.font_size);
+        let metrics = font.metrics(font_size);
         ascender = ascender.max(metrics.ascender());
         descender = descender.min(metrics.descender());
     }
 
-    let primary_metrics = context.find_font(paint.font_ids, |(_, font)| (false, font.metrics(paint.font_size)))?;
+    let primary_metrics = context.find_font(font_ids, |(_, font)| (false, font.metrics(font_size)))?;
     if ascender.abs() < std::f32::EPSILON {
         ascender = primary_metrics.ascender();
     }
@@ -817,7 +831,7 @@ fn layout(
     }
 
     // Baseline alignment
-    let alignment_offset_y = match paint.text_baseline {
+    let alignment_offset_y = match text_baseline {
         Baseline::Top => ascender,
         Baseline::Middle => (ascender + descender) / 2.0,
         Baseline::Alphabetic => 0.0,
@@ -831,7 +845,7 @@ fn layout(
         min_y = min_y.min(glyph.y);
         max_y = max_y.max(glyph.y + glyph.height);
 
-        cursor_x += glyph.advance_x + paint.letter_spacing;
+        cursor_x += glyph.advance_x + letter_spacing;
         cursor_y += glyph.advance_y;
     }
 
