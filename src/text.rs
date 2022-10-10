@@ -161,7 +161,7 @@ struct ShapingId {
 }
 
 impl ShapingId {
-    fn new(paint: &Paint, word: &str, max_width: Option<f32>) -> Self {
+    fn new(font_size: f32, font_ids: [Option<FontId>; 8], word: &str, max_width: Option<f32>) -> Self {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
         if let Some(max_width) = max_width {
@@ -169,9 +169,9 @@ impl ShapingId {
         }
 
         Self {
-            size: (paint.font_size * 10.0).trunc() as u32,
+            size: (font_size * 10.0).trunc() as u32,
             word_hash: hasher.finish(),
-            font_ids: paint.font_ids,
+            font_ids,
         }
     }
 }
@@ -527,7 +527,7 @@ pub(crate) fn shape(
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
-    let id = ShapingId::new(paint, text, max_width);
+    let id = ShapingId::new(paint.font_size, paint.font_ids, text, max_width);
 
     if !context.shaping_run_cache.contains(&id) {
         let metrics = shape_run(context, paint, text, max_width)?;
@@ -586,7 +586,7 @@ fn shape_run(
             let mut byte_index = run.start;
 
             for mut word_txt in sub_text.split_word_bounds() {
-                let id = ShapingId::new(paint, word_txt, max_width);
+                let id = ShapingId::new(paint.font_size, paint.font_ids, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
                     let word = shape_word(word_txt, hb_direction, context, paint);
@@ -624,7 +624,7 @@ fn shape_run(
                                 }
 
                                 let subword_txt = &word_txt[..bytes_included];
-                                let id = ShapingId::new(paint, subword_txt, Some(max_width));
+                                let id = ShapingId::new(paint.font_size, paint.font_ids, subword_txt, Some(max_width));
                                 if !context.shaped_words_cache.contains(&id) {
                                     let subword = shape_word(subword_txt, hb_direction, context, paint);
                                     context.shaped_words_cache.put(id, subword);
