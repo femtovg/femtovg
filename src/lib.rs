@@ -1239,7 +1239,10 @@ where
             &mut paint.stroke.line_width,
         );
 
-        self.text_context.as_ref().borrow_mut().measure_font(&paint)
+        self.text_context
+            .as_ref()
+            .borrow_mut()
+            .measure_font(paint.text.font_size, paint.text.font_ids)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
