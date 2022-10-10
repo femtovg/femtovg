@@ -178,6 +178,16 @@ impl Default for GlyphTexture {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct StrokeSettings {
+    pub(crate) stencil_strokes: bool,
+    pub(crate) miter_limit: f32,
+    pub(crate) line_width: f32,
+    pub(crate) line_cap_start: LineCap,
+    pub(crate) line_cap_end: LineCap,
+    pub(crate) line_join: LineJoin,
+}
+
 /// Struct controlling how graphical shapes are rendered.
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
@@ -210,12 +220,7 @@ pub struct Paint {
     #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) glyph_texture: GlyphTexture,
     pub(crate) shape_anti_alias: bool,
-    pub(crate) stencil_strokes: bool,
-    pub(crate) miter_limit: f32,
-    pub(crate) line_width: f32,
-    pub(crate) line_cap_start: LineCap,
-    pub(crate) line_cap_end: LineCap,
-    pub(crate) line_join: LineJoin,
+    pub(crate) stroke: StrokeSettings,
     #[cfg_attr(feature = "serialization", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,
@@ -231,12 +236,14 @@ impl Default for Paint {
             flavor: PaintFlavor::Color(Color::white()),
             glyph_texture: Default::default(),
             shape_anti_alias: true,
-            stencil_strokes: true,
-            miter_limit: 10.0,
-            line_width: 1.0,
-            line_cap_start: Default::default(),
-            line_cap_end: Default::default(),
-            line_join: Default::default(),
+            stroke: StrokeSettings {
+                stencil_strokes: true,
+                miter_limit: 10.0,
+                line_width: 1.0,
+                line_cap_start: Default::default(),
+                line_cap_end: Default::default(),
+                line_join: Default::default(),
+            },
             font_ids: Default::default(),
             font_size: 16.0,
             letter_spacing: 0.0,
@@ -542,12 +549,12 @@ impl Paint {
 
     /// True if this paint uses higher quality stencil strokes.
     pub fn stencil_strokes(&self) -> bool {
-        self.stencil_strokes
+        self.stroke.stencil_strokes
     }
 
     /// Sets whether to use higher quality stencil strokes.
     pub fn set_stencil_strokes(&mut self, value: bool) {
-        self.stencil_strokes = value;
+        self.stroke.stencil_strokes = value;
     }
 
     /// Returns the paint with stencil strokes set to the specified value.
@@ -558,12 +565,12 @@ impl Paint {
 
     /// Returns the current line width.
     pub fn line_width(&self) -> f32 {
-        self.line_width
+        self.stroke.line_width
     }
 
     /// Sets the line width for shapes stroked with this paint.
     pub fn set_line_width(&mut self, width: f32) {
-        self.line_width = width;
+        self.stroke.line_width = width;
     }
 
     /// Returns the paint with line width set to the specified value.
@@ -574,14 +581,14 @@ impl Paint {
 
     /// Getter for the miter limit
     pub fn miter_limit(&self) -> f32 {
-        self.miter_limit
+        self.stroke.miter_limit
     }
 
     /// Sets the limit at which a sharp corner is drawn beveled.
     ///
     /// If the miter at a corner exceeds this limit, LineJoin is replaced with LineJoin::Bevel.
     pub fn set_miter_limit(&mut self, limit: f32) {
-        self.miter_limit = limit;
+        self.stroke.miter_limit = limit;
     }
 
     /// Returns the paint with the miter limit set to the specified value.
@@ -592,20 +599,20 @@ impl Paint {
 
     /// Returns the current start line cap for this paint.
     pub fn line_cap_start(&self) -> LineCap {
-        self.line_cap_start
+        self.stroke.line_cap_start
     }
 
     /// Returns the current start line cap for this paint.
     pub fn line_cap_end(&self) -> LineCap {
-        self.line_cap_end
+        self.stroke.line_cap_end
     }
 
     /// Sets how the start and end of the line (cap) is drawn
     ///
     /// By default it's set to LineCap::Butt
     pub fn set_line_cap(&mut self, cap: LineCap) {
-        self.line_cap_start = cap;
-        self.line_cap_end = cap;
+        self.stroke.line_cap_start = cap;
+        self.stroke.line_cap_end = cap;
     }
 
     /// Returns the paint with line cap set to the specified value.
@@ -618,7 +625,7 @@ impl Paint {
     ///
     /// By default it's set to LineCap::Butt
     pub fn set_line_cap_start(&mut self, cap: LineCap) {
-        self.line_cap_start = cap;
+        self.stroke.line_cap_start = cap;
     }
 
     /// Returns the paint with the beginning cap of the line set to the specified value.
@@ -631,7 +638,7 @@ impl Paint {
     ///
     /// By default it's set to LineCap::Butt
     pub fn set_line_cap_end(&mut self, cap: LineCap) {
-        self.line_cap_end = cap;
+        self.stroke.line_cap_end = cap;
     }
 
     /// Returns the paint with the beginning cap of the line set to the specified value.
@@ -642,14 +649,14 @@ impl Paint {
 
     /// Returns the current line join for this paint.
     pub fn line_join(&self) -> LineJoin {
-        self.line_join
+        self.stroke.line_join
     }
 
     /// Sets how sharp path corners are drawn.
     ///
     /// By default it's set to LineJoin::Miter
     pub fn set_line_join(&mut self, join: LineJoin) {
-        self.line_join = join;
+        self.stroke.line_join = join;
     }
 
     /// Returns the paint with the line join set to the specified value.
