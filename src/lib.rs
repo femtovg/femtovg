@@ -1223,7 +1223,7 @@ where
         self.text_context
             .as_ref()
             .borrow_mut()
-            .measure_text(x * scale, y * scale, text, &paint)
+            .measure_text(x * scale, y * scale, text, &paint.text)
             .map(|mut metrics| {
                 metrics.scale(invscale);
                 metrics
