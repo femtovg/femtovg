@@ -188,6 +188,19 @@ pub(crate) struct StrokeSettings {
     pub(crate) line_join: LineJoin,
 }
 
+impl Default for StrokeSettings {
+    fn default() -> Self {
+        Self {
+            stencil_strokes: true,
+            miter_limit: 10.0,
+            line_width: 1.0,
+            line_cap_start: Default::default(),
+            line_cap_end: Default::default(),
+            line_join: Default::default(),
+        }
+    }
+}
+
 /// Struct controlling how graphical shapes are rendered.
 ///
 /// The Paint struct is a relatively lightweight object which contains all the information needed to
@@ -236,14 +249,7 @@ impl Default for Paint {
             flavor: PaintFlavor::Color(Color::white()),
             glyph_texture: Default::default(),
             shape_anti_alias: true,
-            stroke: StrokeSettings {
-                stencil_strokes: true,
-                miter_limit: 10.0,
-                line_width: 1.0,
-                line_cap_start: Default::default(),
-                line_cap_end: Default::default(),
-                line_join: Default::default(),
-            },
+            stroke: StrokeSettings::default(),
             font_ids: Default::default(),
             font_size: 16.0,
             letter_spacing: 0.0,
