@@ -216,7 +216,7 @@ impl Scissor {
 
 /// Determines the shape used to draw the end points of lines:
 /// `Butt` (default), `Round`, `Square`.
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineCap {
     /// The ends of lines are squared off at the endpoints. Default value.
@@ -236,7 +236,7 @@ impl Default for LineCap {
 
 /// Determines the shape used to join two line segments where they meet.
 /// `Miter` (default), `Round`, `Bevel`.
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
     /// Connected segments are joined by extending their outside edges to
