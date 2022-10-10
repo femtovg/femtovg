@@ -1188,17 +1188,17 @@ where
 
     /// Adds a font file to the canvas
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
-        self.text_context.as_ref().borrow_mut().add_font_file(file_path)
+        self.text_context.borrow_mut().add_font_file(file_path)
     }
 
     /// Adds a font to the canvas by reading it from the specified chunk of memory.
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
-        self.text_context.as_ref().borrow_mut().add_font_mem(data)
+        self.text_context.borrow_mut().add_font_mem(data)
     }
 
     /// Adds all .ttf files from a directory
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
-        self.text_context.as_ref().borrow_mut().add_font_dir(dir_path)
+        self.text_context.borrow_mut().add_font_dir(dir_path)
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
@@ -1215,12 +1215,10 @@ where
         text_settings.font_size *= scale;
         text_settings.letter_spacing *= scale;
 
-        let text = text.as_ref();
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .measure_text(x * scale, y * scale, text, &text_settings)
             .map(|mut metrics| {
@@ -1234,7 +1232,6 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .measure_font(paint.text.font_size * scale, paint.text.font_ids)
     }
@@ -1252,7 +1249,6 @@ where
         let max_width = max_width * scale;
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .break_text(max_width, text, &text_settings)
     }
@@ -1273,7 +1269,6 @@ where
         let max_width = max_width * scale;
 
         self.text_context
-            .as_ref()
             .borrow_mut()
             .break_text_vec(max_width, text, &text_settings)
     }
@@ -1345,7 +1340,7 @@ where
         let mut layout = text::shape(
             x * scale,
             y * scale,
-            &mut self.text_context.as_ref().borrow_mut(),
+            &mut self.text_context.borrow_mut(),
             &text_settings,
             text,
             None,

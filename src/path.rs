@@ -126,7 +126,7 @@ impl Path {
         // this shouldn't need a bool once non lexic lifetimes are stable
         let mut needs_rebuild = true;
 
-        if let Some((transform_cache_key, _cache)) = self.cache.as_ref() {
+        if let Some((transform_cache_key, _cache)) = &self.cache {
             needs_rebuild = key != *transform_cache_key;
         }
 

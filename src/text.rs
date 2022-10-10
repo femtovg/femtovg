@@ -213,19 +213,19 @@ impl TextContext {
     /// Registers all .ttf files from a directory with this text context. If successful, the
     /// font ids of all registered fonts are returned.
     pub fn add_font_dir<T: AsRef<FilePath>>(&self, path: T) -> Result<Vec<FontId>, ErrorKind> {
-        self.0.as_ref().borrow_mut().add_font_dir(path)
+        self.0.borrow_mut().add_font_dir(path)
     }
 
     /// Registers the .ttf file from the specified path with this text context. If successful,
     /// the font id is returned.
     pub fn add_font_file<T: AsRef<FilePath>>(&self, path: T) -> Result<FontId, ErrorKind> {
-        self.0.as_ref().borrow_mut().add_font_file(path)
+        self.0.borrow_mut().add_font_file(path)
     }
 
     /// Registers the in-memory representation of a TrueType font pointed to by the data
     /// parameter with this text context. If successful, the font id is returned.
     pub fn add_font_mem(&self, data: &[u8]) -> Result<FontId, ErrorKind> {
-        self.0.as_ref().borrow_mut().add_font_mem(data)
+        self.0.borrow_mut().add_font_mem(data)
     }
 
     /// Registers the in-memory representation of a TrueType font pointed to by the shared data
@@ -237,10 +237,7 @@ impl TextContext {
         data: T,
         face_index: u32,
     ) -> Result<FontId, ErrorKind> {
-        self.0
-            .as_ref()
-            .borrow_mut()
-            .add_shared_font_with_index(data, face_index)
+        self.0.borrow_mut().add_shared_font_with_index(data, face_index)
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
@@ -251,14 +248,14 @@ impl TextContext {
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.0.as_ref().borrow_mut().measure_text(x, y, text, &paint.text)
+        self.0.borrow_mut().measure_text(x, y, text, &paint.text)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        self.0.as_ref().borrow_mut().break_text(max_width, text, &paint.text)
+        self.0.borrow_mut().break_text(max_width, text, &paint.text)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside max_width
@@ -268,16 +265,12 @@ impl TextContext {
         text: S,
         paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
-        self.0
-            .as_ref()
-            .borrow_mut()
-            .break_text_vec(max_width, text, &paint.text)
+        self.0.borrow_mut().break_text_vec(max_width, text, &paint.text)
     }
 
     /// Returns font metrics for a particular Paint.
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         self.0
-            .as_ref()
             .borrow_mut()
             .measure_font(paint.text.font_size, paint.text.font_ids)
     }
@@ -285,14 +278,14 @@ impl TextContext {
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
     /// strings.
     pub fn resize_shaping_run_cache(&self, capacity: usize) {
-        self.0.as_ref().borrow_mut().resize_shaping_run_cache(capacity)
+        self.0.borrow_mut().resize_shaping_run_cache(capacity)
     }
 
     /// Adjusts the capacity of the shaped words cache. This is a cache for measurements of
     /// individual words. Words are separated by
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries).
     pub fn resize_shaped_words_cache(&self, capacity: usize) {
-        self.0.as_ref().borrow_mut().resize_shaped_words_cache(capacity)
+        self.0.borrow_mut().resize_shaped_words_cache(capacity)
     }
 }
 
@@ -1180,7 +1173,7 @@ impl GlyphAtlas {
                             .update_image(
                                 image_id,
                                 crate::image::ImageSource::from(imgref::Img::new(
-                                    clear_image.as_ref().as_rgba(),
+                                    clear_image.as_rgba(),
                                     clear_image.width() as usize,
                                     clear_image.height() as usize,
                                 )),
