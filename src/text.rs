@@ -589,7 +589,14 @@ fn shape_run(
                 let id = ShapingId::new(paint.font_size, paint.font_ids, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
-                    let word = shape_word(word_txt, hb_direction, context, paint);
+                    let word = shape_word(
+                        word_txt,
+                        hb_direction,
+                        context,
+                        paint.font_size,
+                        paint.font_ids,
+                        paint.letter_spacing,
+                    );
                     context.shaped_words_cache.put(id, word);
                 }
 
@@ -626,7 +633,14 @@ fn shape_run(
                                 let subword_txt = &word_txt[..bytes_included];
                                 let id = ShapingId::new(paint.font_size, paint.font_ids, subword_txt, Some(max_width));
                                 if !context.shaped_words_cache.contains(&id) {
-                                    let subword = shape_word(subword_txt, hb_direction, context, paint);
+                                    let subword = shape_word(
+                                        subword_txt,
+                                        hb_direction,
+                                        context,
+                                        paint.font_size,
+                                        paint.font_ids,
+                                        paint.letter_spacing,
+                                    );
                                     context.shaped_words_cache.put(id, subword);
                                 }
 
@@ -690,11 +704,13 @@ fn shape_word(
     word: &str,
     hb_direction: rustybuzz::Direction,
     context: &mut TextContextImpl,
-    paint: &Paint,
+    font_size: f32,
+    font_ids: [Option<FontId>; 8],
+    letter_spacing: f32,
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
-    context.find_font(paint.font_ids, |(font_id, font)| {
+    context.find_font(font_ids, |(font_id, font)| {
         // Call harfbuzz
         let output = {
             let face = font.face_ref();
@@ -721,7 +737,7 @@ fn shape_word(
                 has_missing = true;
             }
 
-            let scale = font.scale(paint.font_size);
+            let scale = font.scale(font_size);
 
             let mut g = ShapedGlyph {
                 x: 0.0,
@@ -749,7 +765,7 @@ fn shape_word(
                 g.bitmap_glyph = glyph.path.is_none();
             }
 
-            shaped_word.width += g.advance_x + paint.letter_spacing;
+            shaped_word.width += g.advance_x + letter_spacing;
             shaped_word.glyphs.push(g);
         }
 
