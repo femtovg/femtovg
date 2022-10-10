@@ -268,7 +268,10 @@ impl TextContext {
         text: S,
         paint: &Paint,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
-        self.0.as_ref().borrow_mut().break_text_vec(max_width, text, paint)
+        self.0
+            .as_ref()
+            .borrow_mut()
+            .break_text_vec(max_width, text, &paint.text)
     }
 
     /// Returns font metrics for a particular Paint.
@@ -456,7 +459,7 @@ impl TextContextImpl {
         &mut self,
         max_width: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let text = text.as_ref();
 
@@ -464,7 +467,7 @@ impl TextContextImpl {
         let mut start = 0;
 
         while start < text.len() {
-            if let Ok(index) = self.break_text(max_width, &text[start..], &paint.text) {
+            if let Ok(index) = self.break_text(max_width, &text[start..], text_settings) {
                 if index == 0 {
                     break;
                 }
