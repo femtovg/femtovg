@@ -1235,7 +1235,7 @@ where
 
         self.text_context
             .borrow_mut()
-            .measure_font(paint.text.font_size * scale, paint.text.font_ids)
+            .measure_font(paint.text.font_size * scale, &paint.text.font_ids)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside max_width.

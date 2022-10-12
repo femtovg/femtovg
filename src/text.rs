@@ -272,7 +272,7 @@ impl TextContext {
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         self.0
             .borrow_mut()
-            .measure_font(paint.text.font_size, paint.text.font_ids)
+            .measure_font(paint.text.font_size, &paint.text.font_ids)
     }
 
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
@@ -386,13 +386,13 @@ impl TextContextImpl {
         self.fonts.get_mut(id.0)
     }
 
-    pub fn find_font<F, T>(&mut self, font_ids: [Option<FontId>; 8], mut callback: F) -> Result<T, ErrorKind>
+    pub fn find_font<F, T>(&mut self, font_ids: &[Option<FontId>; 8], mut callback: F) -> Result<T, ErrorKind>
     where
         F: FnMut((FontId, &mut Font)) -> (bool, T),
     {
         // Try each font in the paint
         for maybe_font_id in font_ids {
-            if let Some(font_id) = maybe_font_id {
+            if let &Some(font_id) = maybe_font_id {
                 if let Some(font) = self.fonts.get_mut(font_id.0) {
                     let (has_missing, result) = callback((font_id, font));
 
@@ -476,7 +476,7 @@ impl TextContextImpl {
         Ok(res)
     }
 
-    pub fn measure_font(&mut self, font_size: f32, font_ids: [Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&mut self, font_size: f32, font_ids: &[Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = font_ids.get(0) {
             if let Some(font) = self.font(*id) {
                 return Ok(font.metrics(font_size));
@@ -609,7 +609,7 @@ fn shape_run(
                 let id = ShapingId::new(font_size, font_ids, word_txt, max_width);
 
                 if !context.shaped_words_cache.contains(&id) {
-                    let word = shape_word(word_txt, hb_direction, context, font_size, font_ids, letter_spacing);
+                    let word = shape_word(word_txt, hb_direction, context, font_size, &font_ids, letter_spacing);
                     context.shaped_words_cache.put(id, word);
                 }
 
@@ -651,7 +651,7 @@ fn shape_run(
                                         hb_direction,
                                         context,
                                         font_size,
-                                        font_ids,
+                                        &font_ids,
                                         letter_spacing,
                                     );
                                     context.shaped_words_cache.put(id, subword);
@@ -718,7 +718,7 @@ fn shape_word(
     hb_direction: rustybuzz::Direction,
     context: &mut TextContextImpl,
     font_size: f32,
-    font_ids: [Option<FontId>; 8],
+    font_ids: &[Option<FontId>; 8],
     letter_spacing: f32,
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
@@ -819,7 +819,7 @@ fn layout(
         descender = descender.min(metrics.descender());
     }
 
-    let primary_metrics = context.find_font(text_settings.font_ids, |(_, font)| {
+    let primary_metrics = context.find_font(&text_settings.font_ids, |(_, font)| {
         (false, font.metrics(text_settings.font_size))
     })?;
     if ascender.abs() < std::f32::EPSILON {
