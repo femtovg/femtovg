@@ -25,8 +25,7 @@ fn main() {
             .with_vsync(false)
             .build_windowed(wb, &el)
             .unwrap();
-        let windowed_context = unsafe { windowed_context.make_current().unwrap() };
-        windowed_context
+        unsafe { windowed_context.make_current().unwrap() }
     };
 
     let context: Context;
@@ -53,10 +52,10 @@ fn main() {
 
         match event {
             Event::LoopDestroyed => return,
-            Event::WindowEvent { ref event, .. } => match event {
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                _ => {}
-            },
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
             Event::RedrawRequested(_) => {
                 prepare_framebuffer_for_render(&context, framebuffer);
 
@@ -94,7 +93,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
         let vert_shader = include_str!("../assets/screen.vert.glsl");
         context.shader_source(v_shader, vert_shader);
         context.compile_shader(v_shader);
-        if context.get_shader_compile_status(v_shader) == false {
+        if !context.get_shader_compile_status(v_shader) {
             let error_msg = context.get_shader_info_log(v_shader);
             panic!("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n{:?}", error_msg);
         }
@@ -103,7 +102,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
         let frag_shader = include_str!("../assets/screen.frag.glsl");
         context.shader_source(f_shader, frag_shader);
         context.compile_shader(f_shader);
-        if context.get_shader_compile_status(f_shader) == false {
+        if !context.get_shader_compile_status(f_shader) {
             let error_msg = context.get_shader_info_log(f_shader);
             panic!("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n{:?}", error_msg);
         }
@@ -113,7 +112,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
         context.attach_shader(shader_program, f_shader);
         context.link_program(shader_program);
 
-        if context.get_program_link_status(shader_program) == false {
+        if !context.get_program_link_status(shader_program) {
             let error_msg = context.get_program_info_log(shader_program);
             panic!("ERROR::SHADER::PROGRAM::COMPILATION_FAILED\n{:?}", error_msg);
         }
