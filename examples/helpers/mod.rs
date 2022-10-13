@@ -3,6 +3,9 @@ use super::run;
 use femtovg::{renderer::OpenGl, Canvas};
 use winit::{event_loop::EventLoop, window::WindowBuilder};
 
+mod perf_graph;
+pub use perf_graph::PerfGraph;
+
 pub fn start(
     #[cfg(not(target_arch = "wasm32"))] width: u32,
     #[cfg(not(target_arch = "wasm32"))] height: u32,
