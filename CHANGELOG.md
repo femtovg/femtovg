@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
  - `new_from_glutin_context` can now be used with headless contexts.
  - All const-safe `Color` constructors are now const.
  - `Canvas`'s text layout methods no longer require a mutable reference.
+ - Removed the copy trait from `Paint` to avoid accidental copies.
+ - `Paint` is always supplied by reference now.
 
 ## [0.3.5] - 2022-05-23
 
