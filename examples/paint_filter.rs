@@ -120,7 +120,9 @@ fn run(
                 #[cfg(not(target_arch = "wasm32"))]
                 windowed_context.swap_buffers().unwrap();
 
-                filtered_image.map(|img| canvas.delete_image(img));
+                if let Some(img) = filtered_image {
+                    canvas.delete_image(img)
+                }
             }
             Event::MainEventsCleared => window.request_redraw(),
             _ => (),
