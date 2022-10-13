@@ -465,25 +465,24 @@ impl Game {
         self.powerups.retain(|powerup| powerup.rect.origin.y < height);
 
         // check if all bricks are cleared
-        if has_hit {
-            if self
+        if has_hit
+            && self
                 .bricks
                 .iter()
                 .all(|b| b.destroyed && b.brick_type != BrickType::Invincible)
-            {
-                // next level or win
-                if self.current_level == self.levels.len() - 1 {
-                    // win
-                    self.state = State::Win { time: 5.0 };
-                } else {
-                    // next level
-                    self.balls.truncate(1);
-                    self.current_level += 1;
-                    self.load_level();
-                    self.powerups.clear();
-                    self.state = State::RoundInfo { time: 3.0 };
-                    self.paddle_rect.size = Size::new(100.0, 20.0);
-                }
+        {
+            // next level or win
+            if self.current_level == self.levels.len() - 1 {
+                // win
+                self.state = State::Win { time: 5.0 };
+            } else {
+                // next level
+                self.balls.truncate(1);
+                self.current_level += 1;
+                self.load_level();
+                self.powerups.clear();
+                self.state = State::RoundInfo { time: 3.0 };
+                self.paddle_rect.size = Size::new(100.0, 20.0);
             }
         }
 
