@@ -23,7 +23,7 @@ impl PerfGraph {
     }
 
     pub fn get_average(&self) -> f32 {
-        self.values.iter().map(|v| *v).sum::<f32>() / self.history_count as f32
+        self.values.iter().sum::<f32>() / self.history_count as f32
     }
 
     pub fn render<T: Renderer>(&self, canvas: &mut Canvas<T>, x: f32, y: f32) {
