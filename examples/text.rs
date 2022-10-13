@@ -12,13 +12,13 @@ struct Fonts {
     light: FontId,
 }
 
-mod start;
+mod helpers;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    start::start(1000, 600, "Text demo", false);
+    helpers::start(1000, 600, "Text demo", false);
     #[cfg(target_arch = "wasm32")]
-    start::start();
+    helpers::start();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
