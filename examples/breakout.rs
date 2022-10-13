@@ -11,13 +11,13 @@ use winit::{
     window::Window,
 };
 
-mod start;
+mod helpers;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    start::start(800, 600, "Breakout demo", false);
+    helpers::start(800, 600, "Breakout demo", false);
     #[cfg(target_arch = "wasm32")]
-    start::start();
+    helpers::start();
 }
 
 #[cfg(not(target_arch = "wasm32"))]

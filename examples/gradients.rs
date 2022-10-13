@@ -6,13 +6,13 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-mod start;
+mod helpers;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    start::start(1000, 670, "Gradient test", false);
+    helpers::start(1000, 670, "Gradient test", false);
     #[cfg(target_arch = "wasm32")]
-    start::start();
+    helpers::start();
 }
 
 #[cfg(not(target_arch = "wasm32"))]
