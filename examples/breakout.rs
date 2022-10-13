@@ -94,7 +94,7 @@ struct Game {
 
 impl Game {
     fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
-        let image_id = canvas
+        let logo_image_id = canvas
             .load_image_mem(
                 &resource!("examples/assets/rust-logo.png"),
                 ImageFlags::GENERATE_MIPMAPS,
@@ -123,12 +123,12 @@ impl Game {
                 radius: 10.0,
                 on_paddle: true,
             }],
-            logo_image_id: image_id,
-            fonts: fonts,
-            paddle_rect: paddle_rect,
+            logo_image_id,
+            fonts,
+            paddle_rect,
             size: Size::new(canvas.width(), canvas.height()),
             bricks: Vec::new(),
-            levels: levels,
+            levels,
             powerups: Vec::new(),
             current_level: 0,
             lives: 3,
@@ -828,9 +828,9 @@ impl Brick {
         };
 
         Self {
-            brick_type: brick_type,
+            brick_type,
             destroyed: false,
-            rect: rect,
+            rect,
         }
     }
 
