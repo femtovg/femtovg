@@ -221,25 +221,25 @@ impl Game {
                 },
                 _ => (),
             },
-            Event::DeviceEvent { ref event, .. } => match event {
-                DeviceEvent::MouseMotion { delta } => {
-                    if self.state == State::InGame {
-                        // Move the paddle
-                        self.paddle_rect.origin.x += delta.0 as f32;
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion { delta },
+                ..
+            } => {
+                if self.state == State::InGame {
+                    // Move the paddle
+                    self.paddle_rect.origin.x += delta.0 as f32;
 
-                        // Clamp it to the window
-                        self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
-                        self.paddle_rect.origin = self.paddle_rect.origin.clamp(
-                            Point::new(0.0, self.paddle_rect.origin.y),
-                            Point::new(
-                                self.size.width as f32 - self.paddle_rect.size.width,
-                                self.paddle_rect.origin.y,
-                            ),
-                        );
-                    }
+                    // Clamp it to the window
+                    self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
+                    self.paddle_rect.origin = self.paddle_rect.origin.clamp(
+                        Point::new(0.0, self.paddle_rect.origin.y),
+                        Point::new(
+                            self.size.width as f32 - self.paddle_rect.size.width,
+                            self.paddle_rect.origin.y,
+                        ),
+                    );
                 }
-                _ => (),
-            },
+            }
             _ => (),
         }
     }
