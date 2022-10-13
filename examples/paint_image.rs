@@ -109,19 +109,18 @@ fn run(
                     swap_directions = modifiers.shift();
                 }
                 WindowEvent::MouseWheel {
-                    device_id: _, delta, ..
-                } => match delta {
-                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
-                        if swap_directions {
-                            time_warp += *y as i32;
-                            zoom += *x as i32;
-                        } else {
-                            time_warp += *x as i32;
-                            zoom += *y as i32;
-                        }
+                    device_id: _,
+                    delta: winit::event::MouseScrollDelta::LineDelta(x, y),
+                    ..
+                } => {
+                    if swap_directions {
+                        time_warp += *y as i32;
+                        zoom += *x as i32;
+                    } else {
+                        time_warp += *x as i32;
+                        zoom += *y as i32;
                     }
-                    _ => (),
-                },
+                }
                 WindowEvent::MouseInput {
                     device_id: _,
                     state: ElementState::Pressed,

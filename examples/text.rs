@@ -134,14 +134,13 @@ fn run(
                     font_texture_to_show = if next < len { Some(next) } else { None };
                 }
                 WindowEvent::MouseWheel {
-                    device_id: _, delta, ..
-                } => match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, y) => {
-                        font_size = font_size + *y / 2.0;
-                        font_size = font_size.max(2.0);
-                    }
-                    _ => (),
-                },
+                    device_id: _,
+                    delta: winit::event::MouseScrollDelta::LineDelta(_, y),
+                    ..
+                } => {
+                    font_size += *y / 2.0;
+                    font_size = font_size.max(2.0);
+                }
                 _ => (),
             },
             Event::RedrawRequested(_) => {
