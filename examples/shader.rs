@@ -51,7 +51,7 @@ fn main() {
         *control_flow = ControlFlow::Poll;
 
         match event {
-            Event::LoopDestroyed => return,
+            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
