@@ -1279,7 +1279,7 @@ fn run(
         game.handle_events(window, &event, control_flow);
 
         match event {
-            Event::LoopDestroyed => return,
+            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     #[cfg(not(target_arch = "wasm32"))]

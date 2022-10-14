@@ -98,7 +98,7 @@ fn run(
         *control_flow = ControlFlow::Poll;
 
         match event {
-            Event::LoopDestroyed => return,
+            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
