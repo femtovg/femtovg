@@ -11,6 +11,7 @@ use std::{
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
 use lru::LruCache;
+use rustybuzz::ttf_parser;
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;

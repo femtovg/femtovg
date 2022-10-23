@@ -15,6 +15,11 @@ All notable changes to this project will be documented in this file.
  - `Canvas`'s text layout methods no longer require a mutable reference.
  - Removed the copy trait from `Paint` to avoid accidental copies.
  - `Paint` is always supplied by reference now.
+## [0.3.6] - 2022-10-23
+
+### Fixed
+
+ - Fix build with latest rustybuzz release.
 
 ## [0.3.5] - 2022-05-23
 

@@ -1,6 +1,7 @@
 use std::{f32::consts::PI, slice};
 
 use crate::geometry::{Position, Transform2D, Vector};
+use rustybuzz::ttf_parser;
 
 mod cache;
 pub use cache::{Convexity, PathCache};
