@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.6] - 2022-10-23
+
+### Fixed
+
+ - Fix build with latest rustybuzz release.
+
 ## [0.3.5] - 2022-05-23
 
 ### Changed

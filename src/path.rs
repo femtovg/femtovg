@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 use std::slice;
 
 use crate::geometry::{self, Transform2D};
+use rustybuzz::ttf_parser;
 
 mod cache;
 pub use cache::{Convexity, PathCache};
