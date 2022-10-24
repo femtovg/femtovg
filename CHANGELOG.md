@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.3.7] - 2022-10-24
+
+### Fixed
+
+ - Fix build with latest rustybuzz release after 0.5.2 breakage. 0.5.3 doesn't
+   re-export the ttf_parser module anymore.
+
 ## [0.3.6] - 2022-10-23
 
 ### Fixed
