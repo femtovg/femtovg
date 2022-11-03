@@ -931,7 +931,7 @@ fn round_cap_start(verts: &mut Vec<Vertex>, p0: &Point, p1: &Point, w: f32, ncap
 
     for i in 0..ncap {
         let a = i as f32 / (ncap as f32 - 1.0) * PI;
-        let offset = Vector::from_angle(a).with_basis(-dlpos, p1.dpos) * w;
+        let offset = Vector::from_angle(a).with_basis(-dlpos, -p1.dpos) * w;
 
         verts.push(Vertex::pos(ppos + offset, u0, 1.0));
         verts.push(Vertex::pos(ppos, 0.5, 1.0));
