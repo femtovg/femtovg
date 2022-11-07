@@ -631,9 +631,8 @@ where
     /// The filtering does not take any transformation set on the Canvas into account nor does it
     /// change the current rendering target.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
-        let (image_width, image_height) = match self.image_size(source_image) {
-            Ok((w, h)) => (w, h),
-            Err(_) => return,
+        let Ok((image_width, image_height)) = self.image_size(source_image) else {
+            return;
         };
 
         // The renderer will receive a RenderFilteredImage command with two triangles attached that
