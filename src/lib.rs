@@ -188,9 +188,8 @@ struct Scissor {
 impl Scissor {
     /// Returns the bounding rect if the scissor clip if it's an untransformed rectangular clip
     fn as_rect(&self, canvas_width: f32, canvas_height: f32) -> Option<Rect> {
-        let extent = match self.extent {
-            Some(extent) => extent,
-            None => return Some(Rect::new(0., 0., canvas_width, canvas_height)),
+        let Some(extent) = self.extent else {
+            return Some(Rect::new(0., 0., canvas_width, canvas_height));
         };
 
         // Abort if we're skewing (usually doesn't happen)
