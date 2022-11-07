@@ -960,8 +960,7 @@ fn draw_button<T: Renderer>(
 
     let tw = canvas
         .measure_text(0.0, 0.0, text, &paint)
-        .map(|layout| layout.width())
-        .unwrap_or(0.0);
+        .map_or(0.0, |layout| layout.width())
 
     let mut iw = 0.0;
 
