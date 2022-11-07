@@ -1,7 +1,7 @@
 [![Crates.io](https://img.shields.io/crates/v/femtovg?color=4d76ae)](https://crates.io/crates/femtovg)
 [![API](https://docs.rs/femtovg/badge.svg)](https://docs.rs/femtovg)
 [![dependency status](https://deps.rs/repo/github/femtovg/femtovg/status.svg)](https://deps.rs/repo/github/femtovg/femtovg)
-[![rust: 1.60](https://img.shields.io/badge/MSRV-1.60-success.svg)](#msrv)
+[![rust: 1.65](https://img.shields.io/badge/MSRV-1.65-success.svg)](#msrv)
 [![Discord](https://img.shields.io/discord/691716054560407592)](https://discord.gg/V69VdVu)
 
 # femtovg
