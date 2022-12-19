@@ -51,7 +51,7 @@ debug_inspector = []
 winit = { version = "0.27.1", default-features = false }
 euclid = "0.22.3"
 rand = "0.8"
-svg = "0.10.0"
+svg = "0.13.0"
 usvg = { version = "0.23.0", default-features = false, features = [
     "export",
     "filter",
