@@ -188,7 +188,7 @@ type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>
 type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
 pub(crate) struct FontTexture {
-    atlas: Atlas,
+    pub atlas: Atlas,
     pub(crate) image_id: ImageId,
 }
 
@@ -858,13 +858,13 @@ fn layout(
 // Renderer
 
 #[derive(Clone, Debug)]
-pub(crate) struct DrawCmd {
+pub struct DrawCmd {
     pub image_id: ImageId,
     pub quads: Vec<Quad>,
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-pub(crate) struct Quad {
+pub struct Quad {
     pub x0: f32,
     pub y0: f32,
     pub s0: f32,
@@ -875,9 +875,9 @@ pub(crate) struct Quad {
     pub t1: f32,
 }
 
-pub(crate) struct GlyphDrawCommands {
-    pub(crate) alpha_glyphs: Vec<DrawCmd>,
-    pub(crate) color_glyphs: Vec<DrawCmd>,
+pub struct GlyphDrawCommands {
+    pub alpha_glyphs: Vec<DrawCmd>,
+    pub color_glyphs: Vec<DrawCmd>,
 }
 
 #[derive(Default)]

@@ -29,9 +29,9 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, FontId, FontMetrics, TextContext, TextMetrics};
+pub use text::{Align, Baseline, FontId, FontMetrics, TextContext, TextMetrics, Atlas, RenderMode, GlyphDrawCommands, DrawCmd, Quad};
 
-use text::{GlyphAtlas, RenderMode, TextContextImpl};
+use text::{GlyphAtlas, TextContextImpl};
 
 mod image;
 use crate::image::ImageStore;
@@ -1287,7 +1287,7 @@ where
             x,
             y,
             text.as_ref(),
-            &paint.flavor,
+            &paint,
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
@@ -1307,12 +1307,60 @@ where
             x,
             y,
             text.as_ref(),
-            &paint.flavor,
+            &paint,
             paint.shape_anti_alias,
             &paint.stroke,
             &paint.text,
             RenderMode::Stroke,
         )
+    }
+
+    /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
+    /// using a custom font rasterizer/layout.
+    pub fn draw_glyph_cmds(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint) {
+        let scale = self.font_scale() * self.device_px_ratio;
+        let invscale = 1.0 / scale;
+        let transform = self.state().transform;
+
+        let create_vertices = |quads: &Vec<text::Quad>| {
+            let mut verts = Vec::with_capacity(quads.len() * 6);
+
+            for quad in quads {
+                let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
+                let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
+                let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
+                let (p6, p7) = transform.transform_point(quad.x0 * invscale, quad.y1 * invscale);
+
+                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+                verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
+                verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
+                verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
+                verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
+            }
+            verts
+        };
+
+        // Apply global alpha
+        let mut paint_flavor = paint.flavor.clone();
+        paint_flavor.mul_alpha(self.state().alpha);
+
+        for cmd in draw_commands.alpha_glyphs {
+            let verts = create_vertices(&cmd.quads);
+
+            self.render_triangles(&verts, &transform, &paint_flavor, GlyphTexture::AlphaMask(cmd.image_id));
+        }
+
+        for cmd in draw_commands.color_glyphs {
+            let verts = create_vertices(&cmd.quads);
+
+            self.render_triangles(
+                &verts,
+                &transform,
+                &paint_flavor,
+                GlyphTexture::ColorTexture(cmd.image_id),
+            );
+        }
     }
 
     // Private
@@ -1322,15 +1370,12 @@ where
         x: f32,
         y: f32,
         text: &str,
-        paint_flavor: &PaintFlavor,
+        paint: &Paint,
         anti_alias: bool,
         stroke: &StrokeSettings,
         text_settings: &TextSettings,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
-        let mut paint_flavor = paint_flavor.clone();
-
-        let transform = self.state().transform;
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
@@ -1360,7 +1405,7 @@ where
             text::render_direct(
                 self,
                 &layout,
-                &paint_flavor,
+                &paint.flavor,
                 anti_alias,
                 &stroke,
                 text_settings.font_size,
@@ -1368,25 +1413,6 @@ where
                 invscale,
             )?;
         } else {
-            let create_vertices = |quads: &Vec<text::Quad>| {
-                let mut verts = Vec::with_capacity(quads.len() * 6);
-
-                for quad in quads {
-                    let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
-                    let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
-                    let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
-                    let (p6, p7) = transform.transform_point(quad.x0 * invscale, quad.y1 * invscale);
-
-                    verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                    verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-                    verts.push(Vertex::new(p2, p3, quad.s1, quad.t0));
-                    verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
-                    verts.push(Vertex::new(p6, p7, quad.s0, quad.t1));
-                    verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
-                }
-                verts
-            };
-
             let atlas = if bitmap_glyphs && need_direct_rendering {
                 self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
             } else {
@@ -1395,26 +1421,7 @@ where
 
             let draw_commands =
                 atlas.render_atlas(self, &layout, text_settings.font_size, stroke.line_width, render_mode)?;
-
-            // Apply global alpha
-            paint_flavor.mul_alpha(self.state().alpha);
-
-            for cmd in draw_commands.alpha_glyphs {
-                let verts = create_vertices(&cmd.quads);
-
-                self.render_triangles(&verts, &transform, &paint_flavor, GlyphTexture::AlphaMask(cmd.image_id));
-            }
-
-            for cmd in draw_commands.color_glyphs {
-                let verts = create_vertices(&cmd.quads);
-
-                self.render_triangles(
-                    &verts,
-                    &transform,
-                    &paint_flavor,
-                    GlyphTexture::ColorTexture(cmd.image_id),
-                );
-            }
+            self.draw_glyph_cmds(draw_commands, paint);
         }
 
         layout.scale(invscale);
