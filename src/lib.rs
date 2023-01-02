@@ -29,7 +29,9 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Baseline, FontId, FontMetrics, TextContext, TextMetrics, Atlas, RenderMode, GlyphDrawCommands, DrawCmd, Quad};
+pub use text::{
+    Align, Atlas, Baseline, DrawCmd, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode, TextContext, TextMetrics,
+};
 
 use text::{GlyphAtlas, TextContextImpl};
 
