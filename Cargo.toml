@@ -62,6 +62,9 @@ image = { version = "0.24.0", default-features = false, features = [
     "jpeg",
     "png",
 ] }
+cosmic-text = { git = "https://github.com/pop-os/cosmic-text", rev = "e00109d77f06d5a2e3057865eda3f530bc40a046" }
+swash = "^0.1"  # keep this in sync with cosmic-text
+lazy_static = "1.4.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.29.0"
