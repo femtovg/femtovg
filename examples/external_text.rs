@@ -78,8 +78,12 @@ impl RenderCache {
                     // ...or insert it
 
                     // do the actual rasterization
-                    let font = system.get_font(cache_key.font_id).expect("Shaped a nonexistent font. What?");
-                    let mut scaler = self.scale_context.builder(font.as_swash())
+                    let font = system
+                        .get_font(cache_key.font_id)
+                        .expect("Shaped a nonexistent font. What?");
+                    let mut scaler = self
+                        .scale_context
+                        .builder(font.as_swash())
                         .size(cache_key.font_size as f32)
                         .hint(true)
                         .build();
@@ -89,9 +93,9 @@ impl RenderCache {
                         Source::ColorBitmap(StrikeWith::BestFit),
                         Source::Outline,
                     ])
-                        .format(Format::Alpha)
-                        .offset(offset)
-                        .render(&mut scaler, cache_key.glyph_id);
+                    .format(Format::Alpha)
+                    .offset(offset)
+                    .render(&mut scaler, cache_key.glyph_id);
 
                     // upload it to the GPU
                     rendered.map(|rendered| {
@@ -113,13 +117,20 @@ impl RenderCache {
                             // if no atlas could fit the texture, make a new atlas tyvm
                             // TODO error handling
                             let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
-                            let image_id = canvas.create_image(Img::new(vec![RGBA8::new(0,0,0,0); TEXTURE_SIZE * TEXTURE_SIZE], TEXTURE_SIZE, TEXTURE_SIZE).as_ref(), ImageFlags::empty()).unwrap();
+                            let image_id = canvas
+                                .create_image(
+                                    Img::new(
+                                        vec![RGBA8::new(0, 0, 0, 0); TEXTURE_SIZE * TEXTURE_SIZE],
+                                        TEXTURE_SIZE,
+                                        TEXTURE_SIZE,
+                                    )
+                                    .as_ref(),
+                                    ImageFlags::empty(),
+                                )
+                                .unwrap();
                             let texture_index = self.glyph_textures.len();
                             let (x, y) = atlas.add_rect(alloc_w as usize, alloc_h as usize).unwrap();
-                            self.glyph_textures.push(FontTexture {
-                                atlas,
-                                image_id,
-                            });
+                            self.glyph_textures.push(FontTexture { atlas, image_id });
                             (texture_index, x, y)
                         });
 
@@ -142,8 +153,14 @@ impl RenderCache {
                             }
                             Content::SubpixelMask => unreachable!(),
                         }
-                        canvas.update_image::<ImageSource>(self.glyph_textures[texture_index].image_id, ImgRef::new(&src_buf, content_w, content_h).into(), atlas_content_x as usize, atlas_content_y as usize).unwrap();
-
+                        canvas
+                            .update_image::<ImageSource>(
+                                self.glyph_textures[texture_index].image_id,
+                                ImgRef::new(&src_buf, content_w, content_h).into(),
+                                atlas_content_x as usize,
+                                atlas_content_y as usize,
+                            )
+                            .unwrap();
 
                         RenderedGlyph {
                             texture_index,
