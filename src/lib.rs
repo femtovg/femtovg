@@ -1320,18 +1320,16 @@ where
     /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
     /// using a custom font rasterizer/layout.
     pub fn draw_glyph_cmds(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint) {
-        let scale = self.font_scale() * self.device_px_ratio;
-        let invscale = 1.0 / scale;
         let transform = self.state().transform;
 
         let create_vertices = |quads: &Vec<text::Quad>| {
             let mut verts = Vec::with_capacity(quads.len() * 6);
 
             for quad in quads {
-                let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
-                let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
-                let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
-                let (p6, p7) = transform.transform_point(quad.x0 * invscale, quad.y1 * invscale);
+                let (p0, p1) = transform.transform_point(quad.x0, quad.y0);
+                let (p2, p3) = transform.transform_point(quad.x1, quad.y0);
+                let (p4, p5) = transform.transform_point(quad.x1, quad.y1);
+                let (p6, p7) = transform.transform_point(quad.x0, quad.y1);
 
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
