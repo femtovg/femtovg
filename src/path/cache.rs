@@ -476,8 +476,7 @@ impl PathCache {
 
     pub fn contains_point(&self, x: f32, y: f32, fill_rule: FillRule) -> bool {
         // Early out if point is outside the bounding rectangle
-        // TODO: Make this a method on Bounds
-        if x < self.bounds.minx || x > self.bounds.maxx || y < self.bounds.miny || y > self.bounds.maxy {
+        if !self.bounds.contains(x, y) {
             return false;
         }
 
