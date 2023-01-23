@@ -2,8 +2,8 @@ mod helpers;
 
 use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, SubpixelBin};
 use femtovg::{
-    renderer::OpenGl, Atlas, Canvas, Color, DrawCmd, ErrorKind, GlyphDrawCommands, ImageFlags, ImageId, ImageSource,
-    Paint, Quad, Renderer,
+    renderer::OpenGl, Atlas, Canvas, Color, DrawCommand, ErrorKind, GlyphDrawCommands, ImageFlags, ImageId,
+    ImageSource, Paint, Quad, Renderer,
 };
 use std::collections::HashMap;
 use winit::{
@@ -181,7 +181,7 @@ impl RenderCache {
                         &mut alpha_cmd_map
                     };
 
-                    let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
+                    let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
                         image_id: self.glyph_textures[rendered.texture_index].image_id,
                         quads: Vec::new(),
                     });
