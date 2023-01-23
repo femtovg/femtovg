@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
  - `Canvas`'s text layout methods no longer require a mutable reference.
  - Removed the copy trait from `Paint` to avoid accidental copies.
  - `Paint` is always supplied by reference now.
+ - `TextContext`'s `resize_shaping_run_cache` and `resize_shaped_words_cache` functions now take a
+   `std::num::NonZeroUsize` for the capacity value.
 
 ## [0.3.7] - 2022-10-24
 

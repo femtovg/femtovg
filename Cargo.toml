@@ -26,7 +26,7 @@ rustybuzz = "0.6.0"
 unicode-bidi = "0.3.4"
 unicode-segmentation = "1.6.0"
 generational-arena = "0.2.8"
-lru = { version = "0.7.1", default-features = false }
+lru = { version = "0.9.0", default-features = false }
 image = { version = "0.24.0", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive"] }
 ouroboros = { version = "0.15" }
