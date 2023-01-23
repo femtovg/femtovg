@@ -60,15 +60,13 @@ impl ImageSource<'_> {
     }
 
     /// Source dimensions
-    pub fn dimensions(&self) -> (usize, usize) {
-        // TODO: Create size struct and use it here and in ImageInfo.
-
+    pub fn dimensions(&self) -> Size {
         match self {
-            Self::Rgb(imgref) => (imgref.width(), imgref.height()),
-            Self::Rgba(imgref) => (imgref.width(), imgref.height()),
-            Self::Gray(imgref) => (imgref.width(), imgref.height()),
+            Self::Rgb(imgref) => Size::new(imgref.width(), imgref.height()),
+            Self::Rgba(imgref) => Size::new(imgref.width(), imgref.height()),
+            Self::Gray(imgref) => Size::new(imgref.width(), imgref.height()),
             #[cfg(target_arch = "wasm32")]
-            Self::HtmlImageElement(element) => (element.width() as usize, element.height() as usize),
+            Self::HtmlImageElement(element) => Size::new(element.width() as usize, element.height() as usize),
         }
     }
 }
@@ -124,12 +122,23 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Size {
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Size {
+    pub fn new(width: usize, height: usize) -> Size {
+        Size { width, height }
+    }
+}
+
 /// Information about an image.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ImageInfo {
     flags: ImageFlags,
-    width: usize,
-    height: usize,
+    size: Size,
     format: PixelFormat,
 }
 
@@ -137,8 +146,7 @@ impl ImageInfo {
     pub fn new(flags: ImageFlags, width: usize, height: usize, format: PixelFormat) -> Self {
         Self {
             flags,
-            width,
-            height,
+            size: Size { width, height },
             format,
         }
     }
@@ -150,12 +158,17 @@ impl ImageInfo {
 
     /// Image width in pixels
     pub fn width(&self) -> usize {
-        self.width
+        self.size.width
     }
 
     /// Image height in pixels
     pub fn height(&self) -> usize {
-        self.height
+        self.size.height
+    }
+
+    /// Image size (height and width) in pixels
+    pub fn size(&self) -> Size {
+        self.size
     }
 
     /// Image format

@@ -39,11 +39,11 @@ impl Renderer for Void {
     ) -> Result<(), ErrorKind> {
         let size = data.dimensions();
 
-        if x + size.0 > image.info.width() {
+        if x + size.width > image.info.width() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
-        if y + size.1 > image.info.height() {
+        if y + size.height > image.info.height() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 

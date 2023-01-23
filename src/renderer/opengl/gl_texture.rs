@@ -179,11 +179,11 @@ impl GlTexture {
     ) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
-        if x + size.0 > self.info.width() {
+        if x + size.width > self.info.width() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
-        if y + size.1 > self.info.height() {
+        if y + size.height > self.info.height() {
             return Err(ErrorKind::ImageUpdateOutOfBounds);
         }
 
@@ -195,7 +195,7 @@ impl GlTexture {
             context.bind_texture(glow::TEXTURE_2D, Some(self.id));
             context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             if !opengles_2_0 {
-                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.0 as i32);
+                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.width as i32);
             }
         }
 
@@ -208,8 +208,8 @@ impl GlTexture {
                     0,
                     x as i32,
                     y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
+                    size.width as i32,
+                    size.height as i32,
                     format,
                     glow::UNSIGNED_BYTE,
                     glow::PixelUnpackData::Slice(data.buf().align_to().1),
@@ -221,8 +221,8 @@ impl GlTexture {
                     0,
                     x as i32,
                     y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
+                    size.width as i32,
+                    size.height as i32,
                     glow::RGB,
                     glow::UNSIGNED_BYTE,
                     glow::PixelUnpackData::Slice(data.buf().align_to().1),
@@ -234,8 +234,8 @@ impl GlTexture {
                     0,
                     x as i32,
                     y as i32,
-                    size.0 as i32,
-                    size.1 as i32,
+                    size.width as i32,
+                    size.height as i32,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
                     glow::PixelUnpackData::Slice(data.buf().align_to().1),
