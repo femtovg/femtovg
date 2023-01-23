@@ -30,7 +30,8 @@ mod error;
 pub use error::ErrorKind;
 
 pub use text::{
-    Align, Atlas, Baseline, DrawCmd, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode, TextContext, TextMetrics,
+    Align, Atlas, Baseline, DrawCommand, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode, TextContext,
+    TextMetrics,
 };
 
 use text::{GlyphAtlas, TextContextImpl};

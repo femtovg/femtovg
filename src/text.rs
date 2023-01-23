@@ -864,7 +864,7 @@ fn layout(
 // Renderer
 
 #[derive(Clone, Debug)]
-pub struct DrawCmd {
+pub struct DrawCommand {
     pub image_id: ImageId,
     pub quads: Vec<Quad>,
 }
@@ -882,8 +882,8 @@ pub struct Quad {
 }
 
 pub struct GlyphDrawCommands {
-    pub alpha_glyphs: Vec<DrawCmd>,
-    pub color_glyphs: Vec<DrawCmd>,
+    pub alpha_glyphs: Vec<DrawCommand>,
+    pub color_glyphs: Vec<DrawCommand>,
 }
 
 #[derive(Default)]
@@ -945,7 +945,7 @@ impl GlyphAtlas {
                     &mut alpha_cmd_map
                 };
 
-                let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCmd {
+                let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
                     image_id,
                     quads: Vec::new(),
                 });
