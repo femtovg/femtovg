@@ -546,7 +546,7 @@ where
     ) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
-        let id = self.create_image_empty(size.0, size.1, src.format(), flags)?;
+        let id = self.create_image_empty(size.width, size.height, src.format(), flags)?;
         self.images.update(&mut self.renderer, id, src, 0, 0)?;
         Ok(id)
     }
