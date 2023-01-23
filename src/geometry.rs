@@ -209,7 +209,7 @@ impl Transform2D {
         Self([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }
 
-    /// Creates a new transformation matrax.
+    /// Creates a new transformation matrix.
     ///
     /// The parameters are interpreted as matrix as follows:
     ///   [a c e]
