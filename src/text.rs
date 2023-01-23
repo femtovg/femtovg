@@ -278,14 +278,14 @@ impl TextContext {
 
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
     /// strings.
-    pub fn resize_shaping_run_cache(&self, capacity: usize) {
+    pub fn resize_shaping_run_cache(&self, capacity: std::num::NonZeroUsize) {
         self.0.borrow_mut().resize_shaping_run_cache(capacity)
     }
 
     /// Adjusts the capacity of the shaped words cache. This is a cache for measurements of
     /// individual words. Words are separated by
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries).
-    pub fn resize_shaped_words_cache(&self, capacity: usize) {
+    pub fn resize_shaped_words_cache(&self, capacity: std::num::NonZeroUsize) {
         self.0.borrow_mut().resize_shaped_words_cache(capacity)
     }
 }
@@ -303,18 +303,24 @@ impl Default for TextContextImpl {
 
         Self {
             fonts: Default::default(),
-            shaping_run_cache: LruCache::with_hasher(DEFAULT_LRU_CACHE_CAPACITY, fnv_run),
-            shaped_words_cache: LruCache::with_hasher(DEFAULT_LRU_CACHE_CAPACITY, fnv_words),
+            shaping_run_cache: LruCache::with_hasher(
+                std::num::NonZeroUsize::new(DEFAULT_LRU_CACHE_CAPACITY).unwrap(),
+                fnv_run,
+            ),
+            shaped_words_cache: LruCache::with_hasher(
+                std::num::NonZeroUsize::new(DEFAULT_LRU_CACHE_CAPACITY).unwrap(),
+                fnv_words,
+            ),
         }
     }
 }
 
 impl TextContextImpl {
-    pub fn resize_shaping_run_cache(&mut self, capacity: usize) {
+    pub fn resize_shaping_run_cache(&mut self, capacity: std::num::NonZeroUsize) {
         self.shaping_run_cache.resize(capacity);
     }
 
-    pub fn resize_shaped_words_cache(&mut self, capacity: usize) {
+    pub fn resize_shaped_words_cache(&mut self, capacity: std::num::NonZeroUsize) {
         self.shaped_words_cache.resize(capacity);
     }
 
