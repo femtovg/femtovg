@@ -48,7 +48,7 @@ fn run(
     let mut perf = PerfGraph::new();
 
     let svg_data = include_str!("assets/Ghostscript_Tiger.svg").as_bytes();
-    let tree = usvg::Tree::from_data(svg_data, &usvg::Options::default().to_ref()).unwrap();
+    let tree = usvg::Tree::from_data(svg_data, &usvg::Options::default()).unwrap();
 
     let mut paths = render_svg(tree);
 
