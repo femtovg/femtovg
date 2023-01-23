@@ -1301,7 +1301,7 @@ where
 
     /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
     /// using a custom font rasterizer/layout.
-    pub fn draw_glyph_cmds(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint, scale: f32) {
+    pub fn draw_glyph_commands(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint, scale: f32) {
         let transform = self.state().transform;
         let invscale = 1.0 / scale;
         let create_vertices = |quads: &Vec<text::Quad>| {
@@ -1400,7 +1400,7 @@ where
 
             let draw_commands =
                 atlas.render_atlas(self, &layout, text_settings.font_size, stroke.line_width, render_mode)?;
-            self.draw_glyph_cmds(draw_commands, paint, scale);
+            self.draw_glyph_commands(draw_commands, paint, scale);
         }
 
         layout.scale(invscale);
