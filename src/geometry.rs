@@ -209,6 +209,16 @@ impl Transform2D {
         Self([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }
 
+    /// Creates a new transformation matrax.
+    ///
+    /// The parameters are interpreted as matrix as follows:
+    ///   [a c e]
+    ///   [b d f]
+    ///   [0 0 1]
+    pub fn new(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
+        Self([a, b, c, d, e, f])
+    }
+
     pub fn new_translation(x: f32, y: f32) -> Self {
         let mut new = Self::identity();
         new.translate(x, y);
