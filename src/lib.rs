@@ -53,7 +53,7 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings, TextSettings};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
 
 mod path;
 use path::Convexity;
@@ -1285,16 +1285,7 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(
-            x,
-            y,
-            text.as_ref(),
-            &paint,
-            paint.shape_anti_alias,
-            &paint.stroke,
-            &paint.text,
-            RenderMode::Fill,
-        )
+        self.draw_text(x, y, text.as_ref(), &paint, RenderMode::Fill)
     }
 
     /// Strokes the provided string with the specified Paint.
@@ -1305,16 +1296,7 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(
-            x,
-            y,
-            text.as_ref(),
-            &paint,
-            paint.shape_anti_alias,
-            &paint.stroke,
-            &paint.text,
-            RenderMode::Stroke,
-        )
+        self.draw_text(x, y, text.as_ref(), &paint, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
@@ -1371,18 +1353,15 @@ where
         y: f32,
         text: &str,
         paint: &Paint,
-        anti_alias: bool,
-        stroke: &StrokeSettings,
-        text_settings: &TextSettings,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut stroke = stroke.clone();
+        let mut stroke = paint.stroke.clone();
         stroke.line_width *= scale;
 
-        let mut text_settings = text_settings.clone();
+        let mut text_settings = paint.text.clone();
         text_settings.font_size *= scale;
         text_settings.letter_spacing *= scale;
 
@@ -1406,7 +1385,7 @@ where
                 self,
                 &layout,
                 &paint.flavor,
-                anti_alias,
+                paint.shape_anti_alias,
                 &stroke,
                 text_settings.font_size,
                 render_mode,
