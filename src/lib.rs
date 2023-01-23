@@ -680,15 +680,9 @@ where
     }
 
     #[allow(clippy::many_single_char_names)]
-    /// Premultiplies current coordinate system by specified matrix.
-    ///
-    /// The parameters are interpreted as matrix as follows:
-    ///   [a c e]
-    ///   [b d f]
-    ///   [0 0 1]
-    pub fn set_transform(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
-        let transform = Transform2D([a, b, c, d, e, f]);
-        self.state_mut().transform.premultiply(&transform);
+    /// Premultiplies current coordinate system by specified transform.
+    pub fn set_transform(&mut self, transform: &Transform2D) {
+        self.state_mut().transform.premultiply(transform);
     }
 
     /// Translates the current coordinate system.
@@ -727,8 +721,6 @@ where
     }
 
     /// Returns the current transformation matrix
-    ///
-    /// TODO: It's not ok that this method returns Transform2D while set_transform accepts 6 floats - make it consistant
     pub fn transform(&self) -> Transform2D {
         self.state().transform
     }
