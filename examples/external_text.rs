@@ -258,7 +258,7 @@ fn run(
                 let cmds = cache
                     .fill_to_cmds(&FONT_SYSTEM, &mut canvas, &buffer, (0.0, 0.0))
                     .unwrap();
-                canvas.draw_glyph_cmds(cmds, &Paint::color(Color::black()));
+                canvas.draw_glyph_cmds(cmds, &Paint::color(Color::black()), 1.0);
 
                 canvas.flush();
                 #[cfg(not(target_arch = "wasm32"))]
