@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+ - `OpenGl::new_from_function_cstr` to create the renderer from a GL loading function that
+   takes an `&std::ffi::CStr`.
+
 ### Fixed
 
  - Fixed erroneously multiply applied global alpha when mixing color glyphs with regular glyphs.
