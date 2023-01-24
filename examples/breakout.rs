@@ -21,7 +21,7 @@ fn main() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-use glutin::PossiblyCurrent;
+use glutin::prelude::*;
 
 type Canvas = femtovg::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
@@ -897,8 +897,9 @@ enum Cmd {
 fn run(
     mut canvas: Canvas,
     el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
-    #[cfg(target_arch = "wasm32")] window: Window,
+    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
+    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
+    window: Window,
 ) {
     let mut levels = Vec::new();
 
@@ -1259,9 +1260,6 @@ fn run(
         ],
     ]);
 
-    #[cfg(not(target_arch = "wasm32"))]
-    let window = windowed_context.window();
-
     let mut game = Game::new(&mut canvas, levels);
     game.size = Size::new(window.inner_size().width as f32, window.inner_size().height as f32);
 
@@ -1269,21 +1267,20 @@ fn run(
     let mut prevt = start;
 
     el.run(move |event, _, control_flow| {
-        #[cfg(not(target_arch = "wasm32"))]
-        let window = windowed_context.window();
-        #[cfg(target_arch = "wasm32")]
-        let window = &window;
-
         *control_flow = ControlFlow::Poll;
 
-        game.handle_events(window, &event, control_flow);
+        game.handle_events(&window, &event, control_flow);
 
         match event {
             Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     #[cfg(not(target_arch = "wasm32"))]
-                    windowed_context.resize(*physical_size);
+                    surface.resize(
+                        &context,
+                        physical_size.width.try_into().unwrap(),
+                        physical_size.height.try_into().unwrap(),
+                    );
                     game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -1310,7 +1307,7 @@ fn run(
 
                 canvas.flush();
                 #[cfg(not(target_arch = "wasm32"))]
-                windowed_context.swap_buffers().unwrap();
+                surface.swap_buffers(&context).unwrap();
             }
             Event::MainEventsCleared => window.request_redraw(),
             _ => (),
