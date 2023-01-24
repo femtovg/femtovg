@@ -96,9 +96,7 @@ fn main() {
     let mut renderer: OpenGl;
 
     unsafe {
-        context = glow::Context::from_loader_function(|symbol| {
-            display.get_proc_address(&std::ffi::CString::new(symbol).unwrap()) as *const _
-        });
+        context = glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol) as *const _);
         renderer = OpenGl::new_from_glutin_display(&display).unwrap();
 
         shader_program = create_shader_program(&context);

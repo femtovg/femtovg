@@ -65,11 +65,21 @@ impl OpenGl {
         Self::new_from_context(context, is_opengles_2_0)
     }
 
+    #[allow(clippy::missing_safety_doc)]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub unsafe fn new_from_function_cstr<F>(load_fn: F) -> Result<Self, ErrorKind>
+    where
+        F: FnMut(&std::ffi::CStr) -> *const c_void,
+    {
+        let context = glow::Context::from_loader_function_cstr(load_fn);
+        let version = context.get_parameter_string(glow::VERSION);
+        let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
+        Self::new_from_context(context, is_opengles_2_0)
+    }
+
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
     pub fn new_from_glutin_display(display: &impl GlDisplay) -> Result<Self, ErrorKind> {
-        unsafe {
-            OpenGl::new_from_function(|s| display.get_proc_address(&std::ffi::CString::new(s).unwrap()) as *const _)
-        }
+        unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s) as *const _) }
     }
 
     #[cfg(target_arch = "wasm32")]
