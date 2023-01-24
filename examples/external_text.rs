@@ -9,10 +9,11 @@ use std::collections::HashMap;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    window::Window,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use glutin::PossiblyCurrent;
+use glutin::prelude::*;
 use imgref::{Img, ImgRef};
 use rgb::RGBA8;
 use swash::scale::image::Content;
@@ -224,16 +225,14 @@ lazy_static::lazy_static! {
 fn run(
     mut canvas: Canvas<OpenGl>,
     el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] windowed_context: glutin::WindowedContext<PossiblyCurrent>,
-    #[cfg(target_arch = "wasm32")] window: Window,
+    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
+    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
+    window: Window,
 ) {
     let mut buffer = Buffer::new(&FONT_SYSTEM, Metrics::new(20, 25));
     let mut cache = RenderCache::default();
     buffer.set_text(LOREM_TEXT, Attrs::new());
     el.run(move |event, _, control_flow| {
-        #[cfg(not(target_arch = "wasm32"))]
-        let window = windowed_context.window();
-
         *control_flow = ControlFlow::Wait;
 
         match event {
@@ -241,7 +240,11 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
-                    windowed_context.resize(*physical_size);
+                    surface.resize(
+                        &context,
+                        physical_size.width.try_into().unwrap(),
+                        physical_size.height.try_into().unwrap(),
+                    );
                 }
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => (),
@@ -262,7 +265,7 @@ fn run(
 
                 canvas.flush();
                 #[cfg(not(target_arch = "wasm32"))]
-                windowed_context.swap_buffers().unwrap();
+                surface.swap_buffers(&context).unwrap();
             }
             _ => (),
         }

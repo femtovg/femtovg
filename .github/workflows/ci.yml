@@ -29,7 +29,7 @@ jobs:
           override: true
           profile: minimal
           target: wasm32-unknown-unknown
-      - run: cargo build --features glutin/wayland --verbose
+      - run: cargo build --features glutin/wayland,glutin/egl --verbose
       - run: cargo build --no-default-features --verbose
       - run: cargo build --verbose --target wasm32-unknown-unknown
       - run: cargo build --verbose --examples
@@ -55,4 +55,4 @@ jobs:
         if: github.repository == 'femtovg/femtovg'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --features glutin/wayland --no-deps
+          args: --all-features --features glutin/wayland,glutin/egl --no-deps

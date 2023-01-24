@@ -1,8 +1,19 @@
+use std::num::NonZeroU32;
+
 use femtovg::{renderer::OpenGl, Canvas, Color, Paint, Path};
 use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture, Program};
-use glutin::{event::WindowEvent, Api, ContextBuilder, GlRequest};
+use glutin::{
+    config::ConfigTemplateBuilder,
+    context::{ContextApi, ContextAttributesBuilder},
+    display::GetGlDisplay,
+    prelude::*,
+    surface::{SurfaceAttributesBuilder, WindowSurface},
+};
+use glutin_winit::DisplayBuilder;
+use raw_window_handle::HasRawWindowHandle;
 use winit::{
     event::Event,
+    event::WindowEvent,
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
@@ -13,19 +24,69 @@ const WINDOW_HEIGHT: f32 = 480.0;
 fn main() {
     let el = EventLoop::new();
 
-    let windowed_context = {
-        let wb = WindowBuilder::new()
+    let (window, gl_context, surface, display) = {
+        let window_builder = WindowBuilder::new()
             .with_inner_size(winit::dpi::PhysicalSize::<f32>::new(WINDOW_WIDTH, WINDOW_HEIGHT))
             .with_resizable(false)
             .with_decorations(true)
             .with_title("SHADER");
 
-        let windowed_context = ContextBuilder::new()
-            .with_gl(GlRequest::Specific(Api::OpenGlEs, (3, 0)))
-            .with_vsync(false)
-            .build_windowed(wb, &el)
+        let template = ConfigTemplateBuilder::new().with_alpha_size(8);
+
+        let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+
+        let (window, gl_config) = display_builder
+            .build(&el, template, |configs| {
+                // Find the config with the maximum number of samples, so our triangle will
+                // be smooth.
+                configs
+                    .reduce(|accum, config| {
+                        let transparency_check = config.supports_transparency().unwrap_or(false)
+                            & !accum.supports_transparency().unwrap_or(false);
+
+                        if transparency_check || config.num_samples() > accum.num_samples() {
+                            config
+                        } else {
+                            accum
+                        }
+                    })
+                    .unwrap()
+            })
             .unwrap();
-        unsafe { windowed_context.make_current().unwrap() }
+
+        let window = window.unwrap();
+
+        let raw_window_handle = Some(window.raw_window_handle());
+
+        let gl_display = gl_config.display();
+
+        let context_attributes = ContextAttributesBuilder::new().build(raw_window_handle);
+        let fallback_context_attributes = ContextAttributesBuilder::new()
+            .with_context_api(ContextApi::Gles(None))
+            .build(raw_window_handle);
+        let mut not_current_gl_context = Some(unsafe {
+            gl_display
+                .create_context(&gl_config, &context_attributes)
+                .unwrap_or_else(|_| {
+                    gl_display
+                        .create_context(&gl_config, &fallback_context_attributes)
+                        .expect("failed to create context")
+                })
+        });
+
+        let (width, height): (u32, u32) = window.inner_size().into();
+        let raw_window_handle = window.raw_window_handle();
+        let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
+            raw_window_handle,
+            NonZeroU32::new(width).unwrap(),
+            NonZeroU32::new(height).unwrap(),
+        );
+
+        let surface = unsafe { gl_config.display().create_window_surface(&gl_config, &attrs).unwrap() };
+
+        let gl_context = not_current_gl_context.take().unwrap().make_current(&surface).unwrap();
+
+        (window, gl_context, surface, gl_display)
     };
 
     let context: Context;
@@ -35,8 +96,10 @@ fn main() {
     let mut renderer: OpenGl;
 
     unsafe {
-        context = glow::Context::from_loader_function(|symbol| windowed_context.get_proc_address(symbol) as *const _);
-        renderer = OpenGl::new_from_function(|symbol| windowed_context.get_proc_address(symbol) as *const _).unwrap();
+        context = glow::Context::from_loader_function(|symbol| {
+            display.get_proc_address(&std::ffi::CString::new(symbol).unwrap()) as *const _
+        });
+        renderer = OpenGl::new_from_glutin_display(&display).unwrap();
 
         shader_program = create_shader_program(&context);
         (framebuffer, texture_colorbuffer) = create_framebuffer_colorbuffer(&context);
@@ -61,8 +124,8 @@ fn main() {
 
                 // draw red rectangle on white background
 
-                let dpi_factor = windowed_context.window().scale_factor();
-                let size = windowed_context.window().inner_size();
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
                 canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(1., 1., 1.));
 
@@ -79,9 +142,9 @@ fn main() {
                 // shader inverts colors
                 render_framebuffer_to_screen(&context, shader_program, texture_colorbuffer);
 
-                windowed_context.swap_buffers().unwrap();
+                surface.swap_buffers(&gl_context).unwrap();
             }
-            Event::MainEventsCleared => windowed_context.window().request_redraw(),
+            Event::MainEventsCleared => window.request_redraw(),
             _ => (),
         }
     });
