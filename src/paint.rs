@@ -766,7 +766,7 @@ impl Paint {
 
     /// Sets the current rule to be used when filling a path
     ///
-    /// https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/fill-rule
+    /// <https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/fill-rule>
     pub fn set_fill_rule(&mut self, rule: FillRule) {
         self.fill_rule = rule;
     }
