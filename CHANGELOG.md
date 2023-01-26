@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
  - `TextContext`'s `resize_shaping_run_cache` and `resize_shaped_words_cache` functions now take a
    `std::num::NonZeroUsize` for the capacity value.
  - As part of the glutin update, `OpenGL::new_from_glutin_context` was renamed to `new_from_glutin_display` and takes a glutin display now.
+ - Removed `glutin` from the default features.
 
 ## [0.3.7] - 2022-10-24
 
