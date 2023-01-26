@@ -96,7 +96,8 @@ pub fn start(
 
         let gl_context = not_current_gl_context.take().unwrap().make_current(&surface).unwrap();
 
-        let renderer = OpenGl::new_from_glutin_display(&gl_display).expect("Cannot create renderer");
+        let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+            .expect("Cannot create renderer");
 
         let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
         canvas.set_size(width, height, window.scale_factor() as f32);
