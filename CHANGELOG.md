@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.4.0] - 2022-01-27
+
 ### Added
 
  - `OpenGl::new_from_function_cstr` to create the renderer from a GL loading function that
@@ -105,3 +107,6 @@ All notable changes to this project will be documented in this file.
 [0.3.3]: https://github.com/femtovg/femtovg/releases/tag/v0.3.3
 [0.3.4]: https://github.com/femtovg/femtovg/releases/tag/v0.3.4
 [0.3.5]: https://github.com/femtovg/femtovg/releases/tag/v0.3.5
+[0.3.6]: https://github.com/femtovg/femtovg/releases/tag/v0.3.6
+[0.3.7]: https://github.com/femtovg/femtovg/releases/tag/v0.3.7
+[0.4.0]: https://github.com/femtovg/femtovg/releases/tag/v0.4.0
