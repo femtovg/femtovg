@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Renamed `draw_glyph_cmds` to `draw_glyph_commands`.
+- Renamed `DrawCmd` to `DrawCommand`.
+
 ## [0.4.0] - 2022-01-27
 
 ### Added
