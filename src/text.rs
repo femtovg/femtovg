@@ -1046,9 +1046,9 @@ impl GlyphAtlas {
                 canvas.set_render_target(RenderTarget::Image(dst_image_id));
                 canvas.clear_rect(
                     dst_x as u32,
-                    TEXTURE_SIZE as u32 - dst_y as u32 - height as u32,
-                    width as u32,
-                    height as u32,
+                    TEXTURE_SIZE as u32 - dst_y as u32 - height,
+                    width,
+                    height,
                     Color::black(),
                 );
                 let factor = 1.0 / 8.0;
@@ -1110,8 +1110,8 @@ impl GlyphAtlas {
             Some(GlyphRendering::RenderAsImage(image_buffer)) => {
                 let target_x = rendered_glyph.atlas_x as usize;
                 let target_y = rendered_glyph.atlas_y as usize;
-                let target_width = rendered_glyph.width as u32;
-                let target_height = rendered_glyph.height as u32;
+                let target_width = rendered_glyph.width;
+                let target_height = rendered_glyph.height;
 
                 let image_buffer =
                     image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
