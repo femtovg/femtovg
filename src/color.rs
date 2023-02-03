@@ -152,5 +152,5 @@ fn hue(mut h: f32, m1: f32, m2: f32) -> f32 {
 
 // Convert a hex string to decimal. Eg. "00" -> 0. "FF" -> 255.
 fn hex_to_u8(hex_string: &str) -> u8 {
-    u8::from_str_radix(hex_string, 16).map(|o| o as u8).unwrap_or(0)
+    u8::from_str_radix(hex_string, 16).unwrap_or(0)
 }
