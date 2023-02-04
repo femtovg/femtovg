@@ -57,20 +57,20 @@ impl Framebuffer {
             if status != glow::FRAMEBUFFER_COMPLETE {
                 let reason = match status {
                     glow::FRAMEBUFFER_INCOMPLETE_ATTACHMENT => {
-                        format!("({}) Framebuffer incomplete attachment", status)
+                        format!("({status}) Framebuffer incomplete attachment")
                     }
                     //glow::FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER => format!("({}) Framebuffer incomplete draw buffer", status),
                     //glow::FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS => format!("({}) Framebuffer incomplete layer targets", status),
                     //FIXME: will be in next glow release: glow::FRAMEBUFFER_INCOMPLETE_DIMENSIONS => format!("({}) Framebuffer incomplete dimensions", status),
                     glow::FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT => {
-                        format!("({}) Framebuffer incomplete missing attachment", status)
+                        format!("({status}) Framebuffer incomplete missing attachment")
                     }
                     glow::FRAMEBUFFER_INCOMPLETE_MULTISAMPLE => {
-                        format!("({}) Framebuffer incomplete multisample", status)
+                        format!("({status}) Framebuffer incomplete multisample")
                     }
                     //glow::FRAMEBUFFER_INCOMPLETE_READ_BUFFER => format!("({}) Framebuffer incomplete read buffer", status),
-                    glow::FRAMEBUFFER_UNSUPPORTED => format!("({}) Framebuffer unsupported", status),
-                    _ => format!("({}) Framebuffer not complete!", status),
+                    glow::FRAMEBUFFER_UNSUPPORTED => format!("({status}) Framebuffer unsupported"),
+                    _ => format!("({status}) Framebuffer not complete!"),
                 };
 
                 return Err(ErrorKind::RenderTargetError(reason));
