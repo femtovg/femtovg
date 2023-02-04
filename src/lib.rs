@@ -1286,7 +1286,7 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), &paint, RenderMode::Fill)
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
     }
 
     /// Strokes the provided string with the specified Paint.
@@ -1297,7 +1297,7 @@ where
         text: S,
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), &paint, RenderMode::Stroke)
+        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
