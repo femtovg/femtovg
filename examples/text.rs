@@ -149,8 +149,8 @@ fn run(
             Event::RedrawRequested(_) => {
                 let dpi_factor = window.scale_factor();
                 let size = window.inner_size();
-                canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
+                canvas.set_size(size.width, size.height, dpi_factor as f32);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
                 let elapsed = start.elapsed().as_secs_f32();
                 let now = Instant::now();

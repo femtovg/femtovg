@@ -145,7 +145,7 @@ impl Game {
         let brick_padding = 5.0;
 
         let brick_size = Size::new(
-            self.size.width as f32 / self.levels[self.current_level][0].len() as f32,
+            self.size.width / self.levels[self.current_level][0].len() as f32,
             30.0,
         );
         let mut brick_loc = Point::new(0.0, 0.0);
@@ -206,8 +206,8 @@ impl Game {
                     State::RoundInfo { .. } => {
                         self.state = State::InGame;
 
-                        self.paddle_rect.origin.x = self.size.width as f32 / 2.0 - self.paddle_rect.size.width / 2.0;
-                        self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
+                        self.paddle_rect.origin.x = self.size.width / 2.0 - self.paddle_rect.size.width / 2.0;
+                        self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
                         self.balls[0].on_paddle = true;
                     }
                     State::Paused => self.state = State::InGame,
@@ -230,11 +230,11 @@ impl Game {
                     self.paddle_rect.origin.x += delta.0 as f32;
 
                     // Clamp it to the window
-                    self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
+                    self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
                     self.paddle_rect.origin = self.paddle_rect.origin.clamp(
                         Point::new(0.0, self.paddle_rect.origin.y),
                         Point::new(
-                            self.size.width as f32 - self.paddle_rect.size.width,
+                            self.size.width - self.paddle_rect.size.width,
                             self.paddle_rect.origin.y,
                         ),
                     );
@@ -264,8 +264,8 @@ impl Game {
 
             if *time <= 0.0 {
                 self.state = State::InGame;
-                self.paddle_rect.origin.x = self.size.width as f32 / 2.0 - self.paddle_rect.size.width / 2.0;
-                self.paddle_rect.origin.y = self.size.height as f32 - self.paddle_rect.size.height - 10.0;
+                self.paddle_rect.origin.x = self.size.width / 2.0 - self.paddle_rect.size.width / 2.0;
+                self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
                 self.balls[0].on_paddle = true;
             }
 
@@ -1289,12 +1289,12 @@ fn run(
             Event::RedrawRequested(_) => {
                 let dpi_factor = window.scale_factor();
                 let size = window.inner_size();
-                canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
+                canvas.set_size(size.width, size.height, dpi_factor as f32);
                 canvas.clear_rect(
                     0,
                     0,
-                    size.width as u32,
-                    size.height as u32,
+                    size.width,
+                    size.height,
                     Color::rgbf(0.15, 0.15, 0.12),
                 );
 

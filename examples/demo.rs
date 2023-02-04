@@ -184,8 +184,8 @@ fn run(
 
                 let t = start.elapsed().as_secs_f32();
 
-                canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.3, 0.3, 0.32));
+                canvas.set_size(size.width, size.height, dpi_factor as f32);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.3, 0.3, 0.32));
 
                 let height = size.height as f32;
                 let width = size.width as f32;
