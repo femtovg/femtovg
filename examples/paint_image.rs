@@ -140,12 +140,12 @@ fn run(
             Event::RedrawRequested(_) => {
                 let dpi_factor = window.scale_factor();
                 let window_size = window.inner_size();
-                canvas.set_size(window_size.width as u32, window_size.height as u32, dpi_factor as f32);
+                canvas.set_size(window_size.width, window_size.height, dpi_factor as f32);
                 canvas.clear_rect(
                     0,
                     0,
-                    window_size.width as u32,
-                    window_size.height as u32,
+                    window_size.width,
+                    window_size.height,
                     Color::rgbf(0.2, 0.2, 0.2),
                 );
 

@@ -125,8 +125,8 @@ fn main() {
 
                 let dpi_factor = window.scale_factor();
                 let size = window.inner_size();
-                canvas.set_size(size.width as u32, size.height as u32, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(1., 1., 1.));
+                canvas.set_size(size.width, size.height, dpi_factor as f32);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(1., 1., 1.));
 
                 canvas.save();
 

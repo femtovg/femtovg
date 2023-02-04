@@ -169,8 +169,8 @@ impl RenderCache {
                             height: used_h,
                             offset_x: rendered.placement.left,
                             offset_y: rendered.placement.top,
-                            atlas_x: atlas_used_x as u32,
-                            atlas_y: atlas_used_y as u32,
+                            atlas_x: atlas_used_x,
+                            atlas_y: atlas_used_y,
                             color_glyph: matches!(rendered.content, Content::Color),
                         }
                     })
@@ -253,8 +253,8 @@ fn run(
             Event::RedrawRequested(_) => {
                 let dpi_factor = window.scale_factor();
                 let size = window.inner_size();
-                canvas.set_size(size.width as u32, size.height as u32, 1.0);
-                canvas.clear_rect(0, 0, size.width as u32, size.height as u32, Color::rgbf(0.9, 0.9, 0.9));
+                canvas.set_size(size.width, size.height, 1.0);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
                 buffer.set_metrics(Metrics::new((20.0 * dpi_factor) as i32, (25.0 * dpi_factor) as i32));
                 buffer.set_size(size.width as i32, size.height as i32);
