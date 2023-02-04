@@ -76,7 +76,7 @@ impl Program {
 
         for (i, loc) in attrib_locations.iter().enumerate() {
             unsafe {
-                context.bind_attrib_location(program.id, i as u32, *loc);
+                context.bind_attrib_location(program.id, i as u32, loc);
             }
         }
 
