@@ -385,7 +385,7 @@ fn draw_paragraph<T: Renderer>(
         paint.set_text_align(Align::Right);
         paint.set_text_baseline(Baseline::Middle);
 
-        let text = format!("{}", gutter);
+        let text = format!("{gutter}");
 
         if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, &paint) {
             let mut path = Path::new();
