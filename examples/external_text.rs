@@ -52,11 +52,11 @@ pub struct RenderCache {
 }
 
 impl RenderCache {
-    pub(crate) fn fill_to_cmds<'a, T: Renderer>(
+    pub(crate) fn fill_to_cmds<T: Renderer>(
         &mut self,
         system: &FontSystem,
         canvas: &mut Canvas<T>,
-        buffer: &Buffer<'a>,
+        buffer: &Buffer<'_>,
         position: (f32, f32),
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = HashMap::new();
