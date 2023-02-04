@@ -3,8 +3,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- Renamed `draw_glyph_cmds` to `draw_glyph_commands`.
-- Renamed `DrawCmd` to `DrawCommand`.
+### Added
+
+ - added a new `Size` struct, having a `width` and a `height`.
+ - added `size` function to `Image` type, which returns both, `width` and `height` as a `Size`
+
+### Changed
+
+ - Renamed `draw_glyph_cmds` to `draw_glyph_commands`.
+ - Renamed `DrawCmd` to `DrawCommand`.
+ - `set_transform` takes a value of type `Transform2D` now instead of a parameter list.
+ - `dimensions` of `ImageSource` returns a new `Size` type now.
 
 ## [0.4.0] - 2022-01-27
 
