@@ -33,7 +33,7 @@ impl Shader {
                 _ => "Shader stage",
             };
 
-            return Err(ErrorKind::ShaderCompileError(format!("{}: {}", name, error)));
+            return Err(ErrorKind::ShaderCompileError(format!("{name}: {error}")));
         }
 
         Ok(Shader {
