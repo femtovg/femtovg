@@ -144,10 +144,7 @@ impl Game {
         // Bricks
         let brick_padding = 5.0;
 
-        let brick_size = Size::new(
-            self.size.width / self.levels[self.current_level][0].len() as f32,
-            30.0,
-        );
+        let brick_size = Size::new(self.size.width / self.levels[self.current_level][0].len() as f32, 30.0);
         let mut brick_loc = Point::new(0.0, 0.0);
 
         for row in &self.levels[self.current_level] {
@@ -233,10 +230,7 @@ impl Game {
                     self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
                     self.paddle_rect.origin = self.paddle_rect.origin.clamp(
                         Point::new(0.0, self.paddle_rect.origin.y),
-                        Point::new(
-                            self.size.width - self.paddle_rect.size.width,
-                            self.paddle_rect.origin.y,
-                        ),
+                        Point::new(self.size.width - self.paddle_rect.size.width, self.paddle_rect.origin.y),
                     );
                 }
             }
@@ -1290,13 +1284,7 @@ fn run(
                 let dpi_factor = window.scale_factor();
                 let size = window.inner_size();
                 canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(
-                    0,
-                    0,
-                    size.width,
-                    size.height,
-                    Color::rgbf(0.15, 0.15, 0.12),
-                );
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.15, 0.15, 0.12));
 
                 let now = Instant::now();
                 let dt = (now - prevt).as_secs_f32();
