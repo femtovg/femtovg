@@ -177,7 +177,7 @@ fn run(
                 let _ = canvas.fill_text(
                     size.width as f32 - 10.0,
                     10.0,
-                    format!("Scroll to increase / decrease font size. Current: {}", font_size),
+                    format!("Scroll to increase / decrease font size. Current: {font_size}"),
                     &paint,
                 );
                 #[cfg(feature = "debug_inspector")]
@@ -243,7 +243,7 @@ fn draw_baselines<T: Renderer>(
 
         paint.set_text_baseline(*baseline);
 
-        if let Ok(res) = canvas.fill_text(x, y, format!("{} Baseline::{:?}", base_text, baseline), &paint) {
+        if let Ok(res) = canvas.fill_text(x, y, format!("{base_text} Baseline::{baseline:?}"), &paint) {
             //let res = canvas.fill_text(10.0, y, format!("d النص العربي جميل جدا {:?}", baseline), &paint);
 
             let mut path = Path::new();
@@ -268,7 +268,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     for (i, alignment) in alignments.iter().enumerate() {
         paint.set_text_align(*alignment);
 
-        if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{:?}", alignment), &paint) {
+        if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{alignment:?}"), &paint) {
             let mut path = Path::new();
             path.rect(res.x, res.y, res.width(), res.height());
             canvas.stroke_path(&mut path, &Paint::color(Color::rgba(100, 100, 100, 64)));

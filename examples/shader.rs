@@ -157,7 +157,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
         context.compile_shader(v_shader);
         if !context.get_shader_compile_status(v_shader) {
             let error_msg = context.get_shader_info_log(v_shader);
-            panic!("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::VERTEX::COMPILATION_FAILED\n{error_msg:?}");
         }
 
         let f_shader = context.create_shader(glow::FRAGMENT_SHADER).unwrap();
@@ -166,7 +166,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
         context.compile_shader(f_shader);
         if !context.get_shader_compile_status(f_shader) {
             let error_msg = context.get_shader_info_log(f_shader);
-            panic!("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n{error_msg:?}");
         }
 
         let shader_program = context.create_program().unwrap();
@@ -176,7 +176,7 @@ fn create_shader_program(context: &glow::Context) -> NativeProgram {
 
         if !context.get_program_link_status(shader_program) {
             let error_msg = context.get_program_info_log(shader_program);
-            panic!("ERROR::SHADER::PROGRAM::COMPILATION_FAILED\n{:?}", error_msg);
+            panic!("ERROR::SHADER::PROGRAM::COMPILATION_FAILED\n{error_msg:?}");
         }
 
         context.use_program(Some(shader_program));
