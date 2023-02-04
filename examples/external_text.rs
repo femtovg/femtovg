@@ -205,8 +205,8 @@ impl RenderCache {
         }
 
         Ok(GlyphDrawCommands {
-            alpha_glyphs: alpha_cmd_map.into_iter().map(|(_, cmd)| cmd).collect(),
-            color_glyphs: color_cmd_map.into_iter().map(|(_, cmd)| cmd).collect(),
+            alpha_glyphs: alpha_cmd_map.into_values().collect(),
+            color_glyphs: color_cmd_map.into_values().collect(),
         })
     }
 }
