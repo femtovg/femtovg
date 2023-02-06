@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.5.0] - 2022-02-06
+
 ### Added
 
  - added a new `Size` struct, having a `width` and a `height`.
@@ -122,3 +124,4 @@ All notable changes to this project will be documented in this file.
 [0.3.6]: https://github.com/femtovg/femtovg/releases/tag/v0.3.6
 [0.3.7]: https://github.com/femtovg/femtovg/releases/tag/v0.3.7
 [0.4.0]: https://github.com/femtovg/femtovg/releases/tag/v0.4.0
+[0.5.0]: https://github.com/femtovg/femtovg/releases/tag/v0.5.0
