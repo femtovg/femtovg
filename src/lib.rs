@@ -37,8 +37,7 @@ pub use text::{
 use text::{GlyphAtlas, TextContextImpl};
 
 mod image;
-use crate::image::ImageStore;
-pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
+pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, ImageStore, PixelFormat};
 
 mod color;
 pub use color::Color;

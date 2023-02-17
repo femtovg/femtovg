@@ -19,8 +19,8 @@ pub(crate) use params::Params;
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Drawable {
-    pub(crate) fill_verts: Option<(usize, usize)>,
-    pub(crate) stroke_verts: Option<(usize, usize)>,
+    pub fill_verts: Option<(usize, usize)>,
+    pub stroke_verts: Option<(usize, usize)>,
 }
 
 #[derive(Debug)]
@@ -57,13 +57,13 @@ pub enum CommandType {
 }
 
 pub struct Command {
-    pub(crate) cmd_type: CommandType,
-    pub(crate) drawables: Vec<Drawable>,
-    pub(crate) triangles_verts: Option<(usize, usize)>,
-    pub(crate) image: Option<ImageId>,
-    pub(crate) glyph_texture: GlyphTexture,
-    pub(crate) fill_rule: FillRule,
-    pub(crate) composite_operation: CompositeOperationState,
+    pub cmd_type: CommandType,
+    pub drawables: Vec<Drawable>,
+    pub triangles_verts: Option<(usize, usize)>,
+    pub image: Option<ImageId>,
+    pub glyph_texture: GlyphTexture,
+    pub fill_rule: FillRule,
+    pub composite_operation: CompositeOperationState,
 }
 
 impl Command {

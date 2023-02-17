@@ -225,7 +225,7 @@ impl PaintFlavor {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum GlyphTexture {
+pub enum GlyphTexture {
     None,
     AlphaMask(ImageId),
     ColorTexture(ImageId),
