@@ -8,6 +8,7 @@ use std::{
     rc::Rc,
 };
 
+use const_default::ConstDefault;
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
 use lru::LruCache;
@@ -61,8 +62,12 @@ pub enum Baseline {
 
 impl Default for Baseline {
     fn default() -> Self {
-        Self::Alphabetic
+        Self::DEFAULT
     }
+}
+
+impl ConstDefault for Baseline {
+    const DEFAULT: Self = Self::Alphabetic;
 }
 
 /// Text horizontal alignment: `Left` (default), `Center`, `Right`.
@@ -79,8 +84,12 @@ pub enum Align {
 
 impl Default for Align {
     fn default() -> Self {
-        Self::Left
+        Self::DEFAULT
     }
+}
+
+impl ConstDefault for Align {
+    const DEFAULT: Self = Self::Left;
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]

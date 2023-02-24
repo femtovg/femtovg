@@ -19,6 +19,7 @@ extern crate serde;
 
 use std::{cell::RefCell, ops::Range, path::Path as FilePath, rc::Rc};
 
+use const_default::ConstDefault;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
@@ -73,8 +74,12 @@ pub enum FillRule {
 
 impl Default for FillRule {
     fn default() -> Self {
-        Self::NonZero
+        Self::DEFAULT
     }
+}
+
+impl ConstDefault for FillRule {
+    const DEFAULT: Self = Self::NonZero;
 }
 
 /// Blend factors.
@@ -233,8 +238,12 @@ pub enum LineCap {
 
 impl Default for LineCap {
     fn default() -> Self {
-        Self::Butt
+        Self::DEFAULT
     }
+}
+
+impl ConstDefault for LineCap {
+    const DEFAULT: Self = Self::Butt;
 }
 
 /// Determines the shape used to join two line segments where they meet.
@@ -259,8 +268,12 @@ pub enum LineJoin {
 
 impl Default for LineJoin {
     fn default() -> Self {
-        Self::Miter
+        Self::DEFAULT
     }
+}
+
+impl ConstDefault for LineJoin {
+    const DEFAULT: Self = Self::Miter;
 }
 
 #[derive(Copy, Clone, Debug)]
