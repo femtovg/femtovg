@@ -12,7 +12,7 @@ use crate::{
 use super::Verb;
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct PointFlags: u8 {
         const CORNER        = 0x01;
         const LEFT          = 0x02;

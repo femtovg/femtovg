@@ -26,6 +26,7 @@ pub enum PixelFormat {
 
 bitflags! {
     /// Image flags (eg. repeat, flip, mipmaps, etc.)
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ImageFlags: u32 {
         const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
         const REPEAT_X = 1 << 1;        // Repeat image in X direction.
