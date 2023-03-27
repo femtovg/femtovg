@@ -6,6 +6,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::Window,
 };
+use usvg::TreeParsing;
 
 mod helpers;
 use helpers::PerfGraph;
