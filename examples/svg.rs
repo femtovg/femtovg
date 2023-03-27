@@ -1,12 +1,12 @@
 use femtovg::{renderer::OpenGl, Canvas, Color, FillRule, ImageFlags, Paint, Path};
 use instant::Instant;
 use resource::resource;
+use usvg::TreeParsing;
 use winit::{
     event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::Window,
 };
-use usvg::TreeParsing;
 
 mod helpers;
 use helpers::PerfGraph;
