@@ -5,9 +5,11 @@ use std::rc::Rc;
 
 use const_default::ConstDefault;
 
-use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{
+    default_for_const_default, geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+};
 
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Default, ConstDefault)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct GradientStop(pub f32, pub Color);
 
@@ -233,11 +235,10 @@ pub(crate) enum GlyphTexture {
     ColorTexture(ImageId),
 }
 
-impl Default for GlyphTexture {
-    fn default() -> Self {
-        Self::None
-    }
+impl ConstDefault for GlyphTexture {
+    const DEFAULT: Self = Self::None;
 }
+default_for_const_default!(GlyphTexture);
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -250,12 +251,6 @@ pub(crate) struct StrokeSettings {
     pub(crate) line_join: LineJoin,
 }
 
-impl Default for StrokeSettings {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for StrokeSettings {
     const DEFAULT: Self = Self {
         stencil_strokes: true,
@@ -266,6 +261,7 @@ impl ConstDefault for StrokeSettings {
         line_join: ConstDefault::DEFAULT,
     };
 }
+default_for_const_default!(StrokeSettings);
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -278,12 +274,6 @@ pub(crate) struct TextSettings {
     pub(crate) text_align: Align,
 }
 
-impl Default for TextSettings {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for TextSettings {
     const DEFAULT: Self = Self {
         font_ids: ConstDefault::DEFAULT,
@@ -293,6 +283,7 @@ impl ConstDefault for TextSettings {
         text_align: ConstDefault::DEFAULT,
     };
 }
+default_for_const_default!(TextSettings);
 
 /// Struct controlling how graphical shapes are rendered.
 ///
@@ -329,12 +320,6 @@ pub struct Paint {
     pub(crate) fill_rule: FillRule,
 }
 
-impl Default for Paint {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for Paint {
     const DEFAULT: Self = Self {
         flavor: PaintFlavor::Color(Color::white()),
@@ -344,6 +329,7 @@ impl ConstDefault for Paint {
         fill_rule: ConstDefault::DEFAULT,
     };
 }
+default_for_const_default!(Paint);
 
 impl Paint {
     /// Creates a new solid color paint

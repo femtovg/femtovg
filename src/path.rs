@@ -1,6 +1,10 @@
 use std::{f32::consts::PI, slice};
 
-use crate::geometry::{Position, Transform2D, Vector};
+use crate::{
+    default_for_const_default,
+    geometry::{Position, Transform2D, Vector},
+};
+use const_default::ConstDefault;
 use rustybuzz::ttf_parser;
 
 mod cache;
@@ -16,11 +20,10 @@ pub enum Solidity {
     Hole = 2,
 }
 
-impl Default for Solidity {
-    fn default() -> Self {
-        Self::Solid
-    }
+impl ConstDefault for Solidity {
+    const DEFAULT: Self = Self::Solid;
 }
+default_for_const_default!(Solidity);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u8)]

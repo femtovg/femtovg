@@ -72,15 +72,10 @@ pub enum FillRule {
     NonZero,
 }
 
-impl Default for FillRule {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for FillRule {
     const DEFAULT: Self = Self::NonZero;
 }
+default_for_const_default!(FillRule);
 
 /// Blend factors.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -147,7 +142,7 @@ pub struct CompositeOperationState {
 
 impl CompositeOperationState {
     /// Creates a new CompositeOperationState from the provided CompositeOperation
-    pub fn new(op: CompositeOperation) -> Self {
+    pub const fn new(op: CompositeOperation) -> Self {
         let (sfactor, dfactor) = match op {
             CompositeOperation::SourceOver => (BlendFactor::One, BlendFactor::OneMinusSrcAlpha),
             CompositeOperation::SourceIn => (BlendFactor::DstAlpha, BlendFactor::Zero),
@@ -181,13 +176,12 @@ impl CompositeOperationState {
     }
 }
 
-impl Default for CompositeOperationState {
-    fn default() -> Self {
-        Self::new(CompositeOperation::SourceOver)
-    }
+impl ConstDefault for CompositeOperationState {
+    const DEFAULT: Self = Self::new(CompositeOperation::SourceOver);
 }
+default_for_const_default!(CompositeOperationState);
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, ConstDefault)]
 struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
@@ -236,15 +230,10 @@ pub enum LineCap {
     Square,
 }
 
-impl Default for LineCap {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for LineCap {
     const DEFAULT: Self = Self::Butt;
 }
+default_for_const_default!(LineCap);
 
 /// Determines the shape used to join two line segments where they meet.
 /// `Miter` (default), `Round`, `Bevel`.
@@ -266,15 +255,10 @@ pub enum LineJoin {
     Bevel,
 }
 
-impl Default for LineJoin {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
 impl ConstDefault for LineJoin {
     const DEFAULT: Self = Self::Miter;
 }
+default_for_const_default!(LineJoin);
 
 #[derive(Copy, Clone, Debug)]
 struct State {
@@ -284,16 +268,15 @@ struct State {
     alpha: f32,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            composite_operation: Default::default(),
-            transform: Transform2D::identity(),
-            scissor: Default::default(),
-            alpha: 1.0,
-        }
-    }
+impl ConstDefault for State {
+    const DEFAULT: Self = Self {
+        composite_operation: CompositeOperationState::DEFAULT,
+        transform: Transform2D::identity(),
+        scissor: Scissor::DEFAULT,
+        alpha: 1.0,
+    };
 }
+default_for_const_default!(State);
 
 /// Main 2D drawing context.
 pub struct Canvas<T: Renderer> {
