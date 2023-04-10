@@ -52,7 +52,7 @@ winit = { version = "0.28.1", default-features = false }
 euclid = "0.22.3"
 rand = "0.8"
 svg = "0.13.0"
-usvg = { version = "0.30.0" }
+usvg = { version = "0.31.0" }
 instant = { version = "0.1", features = ["now"] }
 resource = "0.5.0"
 image = { version = "0.24.0", default-features = false, features = [
