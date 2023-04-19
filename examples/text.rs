@@ -239,7 +239,7 @@ fn draw_baselines<T: Renderer>(
         let mut path = Path::new();
         path.move_to(x, y + 0.5);
         path.line_to(x + 250., y + 0.5);
-        canvas.stroke_path(&mut path, &Paint::color(Color::rgba(255, 32, 32, 128)));
+        canvas.stroke_path(&path, &Paint::color(Color::rgba(255, 32, 32, 128)));
 
         paint.set_text_baseline(*baseline);
 
@@ -248,7 +248,7 @@ fn draw_baselines<T: Renderer>(
 
             let mut path = Path::new();
             path.rect(res.x, res.y, res.width(), res.height());
-            canvas.stroke_path(&mut path, &Paint::color(Color::rgba(100, 100, 100, 64)));
+            canvas.stroke_path(&path, &Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
 }
@@ -259,7 +259,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     let mut path = Path::new();
     path.move_to(x + 0.5, y - 20.);
     path.line_to(x + 0.5, y + 80.);
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgba(255, 32, 32, 128)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgba(255, 32, 32, 128)));
 
     let mut paint = Paint::color(Color::black());
     paint.set_font(&[fonts.sans]);
@@ -271,7 +271,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
         if let Ok(res) = canvas.fill_text(x, y + i as f32 * 30.0, format!("Align::{alignment:?}"), &paint) {
             let mut path = Path::new();
             path.rect(res.x, res.y, res.width(), res.height());
-            canvas.stroke_path(&mut path, &Paint::color(Color::rgba(100, 100, 100, 64)));
+            canvas.stroke_path(&path, &Paint::color(Color::rgba(100, 100, 100, 64)));
         }
     }
 }
@@ -375,7 +375,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     let mut path = Path::new();
     path.move_to(x, y - 2.0);
     path.line_to(x + 180.0, y - 2.0);
-    canvas.stroke_path(&mut path, &paint);
+    canvas.stroke_path(&path, &paint);
 
     let text = "RUST";
 

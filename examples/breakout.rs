@@ -516,7 +516,7 @@ impl Game {
             Color::rgb(90, 90, 90),
             Color::rgb(30, 30, 30),
         );
-        canvas.stroke_path(&mut path, &paint);
+        canvas.stroke_path(&path, &paint);
 
         match self.state {
             State::TitleScreen => self.draw_title_screen(canvas),
@@ -532,17 +532,17 @@ impl Game {
         // curtain
         let mut path = Path::new();
         path.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(&mut path, &Paint::color(Color::rgba(0, 0, 0, 180)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 180)));
 
         // rust logo
         let logo_pos = Point::new((canvas.width() / 2.0) - 50.0, (canvas.height() / 2.0) - 180.0);
         let logo_paint = Paint::image(self.logo_image_id, logo_pos.x, logo_pos.y, 100.0, 100.0, 0.0, 1.0);
         let mut path = Path::new();
         path.circle(logo_pos.x + 50.0, logo_pos.y + 50.0, 60.0);
-        //canvas.fill_path(&mut path, &Paint::color(Color::rgba(200, 200, 200, 200)));
+        //canvas.fill_path(&path, &Paint::color(Color::rgba(200, 200, 200, 200)));
         let mut path = Path::new();
         path.rect(logo_pos.x, logo_pos.y, 100.0, 100.0);
-        canvas.fill_path(&mut path, &logo_paint);
+        canvas.fill_path(&path, &logo_paint);
 
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -599,8 +599,8 @@ impl Game {
             self.paddle_rect.size.height / 2.0,
             0.0,
         );
-        canvas.fill_path(&mut path, &Paint::color(Color::rgb(119, 123, 126)));
-        canvas.stroke_path(&mut path, &highlight);
+        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)));
+        canvas.stroke_path(&path, &highlight);
 
         let mut path = Path::new();
         path.rect(
@@ -609,8 +609,8 @@ impl Game {
             self.paddle_rect.size.width - (side_size * 2.0) - 6.0,
             self.paddle_rect.size.height,
         );
-        canvas.fill_path(&mut path, &Paint::color(Color::rgb(119, 123, 126)));
-        canvas.stroke_path(&mut path, &highlight);
+        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)));
+        canvas.stroke_path(&path, &highlight);
 
         let mut path = Path::new();
         path.rounded_rect_varying(
@@ -624,13 +624,13 @@ impl Game {
             25.0,
         );
 
-        canvas.fill_path(&mut path, &highlight);
+        canvas.fill_path(&path, &highlight);
 
         // Ball
         for ball in &self.balls {
             let mut path = Path::new();
             path.circle(ball.position.x, ball.position.y, ball.radius);
-            canvas.fill_path(&mut path, &Paint::color(Color::rgb(183, 65, 14)));
+            canvas.fill_path(&path, &Paint::color(Color::rgb(183, 65, 14)));
 
             let bg = Paint::linear_gradient(
                 ball.position.x,
@@ -643,7 +643,7 @@ impl Game {
 
             let mut path = Path::new();
             path.circle(ball.position.x, ball.position.y - ball.radius / 2.0, ball.radius / 2.0);
-            canvas.fill_path(&mut path, &bg);
+            canvas.fill_path(&path, &bg);
         }
 
         // powerups
@@ -706,7 +706,7 @@ impl Game {
         // curtain
         let mut path = Path::new();
         path.rect(0.0, 0.0, canvas.width(), canvas.height());
-        canvas.fill_path(&mut path, &Paint::color(Color::rgba(0, 0, 0, 32)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
 
         // title
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -776,7 +776,7 @@ impl Powerup {
             5.0,
         );
 
-        canvas.stroke_path(&mut path, &Paint::color(Color::rgb(240, 240, 240)));
+        canvas.stroke_path(&path, &Paint::color(Color::rgb(240, 240, 240)));
 
         let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
         text_paint.set_text_align(Align::Center);
@@ -864,8 +864,8 @@ impl Brick {
             },
         });
 
-        canvas.fill_path(&mut path, &paint);
-        canvas.stroke_path(&mut path, &Paint::color(Color::rgb(240, 240, 240)));
+        canvas.fill_path(&path, &paint);
+        canvas.stroke_path(&path, &Paint::color(Color::rgb(240, 240, 240)));
 
         let mut path = Path::new();
         path.rounded_rect_varying(
@@ -878,7 +878,7 @@ impl Brick {
             15.0,
             15.0,
         );
-        canvas.fill_path(&mut path, &Paint::color(Color::rgba(255, 255, 255, 50)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(255, 255, 255, 50)));
     }
 }
 

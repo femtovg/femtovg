@@ -6,8 +6,8 @@ fn path_with_single_move_to() {
 
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -17,8 +17,8 @@ fn path_with_two_lines() {
     let mut path = Path::new();
     path.line_to(10.0, 10.0);
     path.line_to(10.0, 10.0);
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -29,8 +29,8 @@ fn path_with_close_points() {
     path.move_to(10.0, 10.0);
     path.line_to(10.0001, 10.0);
     path.line_to(10.0001, 10.000001);
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -54,8 +54,8 @@ fn path_with_points_at_limits() {
     );
     path.close();
 
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn path_with_points_around_zero() {
 
     path.close();
 
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn degenerate_stroke() {
     path.line_to(2., 2.);
     path.line_to(2., 2.);
     path.line_to(4., 2.);
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -104,8 +104,8 @@ fn degenerate_arc_to() {
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
     path.arc_to(10.0, 10.0001, 10.0, 10.0001, 2.0);
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -116,8 +116,8 @@ fn degenerate_arc() {
     path.move_to(10.0, 10.0);
     path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Solidity::Hole);
 
-    canvas.fill_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
-    canvas.stroke_path(&mut path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
+    canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
 }
 
 #[test]
@@ -136,12 +136,12 @@ fn path_contains_point() {
     path.close();
 
     // Center of the star should be hollow for even-odd rule
-    assert!(!canvas.contains_point(&mut path, 50.0, 45.0, FillRule::EvenOdd));
-    assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::EvenOdd));
+    assert!(!canvas.contains_point(&path, 50.0, 45.0, FillRule::EvenOdd));
+    assert!(canvas.contains_point(&path, 50.0, 5.0, FillRule::EvenOdd));
 
     // Center of the star should be fill for NonZero rule
-    assert!(canvas.contains_point(&mut path, 50.0, 45.0, FillRule::NonZero));
-    assert!(canvas.contains_point(&mut path, 50.0, 5.0, FillRule::NonZero));
+    assert!(canvas.contains_point(&path, 50.0, 45.0, FillRule::NonZero));
+    assert!(canvas.contains_point(&path, 50.0, 5.0, FillRule::NonZero));
 }
 
 #[test]
