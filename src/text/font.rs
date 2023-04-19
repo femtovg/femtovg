@@ -2,6 +2,7 @@ use fnv::FnvHashMap;
 use ouroboros::self_referencing;
 use rustybuzz::ttf_parser;
 use rustybuzz::ttf_parser::{Face as TtfFont, GlyphId};
+use std::cell::{Ref, RefCell};
 use std::collections::hash_map::Entry;
 
 use crate::{ErrorKind, Path};
@@ -19,7 +20,7 @@ pub struct Glyph {
 }
 
 pub(crate) enum GlyphRendering<'a> {
-    RenderAsPath(&'a mut Path),
+    RenderAsPath(Ref<'a, Path>),
     #[cfg(feature = "image-loading")]
     RenderAsImage(image::DynamicImage),
 }
@@ -98,7 +99,7 @@ pub(crate) struct Font {
     face_data: rustybuzz::Face<'this>,
     units_per_em: u16,
     metrics: FontMetrics,
-    glyphs: FnvHashMap<u16, Glyph>,
+    glyphs: RefCell<FnvHashMap<u16, Glyph>>,
 }
 
 impl Font {
@@ -145,9 +146,9 @@ impl Font {
         size / *self.borrow_units_per_em() as f32
     }
 
-    pub fn glyph(&mut self, codepoint: u16) -> Option<&mut Glyph> {
-        self.with_mut(|fields| {
-            if let Entry::Vacant(entry) = fields.glyphs.entry(codepoint) {
+    pub fn glyph(&self, codepoint: u16) -> Option<Ref<'_, Glyph>> {
+        self.with(|fields| {
+            if let Entry::Vacant(entry) = fields.glyphs.borrow_mut().entry(codepoint) {
                 let mut path = Path::new();
 
                 let id = GlyphId(codepoint);
@@ -188,11 +189,11 @@ impl Font {
                 }
             }
 
-            fields.glyphs.get_mut(&codepoint)
+            Ref::filter_map(fields.glyphs.borrow(), |glyphs| glyphs.get(&codepoint)).ok()
         })
     }
 
-    pub fn glyph_rendering_representation(&mut self, codepoint: u16, _pixels_per_em: u16) -> Option<GlyphRendering> {
+    pub fn glyph_rendering_representation(&self, codepoint: u16, _pixels_per_em: u16) -> Option<GlyphRendering> {
         #[cfg(feature = "image-loading")]
         if let Some(image) = self
             .borrow_face_data()
@@ -204,7 +205,10 @@ impl Font {
             return Some(GlyphRendering::RenderAsImage(image));
         };
 
-        self.glyph(codepoint)
-            .and_then(|glyph| glyph.path.as_mut().map(GlyphRendering::RenderAsPath))
+        self.glyph(codepoint).and_then(|glyph| {
+            Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
+                .ok()
+                .map(GlyphRendering::RenderAsPath)
+        })
     }
 }
