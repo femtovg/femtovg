@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     cell::RefCell,
     ffi::OsStr,
     fs,
@@ -1278,7 +1279,7 @@ pub(crate) fn render_direct<T: Renderer>(
             GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
                     canvas.stroke_path_internal(
-                        path,
+                        path.borrow(),
                         paint_flavor,
                         anti_alias,
                         &StrokeSettings {
@@ -1287,7 +1288,7 @@ pub(crate) fn render_direct<T: Renderer>(
                         },
                     );
                 } else {
-                    canvas.fill_path_internal(path, paint_flavor, anti_alias, FillRule::EvenOdd);
+                    canvas.fill_path_internal(path.borrow(), paint_flavor, anti_alias, FillRule::EvenOdd);
                 }
             }
             #[cfg(feature = "image-loading")]
