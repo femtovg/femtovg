@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
  - Changed `linear_gradient_stops` and `radial_gradient_stops` to take an `IntoIterator`
    instead of a slice slice for the color stops.
+ - Path drawing functions now take a `&Path` instead of a `&mut Path` and use interior mutability
+   for caching.
 
 ## [0.5.0] - 2022-02-06
 

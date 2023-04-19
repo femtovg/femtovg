@@ -196,7 +196,7 @@ fn run(
 
                     // Get the bounding box of the path so that we can stretch
                     // the paint to cover it exactly:
-                    let bbox = canvas.path_bbox(&mut path);
+                    let bbox = canvas.path_bbox(&path);
 
                     // Now we need to apply the current canvas transform
                     // to the path bbox:
@@ -204,7 +204,7 @@ fn run(
                     let b = canvas.transform().inversed().transform_point(bbox.maxx, bbox.maxy);
 
                     canvas.fill_path(
-                        &mut path,
+                        &path,
                         &Paint::image(image_id, a.0, a.1, b.0 - a.0, b.1 - a.1, 0f32, 1f32),
                     );
                 }

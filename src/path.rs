@@ -1,4 +1,8 @@
-use std::{f32::consts::PI, slice};
+use std::{
+    cell::{RefCell, RefMut},
+    f32::consts::PI,
+    slice,
+};
 
 use crate::geometry::{Position, Transform2D, Vector};
 use rustybuzz::ttf_parser;
@@ -85,7 +89,7 @@ pub struct Path {
     last_pos: Position,
     dist_tol: f32,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub(crate) cache: Option<(u64, PathCache)>,
+    pub(crate) cache: RefCell<Option<(u64, PathCache)>>,
 }
 
 impl Path {
@@ -116,7 +120,7 @@ impl Path {
         }
     }
 
-    pub(crate) fn cache<'a>(&'a mut self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> &'a mut PathCache {
+    pub(crate) fn cache<'a>(&'a self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> RefMut<'a, PathCache> {
         // The path cache saves a flattened and transformed version of the path. If client code calls
         // (fill|stroke)_path repeatedly with the same Path under the same transform circumstances then it will be
         // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
@@ -127,16 +131,16 @@ impl Path {
         // this shouldn't need a bool once non lexic lifetimes are stable
         let mut needs_rebuild = true;
 
-        if let Some((transform_cache_key, _cache)) = &self.cache {
+        if let Some((transform_cache_key, _cache)) = &*self.cache.borrow() {
             needs_rebuild = key != *transform_cache_key;
         }
 
         if needs_rebuild {
             let path_cache = PathCache::new(self.verbs(), transform, tess_tol, dist_tol);
-            self.cache = Some((key, path_cache));
+            *self.cache.borrow_mut() = Some((key, path_cache));
         }
 
-        &mut self.cache.as_mut().unwrap().1
+        RefMut::map(self.cache.borrow_mut(), |cache| &mut cache.as_mut().unwrap().1)
     }
 
     // Path funcs

@@ -791,7 +791,7 @@ where
     // Paths
 
     /// Returns true if the specified point (x,y) is in the provided path, and false otherwise.
-    pub fn contains_point(&self, path: &mut Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
+    pub fn contains_point(&self, path: &Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -810,7 +810,7 @@ where
     }
 
     /// Return the bounding box for a Path
-    pub fn path_bbox(&self, path: &mut Path) -> Bounds {
+    pub fn path_bbox(&self, path: &Path) -> Bounds {
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -820,22 +820,16 @@ where
     }
 
     /// Fills the provided Path with the specified Paint.
-    pub fn fill_path(&mut self, path: &mut Path, paint: &Paint) {
+    pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
         self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
     }
 
-    fn fill_path_internal(
-        &mut self,
-        path: &mut Path,
-        paint_flavor: &PaintFlavor,
-        anti_alias: bool,
-        fill_rule: FillRule,
-    ) {
+    fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
         let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
-        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+        let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         let canvas_width = self.width();
         let canvas_height = self.height();
@@ -992,13 +986,13 @@ where
     }
 
     /// Strokes the provided Path with the specified Paint.
-    pub fn stroke_path(&mut self, path: &mut Path, paint: &Paint) {
+    pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
         self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
     }
 
     fn stroke_path_internal(
         &mut self,
-        path: &mut Path,
+        path: &Path,
         paint_flavor: &PaintFlavor,
         anti_alias: bool,
         stroke: &StrokeSettings,
@@ -1007,7 +1001,7 @@ where
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
-        let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+        let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0
@@ -1473,7 +1467,7 @@ where
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect(0f32, 0f32, width, height);
-            self.fill_path(&mut path, &Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
+            self.fill_path(&path, &Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
 }

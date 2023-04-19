@@ -53,7 +53,7 @@ fn run(
     let svg_data = include_str!("assets/Ghostscript_Tiger.svg").as_bytes();
     let tree = usvg::Tree::from_data(svg_data, &usvg::Options::default()).unwrap();
 
-    let mut paths = render_svg(tree);
+    let paths = render_svg(tree);
 
     // print memory usage
     let mut total_sisze_bytes = 0;
@@ -148,14 +148,12 @@ fn run(
                 canvas.save();
                 canvas.translate(200.0, 200.0);
 
-                for (path, fill, stroke) in &mut paths {
+                for (path, fill, stroke) in &paths {
                     if let Some(fill) = fill {
-                        fill.set_anti_alias(true);
                         canvas.fill_path(path, fill);
                     }
 
                     if let Some(stroke) = stroke {
-                        stroke.set_anti_alias(true);
                         canvas.stroke_path(path, stroke);
                     }
 
@@ -213,12 +211,13 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
                 .fill
                 .as_ref()
                 .and_then(|fill| to_femto_color(&fill.paint))
-                .map(Paint::color);
+                .map(|col| Paint::color(col).with_anti_alias(true));
 
             let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
                 to_femto_color(&stroke.paint).map(|paint| {
                     let mut stroke_paint = Paint::color(paint);
                     stroke_paint.set_line_width(stroke.width.get() as f32);
+                    stroke_paint.set_anti_alias(true);
                     stroke_paint
                 })
             });
