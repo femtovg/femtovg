@@ -732,15 +732,14 @@ fn shape_word(
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
     context.find_font(font_ids, |(font_id, font)| {
+        let face = font.face_ref();
         // Call harfbuzz
         let output = {
-            let face = font.face_ref();
-
             let mut buffer = rustybuzz::UnicodeBuffer::new();
             buffer.push_str(word);
             buffer.set_direction(hb_direction);
 
-            rustybuzz::shape(face, &[], buffer)
+            rustybuzz::shape(&face, &[], buffer)
         };
 
         let positions = output.glyph_positions();
@@ -778,7 +777,7 @@ fn shape_word(
                 bitmap_glyph: false,
             };
 
-            if let Some(glyph) = font.glyph(info.glyph_id as u16) {
+            if let Some(glyph) = font.glyph(&face, info.glyph_id as u16) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
                 g.bearing_x = glyph.metrics.bearing_x * scale;
@@ -995,10 +994,11 @@ impl GlyphAtlas {
 
         let (mut maybe_glyph_representation, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let face = font.face_ref();
             let scale = font.scale(font_size);
 
             let maybe_glyph_representation =
-                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16);
+                font.glyph_rendering_representation(&face, glyph.codepoint as u16, font_size as u16);
             (maybe_glyph_representation, scale)
         };
 
@@ -1246,11 +1246,12 @@ pub(crate) fn render_direct<T: Renderer>(
     for glyph in &text_layout.glyphs {
         let (glyph_rendering, scale) = {
             let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let face = font.face_ref();
 
             let scale = font.scale(font_size);
 
             let glyph_rendering = if let Some(glyph_rendering) =
-                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16)
+                font.glyph_rendering_representation(&face, glyph.codepoint as u16, font_size as u16)
             {
                 glyph_rendering
             } else {
