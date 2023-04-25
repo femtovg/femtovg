@@ -8,6 +8,7 @@ use std::{
     rc::Rc,
 };
 
+use const_default::ConstDefault;
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
 use generational_arena::{Arena, Index};
 use lru::LruCache;
@@ -17,6 +18,7 @@ use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
+    default_for_const_default,
     paint::{PaintFlavor, StrokeSettings, TextSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, RenderTarget, Renderer,
 };
@@ -59,11 +61,10 @@ pub enum Baseline {
     Bottom,
 }
 
-impl Default for Baseline {
-    fn default() -> Self {
-        Self::Alphabetic
-    }
+impl ConstDefault for Baseline {
+    const DEFAULT: Self = Self::Alphabetic;
 }
+default_for_const_default!(Baseline);
 
 /// Text horizontal alignment: `Left` (default), `Center`, `Right`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -77,11 +78,10 @@ pub enum Align {
     Right,
 }
 
-impl Default for Align {
-    fn default() -> Self {
-        Self::Left
-    }
+impl ConstDefault for Align {
+    const DEFAULT: Self = Self::Left;
 }
+default_for_const_default!(Align);
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum RenderMode {
@@ -89,11 +89,10 @@ pub enum RenderMode {
     Stroke,
 }
 
-impl Default for RenderMode {
-    fn default() -> Self {
-        Self::Fill
-    }
+impl ConstDefault for RenderMode {
+    const DEFAULT: Self = Self::Fill;
 }
+default_for_const_default!(RenderMode);
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub(crate) struct RenderedGlyphId {
@@ -869,7 +868,7 @@ pub struct DrawCommand {
     pub quads: Vec<Quad>,
 }
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Default, ConstDefault, Debug)]
 pub struct Quad {
     pub x0: f32,
     pub y0: f32,

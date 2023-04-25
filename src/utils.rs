@@ -31,3 +31,14 @@ impl<T> VecRetainMut<T> for Vec<T> {
         }
     }
 }
+
+#[macro_export]
+macro_rules! default_for_const_default {
+    ($type:ty) => {
+        impl Default for $type {
+            fn default() -> Self {
+                Self::DEFAULT
+            }
+        }
+    };
+}

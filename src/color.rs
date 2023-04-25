@@ -1,5 +1,9 @@
 use std::u8;
 
+use const_default::ConstDefault;
+
+use crate::default_for_const_default;
+
 /// Struct for representing colors.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -118,16 +122,17 @@ impl Color {
     }
 }
 
-impl Default for Color {
-    fn default() -> Self {
+impl ConstDefault for Color {
+    const DEFAULT: Self = {
         Self {
             r: 0.0,
             g: 0.0,
             b: 0.0,
             a: 1.0,
         }
-    }
+    };
 }
+default_for_const_default!(Color);
 
 fn hue(mut h: f32, m1: f32, m2: f32) -> f32 {
     if h < 0.0 {

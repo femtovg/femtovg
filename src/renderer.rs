@@ -1,11 +1,12 @@
 //! Module containing renderer implementations.
 
+use const_default::ConstDefault;
 use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
-    ImageInfo, ImageSource, ImageStore,
+    default_for_const_default, geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind,
+    FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
@@ -17,7 +18,7 @@ pub use void::Void;
 mod params;
 pub(crate) use params::Params;
 
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Default, ConstDefault, Debug)]
 pub struct Drawable {
     pub(crate) fill_verts: Option<(usize, usize)>,
     pub(crate) stroke_verts: Option<(usize, usize)>,
@@ -109,7 +110,7 @@ pub trait Renderer {
 }
 
 /// Vertex struct for specifying triangle geometry
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default, ConstDefault)]
 #[repr(C)]
 pub struct Vertex {
     pub x: f32,
@@ -144,11 +145,10 @@ pub enum ShaderType {
     TextureCopyUnclipped,
 }
 
-impl Default for ShaderType {
-    fn default() -> Self {
-        Self::FillGradient
-    }
+impl ConstDefault for ShaderType {
+    const DEFAULT: Self = Self::FillGradient;
 }
+default_for_const_default!(ShaderType);
 
 impl ShaderType {
     pub fn to_u8(self) -> u8 {

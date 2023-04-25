@@ -3,9 +3,12 @@ use std::{
     ops::{Add, Index, IndexMut, Mul, MulAssign, Neg, Sub},
 };
 
+use const_default::ConstDefault;
 use fnv::FnvHasher;
 
-#[derive(Copy, Clone, Debug, Default)]
+use crate::default_for_const_default;
+
+#[derive(Copy, Clone, Debug, Default, ConstDefault)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct Position {
     pub x: f32,
@@ -75,7 +78,7 @@ impl Position {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, ConstDefault)]
 pub(crate) struct Vector {
     pub x: f32,
     pub y: f32,
@@ -205,7 +208,7 @@ pub struct Transform2D(pub [f32; 6]);
 // TODO: Implement std::ops::* on this
 impl Transform2D {
     /// Creates an identity transformation with no translation, rotation or scaling applied.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         Self([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
     }
 
@@ -343,11 +346,10 @@ impl Transform2D {
     }
 }
 
-impl Default for Transform2D {
-    fn default() -> Self {
-        Self::identity()
-    }
+impl ConstDefault for Transform2D {
+    const DEFAULT: Self = Self::identity();
 }
+default_for_const_default!(Transform2D);
 
 impl Index<usize> for Transform2D {
     type Output = f32;
@@ -363,7 +365,7 @@ impl IndexMut<usize> for Transform2D {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Default, ConstDefault, Debug, PartialEq, PartialOrd)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -420,16 +422,15 @@ pub struct Bounds {
     pub maxy: f32,
 }
 
-impl Default for Bounds {
-    fn default() -> Self {
-        Self {
-            minx: 1e6,
-            miny: 1e6,
-            maxx: -1e6,
-            maxy: -1e6,
-        }
-    }
+impl ConstDefault for Bounds {
+    const DEFAULT: Self = Self {
+        minx: 1e6,
+        miny: 1e6,
+        maxx: -1e6,
+        maxy: -1e6,
+    };
 }
+default_for_const_default!(Bounds);
 
 impl Bounds {
     pub(crate) fn contains(&self, x: f32, y: f32) -> bool {

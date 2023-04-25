@@ -3,9 +3,13 @@
 
 use std::rc::Rc;
 
-use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use const_default::ConstDefault;
 
-#[derive(Copy, Clone, Debug, PartialEq, Default)]
+use crate::{
+    default_for_const_default, geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+};
+
+#[derive(Copy, Clone, Debug, PartialEq, Default, ConstDefault)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub(crate) struct GradientStop(pub f32, pub Color);
 
@@ -231,11 +235,10 @@ pub(crate) enum GlyphTexture {
     ColorTexture(ImageId),
 }
 
-impl Default for GlyphTexture {
-    fn default() -> Self {
-        Self::None
-    }
+impl ConstDefault for GlyphTexture {
+    const DEFAULT: Self = Self::None;
 }
+default_for_const_default!(GlyphTexture);
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -248,18 +251,17 @@ pub(crate) struct StrokeSettings {
     pub(crate) line_join: LineJoin,
 }
 
-impl Default for StrokeSettings {
-    fn default() -> Self {
-        Self {
-            stencil_strokes: true,
-            miter_limit: 10.0,
-            line_width: 1.0,
-            line_cap_start: Default::default(),
-            line_cap_end: Default::default(),
-            line_join: Default::default(),
-        }
-    }
+impl ConstDefault for StrokeSettings {
+    const DEFAULT: Self = Self {
+        stencil_strokes: true,
+        miter_limit: 10.0,
+        line_width: 1.0,
+        line_cap_start: ConstDefault::DEFAULT,
+        line_cap_end: ConstDefault::DEFAULT,
+        line_join: ConstDefault::DEFAULT,
+    };
 }
+default_for_const_default!(StrokeSettings);
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -272,17 +274,16 @@ pub(crate) struct TextSettings {
     pub(crate) text_align: Align,
 }
 
-impl Default for TextSettings {
-    fn default() -> Self {
-        Self {
-            font_ids: Default::default(),
-            font_size: 16.0,
-            letter_spacing: 0.0,
-            text_baseline: Default::default(),
-            text_align: Default::default(),
-        }
-    }
+impl ConstDefault for TextSettings {
+    const DEFAULT: Self = Self {
+        font_ids: ConstDefault::DEFAULT,
+        font_size: 16.0,
+        letter_spacing: 0.0,
+        text_baseline: ConstDefault::DEFAULT,
+        text_align: ConstDefault::DEFAULT,
+    };
 }
+default_for_const_default!(TextSettings);
 
 /// Struct controlling how graphical shapes are rendered.
 ///
@@ -319,28 +320,30 @@ pub struct Paint {
     pub(crate) fill_rule: FillRule,
 }
 
-impl Default for Paint {
-    fn default() -> Self {
-        Self {
-            flavor: PaintFlavor::Color(Color::white()),
-            shape_anti_alias: true,
-            stroke: StrokeSettings::default(),
-            text: TextSettings::default(),
-            fill_rule: Default::default(),
-        }
-    }
+impl ConstDefault for Paint {
+    const DEFAULT: Self = Self {
+        flavor: PaintFlavor::Color(Color::white()),
+        shape_anti_alias: true,
+        stroke: StrokeSettings::DEFAULT,
+        text: TextSettings::DEFAULT,
+        fill_rule: ConstDefault::DEFAULT,
+    };
 }
+default_for_const_default!(Paint);
 
 impl Paint {
     /// Creates a new solid color paint
-    pub fn color(color: Color) -> Self {
+    pub const fn color(color: Color) -> Self {
         Paint::with_flavor(PaintFlavor::Color(color))
     }
 
-    fn with_flavor(flavor: PaintFlavor) -> Self {
+    const fn with_flavor(flavor: PaintFlavor) -> Self {
         Paint {
             flavor,
-            ..Default::default()
+            shape_anti_alias: true,
+            stroke: StrokeSettings::DEFAULT,
+            text: TextSettings::DEFAULT,
+            fill_rule: ConstDefault::DEFAULT,
         }
     }
 
@@ -365,7 +368,7 @@ impl Paint {
     /// path.rect(10.0, 10.0, 85.0, 85.0);
     /// canvas.fill_path(&mut path, &fill_paint);
     /// ```
-    pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
+    pub const fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
         Paint::with_flavor(PaintFlavor::Image {
             id,
             center: Position { x: cx, y: cy },
@@ -378,7 +381,7 @@ impl Paint {
 
     /// Like `image`, but allows for adding a tint, or a color which will transform each pixel's
     /// color via channel-wise multiplication.
-    pub fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
+    pub const fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
         Paint::with_flavor(PaintFlavor::Image {
             id,
             center: Position { x: cx, y: cy },
@@ -404,7 +407,7 @@ impl Paint {
     /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, &bg);
     /// ```
-    pub fn linear_gradient(
+    pub const fn linear_gradient(
         start_x: f32,
         start_y: f32,
         end_x: f32,
@@ -484,7 +487,7 @@ impl Paint {
     /// path.rounded_rect(0.0, 0.0, 100.0, 100.0, 5.0);
     /// canvas.fill_path(&mut path, &bg);
     /// ```
-    pub fn box_gradient(
+    pub const fn box_gradient(
         x: f32,
         y: f32,
         width: f32,
@@ -532,7 +535,7 @@ impl Paint {
     /// path.circle(50.0, 50.0, 20.0);
     /// canvas.fill_path(&mut path, &bg);
     /// ```
-    pub fn radial_gradient(
+    pub const fn radial_gradient(
         cx: f32,
         cy: f32,
         in_radius: f32,
@@ -607,7 +610,7 @@ impl Paint {
     }
 
     /// Returns boolean if the shapes drawn with this paint will be antialiased.
-    pub fn anti_alias(&self) -> bool {
+    pub const fn anti_alias(&self) -> bool {
         self.shape_anti_alias
     }
 
@@ -617,13 +620,13 @@ impl Paint {
     }
 
     /// Returns the paint with anti alias set to the specified value.
-    pub fn with_anti_alias(mut self, value: bool) -> Self {
-        self.set_anti_alias(value);
+    pub const fn with_anti_alias(mut self, value: bool) -> Self {
+        self.shape_anti_alias = value;
         self
     }
 
     /// True if this paint uses higher quality stencil strokes.
-    pub fn stencil_strokes(&self) -> bool {
+    pub const fn stencil_strokes(&self) -> bool {
         self.stroke.stencil_strokes
     }
 
@@ -633,13 +636,13 @@ impl Paint {
     }
 
     /// Returns the paint with stencil strokes set to the specified value.
-    pub fn with_stencil_strokes(mut self, value: bool) -> Self {
-        self.set_stencil_strokes(value);
+    pub const fn with_stencil_strokes(mut self, value: bool) -> Self {
+        self.stroke.stencil_strokes = value;
         self
     }
 
     /// Returns the current line width.
-    pub fn line_width(&self) -> f32 {
+    pub const fn line_width(&self) -> f32 {
         self.stroke.line_width
     }
 
@@ -649,13 +652,13 @@ impl Paint {
     }
 
     /// Returns the paint with line width set to the specified value.
-    pub fn with_line_width(mut self, width: f32) -> Self {
-        self.set_line_width(width);
+    pub const fn with_line_width(mut self, width: f32) -> Self {
+        self.stroke.line_width = width;
         self
     }
 
     /// Getter for the miter limit
-    pub fn miter_limit(&self) -> f32 {
+    pub const fn miter_limit(&self) -> f32 {
         self.stroke.miter_limit
     }
 
@@ -667,18 +670,18 @@ impl Paint {
     }
 
     /// Returns the paint with the miter limit set to the specified value.
-    pub fn with_miter_limit(mut self, limit: f32) -> Self {
-        self.set_miter_limit(limit);
+    pub const fn with_miter_limit(mut self, limit: f32) -> Self {
+        self.stroke.miter_limit = limit;
         self
     }
 
     /// Returns the current start line cap for this paint.
-    pub fn line_cap_start(&self) -> LineCap {
+    pub const fn line_cap_start(&self) -> LineCap {
         self.stroke.line_cap_start
     }
 
     /// Returns the current start line cap for this paint.
-    pub fn line_cap_end(&self) -> LineCap {
+    pub const fn line_cap_end(&self) -> LineCap {
         self.stroke.line_cap_end
     }
 
@@ -691,8 +694,9 @@ impl Paint {
     }
 
     /// Returns the paint with line cap set to the specified value.
-    pub fn with_line_cap(mut self, cap: LineCap) -> Self {
-        self.set_line_cap(cap);
+    pub const fn with_line_cap(mut self, cap: LineCap) -> Self {
+        self.stroke.line_cap_start = cap;
+        self.stroke.line_cap_end = cap;
         self
     }
 
@@ -704,8 +708,8 @@ impl Paint {
     }
 
     /// Returns the paint with the beginning cap of the line set to the specified value.
-    pub fn with_line_cap_start(mut self, cap: LineCap) -> Self {
-        self.set_line_cap_start(cap);
+    pub const fn with_line_cap_start(mut self, cap: LineCap) -> Self {
+        self.stroke.line_cap_start = cap;
         self
     }
 
@@ -717,13 +721,13 @@ impl Paint {
     }
 
     /// Returns the paint with the beginning cap of the line set to the specified value.
-    pub fn with_line_cap_end(mut self, cap: LineCap) -> Self {
-        self.set_line_cap_end(cap);
+    pub const fn with_line_cap_end(mut self, cap: LineCap) -> Self {
+        self.stroke.line_cap_end = cap;
         self
     }
 
     /// Returns the current line join for this paint.
-    pub fn line_join(&self) -> LineJoin {
+    pub const fn line_join(&self) -> LineJoin {
         self.stroke.line_join
     }
 
@@ -735,8 +739,8 @@ impl Paint {
     }
 
     /// Returns the paint with the line join set to the specified value.
-    pub fn with_line_join(mut self, join: LineJoin) -> Self {
-        self.set_line_join(join);
+    pub const fn with_line_join(mut self, join: LineJoin) -> Self {
+        self.stroke.line_join = join;
         self
     }
 
@@ -757,7 +761,7 @@ impl Paint {
     /// Returns the current font size
     ///
     /// Only has effect on canvas text operations
-    pub fn font_size(&self) -> f32 {
+    pub const fn font_size(&self) -> f32 {
         self.text.font_size
     }
 
@@ -769,13 +773,13 @@ impl Paint {
     }
 
     /// Returns the paint with the font size set to the specified value.
-    pub fn with_font_size(mut self, size: f32) -> Self {
-        self.set_font_size(size);
+    pub const fn with_font_size(mut self, size: f32) -> Self {
+        self.text.font_size = size;
         self
     }
 
     /// Returns the current letter spacing
-    pub fn letter_spacing(&self) -> f32 {
+    pub const fn letter_spacing(&self) -> f32 {
         self.text.letter_spacing
     }
 
@@ -787,13 +791,13 @@ impl Paint {
     }
 
     /// Returns the paint with the letter spacing set to the specified value.
-    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
-        self.set_letter_spacing(spacing);
+    pub const fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        self.text.letter_spacing = spacing;
         self
     }
 
     /// Returns the current vertical align
-    pub fn text_baseline(&self) -> Baseline {
+    pub const fn text_baseline(&self) -> Baseline {
         self.text.text_baseline
     }
 
@@ -805,13 +809,13 @@ impl Paint {
     }
 
     /// Returns the paint with the text vertical alignment set to the specified value.
-    pub fn with_text_baseline(mut self, align: Baseline) -> Self {
-        self.set_text_baseline(align);
+    pub const fn with_text_baseline(mut self, align: Baseline) -> Self {
+        self.text.text_baseline = align;
         self
     }
 
     /// Returns the current horizontal align
-    pub fn text_align(&self) -> Align {
+    pub const fn text_align(&self) -> Align {
         self.text.text_align
     }
 
@@ -823,13 +827,13 @@ impl Paint {
     }
 
     /// Returns the paint with the text horizontal alignment set to the specified value.
-    pub fn with_text_align(mut self, align: Align) -> Self {
-        self.set_text_align(align);
+    pub const fn with_text_align(mut self, align: Align) -> Self {
+        self.text.text_align = align;
         self
     }
 
     /// Retrieves the current fill rule setting for this paint
-    pub fn fill_rule(&self) -> FillRule {
+    pub const fn fill_rule(&self) -> FillRule {
         self.fill_rule
     }
 
@@ -841,8 +845,8 @@ impl Paint {
     }
 
     /// Returns the paint with the rule for filling a path set to the specified value.
-    pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
-        self.set_fill_rule(rule);
+    pub const fn with_fill_rule(mut self, rule: FillRule) -> Self {
+        self.fill_rule = rule;
         self
     }
 }
