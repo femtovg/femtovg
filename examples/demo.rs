@@ -958,11 +958,9 @@ fn draw_button<T: Renderer>(
     paint.set_text_align(Align::Left);
     paint.set_text_baseline(Baseline::Middle);
 
-    let tw = if let Ok(layout) = canvas.measure_text(0.0, 0.0, text, &paint) {
-        layout.width()
-    } else {
-        0.0
-    };
+    let tw = canvas
+        .measure_text(0.0, 0.0, text, &paint)
+        .map_or(0.0, |layout| layout.width())
 
     let mut iw = 0.0;
 

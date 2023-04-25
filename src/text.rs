@@ -1248,11 +1248,9 @@ pub(crate) fn render_direct<T: Renderer>(
 
             let scale = font.scale(font_size);
 
-            let glyph_rendering = if let Some(glyph_rendering) =
-                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16)
+            let Some(glyph_rendering) =
+                font.glyph_rendering_representation(glyph.codepoint as u16, font_size as u16) else
             {
-                glyph_rendering
-            } else {
                 continue;
             };
 
