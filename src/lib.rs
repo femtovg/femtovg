@@ -363,11 +363,17 @@ where
 
     /// Sets the size of the default framebuffer (screen size)
     pub fn set_size(&mut self, width: u32, height: u32, dpi: f32) {
+        self.set_size_with_anti_alias(width, height, dpi, dpi.ceil());
+    }
+
+    /// Sets the size of the default framebuffer (screen size) and anti-alias scale.
+    /// The `anti_alias_scale` could be any value, but usually larger than or equal to `dpi`.
+    pub fn set_size_with_anti_alias(&mut self, width: u32, height: u32, dpi: f32, anti_alias_scale: f32) {
         self.width = width;
         self.height = height;
         self.fringe_width = 1.0 / dpi;
-        self.tess_tol = 0.25 / dpi;
-        self.dist_tol = 0.01 / dpi;
+        self.tess_tol = 0.25 / anti_alias_scale;
+        self.dist_tol = 0.01 / anti_alias_scale;
         self.device_px_ratio = dpi;
 
         self.renderer.set_size(width, height, dpi);
