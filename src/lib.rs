@@ -1484,3 +1484,109 @@ pub use ::image as img;
 
 pub use imgref;
 pub use rgb;
+
+#[cfg(test)]
+#[derive(Default)]
+pub struct RecordingRenderer {
+    pub last_commands: Rc<RefCell<Vec<renderer::Command>>>,
+}
+
+#[cfg(test)]
+impl Renderer for RecordingRenderer {
+    type Image = DummyImage;
+    type NativeTexture = ();
+
+    fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
+
+    fn render(
+        &mut self,
+        _images: &mut ImageStore<Self::Image>,
+        _verts: &[renderer::Vertex],
+        commands: Vec<renderer::Command>,
+    ) {
+        *self.last_commands.borrow_mut() = commands;
+    }
+
+    fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
+        Ok(Self::Image { info })
+    }
+
+    fn create_image_from_native_texture(
+        &mut self,
+        _native_texture: Self::NativeTexture,
+        _info: crate::ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Err(ErrorKind::UnsuportedImageFromat)
+    }
+
+    fn update_image(
+        &mut self,
+        image: &mut Self::Image,
+        data: crate::ImageSource,
+        x: usize,
+        y: usize,
+    ) -> Result<(), ErrorKind> {
+        let size = data.dimensions();
+
+        if x + size.width > image.info.width() {
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
+        }
+
+        if y + size.height > image.info.height() {
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
+        }
+
+        Ok(())
+    }
+
+    fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {}
+
+    fn screenshot(&mut self) -> Result<imgref::ImgVec<rgb::RGBA8>, ErrorKind> {
+        Ok(imgref::ImgVec::new(Vec::new(), 0, 0))
+    }
+}
+
+#[cfg(test)]
+pub struct DummyImage {
+    info: ImageInfo,
+}
+
+#[test]
+fn test_image_blit_fast_path() {
+    use renderer::{Command, CommandType};
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.);
+    let mut path = Path::new();
+    path.rect(10., 10., 50., 50.);
+    let image = canvas
+        .create_image_empty(30, 30, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let paint = Paint::image(image, 0., 0., 30., 30., 0., 0.).with_anti_alias(false);
+    canvas.fill_path(&path, &paint);
+    canvas.flush();
+
+    let commands = recorded_commands.borrow();
+    let mut commands = commands.iter();
+    assert!(matches!(
+        commands.next(),
+        Some(Command {
+            cmd_type: CommandType::SetRenderTarget(..),
+            ..
+        })
+    ));
+    assert!(matches!(
+        commands.next(),
+        Some(Command {
+            cmd_type: CommandType::Triangles {
+                params: Params {
+                    shader_type: renderer::ShaderType::TextureCopyUnclipped,
+                    ..
+                }
+            },
+            ..
+        })
+    ));
+}

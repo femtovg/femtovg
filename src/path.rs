@@ -326,7 +326,7 @@ impl Path {
                 let br = tr + voffset;
                 let bl = tl + voffset;
 
-                [tl, tr, br, bl]
+                [tl, bl, br, tr]
             },
         );
     }
