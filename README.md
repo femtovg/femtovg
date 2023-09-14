@@ -4,13 +4,15 @@
 [![rust: 1.65](https://img.shields.io/badge/MSRV-1.65-success.svg)](#msrv)
 [![Discord](https://img.shields.io/discord/691716054560407592)](https://discord.gg/V69VdVu)
 
-# femtovg
+<h2 align="center">femtovg</h2>
+<p align="center">GPU Antialiased 2D vector drawing library written in Rust.</p>
 
-[Join the femtovg Discord channel](https://discord.gg/V69VdVu)
+- [Cargo crate](https://crates.io/crates/juniper)
+- [Book](https://async-graphql.github.io/async-graphql/en/index.html)
+- [Join the femtovg Discord channel](https://discord.gg/V69VdVu)
 
-**Work in progress!**
+---
 
-Antialiased 2D vector drawing library written in Rust.
 Ported from https://github.com/memononen/nanovg
 
 Most of the implementation is the same as the original C code with some bug fixes, some features added and several parts have been made more Rust-y. Rendering is done via one OpenGl (ES) 3.0+ backend.
