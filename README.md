@@ -8,7 +8,7 @@
 <p align="center">GPU Antialiased 2D vector drawing library written in Rust.</p>
 
 - [Cargo crate](https://crates.io/crates/juniper)
-- [Book](https://async-graphql.github.io/async-graphql/en/index.html)
+- [Book](https://femtovg.github.io)
 - [Join the femtovg Discord channel](https://discord.gg/V69VdVu)
 
 ---
