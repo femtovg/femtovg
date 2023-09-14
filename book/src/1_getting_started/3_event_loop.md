@@ -7,12 +7,14 @@ Let's edit `main` to handle events instead of doing nothing with `loop {}`:
 ```rust,ignore
 fn main() {
     let event_loop = EventLoop::new();
-    let context = create_window(&event_loop);
+    let (context, gl_display, window, surface) = create_window(&event_loop);
 
-    let renderer = OpenGl::new_from_glutin_context(&context).expect("Cannot create renderer");
+    let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+        .expect("Cannot create renderer");
+
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
 
-    render(&context, &mut canvas);
+    render(&context, &surface, &window, &mut canvas);
 
     event_loop.run(|event, _target, control_flow| match event {
         Event::WindowEvent { window_id, event } => {
@@ -23,13 +25,13 @@ fn main() {
 }
 ```
 
-[`event_loop.run`](https://docs.rs/glutin/latest/glutin/event_loop/struct.EventLoop.html#method.run) will call the provided closure for each new event, until the program exits.
+[`event_loop.run`](https://docs.rs/winit/0.28.6/winit/event_loop/struct.EventLoop.html#method.run) will call the provided closure for each new event, until the program exits.
 
-[`Event`](https://docs.rs/glutin/latest/glutin/event/enum.Event.html) is the first parameter of the closure, and the one we are most interested in. It is an enum with a few branches for different types of events. In the example above, we only capture and print `WindowEvent`s, and ignore the rest.
+[`Event`](https://docs.rs/winit/0.28.6/winit/event/enum.Event.html) is the first parameter of the closure, and the one we are most interested in. It is an enum with a few branches for different types of events. In the example above, we only capture and print `WindowEvent`s, and ignore the rest.
 
 Each `Event::WindowEvent` contains:
-- A [`WindowId`](https://docs.rs/glutin/latest/glutin/window/struct.WindowId.html) – but since we only have 1 window in this example, the ID will always match with our window's ID.
-- A [`WindowEvent`](https://docs.rs/glutin/latest/glutin/event/enum.WindowEvent.html) enum, which contains information about the window event.
+- A [`WindowId`](https://docs.rs/winit/0.28.6/winit/window/struct.WindowId.html) – but since we only have 1 window in this example, the ID will always match with our window's ID.
+- A [`WindowEvent`](https://docs.rs/winit/0.28.6/winit/event/enum.WindowEvent.html) enum, which contains information about the window event.
 
 > Note: `Event::WindowEvent` is a branch of the `Event` enum, which contains another enum, `WindowEvent`, of the same name! It can get confusing, but Rust namespaces distinguish between the two – one is `glutin::event::Event::WindowEvent` and the other is `glutin::event::WindowEvent`.
 
@@ -94,12 +96,12 @@ event_loop.run(move |event, _target, control_flow| match event {
     Event::WindowEvent { window_id, event } => match event {
         WindowEvent::CursorMoved { position, .. } => {
             mouse_position = position;
-            context.window().request_redraw();
+            window.request_redraw();
         }
         // ...
     },
     Event::RedrawRequested(_) => {
-        render(&context, &mut canvas, mouse_position);
+        render(&context, &surface, &window, &mut canvas, mouse_position);
     }
     _ => {}
 })
@@ -109,7 +111,9 @@ Finally, we should update our `render` function to take the mouse position into 
 
 ```rust, ignore
 fn render<T: Renderer>(
-    context: &ContextWrapper<PossiblyCurrent, Window>,
+    context: &PossiblyCurrentContext,
+    surface: &Surface<WindowSurface>,
+    window: &Window,
     canvas: &mut Canvas<T>,
     square_position: PhysicalPosition<f64>,
 ) {

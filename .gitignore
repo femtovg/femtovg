@@ -14,3 +14,5 @@ perf.data.old
 examples/generated
 
 Cargo.lock
+
+.vscode
