@@ -7,7 +7,7 @@
 <h2 align="center">femtovg</h2>
 <p align="center">GPU Antialiased 2D vector drawing library written in Rust.</p>
 
-- [Cargo crate](https://crates.io/crates/juniper)
+- [Cargo crate](https://crates.io/crates/femtovg)
 - [Book](https://femtovg.github.io)
 - [Join the femtovg Discord channel](https://discord.gg/V69VdVu)
 
