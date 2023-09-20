@@ -389,18 +389,18 @@ where
     }
 
     /// Returns the width of the current render target.
-    pub fn width(&self) -> f32 {
+    pub fn width(&self) -> u32 {
         match self.current_render_target {
-            RenderTarget::Image(id) => self.image_info(id).map(|info| info.width() as f32).unwrap_or(0.0),
-            RenderTarget::Screen => self.width as f32,
+            RenderTarget::Image(id) => self.image_info(id).map(|info| info.width() as u32).unwrap_or(0),
+            RenderTarget::Screen => self.width,
         }
     }
 
     /// Returns the height of the current render target.
-    pub fn height(&self) -> f32 {
+    pub fn height(&self) -> u32 {
         match self.current_render_target {
-            RenderTarget::Image(id) => self.image_info(id).map(|info| info.height() as f32).unwrap_or(0.0),
-            RenderTarget::Screen => self.height as f32,
+            RenderTarget::Image(id) => self.image_info(id).map(|info| info.height() as u32).unwrap_or(0),
+            RenderTarget::Screen => self.height,
         }
     }
 
@@ -799,9 +799,9 @@ where
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.minx > self.width() as f32
             || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > self.height()
+            || path_cache.bounds.miny > self.height() as f32
         {
             return false;
         }
@@ -836,9 +836,9 @@ where
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > canvas_width
+            || path_cache.bounds.minx > canvas_width as f32
             || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > canvas_height
+            || path_cache.bounds.miny > canvas_height as f32
         {
             return;
         }
@@ -858,7 +858,7 @@ where
 
         if let (Some(path_rect), Some(scissor_rect), true) = (
             path_cache.path_fill_is_rect(),
-            scissor.as_rect(canvas_width, canvas_height),
+            scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
@@ -1005,9 +1005,9 @@ where
 
         // Early out if path is outside the canvas bounds
         if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > self.width()
+            || path_cache.bounds.minx > self.width() as f32
             || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > self.height()
+            || path_cache.bounds.miny > self.height() as f32
         {
             return;
         }

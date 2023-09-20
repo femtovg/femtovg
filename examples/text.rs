@@ -284,7 +284,7 @@ fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y:
 
     let font_metrics = canvas.measure_font(&paint).expect("Error measuring font");
 
-    let width = canvas.width();
+    let width = canvas.width() as f32;
     let mut y = y;
 
     let lines = canvas

@@ -90,7 +90,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         let mut p = Path::new();
         p.rect(0.0, 0.0, 100.0, 100.0);
         canvas.translate(x, y);
-        canvas.fill_path(&mut p, &paint);
+        canvas.fill_path(&p, &paint);
         canvas.translate(-x, -y);
         let mut text_paint = Paint::color(Color::black());
         text_paint.set_font_size(14.0);

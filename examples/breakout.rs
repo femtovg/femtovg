@@ -126,7 +126,7 @@ impl Game {
             logo_image_id,
             fonts,
             paddle_rect,
-            size: Size::new(canvas.width(), canvas.height()),
+            size: Size::new(canvas.width() as f32, canvas.height() as f32),
             bricks: Vec::new(),
             levels,
             powerups: Vec::new(),
@@ -499,20 +499,20 @@ impl Game {
 
     fn draw(&mut self, canvas: &mut Canvas) {
         // draw background
-        let step_size_x = canvas.width() / 50.0;
+        let step_size_x = self.size.width / 50.0;
 
         let mut path = Path::new();
 
         for i in 0..50 {
             path.move_to(i as f32 * step_size_x, 0.0);
-            path.line_to(i as f32 * step_size_x, canvas.height());
+            path.line_to(i as f32 * step_size_x, self.size.height);
         }
 
         let paint = Paint::radial_gradient(
-            canvas.width() / 2.0,
-            canvas.height() / 2.0,
+            self.size.width / 2.0,
+            self.size.height / 2.0,
             10.0,
-            canvas.height() / 2.0,
+            self.size.height / 2.0,
             Color::rgb(90, 90, 90),
             Color::rgb(30, 30, 30),
         );
@@ -531,11 +531,11 @@ impl Game {
     fn draw_title_screen(&self, canvas: &mut Canvas) {
         // curtain
         let mut path = Path::new();
-        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        path.rect(0.0, 0.0, self.size.width, self.size.height);
         canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 180)));
 
         // rust logo
-        let logo_pos = Point::new((canvas.width() / 2.0) - 50.0, (canvas.height() / 2.0) - 180.0);
+        let logo_pos = Point::new((self.size.width / 2.0) - 50.0, (self.size.height / 2.0) - 180.0);
         let logo_paint = Paint::image(self.logo_image_id, logo_pos.x, logo_pos.y, 100.0, 100.0, 0.0, 1.0);
         let mut path = Path::new();
         path.circle(logo_pos.x + 50.0, logo_pos.y + 50.0, 60.0);
@@ -551,10 +551,10 @@ impl Game {
         paint.set_font_size(80.0);
 
         paint.set_line_width(4.0);
-        let _ = canvas.stroke_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", &paint);
+        let _ = canvas.stroke_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
 
         paint.set_color(Color::rgb(143, 80, 49));
-        let _ = canvas.fill_text(canvas.width() / 2.0, canvas.height() / 2.0, "rsBREAKOUT", &paint);
+        let _ = canvas.fill_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -562,7 +562,7 @@ impl Game {
         paint.set_font(&[self.fonts.regular]);
         paint.set_font_size(16.0);
         let text = "Click anywhere to START.";
-        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + 40.0, text, &paint);
+        let _ = canvas.fill_text(self.size.width / 2.0, (self.size.height / 2.0) + 40.0, text, &paint);
     }
 
     fn draw_game(&self, canvas: &mut Canvas) {
@@ -658,7 +658,7 @@ impl Game {
         paint.set_text_align(Align::Right);
         paint.set_font(&[self.fonts.bold]);
         paint.set_font_size(22.0);
-        let _ = canvas.fill_text(canvas.width() - 20.0, 25.0, &format!("Lives: {}", self.lives), &paint);
+        let _ = canvas.fill_text(self.size.width - 20.0, 25.0, &format!("Lives: {}", self.lives), &paint);
 
         // score
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -705,7 +705,7 @@ impl Game {
 
         // curtain
         let mut path = Path::new();
-        path.rect(0.0, 0.0, canvas.width(), canvas.height());
+        path.rect(0.0, 0.0, self.size.width, self.size.height);
         canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
 
         // title
@@ -717,10 +717,20 @@ impl Game {
         let offset = 30.0;
 
         paint.set_line_width(4.0);
-        let _ = canvas.stroke_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, &paint);
+        let _ = canvas.stroke_text(
+            self.size.width / 2.0,
+            (self.size.height / 2.0) + offset,
+            heading,
+            &paint,
+        );
 
         paint.set_color(Color::rgb(143, 80, 49));
-        let _ = canvas.fill_text(canvas.width() / 2.0, (canvas.height() / 2.0) + offset, heading, &paint);
+        let _ = canvas.fill_text(
+            self.size.width / 2.0,
+            (self.size.height / 2.0) + offset,
+            heading,
+            &paint,
+        );
 
         // Info
         let mut paint = Paint::color(Color::rgb(240, 240, 240));
@@ -728,8 +738,8 @@ impl Game {
         paint.set_font(&[self.fonts.regular]);
         paint.set_font_size(16.0);
         let _ = canvas.fill_text(
-            canvas.width() / 2.0,
-            (canvas.height() / 2.0) + offset * 2.0,
+            self.size.width / 2.0,
+            (self.size.height / 2.0) + offset * 2.0,
             subtext,
             &paint,
         );
