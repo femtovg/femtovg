@@ -3,9 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## [0.7.1] - 2022-06-14
+## [0.7.2] - 2022-11-02
 
- - Fix performance regression when drawing unclipped image path fills.
+ - Bump internal dependencies.
 
 ## [0.7.0] - 2022-05-26
 
@@ -146,3 +146,4 @@ All notable changes to this project will be documented in this file.
 [0.6.0]: https://github.com/femtovg/femtovg/releases/tag/v0.6.0
 [0.7.0]: https://github.com/femtovg/femtovg/releases/tag/v0.7.0
 [0.7.1]: https://github.com/femtovg/femtovg/releases/tag/v0.7.1
+[0.7.2]: https://github.com/femtovg/femtovg/releases/tag/v0.7.2
