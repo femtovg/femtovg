@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.8.0] - 2022-11-02
+
+ - Re-release 0.7.2 with major version bump. 0.7.2 was yanked because
+   glow is a re-exported public dependency, that was bumped.
+
 ## [0.7.2] - 2022-11-02
 
  - Bump internal dependencies.
