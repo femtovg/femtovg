@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 
  - Bump internal dependencies.
 
+## [0.7.1] - 2022-06-14
+
+- Fix performance regression when drawing unclipped image path fills.
+
 ## [0.7.0] - 2022-05-26
 
 ### Changed
