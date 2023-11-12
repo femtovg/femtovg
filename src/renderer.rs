@@ -104,7 +104,10 @@ pub trait Renderer {
     ) -> Result<Self::Image, ErrorKind>;
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize)
         -> Result<(), ErrorKind>;
-    fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind>;
+    #[allow(unused_variables)]
+    fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind> {
+        Err(ErrorKind::UnsupportedImageFormat)
+    }
     fn delete_image(&mut self, image: Self::Image, image_id: ImageId);
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;

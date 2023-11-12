@@ -118,7 +118,7 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
             }
             // TODO: if format is not supported maybe we should convert it here,
             // But that is an expensive operation on the render thread that will remain hidden from the user
-            _ => Err(ErrorKind::UnsuportedImageFromat),
+            _ => Err(ErrorKind::UnsupportedImageFormat),
         }
     }
 }

@@ -551,9 +551,11 @@ where
         Ok(id)
     }
 
-    pub fn get_native_texture(&self, id: ImageId) -> Option<T::NativeTexture> {
+    /// Returns the native texture of an image given its ID.
+    pub fn get_native_texture(&self, id: ImageId) -> Result<T::NativeTexture, ErrorKind> {
         self.get_image(id)
-            .and_then(|image| self.renderer.get_native_texture(image).ok())
+            .ok_or(ErrorKind::ImageIdNotFound)
+            .and_then(|image| self.renderer.get_native_texture(image))
     }
 
     pub fn get_image(&self, id: ImageId) -> Option<&T::Image> {
@@ -1512,10 +1514,6 @@ impl Renderer for RecordingRenderer {
         *self.last_commands.borrow_mut() = commands;
     }
 
-    fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind> {
-        Ok(())
-    }
-
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
         Ok(Self::Image { info })
     }
@@ -1525,7 +1523,7 @@ impl Renderer for RecordingRenderer {
         _native_texture: Self::NativeTexture,
         _info: crate::ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
-        Err(ErrorKind::UnsuportedImageFromat)
+        Err(ErrorKind::UnsupportedImageFormat)
     }
 
     fn update_image(
