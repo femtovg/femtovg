@@ -551,6 +551,11 @@ where
         Ok(id)
     }
 
+    pub fn get_native_texture(&self, id: ImageId) -> Option<T::NativeTexture> {
+        self.get_image(id)
+            .and_then(|image| self.renderer.get_native_texture(image).ok())
+    }
+
     pub fn get_image(&self, id: ImageId) -> Option<&T::Image> {
         self.images.get(id)
     }
@@ -1505,6 +1510,10 @@ impl Renderer for RecordingRenderer {
         commands: Vec<renderer::Command>,
     ) {
         *self.last_commands.borrow_mut() = commands;
+    }
+
+    fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind> {
+        Ok(())
     }
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
