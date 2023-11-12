@@ -16,7 +16,7 @@ pub enum ErrorKind {
     IoError(io::Error),
     FontParseError,
     NoFontFound,
-    FontInfoExtracionError,
+    FontInfoExtractionError,
     FontSizeTooLargeForAtlas,
     ShaderCompileError(String),
     ShaderLinkError(String),
@@ -24,7 +24,7 @@ pub enum ErrorKind {
     ImageIdNotFound,
     ImageUpdateOutOfBounds,
     ImageUpdateWithDifferentFormat,
-    UnsuportedImageFromat,
+    UnsupportedImageFormat,
 }
 
 impl Display for ErrorKind {
