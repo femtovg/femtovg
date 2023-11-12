@@ -687,6 +687,10 @@ impl Renderer for OpenGl {
         }
     }
 
+    fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind> {
+        Ok(image.id())
+    }
+
     fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
         self.current_program = 0;
         self.main_program().bind();
