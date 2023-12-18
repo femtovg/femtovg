@@ -1,7 +1,7 @@
 [package]
 name = "femtovg"
 description = "Antialiased 2D vector drawing library"
-version = "0.8.0"
+version = "0.8.1"
 license = "MIT/Apache-2.0"
 readme = "README.md"
 authors = [
@@ -90,4 +90,4 @@ name = "book_example_1_3"
 path = "book/src/1_getting_started/3_event_loop.rs"
 
 [package.metadata.docs.rs]
-features = ["glutin"]
+features = ["glutin/egl"]

@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.8.1] - 2022-12-18
+
+ - Fix documentation build on docs.rs.
+
 ## [0.8.0] - 2022-11-02
 
  - Re-release 0.7.2 with major version bump. 0.7.2 was yanked because
