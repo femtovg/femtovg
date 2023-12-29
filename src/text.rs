@@ -1,6 +1,7 @@
 use std::{
     borrow::Borrow,
     cell::RefCell,
+    collections::HashMap,
     ffi::OsStr,
     fs,
     hash::{Hash, Hasher},
@@ -1239,14 +1240,15 @@ pub(crate) fn render_direct<T: Renderer>(
     invscale: f32,
 ) -> Result<(), ErrorKind> {
     let text_context = canvas.text_context.clone();
-    let mut text_context = text_context.borrow_mut();
+    let text_context = text_context.borrow_mut();
 
     let mut scaled = false;
+    let mut face_cache: HashMap<FontId, rustybuzz::Face> = HashMap::default();
 
     for glyph in &text_layout.glyphs {
         let (glyph_rendering, scale) = {
-            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let face = font.face_ref();
+            let font = text_context.font(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
+            let face = face_cache.entry(glyph.font_id).or_insert_with(|| font.face_ref());
 
             let scale = font.scale(font_size);
 
