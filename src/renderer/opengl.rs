@@ -215,7 +215,7 @@ impl OpenGl {
             _ => "Unknown error",
         };
 
-        eprintln!("({err}) Error on {label} - {message}");
+        log::error!("({err}) Error on {label} - {message}");
     }
 
     fn gl_factor(factor: BlendFactor) -> u32 {
