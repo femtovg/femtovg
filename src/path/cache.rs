@@ -1158,7 +1158,7 @@ fn main() {
     let mut iter = MutStridedChunks::new(&mut my_array);
 
     while let Some(subslice) = iter.next() {
-        println!("{:?}", subslice);
+        log::info!("{:?}", subslice);
     }
 }
 */
