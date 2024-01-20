@@ -3,38 +3,43 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## [0.8.1] - 2022-12-18
+## [0.8.2] - 2024-01-20
+
+ - Improved performance when rendering large texts.
+ - Replace error logging to stderr with use of log crate.
+
+## [0.8.1] - 2023-12-18
 
  - Fix documentation build on docs.rs.
 
-## [0.8.0] - 2022-11-02
+## [0.8.0] - 2023-11-02
 
  - Re-release 0.7.2 with major version bump. 0.7.2 was yanked because
    glow is a re-exported public dependency, that was bumped.
 
-## [0.7.2] - 2022-11-02
+## [0.7.2] - 2023-11-02
 
  - Bump internal dependencies.
 
-## [0.7.1] - 2022-06-14
+## [0.7.1] - 2023-06-14
 
 - Fix performance regression when drawing unclipped image path fills.
 
-## [0.7.0] - 2022-05-26
+## [0.7.0] - 2023-05-26
 
 ### Changed
 
  - Path drawing functions now take a `&Path` instead of a `&mut Path` and use interior mutability
    for caching.
 
-## [0.6.0] - 2022-02-06
+## [0.6.0] - 2023-02-06
 
 ### Changed
 
  - Changed `linear_gradient_stops` and `radial_gradient_stops` to take an `IntoIterator`
    instead of a slice slice for the color stops.
 
-## [0.5.0] - 2022-02-06
+## [0.5.0] - 2023-02-06
 
 ### Added
 
@@ -48,7 +53,7 @@ All notable changes to this project will be documented in this file.
  - `set_transform` takes a value of type `Transform2D` now instead of a parameter list.
  - `dimensions` of `ImageSource` returns a new `Size` type now.
 
-## [0.4.0] - 2022-01-27
+## [0.4.0] - 2023-01-27
 
 ### Added
 
