@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+ - Bumped MSRV to 1.66.
+
 ## [0.8.2] - 2024-01-20
 
  - Improved performance when rendering large texts.
