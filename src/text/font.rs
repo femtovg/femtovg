@@ -113,8 +113,8 @@ impl Font {
             bold: ttf_font.is_bold(),
             oblique: ttf_font.is_oblique(),
             variable: ttf_font.is_variable(),
-            weight: ttf_font.width().to_number(),
-            width: ttf_font.weight().to_number(),
+            width: ttf_font.width().to_number(),
+            weight: ttf_font.weight().to_number(),
         };
 
         Ok(Self {
