@@ -36,6 +36,8 @@ pub struct FontMetrics {
     bold: bool,
     oblique: bool,
     variable: bool,
+    weight: u16,
+    width: u16,
 }
 
 impl FontMetrics {
@@ -78,6 +80,14 @@ impl FontMetrics {
     pub fn variable(&self) -> bool {
         self.variable
     }
+
+    pub fn weight(&self) -> u16 {
+        self.weight
+    }
+
+    pub fn width(&self) -> u16 {
+        self.width
+    }
 }
 
 pub(crate) struct Font {
@@ -103,6 +113,8 @@ impl Font {
             bold: ttf_font.is_bold(),
             oblique: ttf_font.is_oblique(),
             variable: ttf_font.is_variable(),
+            weight: ttf_font.width().to_number(),
+            width: ttf_font.weight().to_number(),
         };
 
         Ok(Self {
