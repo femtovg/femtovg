@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.9.0] - 2024-TBD
+
+ - **breaking**: Removed pub key field in ImageId. This accidentally
+   exposed the implementation detail of the image store (generational-arena),
+   which has been replaced with slotmap.
  - Bumped MSRV to 1.66.
 
 ## [0.8.2] - 2024-01-20

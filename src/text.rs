@@ -11,9 +11,9 @@ use std::{
 };
 
 use fnv::{FnvBuildHasher, FnvHashMap, FnvHasher};
-use generational_arena::{Arena, Index};
 use lru::LruCache;
 use rustybuzz::ttf_parser;
+use slotmap::{DefaultKey, SlotMap};
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
@@ -44,7 +44,7 @@ const DEFAULT_LRU_CACHE_CAPACITY: usize = 1000;
 
 /// A font handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct FontId(Index);
+pub struct FontId(DefaultKey);
 
 /// Text baseline vertical alignment:
 /// `Top`, `Middle`, `Alphabetic` (default), `Bottom`.
@@ -293,7 +293,7 @@ impl TextContext {
 }
 
 pub(crate) struct TextContextImpl {
-    fonts: Arena<Font>,
+    fonts: SlotMap<DefaultKey, Font>,
     shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
     shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
 }
