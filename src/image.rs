@@ -1,8 +1,8 @@
 use bitflags::bitflags;
-use generational_arena::{Arena, Index};
 use imgref::*;
 use rgb::alt::GRAY8;
 use rgb::*;
+use slotmap::{DefaultKey, SlotMap};
 
 #[cfg(feature = "image-loading")]
 use ::image::DynamicImage;
@@ -14,7 +14,7 @@ use crate::{ErrorKind, Renderer};
 
 /// An image handle.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct ImageId(pub Index);
+pub struct ImageId(DefaultKey);
 
 /// Image format: `Rgb8`, `Rgba8`, `Gray8`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -182,7 +182,7 @@ impl ImageInfo {
     }
 }
 
-pub struct ImageStore<T>(Arena<(ImageInfo, T)>);
+pub struct ImageStore<T>(SlotMap<DefaultKey, (ImageInfo, T)>);
 
 impl<T> Default for ImageStore<T> {
     fn default() -> Self {
@@ -192,7 +192,7 @@ impl<T> Default for ImageStore<T> {
 
 impl<T> ImageStore<T> {
     pub fn new() -> Self {
-        Self(Arena::new())
+        Self(SlotMap::new())
     }
 
     pub fn alloc<R: Renderer<Image = T>>(&mut self, renderer: &mut R, info: ImageInfo) -> Result<ImageId, ErrorKind> {
