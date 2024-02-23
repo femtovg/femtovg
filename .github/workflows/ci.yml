@@ -16,6 +16,9 @@ jobs:
           - stable
           - beta
           - 1.66.0  # MSRV
+        include:
+          - rust: 1.66.0
+            pin_bumpaloo: true
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -29,6 +32,9 @@ jobs:
           override: true
           profile: minimal
           target: wasm32-unknown-unknown
+      - name: pin bumpaloo to work with stable rust
+        if: ${{ matrix.pin_bumpaloo }}
+        run: cargo generate-lockfile && cargo update -p bumpalo --precise 3.14.0
       - run: cargo build --verbose
       - run: cargo build --all-features --features glutin/wayland,glutin/egl --verbose
       - run: cargo build --no-default-features --verbose
