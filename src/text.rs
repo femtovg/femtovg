@@ -486,7 +486,7 @@ impl TextContextImpl {
     }
 
     pub fn measure_font(&mut self, font_size: f32, font_ids: &[Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
-        if let Some(Some(id)) = font_ids.get(0) {
+        if let Some(Some(id)) = font_ids.first() {
             if let Some(font) = self.font(*id) {
                 return Ok(font.metrics(font_size));
             }
@@ -592,7 +592,7 @@ fn shape_run(
     // this controls whether we should break within words
     let mut first_word_in_paragraph = true;
 
-    if let Some(paragraph) = bidi_info.paragraphs.get(0) {
+    if let Some(paragraph) = bidi_info.paragraphs.first() {
         let line = paragraph.range.clone();
 
         let (levels, runs) = bidi_info.visual_runs(paragraph, line);
@@ -1253,7 +1253,7 @@ pub(crate) fn render_direct<T: Renderer>(
             let scale = font.scale(font_size);
 
             let glyph_rendering = if let Some(glyph_rendering) =
-                font.glyph_rendering_representation(&face, glyph.codepoint as u16, font_size as u16)
+                font.glyph_rendering_representation(face, glyph.codepoint as u16, font_size as u16)
             {
                 glyph_rendering
             } else {
