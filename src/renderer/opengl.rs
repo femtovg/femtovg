@@ -89,16 +89,16 @@ impl OpenGl {
         attrs.antialias(false);
 
         use wasm_bindgen::JsCast;
-        let webgl1_context = match canvas.get_context_with_context_options("webgl", &attrs) {
-            Ok(Some(context)) => context.dyn_into::<web_sys::WebGlRenderingContext>().unwrap(),
+        let webgl2_context = match canvas.get_context_with_context_options("webgl2", &attrs) {
+            Ok(Some(context)) => context.dyn_into::<web_sys::WebGl2RenderingContext>().unwrap(),
             _ => {
                 return Err(ErrorKind::GeneralError(
-                    "Canvas::getContext failed to retrieve WebGL 1 context".to_owned(),
+                    "Canvas::getContext failed to retrieve WebGL 2 context".to_owned(),
                 ))
             }
         };
 
-        let context = glow::Context::from_webgl1_context(webgl1_context);
+        let context = glow::Context::from_webgl2_context(webgl2_context);
         Self::new_from_context(context, true)
     }
 
