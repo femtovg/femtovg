@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
  - **breaking**: Removed pub key field in ImageId. This accidentally
    exposed the implementation detail of the image store (generational-arena),
    which has been replaced with slotmap.
+ - For WASM builds, require WebGL 2. This is supported by all major browsers
+   and needed to make `ImageFlags::REPEAT_X/Y` work.
  - Bumped MSRV to 1.66.
 
 ## [0.8.2] - 2024-01-20
