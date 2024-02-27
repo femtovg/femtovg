@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## [0.9.0] - 2024-TBD
+## [0.9.0] - 2024-02-27
 
  - **breaking**: Removed pub key field in ImageId. This accidentally
    exposed the implementation detail of the image store (generational-arena),
