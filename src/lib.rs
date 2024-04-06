@@ -58,7 +58,7 @@ use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
 
 mod path;
 use path::Convexity;
-pub use path::{Path, Solidity};
+pub use path::{Path, PathIter, Solidity, Verb};
 
 mod gradient_store;
 use gradient_store::GradientStore;
