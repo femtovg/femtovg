@@ -1242,7 +1242,6 @@ pub(crate) fn render_direct<T: Renderer>(
     let text_context = canvas.text_context.clone();
     let text_context = text_context.borrow_mut();
 
-    let mut scaled = false;
     let mut face_cache: HashMap<FontId, rustybuzz::Face> = HashMap::default();
 
     for glyph in &text_layout.glyphs {
@@ -1265,12 +1264,10 @@ pub(crate) fn render_direct<T: Renderer>(
 
         canvas.save();
 
-        let mut line_width = stroke.line_width;
-
-        if mode == RenderMode::Stroke && !scaled {
-            line_width /= scale;
-            scaled = true;
-        }
+        let line_width = match mode {
+            RenderMode::Fill => stroke.line_width,
+            RenderMode::Stroke => stroke.line_width / scale,
+        };
 
         canvas.translate(
             (glyph.x - glyph.bearing_x) * invscale,
