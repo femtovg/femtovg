@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.9.1] - 2024-02-27
+
+ - Fixed inability to introspect `Path` verbs by making `PathIter` and `Verb` public.
+ - Fixed rendering of text strokes with large font sizes.
+
 ## [0.9.0] - 2024-02-27
 
  - **breaking**: Removed pub key field in ImageId. This accidentally
