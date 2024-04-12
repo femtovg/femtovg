@@ -38,13 +38,24 @@ pub enum PackedVerb {
     Close,
 }
 
+/// A verb describes how to interpret one or more points to continue the countour
+/// of a [`Path`].
 #[derive(Copy, Clone, Debug)]
 pub enum Verb {
+    /// Terminates the current sub-path and defines the new current point by the
+    /// given x/y f32 coordinates.
     MoveTo(f32, f32),
+    /// Describes that the contour of the path should continue as a line from the
+    /// current point to the given x/y f32 coordinates.
     LineTo(f32, f32),
+    /// Describes that the contour of the path should continue as a cubie bezier segment from the
+    /// current point via two control points (as f32 pairs) to the point in the last f32 pair.
     BezierTo(f32, f32, f32, f32, f32, f32),
+    /// Sets the current sub-path winding to be solid.
     Solid,
+    /// Sets the current sub-path winding to be hole.
     Hole,
+    /// Closes the current sub-path.
     Close,
 }
 
@@ -183,7 +194,7 @@ impl Path {
         self.append(&[PackedVerb::Close], &[]);
     }
 
-    /// Sets the current sub-path winding, see Solidity
+    /// Sets the current sub-path winding, see [`Solidity`].
     pub fn solidity(&mut self, solidity: Solidity) {
         match solidity {
             Solidity::Solid => self.append(&[PackedVerb::Solid], &[]),
