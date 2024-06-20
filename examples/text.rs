@@ -414,9 +414,9 @@ Choice of typeface(s) is the primary aspect of text typography—prose fiction, 
 editorial, educational, religious, scientific, spiritual, and commercial writing all have differing
 characteristics and requirements of appropriate typefaces and their fonts or styles.
 
-مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار عائلة الخط وحجم وطول الخط والمسافة بين السطور
+مرئية وسهلة قراءة وجذابة. ترتيب الحروف يشمل كل من اختيار عائلة الخط وحجم وطول الخط والمسافة بين السطور
 
-مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
+مرئية وسهلة قراءة وجذابة. ترتيب الحروف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
@@ -424,5 +424,5 @@ Etiam non malesuada felis, nec fringilla quam.
 "#;
 
 // const LOREM_TEXT: &str = r#"
-// مرئية وساهلة قراءة وجاذبة. ترتيب الحوف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
+// مرئية وسهلة قراءة وجذابة. ترتيب الحروف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور
 // "#;
