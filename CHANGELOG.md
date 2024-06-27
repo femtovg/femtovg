@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.9.2] - 2024-06-27
+
  - Fix path rendering where the default path solidity would interfere with the path's
    own winding direction (https://github.com/femtovg/femtovg/issues/124)
  - Fix blurry text rendering when drawing on non-integer coordinates
