@@ -1161,7 +1161,7 @@ impl GlyphAtlas {
             // anti-aliasing (ClearType®), and the atlas debug display is much
             // clearer with different colors. Also, Rgba8 is required for color
             // fonts (typically used for emojis).
-            let info = ImageInfo::new(ImageFlags::empty(), atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
+            let info = ImageInfo::new(ImageFlags::NEAREST, atlas.size().0, atlas.size().1, PixelFormat::Rgba8);
             let image_id = canvas.images.alloc(&mut canvas.renderer, info)?;
 
             #[cfg(feature = "debug_inspector")]
