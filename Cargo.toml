@@ -56,7 +56,7 @@ svg = "0.14.0"
 usvg = { version = "0.33.0" }
 instant = { version = "0.1", features = ["now"] }
 resource = "0.5.0"
-image = { version = "0.24.0", default-features = false, features = [
+image = { version = "0.25.0", default-features = false, features = [
     "jpeg",
     "png",
 ] }
