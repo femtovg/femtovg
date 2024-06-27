@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+ - Fix path rendering where the default path solidity would interfere with the path's
+   own winding direction (https://github.com/femtovg/femtovg/issues/124)
+
 ## [0.9.1] - 2024-04-12
 
  - Fixed inability to introspect `Path` verbs by making `PathIter` and `Verb` public.
