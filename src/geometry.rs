@@ -63,11 +63,7 @@ impl Position {
             t /= d;
         }
 
-        if t < 0.0 {
-            t = 0.0;
-        } else if t > 1.0 {
-            t = 1.0;
-        }
+        t = t.clamp(0.0, 1.0);
 
         let dpos = (ppos - pos) + pq * t;
 

@@ -46,16 +46,16 @@ impl Color {
             h += 1.0;
         }
 
-        let s = s.max(0.0).min(1.0);
-        let l = l.max(0.0).min(1.0);
+        let s = s.clamp(0.0, 1.0);
+        let l = l.clamp(0.0, 1.0);
 
         let m2 = if l <= 0.5 { l * (1.0 + s) } else { l + s - l * s };
         let m1 = 2.0 * l - m2;
 
         Self {
-            r: hue(h + 1.0 / 3.0, m1, m2).max(0.0).min(1.0),
-            g: hue(h, m1, m2).max(0.0).min(1.0),
-            b: hue(h - 1.0 / 3.0, m1, m2).max(0.0).min(1.0),
+            r: hue(h + 1.0 / 3.0, m1, m2).clamp(0.0, 1.0),
+            g: hue(h, m1, m2).clamp(0.0, 1.0),
+            b: hue(h - 1.0 / 3.0, m1, m2).clamp(0.0, 1.0),
             a,
         }
     }

@@ -69,8 +69,8 @@ impl GradientStore {
 #[allow(clippy::many_single_char_names)]
 // Gradient filling, adapted from https://github.com/lieff/lvg/blob/master/render/common.c#L147
 fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, offset0: f32, offset1: f32) {
-    let s0o = offset0.max(0.0).min(1.0);
-    let s1o = offset1.max(0.0).min(1.0);
+    let s0o = offset0.clamp(0.0, 1.0);
+    let s1o = offset1.clamp(0.0, 1.0);
 
     if s1o < s0o {
         return;

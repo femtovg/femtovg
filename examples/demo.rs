@@ -1114,7 +1114,7 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         }
 
         let v = i as f32 * dv;
-        let a = ((u2 - v) / dv).max(0.0).min(1.0);
+        let a = ((u2 - v) / dv).clamp(0.0, 1.0);
 
         if a < 1.0 {
             draw_spinner(canvas, tx + thumb / 2.0, ty + thumb / 2.0, thumb * 0.25, t);

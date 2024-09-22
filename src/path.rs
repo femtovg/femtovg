@@ -227,7 +227,7 @@ impl Path {
         }
 
         // Split arc into max 90 degree segments.
-        let ndivs = ((da.abs() / (PI * 0.5) + 0.5) as i32).min(5).max(1);
+        let ndivs = ((da.abs() / (PI * 0.5) + 0.5) as i32).clamp(1, 5);
         let hda = (da / ndivs as f32) / 2.0;
         let mut kappa = (4.0 / 3.0 * (1.0 - hda.cos()) / hda.sin()).abs();
 

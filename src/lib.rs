@@ -1031,7 +1031,7 @@ where
         if line_width < self.fringe_width {
             // If the stroke width is less than pixel size, use alpha to emulate coverage.
             // Since coverage is area, scale by alpha*alpha.
-            let alpha = (line_width / self.fringe_width).max(0.0).min(1.0);
+            let alpha = (line_width / self.fringe_width).clamp(0.0, 1.0);
 
             paint_flavor.mul_alpha(alpha * alpha);
             line_width = self.fringe_width;
