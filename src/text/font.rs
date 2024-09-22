@@ -149,7 +149,7 @@ impl Font {
             let id = GlyphId(codepoint);
 
             let maybe_glyph = if let Some(image) = face
-                .glyph_raster_image(id, std::u16::MAX)
+                .glyph_raster_image(id, u16::MAX)
                 .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
             {
                 let scale = if image.pixels_per_em != 0 {

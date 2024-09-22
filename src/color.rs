@@ -1,5 +1,3 @@
-use std::u8;
-
 /// Struct for representing colors.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

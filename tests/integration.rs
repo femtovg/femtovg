@@ -39,18 +39,18 @@ fn path_with_points_at_limits() {
 
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
-    path.line_to(std::f32::MAX, std::f32::MAX);
-    path.quad_to(10.0, 10.0, -std::f32::MAX, std::f32::MAX);
-    path.bezier_to(10.0, 10.0, std::f32::MAX, 5000.0, -std::f32::MAX, -std::f32::MAX);
+    path.line_to(f32::MAX, f32::MAX);
+    path.quad_to(10.0, 10.0, -f32::MAX, f32::MAX);
+    path.bezier_to(10.0, 10.0, f32::MAX, 5000.0, -f32::MAX, -f32::MAX);
     path.rounded_rect_varying(
-        -std::f32::MAX,
-        -std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
+        -f32::MAX,
+        -f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
     );
     path.close();
 
@@ -69,11 +69,11 @@ fn path_with_points_around_zero() {
     path.quad_to(0.002, 0.0001, -0.002, 0.0001);
     path.bezier_to(0.0001, 0.002, -0.002, 0.0001, -0.002, 0.0001);
     path.rounded_rect_varying(
-        -std::f32::MAX,
-        -std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
-        std::f32::MAX,
+        -f32::MAX,
+        -f32::MAX,
+        f32::MAX,
+        f32::MAX,
+        f32::MAX,
         0.0001,
         0.0001,
         0.0001,
@@ -114,7 +114,7 @@ fn degenerate_arc() {
 
     let mut path = Path::new();
     path.move_to(10.0, 10.0);
-    path.arc(10.0, 10.0, 10.0, 0.0, std::f32::MAX, Solidity::Hole);
+    path.arc(10.0, 10.0, 10.0, 0.0, f32::MAX, Solidity::Hole);
 
     canvas.fill_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
     canvas.stroke_path(&path, &Paint::color(Color::rgb(100, 100, 100)));
