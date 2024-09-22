@@ -88,9 +88,8 @@ impl Params {
                 angle,
                 tint,
             } => {
-                let image_info = match images.info(*id) {
-                    Some(info) => info,
-                    None => return params,
+                let Some(image_info) = images.info(*id) else {
+                    return params;
                 };
 
                 params.extent[0] = *width;

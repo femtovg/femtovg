@@ -103,25 +103,19 @@ impl GradientColors {
         Stops: IntoIterator<Item = (f32, Color)>,
     {
         let mut stops = stops.into_iter();
-        let first_stop = match stops.next() {
-            Some(stop) => stop,
-            None => {
-                // No stops, we use black.
-                return GradientColors::TwoStop {
-                    start_color: Color::black(),
-                    end_color: Color::black(),
-                };
-            }
+        let Some(first_stop) = stops.next() else {
+            // No stops, we use black.
+            return GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::black(),
+            };
         };
-        let second_stop = match stops.next() {
-            Some(stop) => stop,
-            None => {
-                // One stop devolves to a solid color fill (but using the gradient shader variation).
-                return GradientColors::TwoStop {
-                    start_color: first_stop.1,
-                    end_color: first_stop.1,
-                };
-            }
+        let Some(second_stop) = stops.next() else {
+            // One stop devolves to a solid color fill (but using the gradient shader variation).
+            return GradientColors::TwoStop {
+                start_color: first_stop.1,
+                end_color: first_stop.1,
+            };
         };
 
         let maybe_third_stop = stops.next();

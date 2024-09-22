@@ -191,9 +191,8 @@ struct Scissor {
 impl Scissor {
     /// Returns the bounding rect if the scissor clip if it's an untransformed rectangular clip
     fn as_rect(&self, canvas_width: f32, canvas_height: f32) -> Option<Rect> {
-        let extent = match self.extent {
-            Some(extent) => extent,
-            None => return Some(Rect::new(0., 0., canvas_width, canvas_height)),
+        let Some(extent) = self.extent else {
+            return Some(Rect::new(0., 0., canvas_width, canvas_height));
         };
 
         // Abort if we're skewing (usually doesn't happen)
@@ -642,9 +641,8 @@ where
     /// The filtering does not take any transformation set on the Canvas into account nor does it
     /// change the current rendering target.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
-        let (image_width, image_height) = match self.image_size(source_image) {
-            Ok((w, h)) => (w, h),
-            Err(_) => return,
+        let Ok((image_width, image_height)) = self.image_size(source_image) else {
+            return;
         };
 
         // The renderer will receive a RenderFilteredImage command with two triangles attached that
