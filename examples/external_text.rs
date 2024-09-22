@@ -64,7 +64,7 @@ impl RenderCache {
 
         //let total_height = buffer.layout_runs().len() as i32 * buffer.metrics().line_height;
         for run in buffer.layout_runs() {
-            for glyph in run.glyphs.iter() {
+            for glyph in run.glyphs {
                 let mut cache_key = glyph.cache_key;
                 let position_x = position.0 + cache_key.x_bin.as_float();
                 let position_y = position.1 + cache_key.y_bin.as_float();

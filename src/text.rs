@@ -597,7 +597,7 @@ fn shape_run(
 
         let (levels, runs) = bidi_info.visual_runs(paragraph, line);
 
-        for run in runs.iter() {
+        for run in runs {
             let sub_text = &text[run.clone()];
 
             if sub_text.is_empty() {
@@ -633,7 +633,7 @@ fn shape_run(
                                 let mut bytes_included = 0;
                                 let mut subword_width = 0.0;
                                 let target_width = max_width - result.width;
-                                for glyph in word.glyphs.iter() {
+                                for glyph in word.glyphs {
                                     bytes_included = glyph.byte_index;
                                     let glyph_width = glyph.advance_x + letter_spacing;
 

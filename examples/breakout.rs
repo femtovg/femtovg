@@ -1325,12 +1325,12 @@ fn vector_direction(target: Vector) -> Direction {
     let mut best_match = Direction::Up;
     let target = target.normalize();
 
-    for (dir, dir_vec) in compass.iter() {
-        let dot = target.dot(*dir_vec);
+    for (dir, dir_vec) in compass {
+        let dot = target.dot(dir_vec);
 
         if dot > max {
             max = dot;
-            best_match = *dir;
+            best_match = dir;
         }
     }
 

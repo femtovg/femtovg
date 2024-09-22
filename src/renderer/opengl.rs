@@ -737,7 +737,7 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        for cmd in commands.into_iter() {
+        for cmd in commands {
             self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
