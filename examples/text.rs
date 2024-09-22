@@ -406,7 +406,7 @@ fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: 
     //canvas.fill_text(x, y, "Traditionally, text is composed to create a readable, coherent, and visually satisfying", &paint);
 }
 
-const LOREM_TEXT: &str = r#"
+const LOREM_TEXT: &str = r"
 Traditionally, text is composed to create a readable, coherent, and visually satisfying typeface
 that works invisibly, without the awareness of the reader. Even distribution of typeset material,
 with a minimum of distractions and anomalies, is aimed at producing clarity and transparency.
@@ -421,7 +421,7 @@ characteristics and requirements of appropriate typefaces and their fonts or sty
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Curabitur in nisi at ligula lobortis pretium. Sed vel eros tincidunt, fermentum metus sit amet, accumsan massa. Vestibulum sed elit et purus suscipit
 Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna. Pellentesque suscipit nec odio eu varius. Quisque lobortis elit in finibus vulputate. Mauris quis gravida libero.
 Etiam non malesuada felis, nec fringilla quam.
-"#;
+";
 
 // const LOREM_TEXT: &str = r#"
 // مرئية وسهلة قراءة وجذابة. ترتيب الحروف يشمل كل من اختيار (asdasdasdasdasdasd) عائلة الخط وحجم وطول الخط والمسافة بين السطور

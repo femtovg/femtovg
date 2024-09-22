@@ -272,7 +272,7 @@ fn run(
     });
 }
 
-const LOREM_TEXT: &str = r#"
+const LOREM_TEXT: &str = r"
 Traditionally, text is composed to create a readable, coherent, and visually satisfying typeface
 that works invisibly, without the awareness of the reader. Even distribution of typeset material,
 with a minimum of distractions and anomalies, is aimed at producing clarity and transparency.
@@ -289,4 +289,4 @@ Sed at gravida lectus. Duis eu nisl non sem lobortis rutrum. Sed non mauris urna
 Etiam non malesuada felis, nec fringilla quam.
 
 😂🤩🥰😊😄
-"#;
+";
