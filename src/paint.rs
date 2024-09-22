@@ -42,7 +42,7 @@ impl MultiStopGradient {
         let mut stop = self
             .shared_stops
             .get(index)
-            .cloned()
+            .copied()
             .unwrap_or_else(|| GradientStop(2.0, Color::black()));
 
         stop.1.a *= self.tint;
