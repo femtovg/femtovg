@@ -128,7 +128,7 @@ impl Vector {
     }
 
     pub fn normalize(&mut self) -> f32 {
-        let d = (self.x * self.x + self.y * self.y).sqrt();
+        let d = self.x.hypot(self.y);
 
         if d > 1e-6 {
             let id = 1.0 / d;
@@ -320,8 +320,8 @@ impl Transform2D {
     }
 
     pub fn average_scale(&self) -> f32 {
-        let sx = (self[0] * self[0] + self[2] * self[2]).sqrt();
-        let sy = (self[1] * self[1] + self[3] * self[3]).sqrt();
+        let sx = self[0].hypot(self[2]);
+        let sy = self[1].hypot(self[3]);
 
         (sx + sy) * 0.5
     }

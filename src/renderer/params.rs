@@ -48,10 +48,8 @@ impl Params {
                 params.scissor_mat = scissor.transform.inversed().to_mat3x4();
 
                 let scissor_scale = [
-                    (scissor.transform[0] * scissor.transform[0] + scissor.transform[2] * scissor.transform[2]).sqrt()
-                        / fringe_width,
-                    (scissor.transform[1] * scissor.transform[1] + scissor.transform[3] * scissor.transform[3]).sqrt()
-                        / fringe_width,
+                    scissor.transform[0].hypot(scissor.transform[2]) / fringe_width,
+                    scissor.transform[1].hypot(scissor.transform[3]) / fringe_width,
                 ];
 
                 (ext, scissor_scale)
@@ -148,7 +146,7 @@ impl Params {
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
                 let mut dy = end_y - start_y;
-                let d = (dx * dx + dy * dy).sqrt();
+                let d = dx.hypot(dy);
 
                 if d > 0.0001 {
                     dx /= d;

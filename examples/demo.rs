@@ -444,7 +444,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
 
     let mut dx = (mx - rx) / (ex * 10.0);
     let mut dy = (my - ry) / (ey * 10.0);
-    let d = (dx * dx + dy * dy).sqrt();
+    let d = dx.hypot(dy);
     if d > 1.0 {
         dx /= d;
         dy /= d;
@@ -458,7 +458,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
 
     let mut dx = (mx - rx) / (ex * 10.0);
     let mut dy = (my - ry) / (ey * 10.0);
-    let d = (dx * dx + dy * dy).sqrt();
+    let d = dx.hypot(dy);
     if d > 1.0 {
         dx /= d;
         dy /= d;
