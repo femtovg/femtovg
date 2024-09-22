@@ -96,9 +96,9 @@ fn main() {
     let mut renderer: OpenGl;
 
     unsafe {
-        context = glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol) as *const _);
-        renderer = OpenGl::new_from_function_cstr(|s| display.get_proc_address(s) as *const _)
-            .expect("Cannot create renderer");
+        context = glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol).cast());
+        renderer =
+            OpenGl::new_from_function_cstr(|s| display.get_proc_address(s).cast()).expect("Cannot create renderer");
 
         shader_program = create_shader_program(&context);
         (framebuffer, texture_colorbuffer) = create_framebuffer_colorbuffer(&context);

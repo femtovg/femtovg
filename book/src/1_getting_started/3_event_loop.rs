@@ -24,7 +24,7 @@ fn main() {
     let event_loop = EventLoop::new();
     let (context, gl_display, window, surface) = create_window(&event_loop);
 
-    let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+    let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
         .expect("Cannot create renderer");
 
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");

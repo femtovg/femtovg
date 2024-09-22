@@ -79,7 +79,7 @@ impl OpenGl {
 
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
     pub fn new_from_glutin_display(display: &impl GlDisplay) -> Result<Self, ErrorKind> {
-        unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s) as *const _) }
+        unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s).cast()) }
     }
 
     #[cfg(target_arch = "wasm32")]

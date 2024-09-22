@@ -96,7 +96,7 @@ pub fn start(
 
         let gl_context = not_current_gl_context.take().unwrap().make_current(&surface).unwrap();
 
-        let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+        let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
             .expect("Cannot create renderer");
 
         let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
