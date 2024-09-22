@@ -1,10 +1,10 @@
 /**
- * Shows how to work with Paint::image() to fill paths.
+ * Shows how to work with `Paint::image()` to fill paths.
  * The image is rendered independently of the shape of the path,
  * it does not get stretched to fit the path’s bounding box.
  * If that’s what you want, you have to compute the bounding box with
- * Canvas::path_bbox() and use it to set the cx, cy, width, height values
- * in Paint::image() as shown in this example.
+ * `Canvas::path_bbox()` and use it to set the cx, cy, width, height values
+ * in `Paint::image()` as shown in this example.
  */
 use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 use instant::Instant;

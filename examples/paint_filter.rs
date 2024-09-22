@@ -1,5 +1,5 @@
 /**
- * Shows how to use Canvas::filter_image() to apply a blur filter.
+ * Shows how to use `Canvas::filter_image()` to apply a blur filter.
  */
 use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path};
 use instant::Instant;

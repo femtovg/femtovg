@@ -141,7 +141,7 @@ pub struct CompositeOperationState {
 }
 
 impl CompositeOperationState {
-    /// Creates a new CompositeOperationState from the provided CompositeOperation
+    /// Creates a new `CompositeOperationState` from the provided `CompositeOperation`
     pub fn new(op: CompositeOperation) -> Self {
         let (sfactor, dfactor) = match op {
             CompositeOperation::SourceOver => (BlendFactor::One, BlendFactor::OneMinusSrcAlpha),
@@ -165,7 +165,7 @@ impl CompositeOperationState {
         }
     }
 
-    /// Creates a new CompositeOperationState with source and destination blend factors.
+    /// Creates a new `CompositeOperationState` with source and destination blend factors.
     pub fn with_blend_factors(src_factor: BlendFactor, dst_factor: BlendFactor) -> Self {
         Self {
             src_rgb: src_factor,
@@ -427,7 +427,7 @@ where
 
     /// Pushes and saves the current render state into a state stack.
     ///
-    /// A matching restore() must be used to restore the state.
+    /// A matching `restore()` must be used to restore the state.
     pub fn save(&mut self) {
         let state = self.state_stack.last().map_or_else(State::default, |state| *state);
 
@@ -452,7 +452,7 @@ where
 
     /// Saves the current state before calling the callback and restores it afterwards
     ///
-    /// This is less error prone than remembering to match save() -> restore() calls
+    /// This is less error prone than remembering to match `save()` -> `restore()` calls
     pub fn save_with(&mut self, mut callback: impl FnMut(&mut Self)) {
         self.save();
 
@@ -634,7 +634,7 @@ where
         Ok((info.width(), info.height()))
     }
 
-    /// Renders the given source_image into target_image while applying a filter effect.
+    /// Renders the given `source_image` into `target_image` while applying a filter effect.
     ///
     /// The target image must have the same size as the source image. The filtering is recorded
     /// as a drawing command and run by the renderer when [`Self::flush()`] is called.
@@ -1234,7 +1234,7 @@ where
             .measure_font(paint.text.font_size * scale, &paint.text.font_ids)
     }
 
-    /// Returns the maximum index-th byte of text that will fit inside max_width.
+    /// Returns the maximum index-th byte of text that will fit inside `max_width`.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
@@ -1251,7 +1251,7 @@ where
             .break_text(max_width, text, &text_settings)
     }
 
-    /// Returnes a list of ranges representing each line of text that will fit inside max_width
+    /// Returnes a list of ranges representing each line of text that will fit inside `max_width`
     pub fn break_text_vec<S: AsRef<str>>(
         &self,
         max_width: f32,
@@ -1293,7 +1293,7 @@ where
         self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
     }
 
-    /// Dispatch an explicit set of GlyphDrawCommands to the renderer. Use this only if you are
+    /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
     /// using a custom font rasterizer/layout.
     pub fn draw_glyph_commands(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint, scale: f32) {
         let transform = self.state().transform;

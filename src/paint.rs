@@ -391,7 +391,7 @@ impl Paint {
 
     /// Creates and returns a linear gradient paint.
     ///
-    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    /// The gradient is transformed by the current transform when it is passed to `fill_path()` or `stroke_path()`.
     ///
     /// # Example
     /// ```
@@ -420,7 +420,7 @@ impl Paint {
     }
     /// Creates and returns a linear gradient paint with two or more stops.
     ///
-    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    /// The gradient is transformed by the current transform when it is passed to `fill_path()` or `stroke_path()`.
     ///
     /// # Example
     /// ```
@@ -460,8 +460,8 @@ impl Paint {
     /// Box gradient is a feathered rounded rectangle, it is useful for rendering
     /// drop shadows or highlights for boxes. Parameters (x,y) define the top-left corner of the rectangle,
     /// (w,h) define the size of the rectangle, r defines the corner radius, and f feather. Feather defines how blurry
-    /// the border of the rectangle is. Parameter inner_color specifies the inner color and outer_color the outer color of the gradient.
-    /// The gradient is transformed by the current transform when it is passed to fill_path() or stroke_path().
+    /// the border of the rectangle is. Parameter `inner_color` specifies the inner color and `outer_color` the outer color of the gradient.
+    /// The gradient is transformed by the current transform when it is passed to `fill_path()` or `stroke_path()`.
     ///
     /// # Example
     /// ```
@@ -509,9 +509,9 @@ impl Paint {
 
     /// Creates and returns a radial gradient.
     ///
-    /// Parameters (cx,cy) specify the center, in_radius and out_radius specify
-    /// the inner and outer radius of the gradient, inner_color specifies the start color and outer_color the end color.
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    /// Parameters (`cx`,`cy`) specify the center, `in_radius` and `out_radius` specify
+    /// the inner and outer radius of the gradient, `inner_color` specifies the start color and `outer_color` the end color.
+    /// The gradient is transformed by the current transform when it is passed to `fill_paint()` or `stroke_paint()`.
     ///
     /// # Example
     /// ```
@@ -553,10 +553,10 @@ impl Paint {
 
     /// Creates and returns a multi-stop radial gradient.
     ///
-    /// Parameters (cx,cy) specify the center, in_radius and out_radius specify the inner and outer radius of the gradient,
+    /// Parameters (`cx`,`cy`) specify the center, `in_radius` and `out_radius` specify the inner and outer radius of the gradient,
     /// colors specifies a list of color stops with offsets. The first offset should be 0.0 and the last offset should be 1.0.
     ///
-    /// The gradient is transformed by the current transform when it is passed to fill_paint() or stroke_paint().
+    /// The gradient is transformed by the current transform when it is passed to `fill_paint()` or `stroke_paint()`.
     ///
     /// # Example
     /// ```
@@ -661,7 +661,7 @@ impl Paint {
 
     /// Sets the limit at which a sharp corner is drawn beveled.
     ///
-    /// If the miter at a corner exceeds this limit, LineJoin is replaced with LineJoin::Bevel.
+    /// If the miter at a corner exceeds this limit, `LineJoin` is replaced with `LineJoin::Bevel`.
     pub fn set_miter_limit(&mut self, limit: f32) {
         self.stroke.miter_limit = limit;
     }
@@ -684,7 +684,7 @@ impl Paint {
 
     /// Sets how the start and end of the line (cap) is drawn
     ///
-    /// By default it's set to LineCap::Butt
+    /// By default it's set to `LineCap::Butt`
     pub fn set_line_cap(&mut self, cap: LineCap) {
         self.stroke.line_cap_start = cap;
         self.stroke.line_cap_end = cap;
@@ -698,7 +698,7 @@ impl Paint {
 
     /// Sets how the beggining cap of the line is drawn
     ///
-    /// By default it's set to LineCap::Butt
+    /// By default it's set to `LineCap::Butt`
     pub fn set_line_cap_start(&mut self, cap: LineCap) {
         self.stroke.line_cap_start = cap;
     }
@@ -711,7 +711,7 @@ impl Paint {
 
     /// Sets how the end cap of the line is drawn
     ///
-    /// By default it's set to LineCap::Butt
+    /// By default it's set to `LineCap::Butt`
     pub fn set_line_cap_end(&mut self, cap: LineCap) {
         self.stroke.line_cap_end = cap;
     }
@@ -729,7 +729,7 @@ impl Paint {
 
     /// Sets how sharp path corners are drawn.
     ///
-    /// By default it's set to LineJoin::Miter
+    /// By default it's set to `LineJoin::Miter`
     pub fn set_line_join(&mut self, join: LineJoin) {
         self.stroke.line_join = join;
     }

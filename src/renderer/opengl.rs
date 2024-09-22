@@ -522,7 +522,7 @@ impl OpenGl {
         }
     }
 
-    /// Make the "Screen" RenderTarget actually render to a framebuffer object. This is useful when
+    /// Make the "Screen" `RenderTarget` actually render to a framebuffer object. This is useful when
     /// embedding femtovg into another program where final composition is handled by an external task.
     /// The given `framebuffer_object` must refer to a Framebuffer Object created on the current OpenGL
     /// Context, and must have a depth & stencil attachment.

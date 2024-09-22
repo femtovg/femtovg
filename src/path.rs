@@ -202,8 +202,8 @@ impl Path {
         }
     }
 
-    /// Creates new circle arc shaped sub-path. The arc center is at cx,cy, the arc radius is r,
-    /// and the arc is drawn from angle a0 to a1, and swept in direction dir (Winding)
+    /// Creates new circle arc shaped sub-path. The arc center is at `cx`,`cy`, the arc radius is `r`,
+    /// and the arc is drawn from angle `a0` to `a1`, and swept in direction `dir` (Winding)
     /// Angles are specified in radians.
     pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Solidity) {
         let cpos = Position { x: cx, y: cy };

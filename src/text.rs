@@ -189,12 +189,12 @@ impl ShapingId {
 type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, ErrorKind>, H>;
 type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
-pub(crate) struct FontTexture {
+pub struct FontTexture {
     pub atlas: Atlas,
     pub(crate) image_id: ImageId,
 }
 
-/// TextContext provides functionality for text processing in femtovg. You can
+/// `TextContext` provides functionality for text processing in femtovg. You can
 /// add fonts using the [`Self::add_font_file()`], [`Self::add_font_mem()`] and
 /// [`Self::add_font_dir()`] functions. For each registered font a [`FontId`] is
 /// returned.
@@ -202,7 +202,7 @@ pub(crate) struct FontTexture {
 /// The [`FontId`] can be supplied to [`crate::Paint`] along with additional parameters
 /// such as the font size.
 ///
-/// The paint is needed when using TextContext's measurement functions such as
+/// The paint is needed when using `TextContext`'s measurement functions such as
 /// [`Self::measure_text()`].
 ///
 /// Note that the measurements are done entirely with the supplied sizes in the paint
@@ -232,7 +232,7 @@ impl TextContext {
     }
 
     /// Registers the in-memory representation of a TrueType font pointed to by the shared data
-    /// parameter with this text context. If successful, the font id is returned. The face_index
+    /// parameter with this text context. If successful, the font id is returned. The `face_index`
     /// specifies the face index if the font data is a true type font collection. For plain true
     /// type fonts, use 0 as index.
     pub fn add_shared_font_with_index<T: AsRef<[u8]> + 'static>(
@@ -254,14 +254,14 @@ impl TextContext {
         self.0.borrow_mut().measure_text(x, y, text, &paint.text)
     }
 
-    /// Returns the maximum index-th byte of text that will fit inside max_width.
+    /// Returns the maximum index-th byte of text that will fit inside `max_width`.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         self.0.borrow_mut().break_text(max_width, text, &paint.text)
     }
 
-    /// Returnes a list of ranges representing each line of text that will fit inside max_width
+    /// Returnes a list of ranges representing each line of text that will fit inside `max_width`
     pub fn break_text_vec<S: AsRef<str>>(
         &self,
         max_width: f32,

@@ -6,8 +6,8 @@ use crate::{
     Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
 };
 
-/// GradientStore holds image ids for multi-stop gradients. The actual image/textures
-/// are contained by the Canvas's ImageStore.
+/// `GradientStore` holds image ids for multi-stop gradients. The actual image/textures
+/// are contained by the Canvas's `ImageStore`.
 //
 // If many gradients are used in a frame, we could combine them into a single texture
 // and update the texture immediately prior to giving the renderer the command list.
