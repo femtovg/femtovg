@@ -215,7 +215,7 @@ impl Transform2D {
     ///   [a c e]
     ///   [b d f]
     ///   [0 0 1]
-    pub fn new(&mut self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
+    pub fn new(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
         Self([a, b, c, d, e, f])
     }
 

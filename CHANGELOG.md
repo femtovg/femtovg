@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Removed the mutable reference of self in `new` constructor for Transform2D
+
 ## [0.9.2] - 2024-06-27
 
  - Fix path rendering where the default path solidity would interfere with the path's
