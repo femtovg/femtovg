@@ -190,7 +190,7 @@ impl Game {
                     State::InGame => self.state = State::Paused,
                     State::Paused => self.state = State::TitleScreen,
                     State::Win { .. } | State::GameOver { .. } => self.state = State::TitleScreen,
-                    _ => (),
+                    State::RoundInfo { .. } => (),
                 },
                 WindowEvent::MouseInput {
                     button: MouseButton::Left,

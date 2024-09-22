@@ -809,7 +809,7 @@ fn layout(
     match text_settings.text_align {
         Align::Center => cursor_x -= res.width / 2.0,
         Align::Right => cursor_x -= res.width,
-        _ => (),
+        Align::Left => (),
     }
 
     res.x = cursor_x;

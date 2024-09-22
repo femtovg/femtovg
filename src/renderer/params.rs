@@ -134,7 +134,7 @@ impl Params {
                         }
                     }
                     PixelFormat::Gray8 => 2.0,
-                    _ => 0.0,
+                    PixelFormat::Rgb8 => 0.0,
                 };
             }
             PaintFlavor::LinearGradient {

@@ -785,7 +785,7 @@ impl PathCache {
                         match x_sign.cmp(&0) {
                             Ordering::Equal => x_first_sign = 1,
                             Ordering::Less => x_flips += 1,
-                            _ => (),
+                            Ordering::Greater => (),
                         }
 
                         x_sign = 1;
@@ -794,7 +794,7 @@ impl PathCache {
                         match x_sign.cmp(&0) {
                             Ordering::Equal => x_first_sign = -1,
                             Ordering::Greater => x_flips += 1,
-                            _ => (),
+                            Ordering::Less => (),
                         }
 
                         x_sign = -1;
@@ -807,7 +807,7 @@ impl PathCache {
                         match y_sign.cmp(&0) {
                             Ordering::Equal => y_first_sign = 1,
                             Ordering::Less => y_flips += 1,
-                            _ => (),
+                            Ordering::Greater => (),
                         }
 
                         y_sign = 1;
@@ -816,7 +816,7 @@ impl PathCache {
                         match y_sign.cmp(&0) {
                             Ordering::Equal => y_first_sign = -1,
                             Ordering::Greater => y_flips += 1,
-                            _ => (),
+                            Ordering::Less => (),
                         }
 
                         y_sign = -1;
