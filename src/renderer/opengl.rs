@@ -449,7 +449,7 @@ impl OpenGl {
         self.main_program().set_config(arr.as_slice());
         self.check_error("set_uniforms uniforms");
 
-        let tex = image_tex.and_then(|id| images.get(id)).map(|tex| tex.id());
+        let tex = image_tex.and_then(|id| images.get(id)).map(GlTexture::id);
 
         unsafe {
             self.context.active_texture(glow::TEXTURE0);
@@ -458,7 +458,7 @@ impl OpenGl {
 
         let glyphtex = match glyph_tex {
             GlyphTexture::None => None,
-            GlyphTexture::AlphaMask(id) | GlyphTexture::ColorTexture(id) => images.get(id).map(|tex| tex.id()),
+            GlyphTexture::AlphaMask(id) | GlyphTexture::ColorTexture(id) => images.get(id).map(GlTexture::id),
         };
 
         unsafe {
