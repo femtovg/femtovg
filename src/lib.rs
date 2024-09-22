@@ -868,13 +868,11 @@ where
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
-                return;
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
                 self.render_unclipped_image_blit(&intersection, &transform, &paint_flavor);
-                return;
-            } else {
-                return;
             }
+
+            return;
         }
 
         // GPU uniforms
