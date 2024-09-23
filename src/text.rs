@@ -830,10 +830,10 @@ fn layout(
     let primary_metrics = context.find_font(&text_settings.font_ids, |(_, font)| {
         (false, font.metrics(text_settings.font_size))
     })?;
-    if ascender.abs() < std::f32::EPSILON {
+    if ascender.abs() < f32::EPSILON {
         ascender = primary_metrics.ascender();
     }
-    if descender.abs() < std::f32::EPSILON {
+    if descender.abs() < f32::EPSILON {
         descender = primary_metrics.descender();
     }
 
