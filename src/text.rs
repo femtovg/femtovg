@@ -642,9 +642,9 @@ fn shape_run(
                                     // at least complete rendering
                                     if subword_width + glyph_width >= target_width && bytes_included != 0 {
                                         break;
-                                    } else {
-                                        subword_width += glyph_width;
                                     }
+
+                                    subword_width += glyph_width;
                                 }
 
                                 if bytes_included == 0 {
