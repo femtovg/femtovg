@@ -102,24 +102,23 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     type Error = ErrorKind;
 
     fn try_from(src: &'a DynamicImage) -> Result<Self, ErrorKind> {
-        match src {
+        Ok(match src {
             ::image::DynamicImage::ImageLuma8(img) => {
                 let src: Img<&[GRAY8]> = Img::new(img.as_pixels(), img.width() as usize, img.height() as usize);
-
-                Ok(ImageSource::from(src))
+                ImageSource::from(src)
             }
             ::image::DynamicImage::ImageRgb8(img) => {
                 let src = Img::new(img.as_rgb(), img.width() as usize, img.height() as usize);
-                Ok(ImageSource::from(src))
+                ImageSource::from(src)
             }
             ::image::DynamicImage::ImageRgba8(img) => {
                 let src = Img::new(img.as_rgba(), img.width() as usize, img.height() as usize);
-                Ok(ImageSource::from(src))
+                ImageSource::from(src)
             }
             // TODO: if format is not supported maybe we should convert it here,
             // But that is an expensive operation on the render thread that will remain hidden from the user
-            _ => Err(ErrorKind::UnsupportedImageFormat),
-        }
+            _ => return Err(ErrorKind::UnsupportedImageFormat),
+        })
     }
 }
 
