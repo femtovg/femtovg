@@ -167,12 +167,12 @@ impl Game {
     }
 
     fn handle_events(&mut self, window: &Window, event: &Event<()>, control_flow: &mut ControlFlow) {
-        if self.state != State::InGame {
-            let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
-            window.set_cursor_visible(true);
-        } else {
+        if self.state == State::InGame {
             let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
             window.set_cursor_visible(false);
+        } else {
+            let _ = window.set_cursor_grab(winit::window::CursorGrabMode::None);
+            window.set_cursor_visible(true);
         }
 
         match event {

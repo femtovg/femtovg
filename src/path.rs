@@ -247,10 +247,10 @@ impl Path {
             let tanpos = -dpos.orthogonal() * r * kappa;
 
             if i == 0 {
-                let first_move = if !self.verbs.is_empty() {
-                    PackedVerb::LineTo
-                } else {
+                let first_move = if self.verbs.is_empty() {
                     PackedVerb::MoveTo
+                } else {
+                    PackedVerb::LineTo
                 };
 
                 commands.push(first_move);
