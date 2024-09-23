@@ -98,7 +98,7 @@ impl Default for RenderMode {
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
-pub(crate) struct RenderedGlyphId {
+pub struct RenderedGlyphId {
     glyph_index: u32,
     font_id: FontId,
     size: u32,
@@ -128,7 +128,7 @@ impl RenderedGlyphId {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct RenderedGlyph {
+pub struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
@@ -292,7 +292,7 @@ impl TextContext {
     }
 }
 
-pub(crate) struct TextContextImpl {
+pub struct TextContextImpl {
     fonts: SlotMap<DefaultKey, Font>,
     shaping_run_cache: ShapingRunCache<FnvBuildHasher>,
     shaped_words_cache: ShapedWordsCache<FnvBuildHasher>,
@@ -539,7 +539,7 @@ impl TextMetrics {
 
 // Shaper
 
-pub(crate) fn shape(
+pub fn shape(
     x: f32,
     y: f32,
     context: &mut TextContextImpl,
@@ -888,7 +888,7 @@ pub struct GlyphDrawCommands {
 }
 
 #[derive(Default)]
-pub(crate) struct GlyphAtlas {
+pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, RenderedGlyph>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
 }
@@ -1229,7 +1229,7 @@ impl GlyphAtlas {
     }
 }
 
-pub(crate) fn render_direct<T: Renderer>(
+pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
     text_layout: &TextMetrics,
     paint_flavor: &PaintFlavor,

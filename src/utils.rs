@@ -1,6 +1,6 @@
 // TODO: Remove this when drain_filter comes to stable rust
 
-pub(crate) trait VecRetainMut<T> {
+pub trait VecRetainMut<T> {
     fn retain_mut<F>(&mut self, f: F)
     where
         F: FnMut(&mut T) -> bool;

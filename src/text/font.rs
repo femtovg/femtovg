@@ -18,7 +18,7 @@ pub struct Glyph {
     pub metrics: GlyphMetrics,
 }
 
-pub(crate) enum GlyphRendering<'a> {
+pub enum GlyphRendering<'a> {
     RenderAsPath(Ref<'a, Path>),
     #[cfg(feature = "image-loading")]
     RenderAsImage(image::DynamicImage),
@@ -90,7 +90,7 @@ impl FontMetrics {
     }
 }
 
-pub(crate) struct Font {
+pub struct Font {
     data: Box<dyn AsRef<[u8]>>,
     face_index: u32,
     units_per_em: u16,

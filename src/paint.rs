@@ -7,7 +7,7 @@ use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageI
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct GradientStop(pub f32, pub Color);
+pub struct GradientStop(pub f32, pub Color);
 
 // We use MultiStopGradient as a key since we cache them. We either need
 // to define Hash (for HashMap) or Ord for (BTreeMap).
@@ -32,7 +32,7 @@ impl PartialOrd for GradientStop {
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct MultiStopGradient {
+pub struct MultiStopGradient {
     shared_stops: Rc<[GradientStop]>,
     tint: f32,
 }
@@ -82,7 +82,7 @@ impl Ord for MultiStopGradient {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) enum GradientColors {
+pub enum GradientColors {
     TwoStop { start_color: Color, end_color: Color },
     MultiStop { stops: MultiStopGradient },
 }
@@ -149,7 +149,7 @@ impl GradientColors {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) enum PaintFlavor {
+pub enum PaintFlavor {
     Color(Color),
     #[cfg_attr(feature = "serde", serde(skip))]
     Image {
@@ -219,7 +219,7 @@ impl PaintFlavor {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum GlyphTexture {
+pub enum GlyphTexture {
     None,
     AlphaMask(ImageId),
     ColorTexture(ImageId),
@@ -233,7 +233,7 @@ impl Default for GlyphTexture {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct StrokeSettings {
+pub struct StrokeSettings {
     pub(crate) stencil_strokes: bool,
     pub(crate) miter_limit: f32,
     pub(crate) line_width: f32,
@@ -257,7 +257,7 @@ impl Default for StrokeSettings {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct TextSettings {
+pub struct TextSettings {
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
     pub(crate) font_size: f32,

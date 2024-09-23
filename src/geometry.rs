@@ -7,7 +7,7 @@ use fnv::FnvHasher;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub(crate) struct Position {
+pub struct Position {
     pub x: f32,
     pub y: f32,
 }
@@ -72,7 +72,7 @@ impl Position {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct Vector {
+pub struct Vector {
     pub x: f32,
     pub y: f32,
 }
@@ -189,7 +189,7 @@ impl MulAssign<f32> for Vector {
     }
 }
 
-pub(crate) fn quantize(a: f32, d: f32) -> f32 {
+pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
 }
 

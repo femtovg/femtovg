@@ -6,7 +6,7 @@ use crate::{renderer::ShaderType, ErrorKind};
 
 const GLSL_VERSION: &str = "#version 100";
 
-pub(crate) struct Shader {
+pub struct Shader {
     context: Rc<glow::Context>,
     id: <glow::Context as glow::HasContext>::Shader,
 }
@@ -55,7 +55,7 @@ impl Drop for Shader {
     }
 }
 
-pub(crate) struct Program {
+pub struct Program {
     context: Rc<glow::Context>,
     id: <glow::Context as glow::HasContext>::Program,
 }
