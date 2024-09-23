@@ -1,42 +1,46 @@
-/// Struct for representing colors.
+/// Struct representing a color with red, green, blue, and alpha components.
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Color {
+    /// Red component of the color (0.0 to 1.0)
     pub r: f32,
+    /// Green component of the color (0.0 to 1.0)
     pub g: f32,
+    /// Blue component of the color (0.0 to 1.0)
     pub b: f32,
+    /// Alpha (opacity) component of the color (0.0 to 1.0)
     pub a: f32,
 }
 
 impl Color {
-    /// Returns a color value from red, green, blue char values. Alpha will be set to 255.
+    /// Creates a color from red, green, and blue u8 values. Alpha is set to 255.
     pub fn rgb(r: u8, g: u8, b: u8) -> Self {
         Self::rgbf(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
     }
 
-    /// Returns a color value from red, green, blue float values. Alpha will be set to 1.0.
+    /// Creates a color from red, green, and blue f32 values. Alpha is set to 1.0.
     pub const fn rgbf(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
 
-    /// Returns a color value from red, green, blue and alpha char values.
+    /// Creates a color from red, green, blue, and alpha u8 values.
     pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self::rgbaf(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0)
     }
 
-    /// Returns a color value from red, green, blue and alpha char values.
+    /// Creates a color from red, green, blue, and alpha f32 values.
     pub const fn rgbaf(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
-    /// Returns color value specified by hue, saturation and lightness.
-    /// HSL values are all in range [0..1], alpha will be set to 1.0.
+    /// Creates a color from hue, saturation, and lightness f32 values. Alpha is set to 1.0.
+    /// All values are all in range [0..1].
     pub fn hsl(h: f32, s: f32, l: f32) -> Self {
         Self::hsla(h, s, l, 1.0)
     }
 
-    /// Returns color value specified by hue, saturation, lightness and alpha.
-    /// All values are in range [0..1]
+    /// Creates a color from hue, saturation, lightness, and alpha f32 values.
+    /// All values are all in range [0..1].
     pub fn hsla(h: f32, s: f32, l: f32, a: f32) -> Self {
         let mut h = h % 1.0;
 
@@ -58,8 +62,8 @@ impl Color {
         }
     }
 
-    /// Returns color value for a 6-digit (`RRGGBB`) or 8-digit (`RRGGBBAA`)
-    /// HTML hexadecimal string. Any other length produces `rgb(0,0,0)`.
+    /// Creates a color from a 6-digit (`RRGGBB`) or 8-digit (`RRGGBBAA`) HTML hexadecimal string.
+    /// Any other length produces `rgb(0,0,0)`.
     /// The “#” is optional.
     pub fn hex(raw_hex: &str) -> Self {
         let hex = raw_hex.trim_start_matches('#');
@@ -78,26 +82,27 @@ impl Color {
         }
     }
 
-    /// Returns a white color
+    /// Returns a white color (1.0, 1.0, 1.0, 1.0)
     pub const fn white() -> Self {
         Self::rgbaf(1.0, 1.0, 1.0, 1.0)
     }
 
-    /// Returns a black color
+    /// Returns a black color (0.0, 0.0, 0.0, 1.0)
     pub const fn black() -> Self {
         Self::rgbaf(0.0, 0.0, 0.0, 1.0)
     }
 
-    /// Sets transparency of a color value.
+    /// Sets the alpha (opacity) component of the color from a u8 value.
     pub fn set_alpha(&mut self, a: u8) {
         self.set_alphaf(a as f32 / 255.0);
     }
 
-    /// Sets transparency of a color value.
+    /// Sets the alpha (opacity) component of the color from an f32 value.
     pub fn set_alphaf(&mut self, a: f32) {
         self.a = a;
     }
 
+    /// Returns a color with premultiplied alpha components.
     pub fn premultiplied(self) -> Self {
         Self {
             r: self.r * self.a,
@@ -107,10 +112,12 @@ impl Color {
         }
     }
 
+    /// Converts the color to a [f32; 4] array.
     pub const fn to_array(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
 
+    /// Checks if the color is black (0.0, 0.0, 0.0, 0.0)
     pub fn is_black(&self) -> bool {
         self.r == 0.0 && self.g == 0.0 && self.b == 0.0 && self.a == 0.0
     }
