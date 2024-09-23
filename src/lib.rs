@@ -63,11 +63,18 @@ pub use path::{Path, PathIter, Solidity, Verb};
 mod gradient_store;
 use gradient_store::GradientStore;
 
-/// The fill rule used when filling paths: `EvenOdd`, `NonZero` (default).
+/// Determines the fill rule used when filling paths.
+///
+/// The fill rule defines how the interior of a shape is determined.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FillRule {
+    /// The interior is determined using the even-odd rule.
+    /// A point is considered inside the shape if it intersects the shape's outline an odd number of times.
     EvenOdd,
+    /// The interior is determined using the non-zero winding rule (default).
+    /// A point is considered inside the shape if it intersects the shape's outline a non-zero number of times,
+    /// considering the direction of each intersection.
     NonZero,
 }
 
@@ -417,6 +424,7 @@ where
         }
     }
 
+    /// Returns a screenshot of the current canvas.
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         self.flush();
         self.renderer.screenshot()
@@ -557,10 +565,12 @@ where
             .and_then(|image| self.renderer.get_native_texture(image))
     }
 
+    /// Retrieves a reference to the image with the specified ID.
     pub fn get_image(&self, id: ImageId) -> Option<&T::Image> {
         self.images.get(id)
     }
 
+    /// Retrieves a mutable reference to the image with the specified ID.
     pub fn get_image_mut(&mut self, id: ImageId) -> Option<&mut T::Image> {
         self.images.get_mut(id)
     }
