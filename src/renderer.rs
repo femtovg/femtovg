@@ -71,7 +71,7 @@ impl Command {
     pub fn new(flavor: CommandType) -> Self {
         Self {
             cmd_type: flavor,
-            drawables: Default::default(),
+            drawables: Vec::new(),
             triangles_verts: None,
             image: None,
             glyph_texture: Default::default(),

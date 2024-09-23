@@ -80,8 +80,8 @@ impl Default for Contour {
             closed: Default::default(),
             bevel: Default::default(),
             solidity: None,
-            fill: Default::default(),
-            stroke: Default::default(),
+            fill: Vec::new(),
+            stroke: Vec::new(),
             convexity: Default::default(),
         }
     }
