@@ -190,14 +190,14 @@ impl Font {
         &self,
         face: &rustybuzz::Face<'_>,
         codepoint: u16,
-        _pixels_per_em: u16,
+        pixels_per_em: u16,
     ) -> Option<GlyphRendering> {
         #[cfg(feature = "image-loading")]
-        if let Some(image) =
-            face.glyph_raster_image(GlyphId(codepoint), _pixels_per_em)
-                .and_then(|raster_glyph_image| {
-                    image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
-                })
+        if let Some(image) = face
+            .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
+            .and_then(|raster_glyph_image| {
+                image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
+            })
         {
             return Some(GlyphRendering::RenderAsImage(image));
         };
