@@ -498,8 +498,6 @@ impl PathCache {
                     return true;
                 }
             }
-
-            false
         } else {
             // NonZero
             for contour in &self.contours {
@@ -519,9 +517,9 @@ impl PathCache {
                     return true;
                 }
             }
-
-            false
         }
+
+        false
     }
 
     pub(crate) fn expand_fill(&mut self, fringe_width: f32, line_join: LineJoin, miter_limit: f32) {
