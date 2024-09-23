@@ -97,7 +97,7 @@ It compiles, runs, and immediately exits successfully.
 We have an OpenGL context and display now – the Femtovg renderer can use it as output for rendering things. Let's create a renderer from the display we have:
 
 ```rust,ignore
-let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
         .expect("Cannot create renderer");
 ```
 
