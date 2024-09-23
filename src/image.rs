@@ -16,40 +16,53 @@ use crate::{ErrorKind, Renderer};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ImageId(DefaultKey);
 
-/// Image format: `Rgb8`, `Rgba8`, `Gray8`.
+/// Specifies the format of an image's pixels.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PixelFormat {
+    /// 24-bit RGB image format (8 bits per channel)
     Rgb8,
+    /// 32-bit RGBA image format (8 bits per channel, including alpha)
     Rgba8,
+    /// 8-bit grayscale image format
     Gray8,
 }
 
 bitflags! {
-    /// Image flags (eg. repeat, flip, mipmaps, etc.)
+    /// Represents a set of flags that modify the behavior of an image.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ImageFlags: u32 {
-        const GENERATE_MIPMAPS = 1;     // Generate mipmaps during creation of the image.
-        const REPEAT_X = 1 << 1;        // Repeat image in X direction.
-        const REPEAT_Y = 1 << 2;        // Repeat image in Y direction.
-        const FLIP_Y = 1 << 3;          // Flips (inverses) image in Y direction when rendered.
-        const PREMULTIPLIED = 1 << 4;   // Image data has premultiplied alpha.
-        const NEAREST = 1 << 5;         // Image interpolation is Nearest instead Linear
+        /// Generates mipmaps during the creation of the image.
+        const GENERATE_MIPMAPS = 1;
+        /// Repeats the image in the X direction when rendered.
+        const REPEAT_X = 1 << 1;
+        /// Repeats the image in the Y direction when rendered.
+        const REPEAT_Y = 1 << 2;
+        /// Flips (inverses) the image in the Y direction when rendered.
+        const FLIP_Y = 1 << 3;
+        /// Indicates that the image data has premultiplied alpha.
+        const PREMULTIPLIED = 1 << 4;
+        /// Uses nearest-neighbor interpolation instead of linear interpolation when rendering the image.
+        const NEAREST = 1 << 5;
     }
 }
 
-/// Image source
+/// Represents the source of an image.
 #[derive(Copy, Clone, Debug)]
 #[non_exhaustive]
 pub enum ImageSource<'a> {
+    /// Image source with RGB image format (8 bits per channel)
     Rgb(ImgRef<'a, RGB8>),
+    /// Image source with RGBA image format (8 bits per channel, including alpha)
     Rgba(ImgRef<'a, RGBA8>),
+    /// Image source with 8-bit grayscale image format
     Gray(ImgRef<'a, GRAY8>),
+    /// Image source referencing a HTML image element (only available on `wasm32` target)
     #[cfg(target_arch = "wasm32")]
     HtmlImageElement(&'a web_sys::HtmlImageElement),
 }
 
 impl ImageSource<'_> {
-    /// Source format
+    /// Returns the format of the image source.
     pub fn format(&self) -> PixelFormat {
         match self {
             Self::Rgb(_) => PixelFormat::Rgb8,
@@ -60,7 +73,7 @@ impl ImageSource<'_> {
         }
     }
 
-    /// Source dimensions
+    /// Returns the dimensions (width and height) of the image source.
     pub fn dimensions(&self) -> Size {
         match self {
             Self::Rgb(imgref) => Size::new(imgref.width(), imgref.height()),
@@ -143,6 +156,7 @@ pub struct ImageInfo {
 }
 
 impl ImageInfo {
+    /// Creates a new `ImageInfo` with the specified flags, width, height, and format.
     pub fn new(flags: ImageFlags, width: usize, height: usize, format: PixelFormat) -> Self {
         Self {
             flags,
@@ -151,31 +165,32 @@ impl ImageInfo {
         }
     }
 
-    /// Image flags
+    /// Returns the image flags.
     pub fn flags(&self) -> ImageFlags {
         self.flags
     }
 
-    /// Image width in pixels
+    /// Returns the image width in pixels.
     pub fn width(&self) -> usize {
         self.size.width
     }
 
-    /// Image height in pixels
+    /// Returns the image height in pixels.
     pub fn height(&self) -> usize {
         self.size.height
     }
 
-    /// Image size (height and width) in pixels
+    /// Returns the image size (width and height) in pixels.
     pub fn size(&self) -> Size {
         self.size
     }
 
-    /// Image format
+    /// Returns the image format.
     pub fn format(&self) -> PixelFormat {
         self.format
     }
 
+    /// Sets the image format.
     pub fn set_format(&mut self, format: PixelFormat) {
         self.format = format;
     }
@@ -209,9 +224,7 @@ impl<T> ImageStore<T> {
         Ok(ImageId(self.0.insert((info, image))))
     }
 
-    ///
-    /// Reallocates the image without changing the id.
-    ///
+    // Reallocates the image without changing the id.
     pub fn realloc<R: Renderer<Image = T>>(
         &mut self,
         renderer: &mut R,
@@ -269,11 +282,13 @@ impl<T> ImageStore<T> {
     }
 }
 
-/// `ImageFilter` allows specifying the type of filter to apply to images with
-/// [`crate::Canvas::filter_image`].
+/// Specifies the type of filter to apply to images with `crate::Canvas::filter_image`.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub enum ImageFilter {
-    /// The filter shall be a gaussian blur with given sigma as standard deviation.
-    GaussianBlur { sigma: f32 },
+    /// Applies a Gaussian blur filter with the specified standard deviation.
+    GaussianBlur {
+        /// The standard deviation of the Gaussian blur filter.
+        sigma: f32,
+    },
 }
