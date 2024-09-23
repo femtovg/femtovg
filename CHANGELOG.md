@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 ## Unreleased
 
 - **breaking**: Removed the mutable reference of self in `new` constructor for Transform2D
+ - Implemented arithmetic operations for `Transform2D`
 
 ## [0.9.2] - 2024-06-27
 

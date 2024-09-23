@@ -1,6 +1,6 @@
 use std::{
     hash::{Hash, Hasher},
-    ops::{Add, Index, IndexMut, Mul, MulAssign, Neg, Sub},
+    ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use fnv::FnvHasher;
@@ -198,7 +198,6 @@ pub fn quantize(a: f32, d: f32) -> f32 {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Transform2D(pub [f32; 6]);
 
-// TODO: Implement std::ops::* on this
 impl Transform2D {
     /// Creates an identity transformation with no translation, rotation or scaling applied.
     pub fn identity() -> Self {
@@ -356,6 +355,83 @@ impl Index<usize> for Transform2D {
 impl IndexMut<usize> for Transform2D {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
+    }
+}
+
+impl Add for Transform2D {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self([
+            self[0] + rhs[0],
+            self[1] + rhs[1],
+            self[2] + rhs[2],
+            self[3] + rhs[3],
+            self[4] + rhs[4],
+            self[5] + rhs[5],
+        ])
+    }
+}
+
+impl AddAssign for Transform2D {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
+}
+
+impl Sub for Transform2D {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self([
+            self[0] - rhs[0],
+            self[1] - rhs[1],
+            self[2] - rhs[2],
+            self[3] - rhs[3],
+            self[4] - rhs[4],
+            self[5] - rhs[5],
+        ])
+    }
+}
+
+impl SubAssign for Transform2D {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
+impl Mul for Transform2D {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        let t0 = self[0] * rhs[0] + self[1] * rhs[2];
+        let t1 = self[0] * rhs[1] + self[1] * rhs[3];
+        let t2 = self[2] * rhs[0] + self[3] * rhs[2];
+        let t3 = self[2] * rhs[1] + self[3] * rhs[3];
+        let t4 = self[4] * rhs[0] + self[5] * rhs[2] + rhs[4];
+        let t5 = self[4] * rhs[1] + self[5] * rhs[3] + rhs[5];
+
+        Self([t0, t1, t2, t3, t4, t5])
+    }
+}
+
+impl MulAssign for Transform2D {
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
+    }
+}
+
+impl Div for Transform2D {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self * rhs.inversed()
+    }
+}
+
+impl DivAssign for Transform2D {
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
     }
 }
 
