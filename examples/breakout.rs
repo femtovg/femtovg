@@ -497,7 +497,7 @@ impl Game {
         }
     }
 
-    fn draw(&mut self, canvas: &mut Canvas) {
+    fn draw(&self, canvas: &mut Canvas) {
         // draw background
         let step_size_x = self.size.width / 50.0;
 
