@@ -72,8 +72,8 @@ impl Command {
         Self {
             cmd_type: flavor,
             drawables: Default::default(),
-            triangles_verts: Default::default(),
-            image: Default::default(),
+            triangles_verts: None,
+            image: None,
             glyph_texture: Default::default(),
             fill_rule: Default::default(),
             composite_operation: Default::default(),
