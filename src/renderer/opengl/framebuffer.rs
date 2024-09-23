@@ -14,7 +14,7 @@ pub struct Framebuffer {
 
 impl Framebuffer {
     pub fn from_external(context: &Rc<glow::Context>, fbo: <glow::Context as glow::HasContext>::Framebuffer) -> Self {
-        Framebuffer {
+        Self {
             context: context.clone(),
             fbo,
             stencil_rbo: None,
@@ -79,7 +79,7 @@ impl Framebuffer {
             context.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
 
-        Ok(Framebuffer {
+        Ok(Self {
             context: context.clone(),
             fbo,
             stencil_rbo: Some(stencil_rbo),

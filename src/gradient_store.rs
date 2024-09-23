@@ -17,8 +17,8 @@ pub struct GradientStore {
 }
 impl GradientStore {
     /// Create a new empty gradient store
-    pub fn new() -> GradientStore {
-        GradientStore {
+    pub fn new() -> Self {
+        Self {
             this_frame: BTreeMap::new(),
             prev_frame: BTreeMap::new(),
         }

@@ -163,7 +163,7 @@ impl OpenGl {
         let main_programs_with_glyph_texture = generate_shader_program_variants(true)?;
         let main_programs_without_glyph_texture = generate_shader_program_variants(false)?;
 
-        let mut opengl = OpenGl {
+        let mut opengl = Self {
             debug,
             antialias,
             is_opengles_2_0: false,

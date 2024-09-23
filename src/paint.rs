@@ -89,30 +89,30 @@ pub enum GradientColors {
 impl GradientColors {
     fn mul_alpha(&mut self, a: f32) {
         match self {
-            GradientColors::TwoStop { start_color, end_color } => {
+            Self::TwoStop { start_color, end_color } => {
                 start_color.a *= a;
                 end_color.a *= a;
             }
-            GradientColors::MultiStop { stops, .. } => {
+            Self::MultiStop { stops, .. } => {
                 stops.tint *= a;
             }
         }
     }
-    fn from_stops<Stops>(stops: Stops) -> GradientColors
+    fn from_stops<Stops>(stops: Stops) -> Self
     where
         Stops: IntoIterator<Item = (f32, Color)>,
     {
         let mut stops = stops.into_iter();
         let Some(first_stop) = stops.next() else {
             // No stops, we use black.
-            return GradientColors::TwoStop {
+            return Self::TwoStop {
                 start_color: Color::black(),
                 end_color: Color::black(),
             };
         };
         let Some(second_stop) = stops.next() else {
             // One stop devolves to a solid color fill (but using the gradient shader variation).
-            return GradientColors::TwoStop {
+            return Self::TwoStop {
                 start_color: first_stop.1,
                 end_color: first_stop.1,
             };
@@ -123,7 +123,7 @@ impl GradientColors {
         if maybe_third_stop.is_none() && first_stop.0 <= 0.0 && second_stop.0 >= 1.0 {
             // Two stops takes the classic gradient path, so long as the stop positions are at
             // the extents (if the stop positions are inset then we'll fill to them).
-            return GradientColors::TwoStop {
+            return Self::TwoStop {
                 start_color: first_stop.1,
                 end_color: second_stop.1,
             };
@@ -138,7 +138,7 @@ impl GradientColors {
             .chain(stops)
             .map(|(stop, color)| GradientStop(stop, color))
             .collect();
-        GradientColors::MultiStop {
+        Self::MultiStop {
             stops: MultiStopGradient {
                 shared_stops: out_stops,
                 tint: 1.0,
@@ -185,19 +185,19 @@ pub enum PaintFlavor {
 impl PaintFlavor {
     pub(crate) fn mul_alpha(&mut self, a: f32) {
         match self {
-            PaintFlavor::Color(color) => {
+            Self::Color(color) => {
                 color.a *= a;
             }
-            PaintFlavor::Image { tint, .. } => {
+            Self::Image { tint, .. } => {
                 tint.a *= a;
             }
-            PaintFlavor::LinearGradient { colors, .. } => {
+            Self::LinearGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
-            PaintFlavor::BoxGradient { colors, .. } => {
+            Self::BoxGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
-            PaintFlavor::RadialGradient { colors, .. } => {
+            Self::RadialGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
         }
@@ -205,16 +205,16 @@ impl PaintFlavor {
 
     pub(crate) fn gradient_colors(&self) -> Option<&GradientColors> {
         match self {
-            PaintFlavor::LinearGradient { colors, .. } => Some(colors),
-            PaintFlavor::BoxGradient { colors, .. } => Some(colors),
-            PaintFlavor::RadialGradient { colors, .. } => Some(colors),
+            Self::LinearGradient { colors, .. } => Some(colors),
+            Self::BoxGradient { colors, .. } => Some(colors),
+            Self::RadialGradient { colors, .. } => Some(colors),
             _ => None,
         }
     }
 
     /// Returns true if this paint is an untransformed image paint without anti-aliasing at the edges in case of a fill
     pub(crate) fn is_straight_tinted_image(&self, shape_anti_alias: bool) -> bool {
-        matches!(self, &PaintFlavor::Image { angle, .. } if angle == 0.0 && !shape_anti_alias)
+        matches!(self, &Self::Image { angle, .. } if angle == 0.0 && !shape_anti_alias)
     }
 }
 
@@ -328,11 +328,11 @@ impl Default for Paint {
 impl Paint {
     /// Creates a new solid color paint
     pub fn color(color: Color) -> Self {
-        Paint::with_flavor(PaintFlavor::Color(color))
+        Self::with_flavor(PaintFlavor::Color(color))
     }
 
     fn with_flavor(flavor: PaintFlavor) -> Self {
-        Paint {
+        Self {
             flavor,
             ..Default::default()
         }
@@ -360,7 +360,7 @@ impl Paint {
     /// canvas.fill_path(&path, &fill_paint);
     /// ```
     pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
-        Paint::with_flavor(PaintFlavor::Image {
+        Self::with_flavor(PaintFlavor::Image {
             id,
             center: Position { x: cx, y: cy },
             width,
@@ -373,7 +373,7 @@ impl Paint {
     /// Like `image`, but allows for adding a tint, or a color which will transform each pixel's
     /// color via channel-wise multiplication.
     pub fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
-        Paint::with_flavor(PaintFlavor::Image {
+        Self::with_flavor(PaintFlavor::Image {
             id,
             center: Position { x: cx, y: cy },
             width,
@@ -406,7 +406,7 @@ impl Paint {
         start_color: Color,
         end_color: Color,
     ) -> Self {
-        Paint::with_flavor(PaintFlavor::LinearGradient {
+        Self::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
             colors: GradientColors::TwoStop { start_color, end_color },
@@ -441,7 +441,7 @@ impl Paint {
         end_y: f32,
         stops: impl IntoIterator<Item = (f32, Color)>,
     ) -> Self {
-        Paint::with_flavor(PaintFlavor::LinearGradient {
+        Self::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
             colors: GradientColors::from_stops(stops),
@@ -488,7 +488,7 @@ impl Paint {
         inner_color: Color,
         outer_color: Color,
     ) -> Self {
-        Paint::with_flavor(PaintFlavor::BoxGradient {
+        Self::with_flavor(PaintFlavor::BoxGradient {
             pos: Position { x, y },
             width,
             height,
@@ -534,7 +534,7 @@ impl Paint {
         inner_color: Color,
         outer_color: Color,
     ) -> Self {
-        Paint::with_flavor(PaintFlavor::RadialGradient {
+        Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
             in_radius,
             out_radius,
@@ -581,7 +581,7 @@ impl Paint {
         out_radius: f32,
         stops: impl IntoIterator<Item = (f32, Color)>,
     ) -> Self {
-        Paint::with_flavor(PaintFlavor::RadialGradient {
+        Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
             in_radius,
             out_radius,

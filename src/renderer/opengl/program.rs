@@ -36,7 +36,7 @@ impl Shader {
             return Err(ErrorKind::ShaderCompileError(format!("{name}: {error}")));
         }
 
-        Ok(Shader {
+        Ok(Self {
             context: context.clone(),
             id,
         })

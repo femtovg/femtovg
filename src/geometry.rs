@@ -372,16 +372,16 @@ impl Rect {
         Self { x, y, w, h }
     }
 
-    pub fn intersect(&self, other: Rect) -> Rect {
+    pub fn intersect(&self, other: Self) -> Self {
         let minx = self.x.max(other.x);
         let miny = self.y.max(other.y);
         let maxx = (self.x + self.w).min(other.x + other.w);
         let maxy = (self.y + self.h).min(other.y + other.h);
 
-        Rect::new(minx, miny, 0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny))
+        Self::new(minx, miny, 0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny))
     }
 
-    pub fn contains_rect(&self, other: &Rect) -> bool {
+    pub fn contains_rect(&self, other: &Self) -> bool {
         other.is_empty()
             || (self.x <= other.x
                 && other.x + other.w <= self.x + self.w
@@ -389,7 +389,7 @@ impl Rect {
                 && other.y + other.h <= self.y + self.h)
     }
 
-    pub fn intersection(&self, other: &Rect) -> Option<Self> {
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
         let x = self.x.max(other.x);
         let y = self.y.max(other.y);
         let w = (self.x + self.w).min(other.x + other.w) - x;

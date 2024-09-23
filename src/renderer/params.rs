@@ -38,7 +38,7 @@ impl Params {
         fringe_width: f32,
         stroke_thr: f32,
     ) -> Self {
-        let mut params = Params::default();
+        let mut params = Self::default();
 
         // Scissor
         let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
