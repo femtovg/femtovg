@@ -589,34 +589,34 @@ impl Paint {
         })
     }
 
-    /// Creates a new solid color paint
+    /// Sets the color of the paint.
     pub fn set_color(&mut self, color: Color) {
         self.flavor = PaintFlavor::Color(color);
     }
 
-    /// Returns the paint with a new solid color set to the specified value.
+    /// Returns the paint with the color set to the specified value.
     pub fn with_color(mut self, color: Color) -> Self {
         self.set_color(color);
         self
     }
 
-    /// Returns boolean if the shapes drawn with this paint will be antialiased.
+    /// Returns the current anti-alias setting.
     pub fn anti_alias(&self) -> bool {
         self.shape_anti_alias
     }
 
-    /// Sets whether shapes drawn with this paint will be anti aliased. Enabled by default.
+    /// Sets whether shapes drawn with this paint will be anti-aliased.
     pub fn set_anti_alias(&mut self, value: bool) {
         self.shape_anti_alias = value;
     }
 
-    /// Returns the paint with anti alias set to the specified value.
+    /// Returns the paint with anti-alias set to the specified value.
     pub fn with_anti_alias(mut self, value: bool) -> Self {
         self.set_anti_alias(value);
         self
     }
 
-    /// True if this paint uses higher quality stencil strokes.
+    /// Returns whether higher quality stencil strokes are used.
     pub fn stencil_strokes(&self) -> bool {
         self.stroke.stencil_strokes
     }
@@ -637,7 +637,7 @@ impl Paint {
         self.stroke.line_width
     }
 
-    /// Sets the line width for shapes stroked with this paint.
+    /// Sets the line width.
     pub fn set_line_width(&mut self, width: f32) {
         self.stroke.line_width = width;
     }
@@ -648,7 +648,7 @@ impl Paint {
         self
     }
 
-    /// Getter for the miter limit
+    /// Returns the current miter limit.
     pub fn miter_limit(&self) -> f32 {
         self.stroke.miter_limit
     }
@@ -666,64 +666,56 @@ impl Paint {
         self
     }
 
-    /// Returns the current start line cap for this paint.
+    /// Returns the current start line cap.
     pub fn line_cap_start(&self) -> LineCap {
         self.stroke.line_cap_start
     }
 
-    /// Returns the current start line cap for this paint.
+    /// Returns the current end line cap.
     pub fn line_cap_end(&self) -> LineCap {
         self.stroke.line_cap_end
     }
 
-    /// Sets how the start and end of the line (cap) is drawn
-    ///
-    /// By default it's set to `LineCap::Butt`
+    /// Sets the line cap for both start and end of the line.
     pub fn set_line_cap(&mut self, cap: LineCap) {
         self.stroke.line_cap_start = cap;
         self.stroke.line_cap_end = cap;
     }
 
-    /// Returns the paint with line cap set to the specified value.
+    /// Returns the paint with the line cap set to the specified value.
     pub fn with_line_cap(mut self, cap: LineCap) -> Self {
         self.set_line_cap(cap);
         self
     }
 
-    /// Sets how the beggining cap of the line is drawn
-    ///
-    /// By default it's set to `LineCap::Butt`
+    /// Sets the line cap for the start of the line.
     pub fn set_line_cap_start(&mut self, cap: LineCap) {
         self.stroke.line_cap_start = cap;
     }
 
-    /// Returns the paint with the beginning cap of the line set to the specified value.
+    /// Returns the paint with the start line cap set to the specified value.
     pub fn with_line_cap_start(mut self, cap: LineCap) -> Self {
         self.set_line_cap_start(cap);
         self
     }
 
-    /// Sets how the end cap of the line is drawn
-    ///
-    /// By default it's set to `LineCap::Butt`
+    /// Sets the line cap for the end of the line.
     pub fn set_line_cap_end(&mut self, cap: LineCap) {
         self.stroke.line_cap_end = cap;
     }
 
-    /// Returns the paint with the beginning cap of the line set to the specified value.
+    /// Returns the paint with the end line cap set to the specified value.
     pub fn with_line_cap_end(mut self, cap: LineCap) -> Self {
         self.set_line_cap_end(cap);
         self
     }
 
-    /// Returns the current line join for this paint.
+    /// Returns the current line join.
     pub fn line_join(&self) -> LineJoin {
         self.stroke.line_join
     }
 
-    /// Sets how sharp path corners are drawn.
-    ///
-    /// By default it's set to `LineJoin::Miter`
+    /// Sets the line join.
     pub fn set_line_join(&mut self, join: LineJoin) {
         self.stroke.line_join = join;
     }
@@ -734,6 +726,7 @@ impl Paint {
         self
     }
 
+    /// Sets the font.
     pub fn set_font(&mut self, font_ids: &[FontId]) {
         self.text.font_ids = Default::default();
 
@@ -748,16 +741,12 @@ impl Paint {
         self
     }
 
-    /// Returns the current font size
-    ///
-    /// Only has effect on canvas text operations
+    /// Returns the current font size for text operations.
     pub fn font_size(&self) -> f32 {
         self.text.font_size
     }
 
-    /// Sets the font size.
-    ///
-    /// Only has effect on canvas text operations
+    /// Sets the font size for text operations.
     pub fn set_font_size(&mut self, size: f32) {
         self.text.font_size = size;
     }
@@ -768,14 +757,12 @@ impl Paint {
         self
     }
 
-    /// Returns the current letter spacing
+    /// Returns the current letter spacing for text operations.
     pub fn letter_spacing(&self) -> f32 {
         self.text.letter_spacing
     }
 
-    /// Sets the letter spacing for this paint
-    ///
-    /// Only has effect on canvas text operations
+    /// Sets the letter spacing for text operations.
     pub fn set_letter_spacing(&mut self, spacing: f32) {
         self.text.letter_spacing = spacing;
     }
@@ -786,55 +773,49 @@ impl Paint {
         self
     }
 
-    /// Returns the current vertical align
+    /// Returns the current text baseline for text operations.
     pub fn text_baseline(&self) -> Baseline {
         self.text.text_baseline
     }
 
-    /// Sets the text vertical alignment for this paint
-    ///
-    /// Only has effect on canvas text operations
+    /// Sets the text baseline for text operations.
     pub fn set_text_baseline(&mut self, align: Baseline) {
         self.text.text_baseline = align;
     }
 
-    /// Returns the paint with the text vertical alignment set to the specified value.
+    /// Returns the paint with the text baseline set to the specified value.
     pub fn with_text_baseline(mut self, align: Baseline) -> Self {
         self.set_text_baseline(align);
         self
     }
 
-    /// Returns the current horizontal align
+    /// Returns the current text alignment for text operations.
     pub fn text_align(&self) -> Align {
         self.text.text_align
     }
 
-    /// Sets the text horizontal alignment for this paint
-    ///
-    /// Only has effect on canvas text operations
+    /// Sets the text alignment for text operations.
     pub fn set_text_align(&mut self, align: Align) {
         self.text.text_align = align;
     }
 
-    /// Returns the paint with the text horizontal alignment set to the specified value.
+    /// Returns the paint with the text alignment set to the specified value.
     pub fn with_text_align(mut self, align: Align) -> Self {
         self.set_text_align(align);
         self
     }
 
-    /// Retrieves the current fill rule setting for this paint
+    /// Returns the current fill rule for filling paths.
     pub fn fill_rule(&self) -> FillRule {
         self.fill_rule
     }
 
-    /// Sets the current rule to be used when filling a path
-    ///
-    /// <https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/fill-rule>
+    /// Sets the fill rule for filling paths.
     pub fn set_fill_rule(&mut self, rule: FillRule) {
         self.fill_rule = rule;
     }
 
-    /// Returns the paint with the rule for filling a path set to the specified value.
+    /// Returns the paint with the fill rule set to the specified value.
     pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
         self.set_fill_rule(rule);
         self
