@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 /*!
  * The femtovg API is (like [NanoVG](https://github.com/memononen/nanovg))
  * loosely modeled on the
@@ -9,7 +11,6 @@
 
 /*
 TODO:
-    - Documentation
     - Tests
 */
 
