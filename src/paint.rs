@@ -290,8 +290,7 @@ impl Default for TextSettings {
 /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
 ///
 /// let fill_paint = Paint::color(Color::hex("454545"));
-/// let mut stroke_paint = Paint::color(Color::hex("bababa"));
-/// stroke_paint.set_line_width(4.0);
+/// let stroke_paint = Paint::color(Color::hex("bababa")).with_line_width(4.0);
 ///
 /// let mut path = Path::new();
 /// path.rounded_rect(10.0, 10.0, 100.0, 100.0, 20.0);
