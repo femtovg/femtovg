@@ -189,9 +189,10 @@ impl Vertex {
 }
 
 /// Represents different types of shaders used by the renderer.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub enum ShaderType {
     /// Fill gradient shader.
+    #[default]
     FillGradient,
     /// Fill image shader.
     FillImage,
@@ -205,12 +206,6 @@ pub enum ShaderType {
     FillColor,
     /// Texture copy unclipped shader.
     TextureCopyUnclipped,
-}
-
-impl Default for ShaderType {
-    fn default() -> Self {
-        Self::FillGradient
-    }
 }
 
 impl ShaderType {

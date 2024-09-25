@@ -49,17 +49,12 @@ impl Point {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub enum Convexity {
     Concave,
     Convex,
+    #[default]
     Unknown,
-}
-
-impl Default for Convexity {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Clone, Debug)]

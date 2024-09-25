@@ -67,7 +67,7 @@ use gradient_store::GradientStore;
 /// Determines the fill rule used when filling paths.
 ///
 /// The fill rule defines how the interior of a shape is determined.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FillRule {
     /// The interior is determined using the even-odd rule.
@@ -76,13 +76,8 @@ pub enum FillRule {
     /// The interior is determined using the non-zero winding rule (default).
     /// A point is considered inside the shape if it intersects the shape's outline a non-zero number of times,
     /// considering the direction of each intersection.
+    #[default]
     NonZero,
-}
-
-impl Default for FillRule {
-    fn default() -> Self {
-        Self::NonZero
-    }
 }
 
 /// Blend factors.
@@ -226,10 +221,11 @@ impl Scissor {
 
 /// Determines the shape used to draw the end points of lines:
 /// `Butt` (default), `Round`, `Square`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineCap {
     /// The ends of lines are squared off at the endpoints. Default value.
+    #[default]
     Butt,
     /// The ends of lines are rounded.
     Round,
@@ -238,21 +234,16 @@ pub enum LineCap {
     Square,
 }
 
-impl Default for LineCap {
-    fn default() -> Self {
-        Self::Butt
-    }
-}
-
 /// Determines the shape used to join two line segments where they meet.
 /// `Miter` (default), `Round`, `Bevel`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum LineJoin {
     /// Connected segments are joined by extending their outside edges to
     /// connect at a single point, with the effect of filling an additional
     /// lozenge-shaped area. This setting is affected by the miterLimit property.
     /// Default value.
+    #[default]
     Miter,
     /// Rounds off the corners of a shape by filling an additional sector
     /// of disc centered at the common endpoint of connected segments.
@@ -262,12 +253,6 @@ pub enum LineJoin {
     /// of connected segments, and the separate outside rectangular
     /// corners of each segment.
     Bevel,
-}
-
-impl Default for LineJoin {
-    fn default() -> Self {
-        Self::Miter
-    }
 }
 
 #[derive(Copy, Clone, Debug)]

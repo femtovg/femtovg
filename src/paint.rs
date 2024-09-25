@@ -218,17 +218,12 @@ impl PaintFlavor {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum GlyphTexture {
+    #[default]
     None,
     AlphaMask(ImageId),
     ColorTexture(ImageId),
-}
-
-impl Default for GlyphTexture {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Clone, Debug)]

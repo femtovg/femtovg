@@ -49,7 +49,7 @@ pub struct FontId(DefaultKey);
 /// Represents the vertical alignment of a text baseline.
 ///
 /// The default value is `Alphabetic`.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Baseline {
     /// The text baseline is the top of the em square.
@@ -57,24 +57,20 @@ pub enum Baseline {
     /// The text baseline is the middle of the em square.
     Middle,
     /// The text baseline is the normal alphabetic baseline.
+    #[default]
     Alphabetic,
     /// The text baseline is the bottom of the bounding box.
     Bottom,
 }
 
-impl Default for Baseline {
-    fn default() -> Self {
-        Self::Alphabetic
-    }
-}
-
 /// Represents the horizontal alignment of text.
 ///
 /// The default value is `Left`.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Align {
     /// The text is left-aligned.
+    #[default]
     Left,
     /// The text is centered.
     Center,
@@ -82,27 +78,16 @@ pub enum Align {
     Right,
 }
 
-impl Default for Align {
-    fn default() -> Self {
-        Self::Left
-    }
-}
-
 /// Represents the rendering mode for a path.
 ///
 /// The default value is `Fill`.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Default)]
 pub enum RenderMode {
     /// The path is filled.
+    #[default]
     Fill,
     /// The path is stroked.
     Stroke,
-}
-
-impl Default for RenderMode {
-    fn default() -> Self {
-        Self::Fill
-    }
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
