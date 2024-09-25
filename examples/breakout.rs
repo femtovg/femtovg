@@ -545,22 +545,21 @@ impl Game {
         canvas.fill_path(&path, &logo_paint);
 
         // title
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font(&[self.fonts.bold]);
-        paint.set_font_size(80.0);
-
-        paint.set_line_width(4.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Center)
+            .with_font(&[self.fonts.bold])
+            .with_font_size(80.0)
+            .with_line_width(4.0);
         let _ = canvas.stroke_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
 
-        paint.set_color(Color::rgb(143, 80, 49));
+        let paint = paint.with_color(Color::rgb(143, 80, 49));
         let _ = canvas.fill_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
 
         // Info
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font(&[self.fonts.regular]);
-        paint.set_font_size(16.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Center)
+            .with_font(&[self.fonts.regular])
+            .with_font_size(16.0);
         let text = "Click anywhere to START.";
         let _ = canvas.fill_text(self.size.width / 2.0, (self.size.height / 2.0) + 40.0, text, &paint);
     }
@@ -654,16 +653,16 @@ impl Game {
         self.draw_bricks(canvas);
 
         // lives
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Right);
-        paint.set_font(&[self.fonts.bold]);
-        paint.set_font_size(22.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Right)
+            .with_font(&[self.fonts.bold])
+            .with_font_size(22.0);
         let _ = canvas.fill_text(self.size.width - 20.0, 25.0, &format!("Lives: {}", self.lives), &paint);
 
         // score
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_font(&[self.fonts.bold]);
-        paint.set_font_size(22.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_font(&[self.fonts.bold])
+            .with_font_size(22.0);
         let _ = canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), &paint);
     }
 
@@ -709,14 +708,14 @@ impl Game {
         canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
 
         // title
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font(&[self.fonts.bold]);
-        paint.set_font_size(80.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Center)
+            .with_font(&[self.fonts.bold])
+            .with_font_size(80.0)
+            .with_line_width(4.0);
 
         let offset = 30.0;
 
-        paint.set_line_width(4.0);
         let _ = canvas.stroke_text(
             self.size.width / 2.0,
             (self.size.height / 2.0) + offset,
@@ -724,7 +723,7 @@ impl Game {
             &paint,
         );
 
-        paint.set_color(Color::rgb(143, 80, 49));
+        let paint = paint.with_color(Color::rgb(143, 80, 49));
         let _ = canvas.fill_text(
             self.size.width / 2.0,
             (self.size.height / 2.0) + offset,
@@ -733,10 +732,10 @@ impl Game {
         );
 
         // Info
-        let mut paint = Paint::color(Color::rgb(240, 240, 240));
-        paint.set_text_align(Align::Center);
-        paint.set_font(&[self.fonts.regular]);
-        paint.set_font_size(16.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Center)
+            .with_font(&[self.fonts.regular])
+            .with_font_size(16.0);
         let _ = canvas.fill_text(
             self.size.width / 2.0,
             (self.size.height / 2.0) + offset * 2.0,
@@ -788,11 +787,11 @@ impl Powerup {
 
         canvas.stroke_path(&path, &Paint::color(Color::rgb(240, 240, 240)));
 
-        let mut text_paint = Paint::color(Color::rgb(240, 240, 240));
-        text_paint.set_text_align(Align::Center);
-        text_paint.set_text_baseline(Baseline::Middle);
-        text_paint.set_font(&[fonts.light]);
-        text_paint.set_font_size(16.0);
+        let text_paint = Paint::color(Color::rgb(240, 240, 240))
+            .with_text_align(Align::Center)
+            .with_text_baseline(Baseline::Middle)
+            .with_font(&[fonts.light])
+            .with_font_size(16.0);
         let _ = canvas.fill_text(
             self.rect.center().x,
             self.rect.center().y,

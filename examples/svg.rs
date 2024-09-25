@@ -158,8 +158,7 @@ fn run(
                     }
 
                     if canvas.contains_point(path, mousex, mousey, FillRule::NonZero) {
-                        let mut paint = Paint::color(Color::rgb(32, 240, 32));
-                        paint.set_line_width(1.0);
+                        let paint = Paint::color(Color::rgb(32, 240, 32)).with_line_width(1.0);
                         canvas.stroke_path(path, &paint);
                     }
                 }
@@ -215,10 +214,9 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
 
             let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
                 to_femto_color(&stroke.paint).map(|paint| {
-                    let mut stroke_paint = Paint::color(paint);
-                    stroke_paint.set_line_width(stroke.width.get() as f32);
-                    stroke_paint.set_anti_alias(true);
-                    stroke_paint
+                    Paint::color(paint)
+                        .with_line_width(stroke.width.get() as f32)
+                        .with_anti_alias(true)
                 })
             });
 

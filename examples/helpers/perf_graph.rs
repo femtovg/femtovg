@@ -52,20 +52,19 @@ impl PerfGraph {
         path.line_to(x + w, y + h);
         canvas.fill_path(&path, &Paint::color(Color::rgba(255, 192, 0, 128)));
 
-        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(12.0);
+        let text_paint = Paint::color(Color::rgba(240, 240, 240, 255)).with_font_size(12.0);
         let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", &text_paint);
 
-        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 255));
-        text_paint.set_font_size(14.0);
-        text_paint.set_text_align(Align::Right);
-        text_paint.set_text_baseline(Baseline::Top);
+        let text_paint = Paint::color(Color::rgba(240, 240, 240, 255))
+            .with_font_size(14.0)
+            .with_text_align(Align::Right)
+            .with_text_baseline(Baseline::Top);
         let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), &text_paint);
 
-        let mut text_paint = Paint::color(Color::rgba(240, 240, 240, 200));
-        text_paint.set_font_size(12.0);
-        text_paint.set_text_align(Align::Right);
-        text_paint.set_text_baseline(Baseline::Alphabetic);
+        let text_paint = Paint::color(Color::rgba(240, 240, 240, 200))
+            .with_font_size(12.0)
+            .with_text_align(Align::Right)
+            .with_text_baseline(Baseline::Alphabetic);
         let _ = canvas.fill_text(
             x + w - 5.0,
             y + h - 5.0,

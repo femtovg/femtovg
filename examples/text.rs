@@ -170,10 +170,10 @@ fn run(
                 draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
                 draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
-                let mut paint = Paint::color(Color::hex("B7410E"));
-                paint.set_font(&[fonts.bold]);
-                paint.set_text_baseline(Baseline::Top);
-                paint.set_text_align(Align::Right);
+                let paint = Paint::color(Color::hex("B7410E"))
+                    .with_font(&[fonts.bold])
+                    .with_text_baseline(Baseline::Top)
+                    .with_text_align(Align::Right);
                 let _ = canvas.fill_text(
                     size.width as f32 - 10.0,
                     10.0,
@@ -224,9 +224,9 @@ fn draw_baselines<T: Renderer>(
 ) {
     let baselines = [Baseline::Top, Baseline::Middle, Baseline::Alphabetic, Baseline::Bottom];
 
-    let mut paint = Paint::color(Color::black());
-    paint.set_font(&[fonts.sans]);
-    paint.set_font_size(font_size);
+    let mut paint = Paint::color(Color::black())
+        .with_font(&[fonts.sans])
+        .with_font_size(font_size);
 
     let mut base_text = "AbcpKjgF".to_string();
     if supports_emojis {
@@ -261,9 +261,9 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     path.line_to(x + 0.5, y + 80.);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(255, 32, 32, 128)));
 
-    let mut paint = Paint::color(Color::black());
-    paint.set_font(&[fonts.sans]);
-    paint.set_font_size(font_size);
+    let mut paint = Paint::color(Color::black())
+        .with_font(&[fonts.sans])
+        .with_font_size(font_size);
 
     for (i, alignment) in alignments.iter().enumerate() {
         paint.set_text_align(*alignment);
@@ -277,10 +277,10 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
 }
 
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, font_size: f32, text: &str) {
-    let mut paint = Paint::color(Color::black());
-    paint.set_font(&[fonts.light]);
-    //paint.set_text_align(Align::Right);
-    paint.set_font_size(font_size);
+    let paint = Paint::color(Color::black())
+        .with_font(&[fonts.light])
+        //.with_text_align(Align::Right)
+        .with_font_size(font_size);
 
     let font_metrics = canvas.measure_font(&paint).expect("Error measuring font");
 
@@ -318,9 +318,9 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: 
     let mut cursor_y = y;
 
     for i in 4..23 {
-        let mut paint = Paint::color(Color::black());
-        paint.set_font(&[fonts.sans]);
-        paint.set_font_size(i as f32);
+        let paint = Paint::color(Color::black())
+            .with_font(&[fonts.sans])
+            .with_font_size(i as f32);
 
         let font_metrics = canvas.measure_font(&paint).expect("Error measuring font");
 
@@ -331,47 +331,44 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: 
 }
 
 fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32) {
-    let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font(&[fonts.bold]);
-    paint.set_line_width(12.0);
-    paint.set_font_size(72.0);
+    let paint = Paint::color(Color::rgba(0, 0, 0, 128))
+        .with_font(&[fonts.bold])
+        .with_line_width(12.0)
+        .with_font_size(72.0);
     let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", &paint);
 
-    paint.set_color(Color::black());
-    paint.set_line_width(10.0);
+    let paint = paint.with_color(Color::black()).with_line_width(10.0);
     let _ = canvas.stroke_text(x, y, "RUST", &paint);
 
-    paint.set_line_width(6.0);
-    paint.set_color(Color::hex("#B7410E"));
+    let paint = paint.with_line_width(6.0).with_color(Color::hex("#B7410E"));
     let _ = canvas.stroke_text(x, y, "RUST", &paint);
 
-    paint.set_color(Color::white());
+    let paint = paint.with_color(Color::white());
     let _ = canvas.fill_text(x, y, "RUST", &paint);
 }
 
 fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32) {
-    let mut paint = Paint::color(Color::rgba(0, 0, 0, 255));
-    paint.set_font(&[fonts.bold]);
-    paint.set_line_width(6.0);
-    paint.set_font_size(72.0);
+    let paint = Paint::color(Color::rgba(0, 0, 0, 255))
+        .with_font(&[fonts.bold])
+        .with_line_width(6.0)
+        .with_font_size(72.0);
     let _ = canvas.stroke_text(x, y, "RUST", &paint);
 
-    let mut paint = Paint::linear_gradient(
+    let paint = Paint::linear_gradient(
         x,
         y - 60.0,
         x,
         y,
         Color::rgba(225, 133, 82, 255),
         Color::rgba(93, 55, 70, 255),
-    );
-    paint.set_font(&[fonts.bold]);
-    paint.set_font_size(72.0);
+    )
+    .with_font(&[fonts.bold])
+    .with_font_size(72.0);
     let _ = canvas.fill_text(x, y, "RUST", &paint);
 }
 
 fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y: f32, image_id: ImageId, t: f32) {
-    let mut paint = Paint::color(Color::hex("#7300AB"));
-    paint.set_line_width(3.0);
+    let paint = Paint::color(Color::hex("#7300AB")).with_line_width(3.0);
     let mut path = Path::new();
     path.move_to(x, y - 2.0);
     path.line_to(x + 180.0, y - 2.0);
@@ -379,22 +376,21 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
 
     let text = "RUST";
 
-    let mut paint = Paint::color(Color::rgba(0, 0, 0, 128));
-    paint.set_font(&[fonts.bold]);
-    paint.set_line_width(4.0);
-    paint.set_font_size(72.0);
+    let paint = Paint::color(Color::rgba(0, 0, 0, 128))
+        .with_font(&[fonts.bold])
+        .with_line_width(4.0)
+        .with_font_size(72.0);
     let _ = canvas.stroke_text(x, y, text, &paint);
 
-    let mut paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50);
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
-    paint.set_font(&[fonts.bold]);
-    paint.set_font_size(72.0);
+    let paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50)
+        .with_font(&[fonts.bold])
+        .with_font_size(72.0);
     let _ = canvas.fill_text(x, y, text, &paint);
 }
 
 fn draw_complex<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, font_size: f32) {
-    let mut paint = Paint::color(Color::rgb(34, 34, 34));
-    paint.set_font_size(font_size);
+    let paint = Paint::color(Color::rgb(34, 34, 34)).with_font_size(font_size);
 
     let _ = canvas.fill_text(
         x,

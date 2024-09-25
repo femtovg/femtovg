@@ -92,8 +92,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         canvas.translate(x, y);
         canvas.fill_path(&p, &paint);
         canvas.translate(-x, -y);
-        let mut text_paint = Paint::color(Color::black());
-        text_paint.set_font_size(14.0);
+        let text_paint = Paint::color(Color::black()).with_font_size(14.0);
         let _ = canvas.fill_text(x, y + 114.0, name, &text_paint);
     };
     // Various two stop gradients
