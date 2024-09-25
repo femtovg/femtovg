@@ -46,8 +46,9 @@ const DEFAULT_LRU_CACHE_CAPACITY: usize = 1000;
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct FontId(DefaultKey);
 
-/// Text baseline vertical alignment:
-/// `Top`, `Middle`, `Alphabetic` (default), `Bottom`.
+/// Represents the vertical alignment of a text baseline.
+///
+/// The default value is `Alphabetic`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Baseline {
@@ -55,9 +56,9 @@ pub enum Baseline {
     Top,
     /// The text baseline is the middle of the em square.
     Middle,
-    /// The text baseline is the normal alphabetic baseline. Default value.
+    /// The text baseline is the normal alphabetic baseline.
     Alphabetic,
-    // The text baseline is the bottom of the bounding box.
+    /// The text baseline is the bottom of the bounding box.
     Bottom,
 }
 
@@ -67,7 +68,9 @@ impl Default for Baseline {
     }
 }
 
-/// Text horizontal alignment: `Left` (default), `Center`, `Right`.
+/// Represents the horizontal alignment of text.
+///
+/// The default value is `Left`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Align {
@@ -85,9 +88,14 @@ impl Default for Align {
     }
 }
 
+/// Represents the rendering mode for a path.
+///
+/// The default value is `Fill`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub enum RenderMode {
+    /// The path is filled.
     Fill,
+    /// The path is stroked.
     Stroke,
 }
 
@@ -496,13 +504,16 @@ impl TextContextImpl {
     }
 }
 
-/// Result of a shaping run.
+/// Represents the result of a text shaping run.
 #[derive(Clone, Default, Debug)]
 pub struct TextMetrics {
+    /// X-coordinate of the starting position for the shaped text.
     pub x: f32,
+    /// Y-coordinate of the starting position for the shaped text.
     pub y: f32,
     width: f32,
     height: f32,
+    /// Vector of shaped glyphs resulting from the text shaping run.
     pub glyphs: Vec<ShapedGlyph>,
     pub(crate) final_byte_index: usize,
 }
@@ -864,26 +875,41 @@ fn layout(
 
 // Renderer
 
+/// Represents a command to draw an image with a set of quads.
 #[derive(Clone, Debug)]
 pub struct DrawCommand {
+    /// The ID of the image to draw.
     pub image_id: ImageId,
+    /// The quads defining the positions and texture coordinates for drawing the image.
     pub quads: Vec<Quad>,
 }
 
+/// Represents a quad with position and texture coordinates.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Quad {
+    /// X-coordinate of the top-left corner of the quad.
     pub x0: f32,
+    /// Y-coordinate of the top-left corner of the quad.
     pub y0: f32,
+    /// U-coordinate (horizontal texture coordinate) of the top-left corner of the quad.
     pub s0: f32,
+    /// V-coordinate (vertical texture coordinate) of the top-left corner of the quad.
     pub t0: f32,
+    /// X-coordinate of the bottom-right corner of the quad.
     pub x1: f32,
+    /// Y-coordinate of the bottom-right corner of the quad.
     pub y1: f32,
+    /// U-coordinate (horizontal texture coordinate) of the bottom-right corner of the quad.
     pub s1: f32,
+    /// V-coordinate (vertical texture coordinate) of the bottom-right corner of the quad.
     pub t1: f32,
 }
 
+/// Represents the drawing commands for glyphs, separated into alpha and color glyphs.
 pub struct GlyphDrawCommands {
+    /// Drawing commands for alpha (opacity) glyphs.
     pub alpha_glyphs: Vec<DrawCommand>,
+    /// Drawing commands for color glyphs.
     pub color_glyphs: Vec<DrawCommand>,
 }
 
