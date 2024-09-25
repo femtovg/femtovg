@@ -32,6 +32,7 @@ use framebuffer::Framebuffer;
 mod uniform_array;
 use uniform_array::UniformArray;
 
+/// Represents an OpenGL renderer.
 pub struct OpenGl {
     debug: bool,
     antialias: bool,
@@ -53,7 +54,11 @@ pub struct OpenGl {
 }
 
 impl OpenGl {
-    #[allow(clippy::missing_safety_doc)]
+    /// Creates a new OpenGL renderer from a function loader.
+    ///
+    /// # Safety
+    /// This function is unsafe because it requires a function loader that can load OpenGL functions
+    /// and create a valid OpenGL context.
     #[cfg(not(target_arch = "wasm32"))]
     pub unsafe fn new_from_function<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
@@ -65,7 +70,11 @@ impl OpenGl {
         Self::new_from_context(context, is_opengles_2_0)
     }
 
-    #[allow(clippy::missing_safety_doc)]
+    /// Creates a new OpenGL renderer from a function loader that takes C-style strings.
+    ///
+    /// # Safety
+    /// This function is unsafe because it requires a function loader that can load OpenGL functions
+    /// and create a valid OpenGL context.
     #[cfg(not(target_arch = "wasm32"))]
     pub unsafe fn new_from_function_cstr<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
@@ -77,11 +86,13 @@ impl OpenGl {
         Self::new_from_context(context, is_opengles_2_0)
     }
 
+    /// Creates a new OpenGL renderer from a Glutin display.
     #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
     pub fn new_from_glutin_display(display: &impl GlDisplay) -> Result<Self, ErrorKind> {
         unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s).cast()) }
     }
 
+    /// Creates a new OpenGL renderer from an HTML canvas element in a WASM32 target.
     #[cfg(target_arch = "wasm32")]
     pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
         let mut attrs = web_sys::WebGlContextAttributes::new();
@@ -191,6 +202,7 @@ impl OpenGl {
         Ok(opengl)
     }
 
+    /// Checks if the renderer is using OpenGL ES.
     pub fn is_opengles(&self) -> bool {
         self.is_opengles_2_0
     }
