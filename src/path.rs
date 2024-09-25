@@ -13,10 +13,12 @@ pub use cache::{Convexity, PathCache};
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.552_284_8; // 0.552_284_749_3;
 
-/// Used to specify Solid/Hole when adding shapes to a path.
+/// Specifies whether a shape is solid or a hole when adding it to a path.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd)]
 pub enum Solidity {
+    /// The shape is solid (filled).
     Solid = 1,
+    /// The shape is a hole (not filled).
     Hole = 2,
 }
 
@@ -104,6 +106,7 @@ pub struct Path {
 }
 
 impl Path {
+    /// Creates a new empty path with a distance tolerance of 0.01.
     pub fn new() -> Self {
         Self {
             dist_tol: 0.01,
@@ -111,19 +114,22 @@ impl Path {
         }
     }
 
-    /// Memory usage in bytes
+    /// Returns the memory size in bytes used by the path.
     pub fn size(&self) -> usize {
         std::mem::size_of::<PackedVerb>() * self.verbs.len() + std::mem::size_of::<f32>() * self.coords.len()
     }
 
+    /// Checks if the path is empty (contains no verbs).
     pub fn is_empty(&self) -> bool {
         self.verbs.is_empty()
     }
 
+    /// Sets the distance tolerance used for path operations.
     pub fn set_distance_tolerance(&mut self, value: f32) {
         self.dist_tol = value;
     }
 
+    /// Returns an iterator over the path's verbs.
     pub fn verbs(&self) -> PathIter<'_> {
         PathIter {
             verbs: self.verbs.iter(),
@@ -156,17 +162,17 @@ impl Path {
 
     // Path funcs
 
-    /// Starts new sub-path with specified point as first point.
+    /// Starts a new sub-path with the specified point as the first point.
     pub fn move_to(&mut self, x: f32, y: f32) {
         self.append(&[PackedVerb::MoveTo], &[Position { x, y }]);
     }
 
-    /// Adds line segment from the last point in the path to the specified point.
+    /// Adds a line segment from the last point in the path to the specified point.
     pub fn line_to(&mut self, x: f32, y: f32) {
         self.append(&[PackedVerb::LineTo], &[Position { x, y }]);
     }
 
-    /// Adds cubic bezier segment from last point in the path via two control points to the specified point.
+    /// Adds a cubic bezier segment from the last point in the path via two control points to the specified point.
     pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
         self.append(
             &[PackedVerb::BezierTo],
@@ -178,7 +184,7 @@ impl Path {
         );
     }
 
-    /// Adds quadratic bezier segment from last point in the path via a control point to the specified point.
+    /// Adds a quadratic bezier segment from the last point in the path via a control point to the specified point.
     pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
         let pos0 = self.last_pos;
         let cpos = Position { x: cx, y: cy };
@@ -189,7 +195,7 @@ impl Path {
         self.append(&[PackedVerb::BezierTo], &[pos1, pos2, pos]);
     }
 
-    /// Closes current sub-path with a line segment.
+    /// Closes the current sub-path with a line segment.
     pub fn close(&mut self) {
         self.append(&[PackedVerb::Close], &[]);
     }
@@ -269,7 +275,7 @@ impl Path {
         self.append(&commands, &coords);
     }
 
-    /// Adds an arc segment at the corner defined by the last path point, and two specified points.
+    /// Adds an arc segment at the corner defined by the last path point and two specified points.
     pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
         if self.verbs.is_empty() {
             return;
@@ -318,7 +324,7 @@ impl Path {
         self.arc(cpos.x, cpos.y, radius, a0 + PI / 2.0, a1 + PI / 2.0, dir);
     }
 
-    /// Creates new rectangle shaped sub-path.
+    /// Creates a new rectangle shaped sub-path.
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.append(
             &[
@@ -342,14 +348,12 @@ impl Path {
         );
     }
 
-    #[allow(clippy::many_single_char_names)]
-    /// Creates new rounded rectangle shaped sub-path.
+    /// Creates a new rounded rectangle shaped sub-path.
     pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
         self.rounded_rect_varying(x, y, w, h, r, r, r, r);
     }
 
-    #[allow(clippy::too_many_arguments)]
-    /// Creates new rounded rectangle shaped sub-path with varying radii for each corner.
+    /// Creates a new rounded rectangle shaped sub-path with varying radii for each corner.
     pub fn rounded_rect_varying(
         &mut self,
         x: f32,
@@ -452,7 +456,7 @@ impl Path {
         }
     }
 
-    /// Creates new ellipse shaped sub-path.
+    /// Creates a new ellipse shaped sub-path.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
         self.append(
             &[
@@ -486,12 +490,12 @@ impl Path {
         );
     }
 
-    /// Creates new circle shaped sub-path.
+    /// Creates a new circle shaped sub-path.
     pub fn circle(&mut self, cx: f32, cy: f32, r: f32) {
         self.ellipse(cx, cy, r, r);
     }
 
-    /// Appends a slice of verbs to the path
+    /// Appends a slice of verbs and coordinates to the path.
     fn append(&mut self, verbs: &[PackedVerb], coords: &[Position]) {
         if !coords.is_empty() {
             self.last_pos = coords[coords.len() - 1];
@@ -502,6 +506,7 @@ impl Path {
     }
 }
 
+/// An iterator over the verbs and coordinates of a path.
 pub struct PathIter<'a> {
     verbs: slice::Iter<'a, PackedVerb>,
     coords: &'a [Position],
