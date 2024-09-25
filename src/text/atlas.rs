@@ -6,6 +6,7 @@ struct Node {
     width: usize,
 }
 
+/// Represents an atlas for packing rectangles.
 pub struct Atlas {
     width: usize,
     height: usize,
@@ -13,6 +14,7 @@ pub struct Atlas {
 }
 
 impl Atlas {
+    /// Creates a new atlas with the specified width and height.
     pub fn new(width: usize, height: usize) -> Self {
         Self {
             width,
@@ -21,10 +23,12 @@ impl Atlas {
         }
     }
 
+    /// Returns the size (width and height) of the atlas.
     pub fn size(&self) -> (usize, usize) {
         (self.width, self.height)
     }
 
+    /// Expands the atlas to the specified width and height.
     pub fn expand(&mut self, width: usize, height: usize) {
         // Insert node for empty space
 
@@ -36,10 +40,14 @@ impl Atlas {
         self.height = height;
     }
 
+    /// Resets the atlas to the specified width and height.
     pub fn reset(&mut self, width: usize, height: usize) {
         *self = Self::new(width, height);
     }
 
+    /// Adds a rectangle with the specified width and height to the atlas.
+    ///
+    /// Returns the position (x, y) of the added rectangle, or `None` if the rectangle cannot be added.
     pub fn add_rect(&mut self, rect_width: usize, rect_height: usize) -> Option<(usize, usize)> {
         let mut besth = self.height;
         let mut bestw = self.width;
