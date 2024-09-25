@@ -47,44 +47,52 @@ impl FontMetrics {
         self.height *= scale;
     }
 
-    /// The distance from the baseline to the top of the highest glyph
+    /// Returns the distance from the baseline to the top of the highest glyph.
     pub fn ascender(&self) -> f32 {
         self.ascender
     }
 
-    /// The distance from the baseline to the bottom of the lowest descenders on the glyphs
+    /// Returns the distance from the baseline to the bottom of the lowest descenders on the glyphs.
     pub fn descender(&self) -> f32 {
         self.descender
     }
 
+    /// Returns the height of the font.
     pub fn height(&self) -> f32 {
         self.height.round()
     }
 
+    /// Returns if the font is regular.
     pub fn regular(&self) -> bool {
         self.regular
     }
 
+    /// Returns if the font is italic.
     pub fn italic(&self) -> bool {
         self.italic
     }
 
+    /// Returns if the font is bold.
     pub fn bold(&self) -> bool {
         self.bold
     }
 
+    /// Returns if the font is oblique.
     pub fn oblique(&self) -> bool {
         self.oblique
     }
 
+    /// Returns if the font is a variable font.
     pub fn variable(&self) -> bool {
         self.variable
     }
 
+    /// Returns the weight of the font.
     pub fn weight(&self) -> u16 {
         self.weight
     }
 
+    /// Returns the width of the font.
     pub fn width(&self) -> u16 {
         self.width
     }
