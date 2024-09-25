@@ -1294,10 +1294,15 @@ where
             let mut verts = Vec::with_capacity(quads.len() * 6);
 
             for quad in quads {
-                let (p0, p1) = transform.transform_point(quad.x0 * invscale, quad.y0 * invscale);
-                let (p2, p3) = transform.transform_point(quad.x1 * invscale, quad.y0 * invscale);
-                let (p4, p5) = transform.transform_point(quad.x1 * invscale, quad.y1 * invscale);
-                let (p6, p7) = transform.transform_point(quad.x0 * invscale, quad.y1 * invscale);
+                let left = quad.x0 * invscale;
+                let right = quad.x1 * invscale;
+                let top = quad.y0 * invscale;
+                let bottom = quad.y1 * invscale;
+
+                let (p0, p1) = transform.transform_point(left, top);
+                let (p2, p3) = transform.transform_point(right, top);
+                let (p4, p5) = transform.transform_point(right, bottom);
+                let (p6, p7) = transform.transform_point(left, bottom);
 
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));
