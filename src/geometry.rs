@@ -271,23 +271,15 @@ impl Transform2D {
     }
 
     /// Multiplies the current transformation matrix with another matrix.
+    #[inline]
     pub fn multiply(&mut self, other: &Self) {
-        let t0 = self[0] * other[0] + self[1] * other[2];
-        let t2 = self[2] * other[0] + self[3] * other[2];
-        let t4 = self[4] * other[0] + self[5] * other[2] + other[4];
-        self[1] = self[0] * other[1] + self[1] * other[3];
-        self[3] = self[2] * other[1] + self[3] * other[3];
-        self[5] = self[4] * other[1] + self[5] * other[3] + other[5];
-        self[0] = t0;
-        self[2] = t2;
-        self[4] = t4;
+        *self *= *other;
     }
 
     /// Premultiplies the current transformation matrix with another matrix.
+    #[inline]
     pub fn premultiply(&mut self, other: &Self) {
-        let mut other = *other;
-        other.multiply(self);
-        *self = other;
+        *self = *other * *self;
     }
 
     /// Inverts the current transformation matrix.
