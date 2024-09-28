@@ -233,27 +233,60 @@ impl Transform2D {
 
     /// Translates the matrix.
     pub fn translate(&mut self, tx: f32, ty: f32) {
-        *self *= Self::translation(tx, ty);
+        let Self([_, _, _, _, e, f]) = self;
+
+        *e += tx;
+        *f += ty;
     }
 
     /// Rotates the matrix.
     pub fn rotate(&mut self, a: f32) {
-        *self *= Self::rotation(a);
+        let (sin, cos) = a.sin_cos();
+
+        let Self([a, b, c, d, e, f]) = *self;
+
+        *self = Self([
+            a * cos - b * sin,
+            a * sin + b * cos,
+            c * cos - d * sin,
+            c * sin + d * cos,
+            e * cos - f * sin,
+            e * sin + f * cos,
+        ])
     }
 
     /// Scales the matrix.
     pub fn scale(&mut self, sx: f32, sy: f32) {
-        *self *= Self::scaling(sx, sy);
+        let Self([a, b, c, d, e, f]) = self;
+
+        *a *= sx;
+        *b *= sy;
+        *c *= sx;
+        *d *= sy;
+        *e *= sx;
+        *f *= sy;
     }
 
     /// Skews the matrix horizontally.
     pub fn skew_x(&mut self, a: f32) {
-        *self *= Self::new(1.0, 0.0, a.tan(), 1.0, 0.0, 0.0);
+        let tan = a.tan();
+
+        let Self([a, b, c, d, e, f]) = self;
+
+        *a += *b * tan;
+        *c += *d * tan;
+        *e += *f * tan;
     }
 
     /// Skews the matrix vertically.
     pub fn skew_y(&mut self, a: f32) {
-        *self *= Self::new(1.0, a.tan(), 0.0, 1.0, 0.0, 0.0);
+        let tan = a.tan();
+
+        let Self([a, b, c, d, e, f]) = self;
+
+        *b += *a * tan;
+        *d += *c * tan;
+        *f += *e * tan;
     }
 
     /// Premultiplies the current transformation matrix with another matrix.
