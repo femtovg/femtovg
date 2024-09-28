@@ -59,17 +59,12 @@ impl PerfGraph {
             .with_font_size(14.0)
             .with_text_align(Align::Right)
             .with_text_baseline(Baseline::Top);
-        let _ = canvas.fill_text(x + w - 5.0, y, &format!("{:.2} FPS", 1.0 / avg), &text_paint);
+        let _ = canvas.fill_text(x + w - 5.0, y, format!("{:.2} FPS", 1.0 / avg), &text_paint);
 
         let text_paint = Paint::color(Color::rgba(240, 240, 240, 200))
             .with_font_size(12.0)
             .with_text_align(Align::Right)
             .with_text_baseline(Baseline::Alphabetic);
-        let _ = canvas.fill_text(
-            x + w - 5.0,
-            y + h - 5.0,
-            &format!("{:.2} ms", avg * 1000.0),
-            &text_paint,
-        );
+        let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, format!("{:.2} ms", avg * 1000.0), &text_paint);
     }
 }
