@@ -264,29 +264,32 @@ impl Transform2D {
     }
 
     /// Inverts the current transformation matrix.
+    #[inline]
     pub fn invert(&mut self) {
-        let t = *self;
-        let det = t[0] as f64 * t[3] as f64 - t[2] as f64 * t[1] as f64;
-
-        if det > -1e-6 && det < 1e-6 {
-            *self = Self::identity();
-        }
-
-        let invdet = 1.0 / det;
-
-        self[0] = (t[3] as f64 * invdet) as f32;
-        self[2] = (-t[2] as f64 * invdet) as f32;
-        self[4] = ((t[2] as f64 * t[5] as f64 - t[3] as f64 * t[4] as f64) * invdet) as f32;
-        self[1] = (-t[1] as f64 * invdet) as f32;
-        self[3] = (t[0] as f64 * invdet) as f32;
-        self[5] = ((t[1] as f64 * t[4] as f64 - t[0] as f64 * t[5] as f64) * invdet) as f32;
+        *self = self.inverse()
     }
 
     /// Returns the inverse of the current transformation matrix.
     pub fn inverse(&self) -> Self {
-        let mut inv = *self;
-        inv.invert();
-        inv
+        let Self([a, b, c, d, e, f]) = *self;
+        let [a, b, c, d, e, f] = [a as f64, b as f64, c as f64, d as f64, e as f64, f as f64];
+
+        let det = a * d - c * b;
+
+        if det > -1e-6 && det < 1e-6 {
+            return Self::identity();
+        }
+
+        let invdet = 1.0 / det;
+
+        Self([
+            (d * invdet) as f32,
+            (-b * invdet) as f32,
+            (-c * invdet) as f32,
+            (a * invdet) as f32,
+            ((c * f - d * e) * invdet) as f32,
+            ((b * e - a * f) * invdet) as f32,
+        ])
     }
 
     /// Transforms a point using the current transformation matrix.
