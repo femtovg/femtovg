@@ -377,10 +377,10 @@ impl Add for Transform2D {
     type Output = Self;
 
     fn add(self, other: Self) -> Self::Output {
-        let Self([a0, b0, c0, d0, e0, f0]) = self;
-        let Self([a1, b1, c1, d1, e1, f1]) = other;
+        let Self([a0, b0, c0, d0, x0, y0]) = self;
+        let Self([a1, b1, c1, d1, x1, y1]) = other;
 
-        Self([a0 + a1, b0 + b1, c0 + c1, d0 + d1, e0 + e1, f0 + f1])
+        Self([a0 + a1, b0 + b1, c0 + c1, d0 + d1, x0 + x1, y0 + y1])
     }
 }
 
@@ -395,10 +395,10 @@ impl Sub for Transform2D {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self::Output {
-        let Self([a0, b0, c0, d0, e0, f0]) = self;
-        let Self([a1, b1, c1, d1, e1, f1]) = other;
+        let Self([a0, b0, c0, d0, x0, y0]) = self;
+        let Self([a1, b1, c1, d1, x1, y1]) = other;
 
-        Self([a0 - a1, b0 - b1, c0 - c1, d0 - d1, e0 - e1, f0 - f1])
+        Self([a0 - a1, b0 - b1, c0 - c1, d0 - d1, x0 - x1, y0 - y1])
     }
 }
 
@@ -413,15 +413,15 @@ impl Mul for Transform2D {
     type Output = Self;
 
     fn mul(self, other: Self) -> Self::Output {
-        let Self([a0, b0, c0, d0, e0, f0]) = self;
-        let Self([a1, b1, c1, d1, e1, f1]) = other;
+        let Self([a0, b0, c0, d0, x0, y0]) = self;
+        let Self([a1, b1, c1, d1, x1, y1]) = other;
 
         let t0 = a0 * a1 + b0 * c1;
         let t1 = a0 * b1 + b0 * d1;
         let t2 = c0 * a1 + d0 * c1;
         let t3 = c0 * b1 + d0 * d1;
-        let t4 = e0 * a1 + f0 * c1 + e1;
-        let t5 = e0 * b1 + f0 * d1 + f1;
+        let t4 = x0 * a1 + y0 * c1 + x1;
+        let t5 = x0 * b1 + y0 * d1 + y1;
 
         Self([t0, t1, t2, t3, t4, t5])
     }
