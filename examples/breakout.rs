@@ -657,13 +657,13 @@ impl Game {
             .with_text_align(Align::Right)
             .with_font(&[self.fonts.bold])
             .with_font_size(22.0);
-        let _ = canvas.fill_text(self.size.width - 20.0, 25.0, &format!("Lives: {}", self.lives), &paint);
+        let _ = canvas.fill_text(self.size.width - 20.0, 25.0, format!("Lives: {}", self.lives), &paint);
 
         // score
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_font(&[self.fonts.bold])
             .with_font_size(22.0);
-        let _ = canvas.fill_text(20.0, 25.0, &format!("Score: {}", self.score), &paint);
+        let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint);
     }
 
     fn draw_round_info(&self, canvas: &mut Canvas) {
@@ -795,7 +795,7 @@ impl Powerup {
         let _ = canvas.fill_text(
             self.rect.center().x,
             self.rect.center().y,
-            &format!("{:?}", self.ty),
+            format!("{:?}", self.ty),
             &text_paint,
         );
     }
