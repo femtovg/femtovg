@@ -189,6 +189,8 @@ impl Vertex {
 }
 
 /// Represents different types of shaders used by the renderer.
+///
+/// The default value is `FillGradient`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub enum ShaderType {
     /// Fill gradient shader.

@@ -14,6 +14,8 @@ pub use cache::{Convexity, PathCache};
 const KAPPA90: f32 = 0.552_284_8; // 0.552_284_749_3;
 
 /// Specifies whether a shape is solid or a hole when adding it to a path.
+///
+/// The default value is `Solid`.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
 pub enum Solidity {
     /// The shape is solid (filled).
