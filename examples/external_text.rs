@@ -75,7 +75,7 @@ impl RenderCache {
                 cache_key.x_bin = subpixel_x;
                 cache_key.y_bin = subpixel_y;
                 // perform cache lookup for rendered glyph
-                if let Some(rendered) = self.rendered_glyphs.entry(cache_key).or_insert_with(|| {
+                let Some(rendered) = self.rendered_glyphs.entry(cache_key).or_insert_with(|| {
                     // ...or insert it
 
                     // do the actual rasterization
@@ -174,33 +174,35 @@ impl RenderCache {
                             color_glyph: matches!(rendered.content, Content::Color),
                         }
                     })
-                }) {
-                    let cmd_map = if rendered.color_glyph {
-                        &mut color_cmd_map
-                    } else {
-                        &mut alpha_cmd_map
-                    };
+                }) else {
+                    continue;
+                };
 
-                    let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
-                        image_id: self.glyph_textures[rendered.texture_index].image_id,
-                        quads: Vec::new(),
-                    });
+                let cmd_map = if rendered.color_glyph {
+                    &mut color_cmd_map
+                } else {
+                    &mut alpha_cmd_map
+                };
 
-                    let mut q = Quad::default();
-                    let it = 1.0 / TEXTURE_SIZE as f32;
+                let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
+                    image_id: self.glyph_textures[rendered.texture_index].image_id,
+                    quads: Vec::new(),
+                });
 
-                    q.x0 = (position_x + glyph.x_int + rendered.offset_x - GLYPH_PADDING as i32) as f32;
-                    q.y0 = (position_y + run.line_y + glyph.y_int - rendered.offset_y - GLYPH_PADDING as i32) as f32;
-                    q.x1 = q.x0 + rendered.width as f32;
-                    q.y1 = q.y0 + rendered.height as f32;
+                let mut q = Quad::default();
+                let it = 1.0 / TEXTURE_SIZE as f32;
 
-                    q.s0 = rendered.atlas_x as f32 * it;
-                    q.t0 = rendered.atlas_y as f32 * it;
-                    q.s1 = (rendered.atlas_x + rendered.width) as f32 * it;
-                    q.t1 = (rendered.atlas_y + rendered.height) as f32 * it;
+                q.x0 = (position_x + glyph.x_int + rendered.offset_x - GLYPH_PADDING as i32) as f32;
+                q.y0 = (position_y + run.line_y + glyph.y_int - rendered.offset_y - GLYPH_PADDING as i32) as f32;
+                q.x1 = q.x0 + rendered.width as f32;
+                q.y1 = q.y0 + rendered.height as f32;
 
-                    cmd.quads.push(q);
-                }
+                q.s0 = rendered.atlas_x as f32 * it;
+                q.t0 = rendered.atlas_y as f32 * it;
+                q.s1 = (rendered.atlas_x + rendered.width) as f32 * it;
+                q.t1 = (rendered.atlas_y + rendered.height) as f32 * it;
+
+                cmd.quads.push(q);
             }
         }
 
