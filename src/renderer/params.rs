@@ -45,7 +45,7 @@ impl Params {
             if ext[0] < -0.5 || ext[1] < -0.5 {
                 ([1.0, 1.0], [1.0, 1.0])
             } else {
-                params.scissor_mat = scissor.transform.inversed().to_mat3x4();
+                params.scissor_mat = scissor.transform.inverse().to_mat3x4();
 
                 let scissor_scale = [
                     scissor.transform[0].hypot(scissor.transform[2]) / fringe_width,
@@ -78,7 +78,7 @@ impl Params {
                 params.inner_col = color;
                 params.outer_col = color;
                 params.shader_type = ShaderType::FillColor;
-                inv_transform = global_transform.inversed();
+                inv_transform = global_transform.inverse();
             }
             &PaintFlavor::Image {
                 id,
@@ -118,9 +118,9 @@ impl Params {
                     m1.translate(0.0, -height * 0.5);
                     m1 *= m2;
 
-                    inv_transform = m1.inversed();
+                    inv_transform = m1.inverse();
                 } else {
-                    inv_transform = transform.inversed();
+                    inv_transform = transform.inverse();
                 }
 
                 params.shader_type = ShaderType::FillImage;
@@ -159,7 +159,7 @@ impl Params {
 
                 transform *= *global_transform;
 
-                inv_transform = transform.inversed();
+                inv_transform = transform.inverse();
 
                 params.extent[0] = large;
                 params.extent[1] = large + d * 0.5;
@@ -186,7 +186,7 @@ impl Params {
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
                 transform *= *global_transform;
-                inv_transform = transform.inversed();
+                inv_transform = transform.inverse();
 
                 params.extent[0] = width * 0.5;
                 params.extent[1] = height * 0.5;
@@ -214,7 +214,7 @@ impl Params {
 
                 let mut transform = Transform2D::new_translation(*cx, *cy);
                 transform *= *global_transform;
-                inv_transform = transform.inversed();
+                inv_transform = transform.inverse();
 
                 params.extent[0] = r;
                 params.extent[1] = r;

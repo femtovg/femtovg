@@ -277,7 +277,7 @@ impl Transform2D {
     }
 
     /// Inverts the current transformation matrix.
-    pub fn inverse(&mut self) {
+    pub fn invert(&mut self) {
         let t = *self;
         let det = t[0] as f64 * t[3] as f64 - t[2] as f64 * t[1] as f64;
 
@@ -296,9 +296,9 @@ impl Transform2D {
     }
 
     /// Returns the inverse of the current transformation matrix.
-    pub fn inversed(&self) -> Self {
+    pub fn inverse(&self) -> Self {
         let mut inv = *self;
-        inv.inverse();
+        inv.invert();
         inv
     }
 
@@ -426,7 +426,7 @@ impl Div for Transform2D {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        self * rhs.inversed()
+        self * rhs.inverse()
     }
 }
 

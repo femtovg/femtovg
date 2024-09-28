@@ -90,10 +90,10 @@ fn run(
                     device_id: _, position, ..
                 } => {
                     if dragging {
-                        let p0 = canvas.transform().inversed().transform_point(mousex, mousey);
+                        let p0 = canvas.transform().inverse().transform_point(mousex, mousey);
                         let p1 = canvas
                             .transform()
-                            .inversed()
+                            .inverse()
                             .transform_point(position.x as f32, position.y as f32);
 
                         canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
@@ -107,7 +107,7 @@ fn run(
                     delta: winit::event::MouseScrollDelta::LineDelta(_, y),
                     ..
                 } => {
-                    let pt = canvas.transform().inversed().transform_point(mousex, mousey);
+                    let pt = canvas.transform().inverse().transform_point(mousex, mousey);
                     canvas.translate(pt.0, pt.1);
                     canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
                     canvas.translate(-pt.0, -pt.1);

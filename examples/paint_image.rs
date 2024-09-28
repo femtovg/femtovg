@@ -200,8 +200,8 @@ fn run(
 
                     // Now we need to apply the current canvas transform
                     // to the path bbox:
-                    let a = canvas.transform().inversed().transform_point(bbox.minx, bbox.miny);
-                    let b = canvas.transform().inversed().transform_point(bbox.maxx, bbox.maxy);
+                    let a = canvas.transform().inverse().transform_point(bbox.minx, bbox.miny);
+                    let b = canvas.transform().inverse().transform_point(bbox.maxx, bbox.maxy);
 
                     canvas.fill_path(
                         &path,
