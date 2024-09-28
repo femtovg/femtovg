@@ -232,53 +232,29 @@ impl Transform2D {
         Self([sx, 0.0, 0.0, sy, 0.0, 0.0])
     }
 
-    /// Sets the translation of the current transformation matrix.
+    /// Translates the matrix.
     pub fn translate(&mut self, tx: f32, ty: f32) {
-        self[4] = tx;
-        self[5] = ty;
+        *self *= Self::translation(tx, ty);
     }
 
-    /// Sets the scaling of the current matrix.
-    pub fn scale(&mut self, sx: f32, sy: f32) {
-        self[0] = sx;
-        self[1] = 0.0;
-        self[2] = 0.0;
-        self[3] = sy;
-        self[4] = 0.0;
-        self[5] = 0.0;
-    }
-
-    /// Set the rotation of the current matrix.
+    /// Rotates the matrix.
     pub fn rotate(&mut self, a: f32) {
-        let cs = a.cos();
-        let sn = a.sin();
-
-        self[0] = cs;
-        self[1] = sn;
-        self[2] = -sn;
-        self[3] = cs;
-        self[4] = 0.0;
-        self[5] = 0.0;
+        *self *= Self::rotation(a);
     }
 
-    /// Sets the horizontal skew of the current matrix.
+    /// Scales the matrix.
+    pub fn scale(&mut self, sx: f32, sy: f32) {
+        *self *= Self::scaling(sx, sy);
+    }
+
+    /// Skews the matrix horizontally.
     pub fn skew_x(&mut self, a: f32) {
-        self[0] = 1.0;
-        self[1] = 0.0;
-        self[2] = a.tan();
-        self[3] = 1.0;
-        self[4] = 0.0;
-        self[5] = 0.0;
+        *self *= Self::new(1.0, 0.0, a.tan(), 1.0, 0.0, 0.0);
     }
 
-    /// Sets the vertical skew of the current matrix.
+    /// Skews the matrix vertically.
     pub fn skew_y(&mut self, a: f32) {
-        self[0] = 1.0;
-        self[1] = a.tan();
-        self[2] = 0.0;
-        self[3] = 1.0;
-        self[4] = 0.0;
-        self[5] = 0.0;
+        *self *= Self::new(1.0, a.tan(), 0.0, 1.0, 0.0, 0.0);
     }
 
     /// Premultiplies the current transformation matrix with another matrix.
