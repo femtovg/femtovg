@@ -207,11 +207,11 @@ impl Transform2D {
     /// Creates a new transformation matrix.
     ///
     /// The parameters are interpreted as matrix elements as follows:
-    ///   [a c e]
-    ///   [b d f]
+    ///   [a c x]
+    ///   [b d y]
     ///   [0 0 1]
-    pub fn new(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
-        Self([a, b, c, d, e, f])
+    pub fn new(a: f32, b: f32, c: f32, d: f32, x: f32, y: f32) -> Self {
+        Self([a, b, c, d, x, y])
     }
 
     /// Creates a translation transformation matrix.
@@ -233,60 +233,60 @@ impl Transform2D {
 
     /// Translates the matrix.
     pub fn translate(&mut self, tx: f32, ty: f32) {
-        let Self([_, _, _, _, e, f]) = self;
+        let Self([_, _, _, _, x, y]) = self;
 
-        *e += tx;
-        *f += ty;
+        *x += tx;
+        *y += ty;
     }
 
     /// Rotates the matrix.
     pub fn rotate(&mut self, a: f32) {
         let (sin, cos) = a.sin_cos();
 
-        let Self([a, b, c, d, e, f]) = *self;
+        let Self([a, b, c, d, x, y]) = *self;
 
         *self = Self([
             a * cos - b * sin,
             a * sin + b * cos,
             c * cos - d * sin,
             c * sin + d * cos,
-            e * cos - f * sin,
-            e * sin + f * cos,
+            x * cos - y * sin,
+            x * sin + y * cos,
         ])
     }
 
     /// Scales the matrix.
     pub fn scale(&mut self, sx: f32, sy: f32) {
-        let Self([a, b, c, d, e, f]) = self;
+        let Self([a, b, c, d, x, y]) = self;
 
         *a *= sx;
         *b *= sy;
         *c *= sx;
         *d *= sy;
-        *e *= sx;
-        *f *= sy;
+        *x *= sx;
+        *y *= sy;
     }
 
     /// Skews the matrix horizontally.
     pub fn skew_x(&mut self, a: f32) {
         let tan = a.tan();
 
-        let Self([a, b, c, d, e, f]) = self;
+        let Self([a, b, c, d, x, y]) = self;
 
         *a += *b * tan;
         *c += *d * tan;
-        *e += *f * tan;
+        *x += *y * tan;
     }
 
     /// Skews the matrix vertically.
     pub fn skew_y(&mut self, a: f32) {
         let tan = a.tan();
 
-        let Self([a, b, c, d, e, f]) = self;
+        let Self([a, b, c, d, x, y]) = self;
 
         *b += *a * tan;
         *d += *c * tan;
-        *f += *e * tan;
+        *y += *x * tan;
     }
 
     /// Premultiplies the current transformation matrix with another matrix.
@@ -303,8 +303,8 @@ impl Transform2D {
 
     /// Returns the inverse of the current transformation matrix.
     pub fn inverse(&self) -> Self {
-        let Self([a, b, c, d, e, f]) = *self;
-        let [a, b, c, d, e, f] = [a as f64, b as f64, c as f64, d as f64, e as f64, f as f64];
+        let Self([a, b, c, d, x, y]) = *self;
+        let [a, b, c, d, x, y] = [a as f64, b as f64, c as f64, d as f64, x as f64, y as f64];
 
         let det = a * d - c * b;
 
@@ -319,8 +319,8 @@ impl Transform2D {
             (-b * invdet) as f32,
             (-c * invdet) as f32,
             (a * invdet) as f32,
-            ((c * f - d * e) * invdet) as f32,
-            ((b * e - a * f) * invdet) as f32,
+            ((c * y - d * x) * invdet) as f32,
+            ((b * x - a * y) * invdet) as f32,
         ])
     }
 
