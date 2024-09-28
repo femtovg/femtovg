@@ -370,57 +370,52 @@ impl IndexMut<usize> for Transform2D {
 impl Add for Transform2D {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        Self([
-            self[0] + rhs[0],
-            self[1] + rhs[1],
-            self[2] + rhs[2],
-            self[3] + rhs[3],
-            self[4] + rhs[4],
-            self[5] + rhs[5],
-        ])
+    fn add(self, other: Self) -> Self::Output {
+        let Self([a0, b0, c0, d0, e0, f0]) = self;
+        let Self([a1, b1, c1, d1, e1, f1]) = other;
+
+        Self([a0 + a1, b0 + b1, c0 + c1, d0 + d1, e0 + e1, f0 + f1])
     }
 }
 
 impl AddAssign for Transform2D {
     #[inline]
-    fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
     }
 }
 
 impl Sub for Transform2D {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self([
-            self[0] - rhs[0],
-            self[1] - rhs[1],
-            self[2] - rhs[2],
-            self[3] - rhs[3],
-            self[4] - rhs[4],
-            self[5] - rhs[5],
-        ])
+    fn sub(self, other: Self) -> Self::Output {
+        let Self([a0, b0, c0, d0, e0, f0]) = self;
+        let Self([a1, b1, c1, d1, e1, f1]) = other;
+
+        Self([a0 - a1, b0 - b1, c0 - c1, d0 - d1, e0 - e1, f0 - f1])
     }
 }
 
 impl SubAssign for Transform2D {
     #[inline]
-    fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
     }
 }
 
 impl Mul for Transform2D {
     type Output = Self;
 
-    fn mul(self, rhs: Self) -> Self::Output {
-        let t0 = self[0] * rhs[0] + self[1] * rhs[2];
-        let t1 = self[0] * rhs[1] + self[1] * rhs[3];
-        let t2 = self[2] * rhs[0] + self[3] * rhs[2];
-        let t3 = self[2] * rhs[1] + self[3] * rhs[3];
-        let t4 = self[4] * rhs[0] + self[5] * rhs[2] + rhs[4];
-        let t5 = self[4] * rhs[1] + self[5] * rhs[3] + rhs[5];
+    fn mul(self, other: Self) -> Self::Output {
+        let Self([a0, b0, c0, d0, e0, f0]) = self;
+        let Self([a1, b1, c1, d1, e1, f1]) = other;
+
+        let t0 = a0 * a1 + b0 * c1;
+        let t1 = a0 * b1 + b0 * d1;
+        let t2 = c0 * a1 + d0 * c1;
+        let t3 = c0 * b1 + d0 * d1;
+        let t4 = e0 * a1 + f0 * c1 + e1;
+        let t5 = e0 * b1 + f0 * d1 + f1;
 
         Self([t0, t1, t2, t3, t4, t5])
     }
@@ -428,23 +423,23 @@ impl Mul for Transform2D {
 
 impl MulAssign for Transform2D {
     #[inline]
-    fn mul_assign(&mut self, rhs: Self) {
-        *self = *self * rhs;
+    fn mul_assign(&mut self, other: Self) {
+        *self = *self * other;
     }
 }
 
 impl Div for Transform2D {
     type Output = Self;
 
-    fn div(self, rhs: Self) -> Self::Output {
-        self * rhs.inverse()
+    fn div(self, other: Self) -> Self::Output {
+        self * other.inverse()
     }
 }
 
 impl DivAssign for Transform2D {
     #[inline]
-    fn div_assign(&mut self, rhs: Self) {
-        *self = *self / rhs;
+    fn div_assign(&mut self, other: Self) {
+        *self = *self / other;
     }
 }
 
