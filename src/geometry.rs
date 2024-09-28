@@ -270,12 +270,6 @@ impl Transform2D {
         self[5] = 0.0;
     }
 
-    /// Multiplies the current transformation matrix with another matrix.
-    #[inline]
-    pub fn multiply(&mut self, other: &Self) {
-        *self *= *other;
-    }
-
     /// Premultiplies the current transformation matrix with another matrix.
     #[inline]
     pub fn premultiply(&mut self, other: &Self) {

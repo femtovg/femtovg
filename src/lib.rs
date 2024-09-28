@@ -738,7 +738,7 @@ where
         let h = h.max(0.0);
 
         let mut transform = Transform2D::new_translation(x + w * 0.5, y + h * 0.5);
-        transform.multiply(&state.transform);
+        transform *= state.transform;
         state.scissor.transform = transform;
 
         state.scissor.extent = Some([w * 0.5, h * 0.5]);
@@ -767,10 +767,7 @@ where
 
         let mut pxform = state.scissor.transform;
 
-        let mut invxform = state.transform;
-        invxform.inverse();
-
-        pxform.multiply(&invxform);
+        pxform /= state.transform;
 
         let ex = extent[0];
         let ey = extent[1];

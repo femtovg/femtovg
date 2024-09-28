@@ -103,20 +103,20 @@ impl Params {
                 let mut transform = Transform2D::identity();
                 transform.rotate(*angle);
                 transform.translate(*cx, *cy);
-                transform.multiply(global_transform);
+                transform *= *global_transform;
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {
                     let mut m1 = Transform2D::identity();
                     m1.translate(0.0, height * 0.5);
-                    m1.multiply(&transform);
+                    m1 *= transform;
 
                     let mut m2 = Transform2D::identity();
                     m2.scale(1.0, -1.0);
-                    m2.multiply(&m1);
+                    m2 *= m1;
 
                     let mut m1 = Transform2D::identity();
                     m1.translate(0.0, -height * 0.5);
-                    m1.multiply(&m2);
+                    m1 *= m2;
 
                     inv_transform = m1.inversed();
                 } else {
@@ -157,7 +157,7 @@ impl Params {
 
                 let mut transform = Transform2D([dy, -dx, dx, dy, start_x - dx * large, start_y - dy * large]);
 
-                transform.multiply(global_transform);
+                transform *= *global_transform;
 
                 inv_transform = transform.inversed();
 
@@ -185,7 +185,7 @@ impl Params {
                 colors,
             } => {
                 let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
-                transform.multiply(global_transform);
+                transform *= *global_transform;
                 inv_transform = transform.inversed();
 
                 params.extent[0] = width * 0.5;
@@ -213,7 +213,7 @@ impl Params {
                 let f = out_radius - in_radius;
 
                 let mut transform = Transform2D::new_translation(*cx, *cy);
-                transform.multiply(global_transform);
+                transform *= *global_transform;
                 inv_transform = transform.inversed();
 
                 params.extent[0] = r;
