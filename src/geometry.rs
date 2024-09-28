@@ -221,8 +221,7 @@ impl Transform2D {
 
     /// Creates a rotation transformation matrix.
     pub fn rotation(a: f32) -> Self {
-        let cos = a.cos();
-        let sin = a.sin();
+        let (sin, cos) = a.sin_cos();
 
         Self([cos, sin, -sin, cos, 0.0, 0.0])
     }
