@@ -215,10 +215,21 @@ impl Transform2D {
     }
 
     /// Creates a translation transformation matrix.
-    pub fn new_translation(x: f32, y: f32) -> Self {
-        let mut new = Self::identity();
-        new.translate(x, y);
-        new
+    pub fn translation(x: f32, y: f32) -> Self {
+        Self([0.0, 0.0, 0.0, 0.0, x, y])
+    }
+
+    /// Creates a rotation transformation matrix.
+    pub fn rotation(a: f32) -> Self {
+        let cos = a.cos();
+        let sin = a.sin();
+
+        Self([cos, sin, -sin, cos, 0.0, 0.0])
+    }
+
+    /// Creates a scaling transformation matrix.
+    pub fn scaling(sx: f32, sy: f32) -> Self {
+        Self([sx, 0.0, 0.0, sy, 0.0, 0.0])
     }
 
     /// Sets the translation of the current transformation matrix.

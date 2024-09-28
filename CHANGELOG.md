@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
  - Completed and improved documentation
 - **breaking**: Removed methods `multipy` from `Transform2D`, since arithmetic operations are defined for `Transform2D` now.
 - **breaking**: Renamed `Transform2D` methods `inversed` to `inverse` and `inverse` to `invert`.
+- **breaking**: Renamed `Transform2D` constructor `new_translation` to `translation` and added new constructors `rotation` and `scaling`.
 
 ## [0.9.2] - 2024-06-27
 

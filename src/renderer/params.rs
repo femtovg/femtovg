@@ -212,7 +212,7 @@ impl Params {
                 let r = (in_radius + out_radius) * 0.5;
                 let f = out_radius - in_radius;
 
-                let mut transform = Transform2D::new_translation(*cx, *cy);
+                let mut transform = Transform2D::translation(*cx, *cy);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
