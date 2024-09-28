@@ -50,3 +50,36 @@ fn test_division_assignment() {
     b /= a;
     assert_eq!(b, expected);
 }
+
+#[test]
+fn test_translation() {
+    let transform = Transform2D::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+    let (tx, ty) = (2.0, 5.0);
+
+    let mut translated = transform;
+    translated.translate(tx, ty);
+
+    assert_eq!(translated, transform * Transform2D::translation(tx, ty))
+}
+
+#[test]
+fn test_rotation() {
+    let transform = Transform2D::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+    let a = std::f32::consts::TAU * 0.75;
+
+    let mut scaled = transform;
+    scaled.rotate(a);
+
+    assert_eq!(scaled, transform * Transform2D::rotation(a))
+}
+
+#[test]
+fn test_scaling() {
+    let transform = Transform2D::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+    let (sx, sy) = (2.0, 0.5);
+
+    let mut scaled = transform;
+    scaled.scale(sx, sy);
+
+    assert_eq!(scaled, transform * Transform2D::scaling(sx, sy))
+}
