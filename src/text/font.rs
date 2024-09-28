@@ -198,8 +198,7 @@ impl Font {
         &self,
         face: &rustybuzz::Face<'_>,
         codepoint: u16,
-        #[allow(unused_variables)]
-        pixels_per_em: u16,
+        #[allow(unused_variables)] pixels_per_em: u16,
     ) -> Option<GlyphRendering> {
         #[cfg(feature = "image-loading")]
         if let Some(image) = face

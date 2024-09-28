@@ -737,7 +737,7 @@ where
         let w = w.max(0.0);
         let h = h.max(0.0);
 
-        let mut transform = Transform2D::new_translation(x + w * 0.5, y + h * 0.5);
+        let mut transform = Transform2D::translation(x + w * 0.5, y + h * 0.5);
         transform *= state.transform;
         state.scissor.transform = transform;
 

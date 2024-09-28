@@ -184,7 +184,7 @@ impl Params {
                 feather,
                 colors,
             } => {
-                let mut transform = Transform2D::new_translation(x + width * 0.5, y + height * 0.5);
+                let mut transform = Transform2D::translation(x + width * 0.5, y + height * 0.5);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
