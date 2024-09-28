@@ -688,15 +688,19 @@ where
 
     /// Translates the current coordinate system.
     pub fn translate(&mut self, x: f32, y: f32) {
-        let mut t = Transform2D::identity();
-        t.translate(x, y);
+        let t = Transform2D::translation(x, y);
         self.state_mut().transform.premultiply(&t);
     }
 
     /// Rotates the current coordinate system. Angle is specified in radians.
     pub fn rotate(&mut self, angle: f32) {
-        let mut t = Transform2D::identity();
-        t.rotate(angle);
+        let t = Transform2D::rotation(angle);
+        self.state_mut().transform.premultiply(&t);
+    }
+
+    /// Scales the current coordinate system.
+    pub fn scale(&mut self, x: f32, y: f32) {
+        let t = Transform2D::scaling(x, y);
         self.state_mut().transform.premultiply(&t);
     }
 
@@ -711,13 +715,6 @@ where
     pub fn skew_y(&mut self, angle: f32) {
         let mut t = Transform2D::identity();
         t.skew_y(angle);
-        self.state_mut().transform.premultiply(&t);
-    }
-
-    /// Scales the current coordinate system.
-    pub fn scale(&mut self, x: f32, y: f32) {
-        let mut t = Transform2D::identity();
-        t.scale(x, y);
         self.state_mut().transform.premultiply(&t);
     }
 
@@ -1137,8 +1134,7 @@ where
 
         // Apply the same mapping from vertex coordinates to texture coordinates as in the fragment shader,
         // but now ahead of time.
-        let mut to_texture_space_transform = Transform2D::identity();
-        to_texture_space_transform.scale(1. / params.extent[0], 1. / params.extent[1]);
+        let mut to_texture_space_transform = Transform2D::scaling(1. / params.extent[0], 1. / params.extent[1]);
         to_texture_space_transform.premultiply(&Transform2D([
             params.paint_mat[0],
             params.paint_mat[1],

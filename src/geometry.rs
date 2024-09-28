@@ -216,7 +216,7 @@ impl Transform2D {
 
     /// Creates a translation transformation matrix.
     pub fn translation(tx: f32, ty: f32) -> Self {
-        Self([0.0, 0.0, 0.0, 0.0, tx, ty])
+        Self([1.0, 0.0, 0.0, 1.0, tx, ty])
     }
 
     /// Creates a rotation transformation matrix.

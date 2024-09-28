@@ -100,22 +100,18 @@ impl Params {
                 params.inner_col = color.premultiplied().to_array();
                 params.outer_col = color.premultiplied().to_array();
 
-                let mut transform = Transform2D::identity();
-                transform.rotate(*angle);
+                let mut transform = Transform2D::rotation(*angle);
                 transform.translate(*cx, *cy);
                 transform *= *global_transform;
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {
-                    let mut m1 = Transform2D::identity();
-                    m1.translate(0.0, height * 0.5);
+                    let mut m1 = Transform2D::translation(0.0, height * 0.5);
                     m1 *= transform;
 
-                    let mut m2 = Transform2D::identity();
-                    m2.scale(1.0, -1.0);
+                    let mut m2 = Transform2D::scaling(1.0, -1.0);
                     m2 *= m1;
 
-                    let mut m1 = Transform2D::identity();
-                    m1.translate(0.0, -height * 0.5);
+                    let mut m1 = Transform2D::translation(0.0, -height * 0.5);
                     m1 *= m2;
 
                     inv_transform = m1.inverse();
