@@ -243,16 +243,11 @@ impl Transform2D {
     pub fn rotate(&mut self, a: f32) {
         let (sin, cos) = a.sin_cos();
 
-        let Self([a, b, c, d, x, y]) = *self;
+        let Self([a, b, c, d, x, y]) = self;
 
-        *self = Self([
-            a * cos - b * sin,
-            a * sin + b * cos,
-            c * cos - d * sin,
-            c * sin + d * cos,
-            x * cos - y * sin,
-            x * sin + y * cos,
-        ])
+        [*a, *b] = [*a * cos - *b * sin, *a * sin + *b * cos];
+        [*c, *d] = [*c * cos - *d * sin, *c * sin + *d * cos];
+        [*x, *y] = [*x * cos - *y * sin, *x * sin + *y * cos];
     }
 
     /// Scales the matrix.
