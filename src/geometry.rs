@@ -349,6 +349,7 @@ impl Transform2D {
         hasher.finish()
     }
 }
+
 impl Default for Transform2D {
     fn default() -> Self {
         Self::identity()
