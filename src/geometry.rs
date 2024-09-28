@@ -386,6 +386,7 @@ impl Add for Transform2D {
 }
 
 impl AddAssign for Transform2D {
+    #[inline]
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
     }
@@ -407,6 +408,7 @@ impl Sub for Transform2D {
 }
 
 impl SubAssign for Transform2D {
+    #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         *self = *self - rhs;
     }
@@ -428,6 +430,7 @@ impl Mul for Transform2D {
 }
 
 impl MulAssign for Transform2D {
+    #[inline]
     fn mul_assign(&mut self, rhs: Self) {
         *self = *self * rhs;
     }
@@ -442,6 +445,7 @@ impl Div for Transform2D {
 }
 
 impl DivAssign for Transform2D {
+    #[inline]
     fn div_assign(&mut self, rhs: Self) {
         *self = *self / rhs;
     }
