@@ -198,21 +198,23 @@ impl Scissor {
             return Some(Rect::new(0., 0., canvas_width, canvas_height));
         };
 
+        let Transform2D([a, b, c, d, x, y]) = self.transform;
+
         // Abort if we're skewing (usually doesn't happen)
-        if self.transform[1] != 0.0 || self.transform[2] != 0.0 {
+        if b != 0.0 || c != 0.0 {
             return None;
         }
 
         // Abort if we're scaling
-        if self.transform[0] != 1.0 || self.transform[3] != 1.0 {
+        if a != 1.0 || d != 1.0 {
             return None;
         }
 
         let half_width = extent[0];
         let half_height = extent[1];
         Some(Rect::new(
-            self.transform[4] - half_width,
-            self.transform[5] - half_height,
+            x - half_width,
+            y - half_height,
             half_width * 2.0,
             half_height * 2.0,
         ))
@@ -763,17 +765,15 @@ where
         // Transform the current scissor rect into current transform space.
         // If there is difference in rotation, this will be approximation.
 
-        let mut pxform = state.scissor.transform;
-
-        pxform /= state.transform;
+        let Transform2D([a, b, c, d, x, y]) = state.scissor.transform / state.transform;
 
         let ex = extent[0];
         let ey = extent[1];
 
-        let tex = ex * pxform[0].abs() + ey * pxform[2].abs();
-        let tey = ex * pxform[1].abs() + ey * pxform[3].abs();
+        let tex = ex * a.abs() + ey * c.abs();
+        let tey = ex * b.abs() + ey * d.abs();
 
-        let rect = Rect::new(pxform[4] - tex, pxform[5] - tey, tex * 2.0, tey * 2.0);
+        let rect = Rect::new(x - tex, y - tey, tex * 2.0, tey * 2.0);
         let res = rect.intersect(Rect::new(x, y, w, h));
 
         self.scissor(res.x, res.y, res.w, res.h);

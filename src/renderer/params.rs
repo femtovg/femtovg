@@ -47,10 +47,8 @@ impl Params {
             } else {
                 params.scissor_mat = scissor.transform.inverse().to_mat3x4();
 
-                let scissor_scale = [
-                    scissor.transform[0].hypot(scissor.transform[2]) / fringe_width,
-                    scissor.transform[1].hypot(scissor.transform[3]) / fringe_width,
-                ];
+                let Transform2D([a, b, c, d, ..]) = scissor.transform;
+                let scissor_scale = [a.hypot(c) / fringe_width, b.hypot(d) / fringe_width];
 
                 (ext, scissor_scale)
             }
