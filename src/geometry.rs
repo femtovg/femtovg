@@ -321,24 +321,27 @@ impl Transform2D {
 
     /// Transforms a point using the current transformation matrix.
     pub fn transform_point(&self, sx: f32, sy: f32) -> (f32, f32) {
-        let dx = sx * self[0] + sy * self[2] + self[4];
-        let dy = sx * self[1] + sy * self[3] + self[5];
+        let Self([a, b, c, d, x, y]) = *self;
+
+        let dx = sx * a + sy * c + x;
+        let dy = sx * b + sy * d + y;
         (dx, dy)
     }
 
     /// Calculates the average scale factor of the current transformation matrix.
     pub fn average_scale(&self) -> f32 {
-        let sx = self[0].hypot(self[2]);
-        let sy = self[1].hypot(self[3]);
+        let Self([a, b, c, d, ..]) = *self;
+
+        let sx = a.hypot(c);
+        let sy = b.hypot(d);
 
         (sx + sy) * 0.5
     }
 
     /// Converts the current transformation matrix to a 3×4 matrix format.
     pub fn to_mat3x4(self) -> [f32; 12] {
-        [
-            self[0], self[1], 0.0, 0.0, self[2], self[3], 0.0, 0.0, self[4], self[5], 1.0, 0.0,
-        ]
+        let Self([a, b, c, d, x, y]) = self;
+        [a, b, 0.0, 0.0, c, d, 0.0, 0.0, x, y, 1.0, 0.0]
     }
 
     /// Generates a cache key for the current transformation matrix.
