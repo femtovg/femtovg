@@ -233,7 +233,7 @@ impl Transform2D {
 
     /// Translates the matrix.
     pub fn translate(&mut self, tx: f32, ty: f32) {
-        let Self([_, _, _, _, x, y]) = self;
+        let Self([.., x, y]) = self;
 
         *x += tx;
         *y += ty;
