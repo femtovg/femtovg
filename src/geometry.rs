@@ -298,7 +298,7 @@ impl Transform2D {
 
     /// Returns the inverse of the current transformation matrix.
     pub fn inverse(&self) -> Self {
-        let Self([a, b, c, d, x, y]) = *self;
+        let &Self([a, b, c, d, x, y]) = self;
         let [a, b, c, d, x, y] = [a as f64, b as f64, c as f64, d as f64, x as f64, y as f64];
 
         let det = a * d - c * b;
@@ -321,7 +321,7 @@ impl Transform2D {
 
     /// Transforms a point using the current transformation matrix.
     pub fn transform_point(&self, sx: f32, sy: f32) -> (f32, f32) {
-        let Self([a, b, c, d, x, y]) = *self;
+        let &Self([a, b, c, d, x, y]) = self;
 
         let dx = sx * a + sy * c + x;
         let dy = sx * b + sy * d + y;
@@ -330,7 +330,7 @@ impl Transform2D {
 
     /// Calculates the average scale factor of the current transformation matrix.
     pub fn average_scale(&self) -> f32 {
-        let Self([a, b, c, d, ..]) = *self;
+        let &Self([a, b, c, d, ..]) = self;
 
         let sx = a.hypot(c);
         let sy = b.hypot(d);
