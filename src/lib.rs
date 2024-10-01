@@ -1448,6 +1448,7 @@ where
         self.state_stack.last_mut().unwrap()
     }
 
+    /// Get a list of all font textures.
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_get_font_textures(&self) -> Vec<ImageId> {
         self.glyph_atlas
@@ -1458,6 +1459,7 @@ where
             .collect()
     }
 
+    /// Draws an image with the specified `id` on the whole canvas.
     #[cfg(feature = "debug_inspector")]
     pub fn debug_inspector_draw_image(&mut self, id: ImageId) {
         if let Ok(size) = self.image_size(id) {
