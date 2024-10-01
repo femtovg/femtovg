@@ -184,7 +184,7 @@ fn run(
                 let _ = canvas.fill_text(
                     size.width as f32 - 10.0,
                     24.0,
-                    format!("Click to show font atlas texture. Current: {:?}", font_texture_to_show),
+                    format!("Click to show font atlas texture. Current: {font_texture_to_show:?}"),
                     &paint,
                 );
 
