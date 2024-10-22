@@ -1485,9 +1485,11 @@ pub use ::image as img;
 pub use imgref;
 pub use rgb;
 
+/// Internal structure that implements the Renderer trait for unit testing.
 #[cfg(test)]
 #[derive(Default)]
 pub struct RecordingRenderer {
+    /// Vector of the last commands submitted to the renderer.
     pub last_commands: Rc<RefCell<Vec<renderer::Command>>>,
 }
 
@@ -1546,6 +1548,7 @@ impl Renderer for RecordingRenderer {
     }
 }
 
+/// Dummy image type used for tests.
 #[cfg(test)]
 pub struct DummyImage {
     info: ImageInfo,
