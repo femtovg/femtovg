@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use imgref::*;
-use rgb::alt::GRAY8;
+use rgb::alt::Gray;
 use rgb::*;
 use slotmap::{DefaultKey, SlotMap};
 
@@ -55,7 +55,7 @@ pub enum ImageSource<'a> {
     /// Image source with RGBA image format (8 bits per channel, including alpha)
     Rgba(ImgRef<'a, RGBA8>),
     /// Image source with 8-bit grayscale image format
-    Gray(ImgRef<'a, GRAY8>),
+    Gray(ImgRef<'a, Gray<u8>>),
     /// Image source referencing a HTML image element (only available on `wasm32` target)
     #[cfg(target_arch = "wasm32")]
     HtmlImageElement(&'a web_sys::HtmlImageElement),
@@ -97,8 +97,8 @@ impl<'a> From<ImgRef<'a, RGBA8>> for ImageSource<'a> {
     }
 }
 
-impl<'a> From<ImgRef<'a, GRAY8>> for ImageSource<'a> {
-    fn from(src: ImgRef<'a, GRAY8>) -> Self {
+impl<'a> From<ImgRef<'a, Gray<u8>>> for ImageSource<'a> {
+    fn from(src: ImgRef<'a, Gray<u8>>) -> Self {
         Self::Gray(src)
     }
 }
@@ -117,7 +117,7 @@ impl<'a> TryFrom<&'a DynamicImage> for ImageSource<'a> {
     fn try_from(src: &'a DynamicImage) -> Result<Self, ErrorKind> {
         Ok(match src {
             ::image::DynamicImage::ImageLuma8(img) => {
-                let src: Img<&[GRAY8]> = Img::new(img.as_pixels(), img.width() as usize, img.height() as usize);
+                let src: Img<&[Gray<u8>]> = Img::new(img.as_pixels(), img.width() as usize, img.height() as usize);
                 ImageSource::from(src)
             }
             ::image::DynamicImage::ImageRgb8(img) => {
