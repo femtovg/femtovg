@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.10.0] - 2024-10-23
+
 - **breaking**: Removed the mutable reference of self in `new` constructor for Transform2D
  - Implemented arithmetic operations for `Transform2D`
  - Completed and improved documentation
@@ -10,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - **breaking**: Renamed `Transform2D` methods `inversed` to `inverse` and `inverse` to `invert`.
 - **breaking**: Renamed `Transform2D` constructor `new_translation` to `translation` and added new constructors `rotation` and `scaling`.
 - Reimplemented `Transform2D` transformation functions (`translate`, `rotate`, `scale`, `skew_x`, `skew_y`) to do what they are supposed to.
+- **breaking**: glow dependency bumped.
 
 ## [0.9.2] - 2024-06-27
 
