@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## [0.10.1] - 2024-10-24
+
+ - Fix accidental breakage with scissor clipping.
+
 ## [0.10.0] - 2024-10-23
 
 - **breaking**: Removed the mutable reference of self in `new` constructor for Transform2D
@@ -202,3 +206,6 @@ All notable changes to this project will be documented in this file.
 [0.8.2]: https://github.com/femtovg/femtovg/releases/tag/v0.8.2
 [0.9.0]: https://github.com/femtovg/femtovg/releases/tag/v0.9.0
 [0.9.1]: https://github.com/femtovg/femtovg/releases/tag/v0.9.1
+[0.9.2]: https://github.com/femtovg/femtovg/releases/tag/v0.9.2
+[0.10.0]: https://github.com/femtovg/femtovg/releases/tag/v0.10.0
+[0.10.1]: https://github.com/femtovg/femtovg/releases/tag/v0.10.1

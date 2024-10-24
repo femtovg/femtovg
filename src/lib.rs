@@ -765,7 +765,7 @@ where
         // Transform the current scissor rect into current transform space.
         // If there is difference in rotation, this will be approximation.
 
-        let Transform2D([a, b, c, d, x, y]) = state.scissor.transform / state.transform;
+        let Transform2D([a, b, c, d, tx, ty]) = state.scissor.transform / state.transform;
 
         let ex = extent[0];
         let ey = extent[1];
@@ -773,7 +773,7 @@ where
         let tex = ex * a.abs() + ey * c.abs();
         let tey = ex * b.abs() + ey * d.abs();
 
-        let rect = Rect::new(x - tex, y - tey, tex * 2.0, tey * 2.0);
+        let rect = Rect::new(tx - tex, ty - tey, tex * 2.0, tey * 2.0);
         let res = rect.intersect(Rect::new(x, y, w, h));
 
         self.scissor(res.x, res.y, res.w, res.h);
