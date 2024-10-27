@@ -16,7 +16,7 @@ use glutin::{
 };
 
 fn main() {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let _context = create_window(&event_loop);
 }
 

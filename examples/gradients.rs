@@ -3,7 +3,7 @@ use instant::Instant;
 use resource::resource;
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::EventLoop,
     window::Window,
 };
 
@@ -39,11 +39,11 @@ fn run(
 
     let mut perf = PerfGraph::new();
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    el.run(move |event, event_loop_window_target| {
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
@@ -53,36 +53,38 @@ fn run(
                         physical_size.height.try_into().unwrap(),
                     );
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::RedrawRequested { .. } => {
+                    let dpi_factor = window.scale_factor();
+                    let size = window.inner_size();
+                    canvas.set_size(size.width, size.height, dpi_factor as f32);
+                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
+
+                    let now = Instant::now();
+                    let dt = (now - prevt).as_secs_f32();
+                    prevt = now;
+
+                    perf.update(dt);
+
+                    draw_gradients(&mut canvas);
+
+                    canvas.save();
+                    canvas.reset();
+                    perf.render(&mut canvas, 5.0, 5.0);
+                    canvas.restore();
+
+                    canvas.flush();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    surface.swap_buffers(&context).unwrap();
+                }
                 _ => (),
             },
-            Event::RedrawRequested(_) => {
-                let dpi_factor = window.scale_factor();
-                let size = window.inner_size();
-                canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
-                let now = Instant::now();
-                let dt = (now - prevt).as_secs_f32();
-                prevt = now;
-
-                perf.update(dt);
-
-                draw_gradients(&mut canvas);
-
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
-
-                canvas.flush();
-                #[cfg(not(target_arch = "wasm32"))]
-                surface.swap_buffers(&context).unwrap();
-            }
-            Event::MainEventsCleared => window.request_redraw(),
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }
 
 fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {

@@ -11,18 +11,13 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use raw_window_handle::HasRawWindowHandle;
-use winit::{
-    event::Event,
-    event::WindowEvent,
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
+use winit::{event::Event, event::WindowEvent, event_loop::EventLoop, window::WindowBuilder};
 
 const WINDOW_WIDTH: f32 = 640.0;
 const WINDOW_HEIGHT: f32 = 480.0;
 
 fn main() {
-    let el = EventLoop::new();
+    let el = EventLoop::new().unwrap();
 
     let (window, gl_context, surface, display) = {
         let window_builder = WindowBuilder::new()
@@ -109,16 +104,19 @@ fn main() {
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
     canvas.set_size(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, 1.0);
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    el.run(move |event, event_loop_window_target| {
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => *control_flow = ControlFlow::Exit,
-            Event::RedrawRequested(_) => {
+            } => event_loop_window_target.exit(),
+            Event::WindowEvent {
+                event: WindowEvent::RedrawRequested { .. },
+                ..
+            } => {
                 prepare_framebuffer_for_render(&context, framebuffer);
 
                 // draw red rectangle on white background
@@ -143,10 +141,11 @@ fn main() {
 
                 surface.swap_buffers(&gl_context).unwrap();
             }
-            Event::MainEventsCleared => window.request_redraw(),
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }
 
 fn create_shader_program(context: &glow::Context) -> NativeProgram {

@@ -2,8 +2,9 @@ use femtovg::{renderer::OpenGl, Align, Baseline, Canvas, Color, FontId, ImageFla
 use instant::Instant;
 use resource::resource;
 use winit::{
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event::{ElementState, Event, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::KeyCode,
     window::Window,
 };
 
@@ -75,11 +76,11 @@ fn run(
     let mut x = 5.0;
     let mut y = 380.0;
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    el.run(move |event, event_loop_window_target| {
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
@@ -89,37 +90,37 @@ fn run(
                         physical_size.height.try_into().unwrap(),
                     );
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            virtual_keycode: Some(keycode),
+                    event:
+                        winit::event::KeyEvent {
+                            physical_key: winit::keyboard::PhysicalKey::Code(keycode),
                             state: ElementState::Pressed,
                             ..
                         },
                     ..
                 } => {
-                    if *keycode == VirtualKeyCode::W {
+                    if *keycode == KeyCode::KeyW {
                         y -= 0.1;
                     }
 
-                    if *keycode == VirtualKeyCode::S {
+                    if *keycode == KeyCode::KeyS {
                         y += 0.1;
                     }
 
-                    if *keycode == VirtualKeyCode::A {
+                    if *keycode == KeyCode::KeyA {
                         x -= 0.1;
                     }
 
-                    if *keycode == VirtualKeyCode::D {
+                    if *keycode == KeyCode::KeyD {
                         x += 0.1;
                     }
 
-                    if *keycode == VirtualKeyCode::NumpadAdd {
+                    if *keycode == KeyCode::NumpadAdd {
                         font_size += 1.0;
                     }
 
-                    if *keycode == VirtualKeyCode::NumpadSubtract {
+                    if *keycode == KeyCode::NumpadSubtract {
                         font_size -= 1.0;
                     }
                 }
@@ -144,74 +145,76 @@ fn run(
                     font_size += *y / 2.0;
                     font_size = font_size.max(2.0);
                 }
-                _ => (),
-            },
-            Event::RedrawRequested(_) => {
-                let dpi_factor = window.scale_factor();
-                let size = window.inner_size();
-                canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
+                WindowEvent::RedrawRequested { .. } => {
+                    let dpi_factor = window.scale_factor();
+                    let size = window.inner_size();
+                    canvas.set_size(size.width, size.height, dpi_factor as f32);
+                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
-                let elapsed = start.elapsed().as_secs_f32();
-                let now = Instant::now();
-                let dt = (now - prevt).as_secs_f32();
-                prevt = now;
+                    let elapsed = start.elapsed().as_secs_f32();
+                    let now = Instant::now();
+                    let dt = (now - prevt).as_secs_f32();
+                    prevt = now;
 
-                perf.update(dt);
+                    perf.update(dt);
 
-                draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size, supports_emojis);
-                draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
-                draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
-                draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
+                    draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size, supports_emojis);
+                    draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
+                    draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
+                    draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
 
-                draw_complex(&mut canvas, 300.0, 340.0, font_size);
+                    draw_complex(&mut canvas, 300.0, 340.0, font_size);
 
-                draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
-                draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
-                draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+                    draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
+                    draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
+                    draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
 
-                let paint = Paint::color(Color::hex("B7410E"))
-                    .with_font(&[fonts.bold])
-                    .with_text_baseline(Baseline::Top)
-                    .with_text_align(Align::Right);
-                let _ = canvas.fill_text(
-                    size.width as f32 - 10.0,
-                    10.0,
-                    format!("Scroll to increase / decrease font size. Current: {font_size}"),
-                    &paint,
-                );
-                #[cfg(feature = "debug_inspector")]
-                let _ = canvas.fill_text(
-                    size.width as f32 - 10.0,
-                    24.0,
-                    format!("Click to show font atlas texture. Current: {font_texture_to_show:?}"),
-                    &paint,
-                );
+                    let paint = Paint::color(Color::hex("B7410E"))
+                        .with_font(&[fonts.bold])
+                        .with_text_baseline(Baseline::Top)
+                        .with_text_align(Align::Right);
+                    let _ = canvas.fill_text(
+                        size.width as f32 - 10.0,
+                        10.0,
+                        format!("Scroll to increase / decrease font size. Current: {font_size}"),
+                        &paint,
+                    );
+                    #[cfg(feature = "debug_inspector")]
+                    let _ = canvas.fill_text(
+                        size.width as f32 - 10.0,
+                        24.0,
+                        format!("Click to show font atlas texture. Current: {font_texture_to_show:?}"),
+                        &paint,
+                    );
 
-                canvas.save();
-                canvas.reset();
-                perf.render(&mut canvas, 5.0, 5.0);
-                canvas.restore();
-
-                #[cfg(feature = "debug_inspector")]
-                if let Some(index) = font_texture_to_show {
                     canvas.save();
                     canvas.reset();
-                    let textures = canvas.debug_inspector_get_font_textures();
-                    if let Some(&id) = textures.get(index) {
-                        canvas.debug_inspector_draw_image(id);
-                    }
+                    perf.render(&mut canvas, 5.0, 5.0);
                     canvas.restore();
-                }
 
-                canvas.flush();
-                #[cfg(not(target_arch = "wasm32"))]
-                surface.swap_buffers(&context).unwrap();
-            }
-            Event::MainEventsCleared => window.request_redraw(),
+                    #[cfg(feature = "debug_inspector")]
+                    if let Some(index) = font_texture_to_show {
+                        canvas.save();
+                        canvas.reset();
+                        let textures = canvas.debug_inspector_get_font_textures();
+                        if let Some(&id) = textures.get(index) {
+                            canvas.debug_inspector_draw_image(id);
+                        }
+                        canvas.restore();
+                    }
+
+                    canvas.flush();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    surface.swap_buffers(&context).unwrap();
+                }
+                _ => (),
+            },
+
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }
 
 fn draw_baselines<T: Renderer>(

@@ -8,7 +8,7 @@ use glutin_winit::DisplayBuilder;
 use raw_window_handle::HasRawWindowHandle;
 use winit::dpi::PhysicalPosition;
 use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -21,7 +21,7 @@ use glutin::{
 };
 
 fn main() {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let (context, gl_display, window, surface) = create_window(&event_loop);
 
     let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
@@ -32,20 +32,22 @@ fn main() {
 
     let mut mouse_position = PhysicalPosition::new(0., 0.);
 
-    event_loop.run(move |event, _target, control_flow| match event {
-        Event::WindowEvent { event, .. } => match event {
-            WindowEvent::CursorMoved { position, .. } => {
-                mouse_position = position;
-                window.request_redraw();
-            }
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+    event_loop
+        .run(move |event, target| match event {
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CursorMoved { position, .. } => {
+                    mouse_position = position;
+                    window.request_redraw();
+                }
+                WindowEvent::CloseRequested => target.exit(),
+                WindowEvent::RedrawRequested { .. } => {
+                    render(&context, &surface, &window, &mut canvas, mouse_position);
+                }
+                _ => {}
+            },
             _ => {}
-        },
-        Event::RedrawRequested(_) => {
-            render(&context, &surface, &window, &mut canvas, mouse_position);
-        }
-        _ => {}
-    })
+        })
+        .unwrap();
 }
 
 fn create_window(event_loop: &EventLoop<()>) -> (PossiblyCurrentContext, Display, Window, Surface<WindowSurface>) {

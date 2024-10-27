@@ -19,7 +19,7 @@ use glutin::{
 };
 
 fn main() {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let (context, gl_display, window, surface) = create_window(&event_loop);
 
     let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
