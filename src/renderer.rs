@@ -11,6 +11,11 @@ use crate::{
 mod opengl;
 pub use opengl::OpenGl;
 
+#[cfg(feature = "wgpu")]
+mod wgpu;
+#[cfg(feature = "wgpu")]
+pub use wgpu::WGPURenderer;
+
 mod void;
 pub use void::Void;
 
@@ -31,14 +36,6 @@ pub enum CommandType {
     SetRenderTarget(RenderTarget),
     /// Clear a rectangle with the specified color.
     ClearRect {
-        /// X-coordinate of the rectangle.
-        x: u32,
-        /// Y-coordinate of the rectangle.
-        y: u32,
-        /// Width of the rectangle.
-        width: u32,
-        /// Height of the rectangle.
-        height: u32,
         /// Color to fill the rectangle with.
         color: Color,
     },
@@ -124,11 +121,20 @@ pub trait Renderer {
     /// Associated native texture type.
     type NativeTexture;
 
+    /// Associated surface type.
+    type Surface;
+
     /// Set the size of the renderer.
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
     /// Render the specified commands.
-    fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>);
+    fn render(
+        &mut self,
+        surface: &Self::Surface,
+        images: &mut ImageStore<Self::Image>,
+        verts: &[Vertex],
+        commands: Vec<Command>,
+    );
 
     /// Allocate a new image with the specified image info.
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;
@@ -157,8 +163,16 @@ pub trait Renderer {
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;
 }
 
+/// Marker trait for renderers that don't have a surface.
+pub trait SurfacelessRenderer: Renderer {
+    /// Render the specified commands.
+    fn render_surfaceless(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>);
+}
+
+use bytemuck::{Pod, Zeroable};
+
 /// Vertex struct for specifying triangle geometry.
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Default, Pod, Zeroable)]
 #[repr(C)]
 pub struct Vertex {
     /// X-coordinate of the vertex.
@@ -208,6 +222,8 @@ pub enum ShaderType {
     FillColor,
     /// Texture copy unclipped shader.
     TextureCopyUnclipped,
+    /// Fill color shader without clipping, used for clear_rect()
+    FillColorUnclipped,
 }
 
 impl ShaderType {
@@ -221,6 +237,7 @@ impl ShaderType {
             Self::FilterImage => 4,
             Self::FillColor => 5,
             Self::TextureCopyUnclipped => 6,
+            Self::FillColorUnclipped => 7,
         }
     }
 

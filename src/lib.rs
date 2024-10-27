@@ -45,7 +45,7 @@ pub use color::Color;
 pub mod renderer;
 pub use renderer::{RenderTarget, Renderer};
 
-use renderer::{Command, CommandType, Drawable, Params, ShaderType, Vertex};
+use renderer::{Command, CommandType, Drawable, Params, ShaderType, SurfacelessRenderer, Vertex};
 
 pub(crate) mod geometry;
 pub use geometry::Transform2D;
@@ -370,15 +370,32 @@ where
 
     /// Clears the rectangle area defined by left upper corner (x,y), width and height with the provided color.
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
-        let cmd = Command::new(CommandType::ClearRect {
-            x,
-            y,
-            width,
-            height,
-            color,
-        });
+        let mut cmd = Command::new(CommandType::ClearRect { color });
+        cmd.composite_operation = self.state().composite_operation;
 
+        let x0 = x as f32;
+        let y0 = y as f32;
+        let x1 = x0 + width as f32;
+        let y1 = y0 + height as f32;
+
+        let (p0, p1) = (x0, y0);
+        let (p2, p3) = (x1, y0);
+        let (p4, p5) = (x1, y1);
+        let (p6, p7) = (x0, y1);
+
+        let verts = [
+            Vertex::new(p0, p1, 0.0, 0.0),
+            Vertex::new(p4, p5, 0.0, 0.0),
+            Vertex::new(p2, p3, 0.0, 0.0),
+            Vertex::new(p0, p1, 0.0, 0.0),
+            Vertex::new(p6, p7, 0.0, 0.0),
+            Vertex::new(p4, p5, 0.0, 0.0),
+        ];
+
+        cmd.triangles_verts = Some((self.verts.len(), verts.len()));
         self.append_cmd(cmd);
+
+        self.verts.extend_from_slice(&verts);
     }
 
     /// Returns the width of the current render target.
@@ -400,9 +417,13 @@ where
     /// Tells the renderer to execute all drawing commands and clears the current internal state
     ///
     /// Call this at the end of each frame.
-    pub fn flush(&mut self) {
-        self.renderer
-            .render(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
+    pub fn flush_to_surface(&mut self, surface: &T::Surface) {
+        self.renderer.render(
+            surface,
+            &mut self.images,
+            &self.verts,
+            std::mem::take(&mut self.commands),
+        );
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -413,7 +434,6 @@ where
 
     /// Returns a screenshot of the current canvas.
     pub fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
-        self.flush();
         self.renderer.screenshot()
     }
 
@@ -1470,6 +1490,25 @@ where
     }
 }
 
+impl<T> Canvas<T>
+where
+    T: SurfacelessRenderer,
+{
+    /// Tells the renderer to execute all drawing commands and clears the current internal state
+    ///
+    /// Call this at the end of each frame.
+    pub fn flush(&mut self) {
+        self.renderer
+            .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
+        self.verts.clear();
+        self.gradients
+            .release_old_gradients(&mut self.images, &mut self.renderer);
+        if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
+            atlas.clear(self);
+        }
+    }
+}
+
 impl<T: Renderer> Drop for Canvas<T> {
     fn drop(&mut self) {
         self.images.clear(&mut self.renderer);
@@ -1495,11 +1534,13 @@ pub struct RecordingRenderer {
 impl Renderer for RecordingRenderer {
     type Image = DummyImage;
     type NativeTexture = ();
+    type Surface = ();
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
 
     fn render(
         &mut self,
+        _surface: &Self::Surface,
         _images: &mut ImageStore<Self::Image>,
         _verts: &[renderer::Vertex],
         commands: Vec<renderer::Command>,
@@ -1567,7 +1608,7 @@ fn test_image_blit_fast_path() {
         .unwrap();
     let paint = Paint::image(image, 0., 0., 30., 30., 0., 0.).with_anti_alias(false);
     canvas.fill_path(&path, &paint);
-    canvas.flush();
+    canvas.flush_to_surface(&());
 
     let commands = recorded_commands.borrow();
     let mut commands = commands.iter();

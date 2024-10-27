@@ -1,8 +1,8 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, sync::Arc};
 
 use femtovg::{
-    renderer::OpenGl, Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, ImageId, LineCap, LineJoin, Paint,
-    Path, Renderer, Solidity,
+    Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, ImageId, LineCap, LineJoin, Paint, Path, Renderer,
+    Solidity,
 };
 use instant::Instant;
 use resource::resource;
@@ -15,6 +15,7 @@ use winit::{
 
 mod helpers;
 use helpers::PerfGraph;
+use helpers::WindowSurface;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
@@ -22,9 +23,6 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     helpers::start();
 }
-
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::prelude::*;
 
 pub fn quantize(a: f32, d: f32) -> f32 {
     (a / d + 0.5).trunc() * d
@@ -36,13 +34,7 @@ struct Fonts {
     icons: FontId,
 }
 
-fn run(
-    mut canvas: Canvas<OpenGl>,
-    el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
-    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    window: Window,
-) {
+fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     let fonts = Fonts {
         regular: canvas
             .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
@@ -113,11 +105,7 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
-                    surface.resize(
-                        &context,
-                        physical_size.width.try_into().unwrap(),
-                        physical_size.height.try_into().unwrap(),
-                    );
+                    surface.resize(physical_size.width, physical_size.height);
                 }
                 WindowEvent::CursorMoved {
                     device_id: _, position, ..
@@ -184,7 +172,6 @@ fn run(
 
                     canvas.set_size(size.width, size.height, dpi_factor as f32);
                     canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.3, 0.3, 0.32));
-
                     let height = size.height as f32;
                     let width = size.width as f32;
 
@@ -305,9 +292,7 @@ fn run(
                         perf.render(canvas, 5.0, 5.0);
                     });
 
-                    canvas.flush();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    surface.swap_buffers(&context).unwrap();
+                    surface.present(&mut canvas);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 _ => (),

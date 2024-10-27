@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 /**
  * Shows how to use `Canvas::filter_image()` to apply a blur filter.
  */
-use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path};
+use femtovg::{Canvas, Color, ImageFlags, Paint, Path};
+use helpers::WindowSurface;
 use instant::Instant;
 use resource::resource;
 use winit::{
@@ -19,19 +22,10 @@ fn main() {
     helpers::start();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
 
-fn run(
-    mut canvas: Canvas<OpenGl>,
-    el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
-    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    window: Window,
-) {
+fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     let image_id = canvas
         .load_image_mem(&resource!("examples/assets/rust-logo.png"), ImageFlags::empty())
         .unwrap();
@@ -46,11 +40,7 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
-                    surface.resize(
-                        &context,
-                        physical_size.width.try_into().unwrap(),
-                        physical_size.height.try_into().unwrap(),
-                    );
+                    surface.resize(physical_size.width, physical_size.height);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 WindowEvent::RedrawRequested { .. } => {
@@ -111,9 +101,7 @@ fn run(
 
                     canvas.restore();
 
-                    canvas.flush();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    surface.swap_buffers(&context).unwrap();
+                    surface.present(&mut canvas);
 
                     if let Some(img) = filtered_image {
                         canvas.delete_image(img)

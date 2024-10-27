@@ -20,6 +20,7 @@ debug = true
 [dependencies]
 fnv = "1.0.7"
 rgb = "0.8.50"
+bytemuck = { version = "1.16", features = ["derive"] }
 imgref = "1.11.0"
 bitflags = "2.6.0"
 rustybuzz = "0.20.0"
@@ -31,6 +32,7 @@ image = { version = "0.25.0", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive", "rc"] }
 glow = { version = "0.15.0", default-features = false }
 log = "0.4"
+wgpu = { version = "23", optional = true, default-features = false, features = ["wgsl"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 glutin = { version = "0.31", optional = true, default-features = false }
@@ -47,9 +49,10 @@ wasm-bindgen = "0.2"
 default = ["image-loading"]
 image-loading = ["image"]
 debug_inspector = []
+wgpu = ["dep:wgpu"]
 
 [dev-dependencies]
-winit = { version = "0.29", default-features = false }
+winit = { version = "0.29.1" }
 euclid = "0.22.3"
 rand = "0.8"
 svg = "0.14.0"
@@ -63,6 +66,8 @@ image = { version = "0.25.0", default-features = false, features = [
 cosmic-text = "0.12.1"
 swash = "=0.1.17" # keep this in sync with cosmic-text
 lazy_static = "1.4.0"
+spin_on = "0.1"
+wgpu = { version = "23" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.31.0"
@@ -78,6 +83,8 @@ console_error_panic_hook = "0.1.5"
 instant = { version = "0.1", features = ["wasm-bindgen", "now"] }
 resource = { version = "0.5.0", features = ["force-static"] }
 getrandom = { version = "0.2.2", features = ["js"] }
+wgpu = { version = "23", features = ["webgl"] }
+wasm-bindgen-futures = { version = "0.4.45" }
 
 [[example]]
 name = "book_example_1_1"

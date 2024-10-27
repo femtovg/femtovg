@@ -15,9 +15,9 @@ jobs:
         rust:
           - stable
           - beta
-          - 1.70.0  # MSRV
+          - 1.76.0  # MSRV
         include:
-          - rust: 1.70.0
+          - rust: 1.76.0
             pin_bumpaloo: true
     steps:
       - name: Checkout
@@ -40,6 +40,7 @@ jobs:
       - run: cargo build --no-default-features --verbose
       - run: cargo build --verbose --target wasm32-unknown-unknown
       - run: cargo build --verbose --examples
+      - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
       - run: cargo test
   format:
