@@ -33,7 +33,7 @@ glow = { version = "0.15.0", default-features = false }
 log = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-glutin = { version = "0.30.3", optional = true, default-features = false }
+glutin = { version = "0.31", optional = true, default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web_sys = { version = "0.3", package = "web-sys", features = [
@@ -49,7 +49,7 @@ image-loading = ["image"]
 debug_inspector = []
 
 [dev-dependencies]
-winit = { version = "0.28.1", default-features = false }
+winit = { version = "0.29", default-features = false }
 euclid = "0.22.3"
 rand = "0.8"
 svg = "0.14.0"
@@ -65,8 +65,8 @@ swash = "=0.1.17" # keep this in sync with cosmic-text
 lazy_static = "1.4.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-glutin = "0.30.0"
-glutin-winit = "0.3.0"
+glutin = "0.31.0"
+glutin-winit = "0.4.0"
 raw-window-handle = "0.5.0"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

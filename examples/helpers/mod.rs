@@ -32,7 +32,7 @@ pub fn start(
     #[cfg(all(debug_assertions, target_arch = "wasm32"))]
     console_error_panic_hook::set_once();
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
 
     #[cfg(not(target_arch = "wasm32"))]
     let (canvas, window, context, surface) = {
@@ -120,12 +120,17 @@ pub fn start(
 
         use winit::platform::web::WindowBuilderExtWebSys;
 
+        let width = canvas.width();
+        let height = canvas.height();
+
         let renderer = OpenGl::new_from_html_canvas(&canvas).expect("Cannot create renderer");
 
         let window = WindowBuilder::new()
             .with_canvas(Some(canvas))
             .build(&event_loop)
             .unwrap();
+
+        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
 
         let canvas = Canvas::new(renderer).expect("Cannot create canvas");
 

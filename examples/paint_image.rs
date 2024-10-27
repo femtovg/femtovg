@@ -10,7 +10,7 @@ use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFor
 use instant::Instant;
 use winit::{
     event::{ElementState, Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::EventLoop,
     window::Window,
 };
 
@@ -93,11 +93,11 @@ fn run(
 
     let mut swap_directions = false;
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    el.run(move |event, event_loop_window_target| {
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
@@ -107,9 +107,9 @@ fn run(
                         physical_size.height.try_into().unwrap(),
                     );
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 WindowEvent::ModifiersChanged(modifiers) => {
-                    swap_directions = modifiers.shift();
+                    swap_directions = modifiers.state().shift_key();
                 }
                 WindowEvent::MouseWheel {
                     device_id: _,
@@ -135,88 +135,90 @@ fn run(
                         Shape::Polar => Shape::Rect,
                     };
                 }
-                _ => (),
-            },
-            Event::RedrawRequested(_) => {
-                let dpi_factor = window.scale_factor();
-                let window_size = window.inner_size();
-                canvas.set_size(window_size.width, window_size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, window_size.width, window_size.height, Color::rgbf(0.2, 0.2, 0.2));
+                WindowEvent::RedrawRequested { .. } => {
+                    let dpi_factor = window.scale_factor();
+                    let window_size = window.inner_size();
+                    canvas.set_size(window_size.width, window_size.height, dpi_factor as f32);
+                    canvas.clear_rect(0, 0, window_size.width, window_size.height, Color::rgbf(0.2, 0.2, 0.2));
 
-                canvas.save();
-                canvas.reset();
+                    canvas.save();
+                    canvas.reset();
 
-                let zoom = (zoom as f32 / 40.0).exp();
-                let time_warp = (time_warp as f32 / 20.0).exp();
-                canvas.translate(window_size.width as f32 / 2.0, window_size.height as f32 / 2.0);
-                canvas.scale(zoom, zoom);
-                canvas.translate(window_size.width as f32 / -2.0, window_size.height as f32 / -2.0);
+                    let zoom = (zoom as f32 / 40.0).exp();
+                    let time_warp = (time_warp as f32 / 20.0).exp();
+                    canvas.translate(window_size.width as f32 / 2.0, window_size.height as f32 / 2.0);
+                    canvas.scale(zoom, zoom);
+                    canvas.translate(window_size.width as f32 / -2.0, window_size.height as f32 / -2.0);
 
-                if let Ok(size) = canvas.image_size(image_id) {
-                    let now = Instant::now();
-                    let t = (now - start).as_secs_f32() * time_warp;
+                    if let Ok(size) = canvas.image_size(image_id) {
+                        let now = Instant::now();
+                        let t = (now - start).as_secs_f32() * time_warp;
 
-                    // Shake things a bit to notice if we forgot something:
-                    canvas.translate(60.0 * (t / 3.0).cos(), 60.0 * (t / 5.0).sin());
+                        // Shake things a bit to notice if we forgot something:
+                        canvas.translate(60.0 * (t / 3.0).cos(), 60.0 * (t / 5.0).sin());
 
-                    let rx = 100.0 * t.cos();
-                    let ry = 100.0 * t.sin();
-                    let width = f32::max(1.0, size.0 as f32 * zoom + rx);
-                    let height = f32::max(1.0, size.1 as f32 * zoom + ry);
-                    let x = window_size.width as f32 / 2.0;
-                    let y = window_size.height as f32 / 2.0;
+                        let rx = 100.0 * t.cos();
+                        let ry = 100.0 * t.sin();
+                        let width = f32::max(1.0, size.0 as f32 * zoom + rx);
+                        let height = f32::max(1.0, size.1 as f32 * zoom + ry);
+                        let x = window_size.width as f32 / 2.0;
+                        let y = window_size.height as f32 / 2.0;
 
-                    let mut path = Path::new();
-                    match &shape {
-                        Shape::Rect => {
-                            path.rect(x - width / 2.0, y - height / 2.0, width, height);
-                        }
-                        Shape::Ellipse => {
-                            let rx = width / 2.0;
-                            let ry = height / 2.0;
-                            path.ellipse(x, y, rx, ry);
-                        }
-                        Shape::Polar => {
-                            const TO_RADIANS: f32 = std::f32::consts::PI / 180.0;
-                            for theta in 0..360 {
-                                let theta = theta as f32 * TO_RADIANS;
-                                let r = width / 3.0 + width / 2.0 * (3.0 * theta + t).cos();
-                                let x = x + r * theta.cos();
-                                let y = y + r * theta.sin();
-                                if path.is_empty() {
-                                    path.move_to(x, y);
-                                } else {
-                                    path.line_to(x, y);
-                                }
+                        let mut path = Path::new();
+                        match &shape {
+                            Shape::Rect => {
+                                path.rect(x - width / 2.0, y - height / 2.0, width, height);
                             }
-                            path.close();
-                            path.circle(x, y, width / 5.0);
+                            Shape::Ellipse => {
+                                let rx = width / 2.0;
+                                let ry = height / 2.0;
+                                path.ellipse(x, y, rx, ry);
+                            }
+                            Shape::Polar => {
+                                const TO_RADIANS: f32 = std::f32::consts::PI / 180.0;
+                                for theta in 0..360 {
+                                    let theta = theta as f32 * TO_RADIANS;
+                                    let r = width / 3.0 + width / 2.0 * (3.0 * theta + t).cos();
+                                    let x = x + r * theta.cos();
+                                    let y = y + r * theta.sin();
+                                    if path.is_empty() {
+                                        path.move_to(x, y);
+                                    } else {
+                                        path.line_to(x, y);
+                                    }
+                                }
+                                path.close();
+                                path.circle(x, y, width / 5.0);
+                            }
                         }
+
+                        // Get the bounding box of the path so that we can stretch
+                        // the paint to cover it exactly:
+                        let bbox = canvas.path_bbox(&path);
+
+                        // Now we need to apply the current canvas transform
+                        // to the path bbox:
+                        let a = canvas.transform().inverse().transform_point(bbox.minx, bbox.miny);
+                        let b = canvas.transform().inverse().transform_point(bbox.maxx, bbox.maxy);
+
+                        canvas.fill_path(
+                            &path,
+                            &Paint::image(image_id, a.0, a.1, b.0 - a.0, b.1 - a.1, 0f32, 1f32),
+                        );
                     }
 
-                    // Get the bounding box of the path so that we can stretch
-                    // the paint to cover it exactly:
-                    let bbox = canvas.path_bbox(&path);
+                    canvas.restore();
 
-                    // Now we need to apply the current canvas transform
-                    // to the path bbox:
-                    let a = canvas.transform().inverse().transform_point(bbox.minx, bbox.miny);
-                    let b = canvas.transform().inverse().transform_point(bbox.maxx, bbox.maxy);
-
-                    canvas.fill_path(
-                        &path,
-                        &Paint::image(image_id, a.0, a.1, b.0 - a.0, b.1 - a.1, 0f32, 1f32),
-                    );
+                    canvas.flush();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    surface.swap_buffers(&context).unwrap();
                 }
+                _ => (),
+            },
 
-                canvas.restore();
-
-                canvas.flush();
-                #[cfg(not(target_arch = "wasm32"))]
-                surface.swap_buffers(&context).unwrap();
-            }
-            Event::MainEventsCleared => window.request_redraw(),
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }

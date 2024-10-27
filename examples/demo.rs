@@ -7,8 +7,9 @@ use femtovg::{
 use instant::Instant;
 use resource::resource;
 use winit::{
-    event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event::{ElementState, Event, KeyEvent, MouseButton, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
 
@@ -104,11 +105,11 @@ fn run(
 
     let mut perf = PerfGraph::new();
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
+    el.run(move |event, event_loop_window_target| {
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
@@ -153,9 +154,9 @@ fn run(
                     ElementState::Released => dragging = false,
                 },
                 WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            virtual_keycode: Some(VirtualKeyCode::S),
+                    event:
+                        KeyEvent {
+                            physical_key: PhysicalKey::Code(KeyCode::KeyS),
                             state: ElementState::Pressed,
                             ..
                         },
@@ -169,152 +170,153 @@ fn run(
                         screenshot_image_id = Some(canvas.create_image(image.as_ref(), ImageFlags::empty()).unwrap());
                     }
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::RedrawRequested { .. } => {
+                    let now = Instant::now();
+                    let dt = (now - prevt).as_secs_f32();
+                    prevt = now;
+
+                    perf.update(dt);
+
+                    let dpi_factor = window.scale_factor();
+                    let size = window.inner_size();
+
+                    let t = start.elapsed().as_secs_f32();
+
+                    canvas.set_size(size.width, size.height, dpi_factor as f32);
+                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.3, 0.3, 0.32));
+
+                    let height = size.height as f32;
+                    let width = size.width as f32;
+
+                    let pt = canvas.transform().inverse().transform_point(mousex, mousey);
+                    let rel_mousex = pt.0;
+                    let rel_mousey = pt.1;
+
+                    draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
+
+                    draw_eyes(
+                        &mut canvas,
+                        width - 250.0,
+                        50.0,
+                        150.0,
+                        100.0,
+                        rel_mousex,
+                        rel_mousey,
+                        t,
+                    );
+
+                    draw_paragraph(
+                        &mut canvas,
+                        fonts.regular,
+                        width - 450.0,
+                        50.0,
+                        150.0,
+                        100.0,
+                        rel_mousex,
+                        rel_mousey,
+                    );
+
+                    draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
+
+                    draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
+                    draw_widths(&mut canvas, 10.0, 50.0, 30.0);
+                    draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
+                    draw_caps(&mut canvas, 10.0, 300.0, 30.0);
+
+                    draw_scissor(&mut canvas, 50.0, height - 80.0, t);
+
+                    draw_window(&mut canvas, &fonts, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
+
+                    let x = 60.0;
+                    let mut y = 95.0;
+
+                    draw_search_box(&mut canvas, &fonts, "Search", x, y, 280.0, 25.0);
+                    y += 40.0;
+                    draw_drop_down(&mut canvas, &fonts, "Effects", 60.0, 135.0, 280.0, 28.0);
+                    let popy = y + 14.0;
+                    y += 45.0;
+
+                    draw_label(&mut canvas, &fonts, "Login", x, y, 280.0, 20.0);
+                    y += 25.0;
+                    draw_edit_box(&mut canvas, &fonts, "Email", x, y, 280.0, 28.0);
+                    y += 35.0;
+                    draw_edit_box(&mut canvas, &fonts, "Password", x, y, 280.0, 28.0);
+                    y += 38.0;
+                    draw_check_box(&mut canvas, &fonts, "Remember me", x, y, 140.0, 28.0);
+                    draw_button(
+                        &mut canvas,
+                        &fonts,
+                        Some("\u{E740}"),
+                        "Sign in",
+                        x + 138.0,
+                        y,
+                        140.0,
+                        28.0,
+                        Color::rgba(0, 96, 128, 255),
+                    );
+                    y += 45.0;
+
+                    // Slider
+                    draw_label(&mut canvas, &fonts, "Diameter", x, y, 280.0, 20.0);
+                    y += 25.0;
+                    draw_edit_box_num(&mut canvas, &fonts, "123.00", "px", x + 180.0, y, 100.0, 28.0);
+                    draw_slider(&mut canvas, 0.4, x, y, 170.0, 28.0);
+                    y += 55.0;
+
+                    draw_button(
+                        &mut canvas,
+                        &fonts,
+                        Some("\u{E729}"),
+                        "Delete",
+                        x,
+                        y,
+                        160.0,
+                        28.0,
+                        Color::rgba(128, 16, 8, 255),
+                    );
+                    draw_button(
+                        &mut canvas,
+                        &fonts,
+                        None,
+                        "Cancel",
+                        x + 170.0,
+                        y,
+                        110.0,
+                        28.0,
+                        Color::rgba(0, 0, 0, 0),
+                    );
+
+                    draw_thumbnails(&mut canvas, 365.0, popy - 30.0, 160.0, 300.0, &images, t);
+
+                    if let Some(image_id) = screenshot_image_id {
+                        let x = size.width as f32 - 512.0;
+                        let y = size.height as f32 - 512.0;
+
+                        let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
+
+                        let mut path = Path::new();
+                        path.rect(x, y, 512.0, 512.0);
+                        canvas.fill_path(&path, &paint);
+                        canvas.stroke_path(&path, &Paint::color(Color::hex("454545")));
+                    }
+
+                    canvas.save_with(|canvas| {
+                        canvas.reset();
+                        perf.render(canvas, 5.0, 5.0);
+                    });
+
+                    canvas.flush();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    surface.swap_buffers(&context).unwrap();
+                }
+                WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 _ => (),
             },
-            Event::RedrawRequested(_) => {
-                let now = Instant::now();
-                let dt = (now - prevt).as_secs_f32();
-                prevt = now;
-
-                perf.update(dt);
-
-                let dpi_factor = window.scale_factor();
-                let size = window.inner_size();
-
-                let t = start.elapsed().as_secs_f32();
-
-                canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.3, 0.3, 0.32));
-
-                let height = size.height as f32;
-                let width = size.width as f32;
-
-                let pt = canvas.transform().inverse().transform_point(mousex, mousey);
-                let rel_mousex = pt.0;
-                let rel_mousey = pt.1;
-
-                draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
-
-                draw_eyes(
-                    &mut canvas,
-                    width - 250.0,
-                    50.0,
-                    150.0,
-                    100.0,
-                    rel_mousex,
-                    rel_mousey,
-                    t,
-                );
-
-                draw_paragraph(
-                    &mut canvas,
-                    fonts.regular,
-                    width - 450.0,
-                    50.0,
-                    150.0,
-                    100.0,
-                    rel_mousex,
-                    rel_mousey,
-                );
-
-                draw_colorwheel(&mut canvas, width - 300.0, height - 350.0, 250.0, 250.0, t);
-
-                draw_lines(&mut canvas, 120.0, height - 50.0, 600.0, 50.0, t);
-                draw_widths(&mut canvas, 10.0, 50.0, 30.0);
-                draw_fills(&mut canvas, width - 200.0, height - 100.0, mousex, mousey);
-                draw_caps(&mut canvas, 10.0, 300.0, 30.0);
-
-                draw_scissor(&mut canvas, 50.0, height - 80.0, t);
-
-                draw_window(&mut canvas, &fonts, "Widgets `n Stuff", 50.0, 50.0, 300.0, 400.0);
-
-                let x = 60.0;
-                let mut y = 95.0;
-
-                draw_search_box(&mut canvas, &fonts, "Search", x, y, 280.0, 25.0);
-                y += 40.0;
-                draw_drop_down(&mut canvas, &fonts, "Effects", 60.0, 135.0, 280.0, 28.0);
-                let popy = y + 14.0;
-                y += 45.0;
-
-                draw_label(&mut canvas, &fonts, "Login", x, y, 280.0, 20.0);
-                y += 25.0;
-                draw_edit_box(&mut canvas, &fonts, "Email", x, y, 280.0, 28.0);
-                y += 35.0;
-                draw_edit_box(&mut canvas, &fonts, "Password", x, y, 280.0, 28.0);
-                y += 38.0;
-                draw_check_box(&mut canvas, &fonts, "Remember me", x, y, 140.0, 28.0);
-                draw_button(
-                    &mut canvas,
-                    &fonts,
-                    Some("\u{E740}"),
-                    "Sign in",
-                    x + 138.0,
-                    y,
-                    140.0,
-                    28.0,
-                    Color::rgba(0, 96, 128, 255),
-                );
-                y += 45.0;
-
-                // Slider
-                draw_label(&mut canvas, &fonts, "Diameter", x, y, 280.0, 20.0);
-                y += 25.0;
-                draw_edit_box_num(&mut canvas, &fonts, "123.00", "px", x + 180.0, y, 100.0, 28.0);
-                draw_slider(&mut canvas, 0.4, x, y, 170.0, 28.0);
-                y += 55.0;
-
-                draw_button(
-                    &mut canvas,
-                    &fonts,
-                    Some("\u{E729}"),
-                    "Delete",
-                    x,
-                    y,
-                    160.0,
-                    28.0,
-                    Color::rgba(128, 16, 8, 255),
-                );
-                draw_button(
-                    &mut canvas,
-                    &fonts,
-                    None,
-                    "Cancel",
-                    x + 170.0,
-                    y,
-                    110.0,
-                    28.0,
-                    Color::rgba(0, 0, 0, 0),
-                );
-
-                draw_thumbnails(&mut canvas, 365.0, popy - 30.0, 160.0, 300.0, &images, t);
-
-                if let Some(image_id) = screenshot_image_id {
-                    let x = size.width as f32 - 512.0;
-                    let y = size.height as f32 - 512.0;
-
-                    let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
-
-                    let mut path = Path::new();
-                    path.rect(x, y, 512.0, 512.0);
-                    canvas.fill_path(&path, &paint);
-                    canvas.stroke_path(&path, &Paint::color(Color::hex("454545")));
-                }
-
-                canvas.save_with(|canvas| {
-                    canvas.reset();
-                    perf.render(canvas, 5.0, 5.0);
-                });
-
-                canvas.flush();
-                #[cfg(not(target_arch = "wasm32"))]
-                surface.swap_buffers(&context).unwrap();
-            }
-            Event::MainEventsCleared => window.request_redraw(),
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }
 
 fn draw_paragraph<T: Renderer>(

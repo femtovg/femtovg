@@ -6,8 +6,8 @@ use rand::{
 };
 use resource::resource;
 use winit::{
-    event::{DeviceEvent, ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
+    event_loop::{EventLoop, EventLoopWindowTarget},
     window::Window,
 };
 
@@ -166,7 +166,7 @@ impl Game {
         }
     }
 
-    fn handle_events(&mut self, window: &Window, event: &Event<()>, control_flow: &mut ControlFlow) {
+    fn handle_events(&mut self, window: &Window, event: &Event<()>, event_loop_target: &EventLoopWindowTarget<()>) {
         if self.state == State::InGame {
             let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
             window.set_cursor_visible(false);
@@ -178,15 +178,15 @@ impl Game {
         match event {
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::KeyboardInput {
-                    input:
-                        KeyboardInput {
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                    event:
+                        winit::event::KeyEvent {
+                            physical_key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape),
                             state: ElementState::Pressed,
                             ..
                         },
                     ..
                 } => match self.state {
-                    State::TitleScreen => *control_flow = ControlFlow::Exit,
+                    State::TitleScreen => event_loop_target.exit(),
                     State::InGame => self.state = State::Paused,
                     State::Paused => self.state = State::TitleScreen,
                     State::Win { .. } | State::GameOver { .. } => self.state = State::TitleScreen,
@@ -1269,13 +1269,12 @@ fn run(
     let start = Instant::now();
     let mut prevt = start;
 
-    el.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-
-        game.handle_events(&window, &event, control_flow);
+    el.run(move |event, event_loop_window_target| {
+        game.handle_events(&window, &event, event_loop_window_target);
+        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
         match event {
-            Event::LoopDestroyed => *control_flow = ControlFlow::Exit,
+            Event::LoopExiting => event_loop_window_target.exit(),
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -1286,30 +1285,32 @@ fn run(
                     );
                     game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
-                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::RedrawRequested { .. } => {
+                    let dpi_factor = window.scale_factor();
+                    let size = window.inner_size();
+                    canvas.set_size(size.width, size.height, dpi_factor as f32);
+                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.15, 0.15, 0.12));
+
+                    let now = Instant::now();
+                    let dt = (now - prevt).as_secs_f32();
+                    prevt = now;
+
+                    game.update(dt);
+                    game.draw(&mut canvas);
+
+                    canvas.flush();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    surface.swap_buffers(&context).unwrap();
+                }
                 _ => (),
             },
-            Event::RedrawRequested(_) => {
-                let dpi_factor = window.scale_factor();
-                let size = window.inner_size();
-                canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.15, 0.15, 0.12));
 
-                let now = Instant::now();
-                let dt = (now - prevt).as_secs_f32();
-                prevt = now;
-
-                game.update(dt);
-                game.draw(&mut canvas);
-
-                canvas.flush();
-                #[cfg(not(target_arch = "wasm32"))]
-                surface.swap_buffers(&context).unwrap();
-            }
-            Event::MainEventsCleared => window.request_redraw(),
+            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    });
+    })
+    .unwrap();
 }
 
 fn vector_direction(target: Vector) -> Direction {
