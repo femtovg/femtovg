@@ -18,7 +18,7 @@ use crate::{
 
 use glow::HasContext;
 
-use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType};
+use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
 
 mod program;
 use program::MainProgram;
@@ -468,10 +468,7 @@ impl OpenGl {
             self.context.bind_texture(glow::TEXTURE_2D, tex);
         }
 
-        let glyphtex = match glyph_tex {
-            GlyphTexture::None => None,
-            GlyphTexture::AlphaMask(id) | GlyphTexture::ColorTexture(id) => images.get(id).map(GlTexture::id),
-        };
+        let glyphtex = glyph_tex.image_id().and_then(|id| images.get(id).map(GlTexture::id));
 
         unsafe {
             self.context.active_texture(glow::TEXTURE0 + 1);
@@ -687,6 +684,7 @@ impl OpenGl {
 impl Renderer for OpenGl {
     type Image = GlTexture;
     type NativeTexture = <glow::Context as glow::HasContext>::Texture;
+    type Surface = ();
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;
@@ -703,7 +701,13 @@ impl Renderer for OpenGl {
         Ok(image.id())
     }
 
-    fn render(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
+    fn render(
+        &mut self,
+        _surface: &Self::Surface,
+        images: &mut ImageStore<Self::Image>,
+        verts: &[Vertex],
+        commands: Vec<Command>,
+    ) {
         self.current_program = 0;
         self.main_program().bind();
 
@@ -764,14 +768,14 @@ impl Renderer for OpenGl {
                     ref params2,
                 } => self.stencil_stroke(images, &cmd, params1, params2),
                 CommandType::Triangles { ref params } => self.triangles(images, &cmd, params),
-                CommandType::ClearRect {
-                    x,
-                    y,
-                    width,
-                    height,
-                    color,
-                } => {
-                    self.clear_rect(x, y, width, height, color);
+                CommandType::ClearRect { color } => {
+                    if let Some((start, _)) = cmd.triangles_verts {
+                        let x = verts[start].x as _;
+                        let y = verts[start].y as _;
+                        let width = verts[start + 1].x as u32 - x;
+                        let height = verts[start + 1].y as u32 - y;
+                        self.clear_rect(x, y, width, height, color);
+                    }
                 }
                 CommandType::SetRenderTarget(target) => {
                     self.set_target(images, target);
@@ -863,6 +867,12 @@ impl Renderer for OpenGl {
         }
 
         Ok(ImgVec::new(flipped, w, h))
+    }
+}
+
+impl SurfacelessRenderer for OpenGl {
+    fn render_surfaceless(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
+        self.render(&(), images, verts, commands)
     }
 }
 

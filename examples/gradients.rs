@@ -1,4 +1,6 @@
-use femtovg::{renderer::OpenGl, Canvas, Color, Paint, Path, Renderer};
+use std::sync::Arc;
+
+use femtovg::{Canvas, Color, Paint, Path, Renderer};
 use instant::Instant;
 use resource::resource;
 use winit::{
@@ -8,7 +10,7 @@ use winit::{
 };
 
 mod helpers;
-use helpers::PerfGraph;
+use helpers::{PerfGraph, WindowSurface};
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
@@ -17,19 +19,10 @@ fn main() {
     helpers::start();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
 
-fn run(
-    mut canvas: Canvas<OpenGl>,
-    el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
-    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    window: Window,
-) {
+fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     canvas
         .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
         .expect("Cannot add font");
@@ -47,11 +40,7 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
-                    surface.resize(
-                        &context,
-                        physical_size.width.try_into().unwrap(),
-                        physical_size.height.try_into().unwrap(),
-                    );
+                    surface.resize(physical_size.width, physical_size.height);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 WindowEvent::RedrawRequested { .. } => {
@@ -73,9 +62,7 @@ fn run(
                     perf.render(&mut canvas, 5.0, 5.0);
                     canvas.restore();
 
-                    canvas.flush();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    surface.swap_buffers(&context).unwrap();
+                    surface.present(&mut canvas);
                 }
                 _ => (),
             },

@@ -40,6 +40,8 @@ pub enum ErrorKind {
     ImageUpdateWithDifferentFormat,
     /// The specified image format is not supported.
     UnsupportedImageFormat,
+    /// The requested operation is not supported (for example screenshot by wgpu renderer).
+    UnsupportedOperation,
 }
 
 impl Display for ErrorKind {

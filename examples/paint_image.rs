@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /**
  * Shows how to work with `Paint::image()` to fill paths.
  * The image is rendered independently of the shape of the path,
@@ -6,7 +8,8 @@
  * `Canvas::path_bbox()` and use it to set the cx, cy, width, height values
  * in `Paint::image()` as shown in this example.
  */
-use femtovg::{renderer::OpenGl, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use femtovg::{Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use helpers::WindowSurface;
 use instant::Instant;
 use winit::{
     event::{ElementState, Event, WindowEvent},
@@ -23,9 +26,6 @@ fn main() {
     helpers::start();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::prelude::*;
-
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
 
@@ -35,13 +35,7 @@ enum Shape {
     Polar,
 }
 
-fn run(
-    mut canvas: Canvas<OpenGl>,
-    el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
-    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    window: Window,
-) {
+fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     // Prepare the image, in this case a grid.
     let grid_size: usize = 16;
     let image_id = canvas
@@ -101,11 +95,7 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
-                    surface.resize(
-                        &context,
-                        physical_size.width.try_into().unwrap(),
-                        physical_size.height.try_into().unwrap(),
-                    );
+                    surface.resize(physical_size.width, physical_size.height);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
                 WindowEvent::ModifiersChanged(modifiers) => {
@@ -209,9 +199,7 @@ fn run(
 
                     canvas.restore();
 
-                    canvas.flush();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    surface.swap_buffers(&context).unwrap();
+                    surface.present(&mut canvas);
                 }
                 _ => (),
             },

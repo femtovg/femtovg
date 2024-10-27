@@ -218,12 +218,21 @@ impl PaintFlavor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum GlyphTexture {
     #[default]
     None,
     AlphaMask(ImageId),
     ColorTexture(ImageId),
+}
+
+impl GlyphTexture {
+    pub(crate) fn image_id(&self) -> Option<ImageId> {
+        match self {
+            GlyphTexture::None => None,
+            GlyphTexture::AlphaMask(image_id) | GlyphTexture::ColorTexture(image_id) => Some(*image_id),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

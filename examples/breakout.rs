@@ -1,4 +1,6 @@
-use femtovg::{renderer::OpenGl, Align, Baseline, Color, FontId, ImageFlags, ImageId, Paint, Path};
+use std::sync::Arc;
+
+use femtovg::{Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
 use instant::Instant;
 use rand::{
     distributions::{Distribution, Standard},
@@ -12,6 +14,7 @@ use winit::{
 };
 
 mod helpers;
+use helpers::WindowSurface;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
@@ -20,10 +23,6 @@ fn main() {
     helpers::start();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-use glutin::prelude::*;
-
-type Canvas = femtovg::Canvas<OpenGl>;
 type Point = euclid::default::Point2D<f32>;
 type Vector = euclid::default::Vector2D<f32>;
 type Size = euclid::default::Size2D<f32>;
@@ -93,7 +92,7 @@ struct Game {
 }
 
 impl Game {
-    fn new(canvas: &mut Canvas, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
+    fn new<R: Renderer + 'static>(canvas: &mut Canvas<R>, levels: Vec<Vec<Vec<Cmd>>>) -> Self {
         let logo_image_id = canvas
             .load_image_mem(
                 &resource!("examples/assets/rust-logo.png"),
@@ -497,7 +496,7 @@ impl Game {
         }
     }
 
-    fn draw(&self, canvas: &mut Canvas) {
+    fn draw<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         // draw background
         let step_size_x = self.size.width / 50.0;
 
@@ -528,7 +527,7 @@ impl Game {
         }
     }
 
-    fn draw_title_screen(&self, canvas: &mut Canvas) {
+    fn draw_title_screen<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         // curtain
         let mut path = Path::new();
         path.rect(0.0, 0.0, self.size.width, self.size.height);
@@ -564,7 +563,7 @@ impl Game {
         let _ = canvas.fill_text(self.size.width / 2.0, (self.size.height / 2.0) + 40.0, text, &paint);
     }
 
-    fn draw_game(&self, canvas: &mut Canvas) {
+    fn draw_game<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         // Paddle
         let side_size = 15.0;
 
@@ -666,29 +665,29 @@ impl Game {
         let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint);
     }
 
-    fn draw_round_info(&self, canvas: &mut Canvas) {
+    fn draw_round_info<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         let heading = format!("ROUND {}", self.current_level + 1);
 
         self.draw_generic_info(canvas, &heading, "");
     }
 
-    fn draw_paused(&self, canvas: &mut Canvas) {
+    fn draw_paused<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         self.draw_generic_info(canvas, "PAUSE", "Click anywhere to resume. Press ESC to exit");
     }
 
-    fn draw_game_over(&self, canvas: &mut Canvas) {
+    fn draw_game_over<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         let score = format!("Score: {}", self.score);
 
         self.draw_generic_info(canvas, "Game Over", &score);
     }
 
-    fn draw_win(&self, canvas: &mut Canvas) {
+    fn draw_win<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         let score = format!("Final score: {}", self.score);
 
         self.draw_generic_info(canvas, "All cleared!", &score);
     }
 
-    fn draw_bricks(&self, canvas: &mut Canvas) {
+    fn draw_bricks<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         // Bricks
         for brick in &self.bricks {
             if brick.destroyed {
@@ -699,7 +698,7 @@ impl Game {
         }
     }
 
-    fn draw_generic_info(&self, canvas: &mut Canvas, heading: &str, subtext: &str) {
+    fn draw_generic_info<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>, heading: &str, subtext: &str) {
         self.draw_bricks(canvas);
 
         // curtain
@@ -775,7 +774,7 @@ struct Powerup {
 }
 
 impl Powerup {
-    fn draw(&self, canvas: &mut Canvas, fonts: &Fonts) {
+    fn draw<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>, fonts: &Fonts) {
         let mut path = Path::new();
         path.rounded_rect(
             self.rect.origin.x,
@@ -847,7 +846,7 @@ impl Brick {
         }
     }
 
-    fn draw(&self, canvas: &mut Canvas) {
+    fn draw<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
         if self.destroyed {
             return;
         }
@@ -897,13 +896,7 @@ enum Cmd {
     B(u8), // Brick Id
 }
 
-fn run(
-    mut canvas: Canvas,
-    el: EventLoop<()>,
-    #[cfg(not(target_arch = "wasm32"))] context: glutin::context::PossiblyCurrentContext,
-    #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    window: Window,
-) {
+fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     let level1 = vec![
         vec![
             Cmd::Spac,
@@ -1278,11 +1271,7 @@ fn run(
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(physical_size) => {
                     #[cfg(not(target_arch = "wasm32"))]
-                    surface.resize(
-                        &context,
-                        physical_size.width.try_into().unwrap(),
-                        physical_size.height.try_into().unwrap(),
-                    );
+                    surface.resize(physical_size.width, physical_size.height);
                     game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
@@ -1299,9 +1288,7 @@ fn run(
                     game.update(dt);
                     game.draw(&mut canvas);
 
-                    canvas.flush();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    surface.swap_buffers(&context).unwrap();
+                    surface.present(&mut canvas);
                 }
                 _ => (),
             },

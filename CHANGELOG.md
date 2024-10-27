@@ -3,7 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
- - Bumped MSRV to 1.70.
+ - Bumped MSRV to 1.76.
 
 ## [0.10.1] - 2024-10-24
 
