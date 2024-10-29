@@ -540,6 +540,9 @@ impl PathCache {
             contour.stroke.clear();
             contour.fill.clear();
 
+            let triangle_count = (contour.fill.capacity() - 2) * 3;
+            let mut triangle_fan_fill = Vec::with_capacity(triangle_count);
+
             // TODO: woff = 0.0 produces no artifaacts for small sizes
             let woff = 0.5 * fringe_width;
             //let woff = 0.0; // Makes everything thicker
@@ -549,23 +552,34 @@ impl PathCache {
                     if p1.flags.contains(PointFlags::BEVEL) {
                         if p1.flags.contains(PointFlags::LEFT) {
                             let lpos = p1.pos + p1.dmpos * woff;
-                            contour.fill.push(Vertex::pos(lpos, 0.5, 1.0));
+                            triangle_fan_fill.push(Vertex::pos(lpos, 0.5, 1.0));
                         } else {
                             let lpos0 = p1.pos + p0.dpos.orthogonal() * woff;
                             let lpos1 = p1.pos + p1.dpos.orthogonal() * woff;
-                            contour.fill.push(Vertex::pos(lpos0, 0.5, 1.0));
-                            contour.fill.push(Vertex::pos(lpos1, 0.5, 1.0));
+                            triangle_fan_fill.push(Vertex::pos(lpos0, 0.5, 1.0));
+                            triangle_fan_fill.push(Vertex::pos(lpos1, 0.5, 1.0));
                         }
                     } else {
-                        contour.fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
+                        triangle_fan_fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
                     }
                 }
             } else {
                 let points = &self.points[contour.point_range.clone()];
 
                 for point in points {
-                    contour.fill.push(Vertex::pos(point.pos, 0.5, 1.0));
+                    triangle_fan_fill.push(Vertex::pos(point.pos, 0.5, 1.0));
                 }
+            }
+
+            // convert fill triangle fan to triangles, to eliminate requirement for GL_TRIANGLE_FAN
+            // from the renderer.
+            if triangle_fan_fill.len() > 2 {
+                let center = triangle_fan_fill[0];
+                let tail = &triangle_fan_fill[1..];
+                contour.fill = tail
+                    .windows(2)
+                    .flat_map(|vertices| IntoIterator::into_iter([center, vertices[0], vertices[1]]))
+                    .collect();
             }
 
             if has_fringe {
@@ -864,25 +878,29 @@ impl PathCache {
         }
 
         let vertices = &self.contours[0].fill;
-        if vertices.len() != 4 {
+        if vertices.len() != 6 {
             return None;
         }
 
-        let maybe_top_left = vertices[0];
-        let maybe_bottom_left = vertices[1];
-        let maybe_bottom_right = vertices[2];
-        let maybe_top_right = vertices[3];
+        let maybe_t1_top_left = vertices[0];
+        let maybe_t1_bottom_left = vertices[1];
+        let maybe_t1_bottom_right = vertices[2];
+        let maybe_t2_top_left = vertices[3];
+        let maybe_t2_bottom_right = vertices[4];
+        let maybe_t2_top_right = vertices[5];
 
-        if maybe_top_left.x == maybe_bottom_left.x
-            && maybe_top_left.y == maybe_top_right.y
-            && maybe_bottom_right.x == maybe_top_right.x
-            && maybe_bottom_right.y == maybe_bottom_left.y
+        if maybe_t1_top_left == maybe_t2_top_left
+            && maybe_t1_bottom_right == maybe_t2_bottom_right
+            && maybe_t1_top_left.x == maybe_t1_bottom_left.x
+            && maybe_t1_top_left.y == maybe_t2_top_right.y
+            && maybe_t1_bottom_right.x == maybe_t2_top_right.x
+            && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
         {
             Some(crate::Rect::new(
-                maybe_top_left.x,
-                maybe_top_left.y,
-                maybe_top_right.x - maybe_top_left.x,
-                maybe_bottom_left.y - maybe_top_left.y,
+                maybe_t1_top_left.x,
+                maybe_t1_top_left.y,
+                maybe_t2_top_right.x - maybe_t1_top_left.x,
+                maybe_t1_bottom_left.y - maybe_t1_top_left.y,
             ))
         } else {
             None
