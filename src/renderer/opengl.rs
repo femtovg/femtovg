@@ -263,7 +263,7 @@ impl OpenGl {
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
                 unsafe {
-                    self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32);
+                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
                 }
             }
 
@@ -306,7 +306,7 @@ impl OpenGl {
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
                 unsafe {
-                    self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32);
+                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
                 }
             }
         }
