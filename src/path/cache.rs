@@ -5,7 +5,6 @@ use bitflags::bitflags;
 use crate::{
     geometry::{Bounds, Position, Transform2D, Vector},
     renderer::Vertex,
-    utils::VecRetainMut,
     FillRule, LineCap, LineJoin, Solidity,
 };
 
@@ -208,7 +207,7 @@ impl PathCache {
         let all_points = &mut cache.points;
         let bounds = &mut cache.bounds;
 
-        VecRetainMut::retain_mut(&mut cache.contours, |contour| {
+        cache.contours.retain_mut(|contour| {
             let mut points = &mut all_points[contour.point_range.clone()];
 
             // If the first and last points are the same, remove the last, mark as closed contour.
