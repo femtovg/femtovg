@@ -52,16 +52,13 @@ Run with `cargo run --example text`
 * [x] Nearest font matching
 * [x] Path hit testing
 * [x] OpenGl ES2 backend
-
-## In progress
-* [ ] [Metal backend](https://github.com/adamnemecek/gpucanvas/)
+* [x] Color fonts
 
 ## Not supported
 * [ ] Stroke dashing
 * [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
-* [ ] Color fonts
 
 ## License
 Licensed under either of
