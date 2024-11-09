@@ -95,9 +95,9 @@ impl OpenGl {
     /// Creates a new OpenGL renderer from an HTML canvas element in a WASM32 target.
     #[cfg(target_arch = "wasm32")]
     pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
-        let mut attrs = web_sys::WebGlContextAttributes::new();
-        attrs.stencil(true);
-        attrs.antialias(false);
+        let attrs = web_sys::WebGlContextAttributes::new();
+        attrs.set_stencil(true);
+        attrs.set_antialias(false);
 
         use wasm_bindgen::JsCast;
         let webgl2_context = match canvas.get_context_with_context_options("webgl2", &attrs) {
