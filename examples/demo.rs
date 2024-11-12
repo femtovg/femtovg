@@ -329,6 +329,8 @@ fn draw_paragraph<T: Renderer>(
 ) {
     let text = "This is longer chunk of text.\n\nWould have used lorem ipsum but she was busy jumping over the lazy dog with the fox and all the men who came to the aid of the party.🎉";
 
+    let hover_text = "Hover your mouse over the text to see calculated caret position.";
+
     canvas.save();
 
     let paint = Paint::color(Color::rgba(255, 255, 255, 255))
@@ -400,6 +402,53 @@ fn draw_paragraph<T: Renderer>(
 
             let paint = paint.with_color(Color::rgba(32, 32, 32, 255));
             let _ = canvas.fill_text(x - 10.0, gutter_y, &text, &paint);
+        }
+    }
+
+    y += 20.0;
+
+    let paint = Paint::color(Color::rgba(220, 220, 220, 255))
+        .with_font_size(11.0)
+        .with_text_align(Align::Left)
+        .with_text_baseline(Baseline::Top)
+        .with_font(&[font]);
+
+    let lines = canvas
+        .break_text_vec(150.0, hover_text, &paint)
+        .expect("Cannot break text");
+
+    let mut height = 0.0;
+    let mut width = 0.0;
+    for line_range in lines.iter() {
+        let metrics = canvas
+            .measure_text(x, y, &hover_text[line_range.clone()], &paint)
+            .expect("Cannot measure text");
+
+        height += metrics.height();
+        width = f32::max(width, metrics.width());
+    }
+
+    // Fade the tooltip out when close to it.
+    let gx = mx.clamp(x, x + width) - mx;
+    let gy = my.clamp(y, y + height) - my;
+    let a = f32::sqrt(gx * gx + gy * gy) / 30.0;
+    let a = a.clamp(0.0, 1.0);
+    canvas.set_global_alpha(a);
+
+    let mut path = Path::new();
+    path.rounded_rect(x - 2.0, y - 2.0, width + 4.0, height + 4.0, 3.0);
+    let px = x + width / 2.0;
+    path.move_to(px, y - 10.0);
+    path.line_to(px + 7.0, y + 1.0);
+    path.line_to(px - 7.0, y + 1.0);
+    path.solidity(Solidity::Solid);
+    canvas.fill_path(&path, &paint);
+
+    let paint = paint.with_color(Color::rgba(0, 0, 0, 220));
+
+    for (_, line_range) in lines.into_iter().enumerate() {
+        if let Ok(res) = canvas.fill_text(x, y, &hover_text[line_range], &paint) {
+            y += res.height();
         }
     }
 
