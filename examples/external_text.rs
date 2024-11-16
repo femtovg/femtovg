@@ -1,6 +1,6 @@
 mod helpers;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping, SubpixelBin};
+use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping, SubpixelBin, SwashCache};
 use femtovg::{
     renderer::OpenGl, Atlas, Canvas, Color, DrawCommand, ErrorKind, GlyphDrawCommands, ImageFlags, ImageId,
     ImageSource, Paint, Quad, Renderer,
@@ -17,8 +17,6 @@ use glutin::prelude::*;
 use imgref::{Img, ImgRef};
 use rgb::RGBA8;
 use swash::scale::image::Content;
-use swash::scale::{Render, ScaleContext, Source, StrikeWith};
-use swash::zeno::{Format, Vector};
 
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
@@ -44,14 +42,21 @@ pub struct RenderedGlyph {
     color_glyph: bool,
 }
 
-#[derive(Default)]
 pub struct RenderCache {
-    scale_context: ScaleContext,
+    swash_cache: SwashCache,
     rendered_glyphs: HashMap<CacheKey, Option<RenderedGlyph>>,
     glyph_textures: Vec<FontTexture>,
 }
 
 impl RenderCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            swash_cache: SwashCache::new(),
+            rendered_glyphs: Default::default(),
+            glyph_textures: Default::default(),
+        }
+    }
+
     pub(crate) fn fill_to_cmds<T: Renderer>(
         &mut self,
         system: &mut FontSystem,
@@ -66,6 +71,7 @@ impl RenderCache {
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
                 let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
+
                 let mut cache_key = physical_glyph.cache_key;
 
                 let position_x = position.0 + cache_key.x_bin.as_float();
@@ -78,27 +84,8 @@ impl RenderCache {
                 cache_key.y_bin = subpixel_y;
                 // perform cache lookup for rendered glyph
                 let Some(rendered) = self.rendered_glyphs.entry(cache_key).or_insert_with(|| {
-                    // ...or insert it
-
-                    // do the actual rasterization
-                    let font = system
-                        .get_font(cache_key.font_id)
-                        .expect("Shaped a nonexistent font. What?");
-                    let mut scaler = self
-                        .scale_context
-                        .builder(font.as_swash())
-                        .size(glyph.font_size)
-                        .hint(true)
-                        .build();
-                    let offset = Vector::new(cache_key.x_bin.as_float(), cache_key.y_bin.as_float());
-                    let rendered = Render::new(&[
-                        Source::ColorOutline(0),
-                        Source::ColorBitmap(StrikeWith::BestFit),
-                        Source::Outline,
-                    ])
-                    .format(Format::Alpha)
-                    .offset(offset)
-                    .render(&mut scaler, cache_key.glyph_id);
+                    // resterize glyph
+                    let rendered = self.swash_cache.get_image_uncached(system, cache_key);
 
                     // upload it to the GPU
                     rendered.map(|rendered| {
@@ -231,7 +218,8 @@ fn run(
 ) {
     let mut font_system = FontSystem::new();
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 25.0));
-    let mut cache = RenderCache::default();
+    let mut cache = RenderCache::new();
+
     buffer.set_text(&mut font_system, LOREM_TEXT, Attrs::new(), Shaping::Advanced);
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
