@@ -1,6 +1,6 @@
 mod helpers;
 
-use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, SubpixelBin};
+use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping, SubpixelBin};
 use femtovg::{
     renderer::OpenGl, Atlas, Canvas, Color, DrawCommand, ErrorKind, GlyphDrawCommands, ImageFlags, ImageId,
     ImageSource, Paint, Quad, Renderer,
@@ -54,9 +54,9 @@ pub struct RenderCache {
 impl RenderCache {
     pub(crate) fn fill_to_cmds<T: Renderer>(
         &mut self,
-        system: &FontSystem,
+        system: &mut FontSystem,
         canvas: &mut Canvas<T>,
-        buffer: &Buffer<'_>,
+        buffer: &Buffer,
         position: (f32, f32),
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = HashMap::new();
@@ -65,7 +65,9 @@ impl RenderCache {
         //let total_height = buffer.layout_runs().len() as i32 * buffer.metrics().line_height;
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
-                let mut cache_key = glyph.cache_key;
+                let physical_glyph = glyph.physical((0.0, 0.0), 1.0);
+                let mut cache_key = physical_glyph.cache_key;
+
                 let position_x = position.0 + cache_key.x_bin.as_float();
                 let position_y = position.1 + cache_key.y_bin.as_float();
                 //let position_x = position_x - run.line_w * justify.0;
@@ -85,7 +87,7 @@ impl RenderCache {
                     let mut scaler = self
                         .scale_context
                         .builder(font.as_swash())
-                        .size(cache_key.font_size as f32)
+                        .size(glyph.font_size)
                         .hint(true)
                         .build();
                     let offset = Vector::new(cache_key.x_bin.as_float(), cache_key.y_bin.as_float());
@@ -192,8 +194,8 @@ impl RenderCache {
                 let mut q = Quad::default();
                 let it = 1.0 / TEXTURE_SIZE as f32;
 
-                q.x0 = (position_x + glyph.x_int + rendered.offset_x - GLYPH_PADDING as i32) as f32;
-                q.y0 = (position_y + run.line_y + glyph.y_int - rendered.offset_y - GLYPH_PADDING as i32) as f32;
+                q.x0 = (position_x + physical_glyph.x + rendered.offset_x - GLYPH_PADDING as i32) as f32;
+                q.y0 = (position_y + physical_glyph.y - rendered.offset_y - GLYPH_PADDING as i32) as f32 + run.line_y;
                 q.x1 = q.x0 + rendered.width as f32;
                 q.y1 = q.y0 + rendered.height as f32;
 
@@ -220,10 +222,6 @@ fn main() {
     helpers::start();
 }
 
-lazy_static::lazy_static! {
-    static ref FONT_SYSTEM: FontSystem = FontSystem::new();
-}
-
 fn run(
     mut canvas: Canvas<OpenGl>,
     el: EventLoop<()>,
@@ -231,9 +229,10 @@ fn run(
     #[cfg(not(target_arch = "wasm32"))] surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
     window: Window,
 ) {
-    let mut buffer = Buffer::new(&FONT_SYSTEM, Metrics::new(20, 25));
+    let mut font_system = FontSystem::new();
+    let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 25.0));
     let mut cache = RenderCache::default();
-    buffer.set_text(LOREM_TEXT, Attrs::new());
+    buffer.set_text(&mut font_system, LOREM_TEXT, Attrs::new(), Shaping::Advanced);
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -253,15 +252,15 @@ fn run(
             },
             Event::MainEventsCleared => window.request_redraw(),
             Event::RedrawRequested(_) => {
-                let dpi_factor = window.scale_factor();
+                let dpi_factor = window.scale_factor() as f32;
                 let size = window.inner_size();
                 canvas.set_size(size.width, size.height, 1.0);
                 canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
-                buffer.set_metrics(Metrics::new((20.0 * dpi_factor) as i32, (25.0 * dpi_factor) as i32));
-                buffer.set_size(size.width as i32, size.height as i32);
+                buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
+                buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
                 let cmds = cache
-                    .fill_to_cmds(&FONT_SYSTEM, &mut canvas, &buffer, (0.0, 0.0))
+                    .fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0))
                     .unwrap();
                 canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()), 1.0);
 
