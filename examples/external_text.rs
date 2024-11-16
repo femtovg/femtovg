@@ -85,83 +85,83 @@ impl RenderCache {
                 // perform cache lookup for rendered glyph
                 let Some(rendered) = self.rendered_glyphs.entry(cache_key).or_insert_with(|| {
                     // resterize glyph
-                    let rendered = self.swash_cache.get_image_uncached(system, cache_key);
+                    let Some(rendered) = self.swash_cache.get_image_uncached(system, cache_key) else {
+                        return None;
+                    };
 
                     // upload it to the GPU
-                    rendered.map(|rendered| {
-                        // pick an atlas texture for our glyph
-                        let content_w = rendered.placement.width as usize;
-                        let content_h = rendered.placement.height as usize;
-                        let alloc_w = rendered.placement.width + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
-                        let alloc_h = rendered.placement.height + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
-                        let used_w = rendered.placement.width + GLYPH_PADDING * 2;
-                        let used_h = rendered.placement.height + GLYPH_PADDING * 2;
-                        let mut found = None;
-                        for (texture_index, glyph_atlas) in self.glyph_textures.iter_mut().enumerate() {
-                            if let Some((x, y)) = glyph_atlas.atlas.add_rect(alloc_w as usize, alloc_h as usize) {
-                                found = Some((texture_index, x, y));
-                                break;
-                            }
+                    // pick an atlas texture for our glyph
+                    let content_w = rendered.placement.width as usize;
+                    let content_h = rendered.placement.height as usize;
+                    let alloc_w = rendered.placement.width + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
+                    let alloc_h = rendered.placement.height + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
+                    let used_w = rendered.placement.width + GLYPH_PADDING * 2;
+                    let used_h = rendered.placement.height + GLYPH_PADDING * 2;
+                    let mut found = None;
+                    for (texture_index, glyph_atlas) in self.glyph_textures.iter_mut().enumerate() {
+                        if let Some((x, y)) = glyph_atlas.atlas.add_rect(alloc_w as usize, alloc_h as usize) {
+                            found = Some((texture_index, x, y));
+                            break;
                         }
-                        let (texture_index, atlas_alloc_x, atlas_alloc_y) = found.unwrap_or_else(|| {
-                            // if no atlas could fit the texture, make a new atlas tyvm
-                            // TODO error handling
-                            let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
-                            let image_id = canvas
-                                .create_image(
-                                    Img::new(
-                                        vec![RGBA8::new(0, 0, 0, 0); TEXTURE_SIZE * TEXTURE_SIZE],
-                                        TEXTURE_SIZE,
-                                        TEXTURE_SIZE,
-                                    )
-                                    .as_ref(),
-                                    ImageFlags::empty(),
+                    }
+                    let (texture_index, atlas_alloc_x, atlas_alloc_y) = found.unwrap_or_else(|| {
+                        // if no atlas could fit the texture, make a new atlas tyvm
+                        // TODO error handling
+                        let mut atlas = Atlas::new(TEXTURE_SIZE, TEXTURE_SIZE);
+                        let image_id = canvas
+                            .create_image(
+                                Img::new(
+                                    vec![RGBA8::new(0, 0, 0, 0); TEXTURE_SIZE * TEXTURE_SIZE],
+                                    TEXTURE_SIZE,
+                                    TEXTURE_SIZE,
                                 )
-                                .unwrap();
-                            let texture_index = self.glyph_textures.len();
-                            let (x, y) = atlas.add_rect(alloc_w as usize, alloc_h as usize).unwrap();
-                            self.glyph_textures.push(FontTexture { atlas, image_id });
-                            (texture_index, x, y)
-                        });
-
-                        let atlas_used_x = atlas_alloc_x as u32 + GLYPH_MARGIN;
-                        let atlas_used_y = atlas_alloc_y as u32 + GLYPH_MARGIN;
-                        let atlas_content_x = atlas_alloc_x as u32 + GLYPH_MARGIN + GLYPH_PADDING;
-                        let atlas_content_y = atlas_alloc_y as u32 + GLYPH_MARGIN + GLYPH_PADDING;
-
-                        let mut src_buf = Vec::with_capacity(content_w * content_h);
-                        match rendered.content {
-                            Content::Mask => {
-                                for chunk in rendered.data.chunks_exact(1) {
-                                    src_buf.push(RGBA8::new(chunk[0], 0, 0, 0));
-                                }
-                            }
-                            Content::Color => {
-                                for chunk in rendered.data.chunks_exact(4) {
-                                    src_buf.push(RGBA8::new(chunk[0], chunk[1], chunk[2], chunk[3]));
-                                }
-                            }
-                            Content::SubpixelMask => unreachable!(),
-                        }
-                        canvas
-                            .update_image::<ImageSource>(
-                                self.glyph_textures[texture_index].image_id,
-                                ImgRef::new(&src_buf, content_w, content_h).into(),
-                                atlas_content_x as usize,
-                                atlas_content_y as usize,
+                                .as_ref(),
+                                ImageFlags::empty(),
                             )
                             .unwrap();
+                        let texture_index = self.glyph_textures.len();
+                        let (x, y) = atlas.add_rect(alloc_w as usize, alloc_h as usize).unwrap();
+                        self.glyph_textures.push(FontTexture { atlas, image_id });
+                        (texture_index, x, y)
+                    });
 
-                        RenderedGlyph {
-                            texture_index,
-                            width: used_w,
-                            height: used_h,
-                            offset_x: rendered.placement.left,
-                            offset_y: rendered.placement.top,
-                            atlas_x: atlas_used_x,
-                            atlas_y: atlas_used_y,
-                            color_glyph: matches!(rendered.content, Content::Color),
+                    let atlas_used_x = atlas_alloc_x as u32 + GLYPH_MARGIN;
+                    let atlas_used_y = atlas_alloc_y as u32 + GLYPH_MARGIN;
+                    let atlas_content_x = atlas_alloc_x as u32 + GLYPH_MARGIN + GLYPH_PADDING;
+                    let atlas_content_y = atlas_alloc_y as u32 + GLYPH_MARGIN + GLYPH_PADDING;
+
+                    let mut src_buf = Vec::with_capacity(content_w * content_h);
+                    match rendered.content {
+                        Content::Mask => {
+                            for chunk in rendered.data.chunks_exact(1) {
+                                src_buf.push(RGBA8::new(chunk[0], 0, 0, 0));
+                            }
                         }
+                        Content::Color => {
+                            for chunk in rendered.data.chunks_exact(4) {
+                                src_buf.push(RGBA8::new(chunk[0], chunk[1], chunk[2], chunk[3]));
+                            }
+                        }
+                        Content::SubpixelMask => unreachable!(),
+                    }
+                    canvas
+                        .update_image::<ImageSource>(
+                            self.glyph_textures[texture_index].image_id,
+                            ImgRef::new(&src_buf, content_w, content_h).into(),
+                            atlas_content_x as usize,
+                            atlas_content_y as usize,
+                        )
+                        .unwrap();
+
+                    Some(RenderedGlyph {
+                        texture_index,
+                        width: used_w,
+                        height: used_h,
+                        offset_x: rendered.placement.left,
+                        offset_y: rendered.placement.top,
+                        atlas_x: atlas_used_x,
+                        atlas_y: atlas_used_y,
+                        color_glyph: matches!(rendered.content, Content::Color),
                     })
                 }) else {
                     continue;
