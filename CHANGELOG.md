@@ -1,8 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.11.0] - 2024-11-17
 
+ - Added WGPU renderer, behind `wgpu` feature flag.
+ - Fixed rendering of glyphs with overlaps (#183). Thanks to Richard Hozák.
  - Bumped MSRV to 1.76.
 
 ## [0.10.1] - 2024-10-24
