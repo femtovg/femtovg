@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.11.1] - 2024-11-17
+
+ - No code changes, just a release for docs.rs.
+
 ## [0.11.0] - 2024-11-17
 
  - Added WGPU renderer, behind `wgpu` feature flag.

@@ -99,4 +99,5 @@ name = "book_example_1_3"
 path = "book/src/1_getting_started/3_event_loop.rs"
 
 [package.metadata.docs.rs]
-features = ["glutin/egl"]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

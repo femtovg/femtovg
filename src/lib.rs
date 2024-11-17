@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /*!
  * The femtovg API is (like [NanoVG](https://github.com/memononen/nanovg))
