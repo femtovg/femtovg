@@ -21,8 +21,6 @@ use swash::scale::image::Content;
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
 
-const GLYPH_PADDING: u32 = 1;
-const GLYPH_MARGIN: u32 = 1;
 const TEXTURE_SIZE: usize = 512;
 
 pub struct FontTexture {
@@ -93,13 +91,9 @@ impl RenderCache {
                     // pick an atlas texture for our glyph
                     let content_w = rendered.placement.width as usize;
                     let content_h = rendered.placement.height as usize;
-                    let alloc_w = rendered.placement.width + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
-                    let alloc_h = rendered.placement.height + (GLYPH_MARGIN + GLYPH_PADDING) * 2;
-                    let used_w = rendered.placement.width + GLYPH_PADDING * 2;
-                    let used_h = rendered.placement.height + GLYPH_PADDING * 2;
                     let mut found = None;
                     for (texture_index, glyph_atlas) in self.glyph_textures.iter_mut().enumerate() {
-                        if let Some((x, y)) = glyph_atlas.atlas.add_rect(alloc_w as usize, alloc_h as usize) {
+                        if let Some((x, y)) = glyph_atlas.atlas.add_rect(content_w, content_h) {
                             found = Some((texture_index, x, y));
                             break;
                         }
@@ -116,19 +110,14 @@ impl RenderCache {
                                     TEXTURE_SIZE,
                                 )
                                 .as_ref(),
-                                ImageFlags::empty(),
+                                ImageFlags::NEAREST,
                             )
                             .unwrap();
                         let texture_index = self.glyph_textures.len();
-                        let (x, y) = atlas.add_rect(alloc_w as usize, alloc_h as usize).unwrap();
+                        let (x, y) = atlas.add_rect(content_w, content_h).unwrap();
                         self.glyph_textures.push(FontTexture { atlas, image_id });
                         (texture_index, x, y)
                     });
-
-                    let atlas_used_x = atlas_alloc_x as u32 + GLYPH_MARGIN;
-                    let atlas_used_y = atlas_alloc_y as u32 + GLYPH_MARGIN;
-                    let atlas_content_x = atlas_alloc_x as u32 + GLYPH_MARGIN + GLYPH_PADDING;
-                    let atlas_content_y = atlas_alloc_y as u32 + GLYPH_MARGIN + GLYPH_PADDING;
 
                     let mut src_buf = Vec::with_capacity(content_w * content_h);
                     match rendered.content {
@@ -148,19 +137,19 @@ impl RenderCache {
                         .update_image::<ImageSource>(
                             self.glyph_textures[texture_index].image_id,
                             ImgRef::new(&src_buf, content_w, content_h).into(),
-                            atlas_content_x as usize,
-                            atlas_content_y as usize,
+                            atlas_alloc_x,
+                            atlas_alloc_y,
                         )
                         .unwrap();
 
                     Some(RenderedGlyph {
                         texture_index,
-                        width: used_w,
-                        height: used_h,
+                        width: rendered.placement.width,
+                        height: rendered.placement.height,
                         offset_x: rendered.placement.left,
                         offset_y: rendered.placement.top,
-                        atlas_x: atlas_used_x,
-                        atlas_y: atlas_used_y,
+                        atlas_x: atlas_alloc_x as u32,
+                        atlas_y: atlas_alloc_y as u32,
                         color_glyph: matches!(rendered.content, Content::Color),
                     })
                 }) else {
@@ -181,8 +170,8 @@ impl RenderCache {
                 let mut q = Quad::default();
                 let it = 1.0 / TEXTURE_SIZE as f32;
 
-                q.x0 = (position_x + physical_glyph.x + rendered.offset_x - GLYPH_PADDING as i32) as f32;
-                q.y0 = (position_y + physical_glyph.y - rendered.offset_y - GLYPH_PADDING as i32) as f32 + run.line_y;
+                q.x0 = (position_x + physical_glyph.x + rendered.offset_x) as f32;
+                q.y0 = (position_y + physical_glyph.y - rendered.offset_y) as f32 + run.line_y;
                 q.x1 = q.x0 + rendered.width as f32;
                 q.y1 = q.y0 + rendered.height as f32;
 
