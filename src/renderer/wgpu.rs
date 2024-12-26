@@ -354,6 +354,8 @@ impl Renderer for WGPURenderer {
             stencil_buffer.clone(),
             vertex_buffer,
         );
+        // Ensure that we have one initial render pass, in case the first command is not SetRenderTarget
+        render_pass_builder.set_render_target_screen();
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
             self.device.clone(),

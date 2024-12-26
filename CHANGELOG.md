@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+ - WGPU renderer: Fix crash when rendering without always calling `set_size()`. (#226)
+
 ## [0.11.1] - 2024-11-17
 
  - No code changes, just a release for docs.rs.
