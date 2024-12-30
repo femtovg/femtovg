@@ -14,6 +14,7 @@ impl Renderer for Void {
     type Image = VoidImage;
     type NativeTexture = ();
     type Surface = ();
+    type CommandBuffer = ();
 
     fn set_size(&mut self, width: u32, height: u32, dpi: f32) {}
 

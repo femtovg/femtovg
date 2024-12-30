@@ -7,6 +7,7 @@ use super::{run, WindowSurface};
 
 pub struct DemoSurface {
     device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     surface_config: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
 }
@@ -26,7 +27,9 @@ impl WindowSurface for DemoSurface {
             .get_current_texture()
             .expect("unable to get next texture from swapchain");
 
-        canvas.flush_to_surface(&frame.texture);
+        let commands = canvas.flush_to_surface(&frame.texture);
+
+        self.queue.submit(Some(commands));
 
         frame.present();
     }
@@ -131,13 +134,16 @@ pub async fn start_wgpu(
 
     let device = Arc::new(device);
 
+    let queue = Arc::new(queue);
+
     let demo_surface = DemoSurface {
         device: device.clone(),
+        queue: queue.clone(),
         surface_config,
         surface,
     };
 
-    let renderer = WGPURenderer::new(device, Arc::new(queue));
+    let renderer = WGPURenderer::new(device, queue);
 
     let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
     canvas.set_size(width, height, window.scale_factor() as f32);

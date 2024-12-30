@@ -124,6 +124,9 @@ pub trait Renderer {
     /// Associated surface type.
     type Surface;
 
+    /// Associated type to hold commands created via flush_to_surface.
+    type CommandBuffer;
+
     /// Set the size of the renderer.
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
 
@@ -134,7 +137,7 @@ pub trait Renderer {
         images: &mut ImageStore<Self::Image>,
         verts: &[Vertex],
         commands: Vec<Command>,
-    );
+    ) -> Self::CommandBuffer;
 
     /// Allocate a new image with the specified image info.
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;

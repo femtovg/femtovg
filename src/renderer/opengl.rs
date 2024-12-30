@@ -685,6 +685,7 @@ impl Renderer for OpenGl {
     type Image = GlTexture;
     type NativeTexture = <glow::Context as glow::HasContext>::Texture;
     type Surface = ();
+    type CommandBuffer = ();
 
     fn set_size(&mut self, width: u32, height: u32, _dpi: f32) {
         self.view[0] = width as f32;

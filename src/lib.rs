@@ -418,8 +418,8 @@ where
     /// Tells the renderer to execute all drawing commands and clears the current internal state
     ///
     /// Call this at the end of each frame.
-    pub fn flush_to_surface(&mut self, surface: &T::Surface) {
-        self.renderer.render(
+    pub fn flush_to_surface(&mut self, surface: &T::Surface) -> T::CommandBuffer {
+        let command_buffer = self.renderer.render(
             surface,
             &mut self.images,
             &self.verts,
@@ -431,6 +431,7 @@ where
         if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
+        command_buffer
     }
 
     /// Returns a screenshot of the current canvas.
@@ -1536,6 +1537,7 @@ impl Renderer for RecordingRenderer {
     type Image = DummyImage;
     type NativeTexture = ();
     type Surface = ();
+    type CommandBuffer = ();
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
 
