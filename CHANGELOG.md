@@ -1,10 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## UNRELEASED
+## [0.12.0] - 2025-01-14
 
  - WGPU renderer: Changed `flush_to_surface()` API to return a command buffer,
    to let the application decide when to submit.
+ - Bumped glow dependency.
 
 ## [0.11.3] - 2024-12-26
 
