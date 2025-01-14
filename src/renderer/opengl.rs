@@ -857,7 +857,7 @@ impl Renderer for OpenGl {
                 self.view[1] as i32,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(image.buf_mut().align_to_mut().1),
+                glow::PixelPackData::Slice(Some(image.buf_mut().align_to_mut().1)),
             );
         }
 

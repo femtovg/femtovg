@@ -205,7 +205,7 @@ fn create_framebuffer_colorbuffer(context: &Context) -> (NativeFramebuffer, Nati
             0,
             glow::RGB,
             glow::UNSIGNED_BYTE,
-            None,
+            glow::PixelUnpackData::Slice(None),
         );
         context.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
         context.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);

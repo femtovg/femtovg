@@ -49,7 +49,7 @@ impl GlTexture {
                     0,
                     format,
                     glow::UNSIGNED_BYTE,
-                    None, //data.buf().as_ptr() as *const GLvoid
+                    glow::PixelUnpackData::Slice(None), //data.buf().as_ptr() as *const GLvoid
                 );
             },
             PixelFormat::Rgb8 => unsafe {
@@ -62,7 +62,7 @@ impl GlTexture {
                     0,
                     glow::RGB,
                     glow::UNSIGNED_BYTE,
-                    None,
+                    glow::PixelUnpackData::Slice(None),
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
@@ -76,7 +76,7 @@ impl GlTexture {
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    None,
+                    glow::PixelUnpackData::Slice(None),
                     //data.buf().as_ptr() as *const GLvoid
                 );
             },
@@ -212,7 +212,7 @@ impl GlTexture {
                     size.height as i32,
                     format,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(data.buf().align_to().1),
+                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
                 );
             },
             ImageSource::Rgb(data) => unsafe {
@@ -225,7 +225,7 @@ impl GlTexture {
                     size.height as i32,
                     glow::RGB,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(data.buf().align_to().1),
+                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
                 );
             },
             ImageSource::Rgba(data) => unsafe {
@@ -238,7 +238,7 @@ impl GlTexture {
                     size.height as i32,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(data.buf().align_to().1),
+                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
                 );
             },
             #[cfg(target_arch = "wasm32")]
