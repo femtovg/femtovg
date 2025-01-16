@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - Unreleased
+
+ - Bump MSRV to 1.81.
+ - Bump wgpu to 0.24.
+
 ## [0.12.0] - 2025-01-14
 
  - WGPU renderer: Changed `flush_to_surface()` API to return a command buffer,
