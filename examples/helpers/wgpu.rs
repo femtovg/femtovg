@@ -87,15 +87,19 @@ pub async fn start_wgpu(
 
     let window = Arc::new(window);
 
-    let backends = wgpu::util::backend_bits_from_env().unwrap_or_default();
-    let dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env().unwrap_or_default();
-    let gles_minor_version = wgpu::util::gles_minor_version_from_env().unwrap_or_default();
+    let backends = wgpu::Backends::from_env().unwrap_or_default();
+    let dx12_shader_compiler = wgpu::Dx12Compiler::from_env().unwrap_or_default();
+    let gles_minor_version = wgpu::Gles3MinorVersion::from_env().unwrap_or_default();
 
-    let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
+    let instance = wgpu::util::new_instance_with_webgpu_detection(&wgpu::InstanceDescriptor {
         backends,
         flags: wgpu::InstanceFlags::from_build_config().with_env(),
-        dx12_shader_compiler,
-        gles_minor_version,
+        backend_options: wgpu::BackendOptions {
+            dx12: wgpu::Dx12BackendOptions {
+                shader_compiler: dx12_shader_compiler,
+            },
+            gl: wgpu::GlBackendOptions { gles_minor_version },
+        },
     })
     .await;
 
