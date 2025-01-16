@@ -193,7 +193,7 @@ impl WGPURenderer {
         queue.write_texture(
             empty_texture.as_image_copy(),
             &[255, 0, 0, 255],
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4),
                 rows_per_image: None,
@@ -568,7 +568,7 @@ impl Renderer for WGPURenderer {
         self.queue.write_texture(
             target,
             bytes,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bpp * data.dimensions().width as u32),
                 rows_per_image: None,
