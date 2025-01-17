@@ -52,6 +52,7 @@ Run with `cargo run --example text`
 * [x] Nearest font matching
 * [x] Path hit testing
 * [x] OpenGl ES2 backend
+* [x] WGPU backend
 * [x] Color fonts
 
 ## Not supported
@@ -59,6 +60,19 @@ Run with `cargo run --example text`
 * [ ] Path scissoring
 * [ ] Custom shaders
 * [ ] 3D transforms
+
+## Ecosystem
+
+FemtoVG is used by these projects:
+
+ - pn-editor <https://gitlab.com/porky11/pn-editor>:
+   view, edit, and simulate petri nets
+ - Slint <https://slint.dev>:
+   A declarative GUI toolkit to build native user interfaces for embedded, desktop, and mobile application
+ - inlottie <https://github.com/mhfan/inlottie>:
+   lib/tool in Rust for Lottie (Bodymovin) Animation
+ - Mapvas <https://github.com/UdHo/mapvas>:
+   A map canvas showing OSM tiles with drawing functionality
 
 ## License
 Licensed under either of
