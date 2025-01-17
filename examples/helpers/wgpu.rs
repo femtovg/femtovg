@@ -6,8 +6,8 @@ use winit::{event_loop::EventLoop, window::WindowBuilder};
 use super::{run, WindowSurface};
 
 pub struct DemoSurface {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     surface_config: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
 }
@@ -135,10 +135,6 @@ pub async fn start_wgpu(
         .unwrap_or_else(|| swapchain_capabilities.formats[0]);
     surface_config.format = swapchain_format;
     surface.configure(&device, &surface_config);
-
-    let device = Arc::new(device);
-
-    let queue = Arc::new(queue);
 
     let demo_surface = DemoSurface {
         device: device.clone(),

@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use rgb::bytemuck;
 use wgpu::util::DeviceExt;
@@ -151,8 +150,8 @@ struct CachedPipeline {
 
 /// WGPU renderer.
 pub struct WGPURenderer {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
 
     shader_module: Rc<wgpu::ShaderModule>,
 
@@ -170,7 +169,7 @@ pub struct WGPURenderer {
 
 impl WGPURenderer {
     /// Creates a new renderer for the device.
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+    pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let module = wgpu::include_wgsl!("wgpu/shader.wgsl");
         let shader_module = Rc::new(device.create_shader_module(module));
 
@@ -1319,7 +1318,7 @@ impl BindGroupState {
 }
 
 struct RenderPassBuilder<'a> {
-    device: Arc<wgpu::Device>,
+    device: wgpu::Device,
     encoder: &'a mut wgpu::CommandEncoder,
     surface_view: std::rc::Rc<wgpu::TextureView>,
     surface_format: wgpu::TextureFormat,
@@ -1340,7 +1339,7 @@ struct RenderPassBuilder<'a> {
 
 impl<'a> RenderPassBuilder<'a> {
     fn new(
-        device: Arc<wgpu::Device>,
+        device: wgpu::Device,
         encoder: &'a mut wgpu::CommandEncoder,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
@@ -1550,7 +1549,7 @@ impl<'a> RenderPassBuilder<'a> {
 }
 
 struct CommandToPipelineAndBindGroupMapper {
-    device: Arc<wgpu::Device>,
+    device: wgpu::Device,
     empty_texture: Rc<wgpu::Texture>,
     shader_module: Rc<wgpu::ShaderModule>,
 
@@ -1563,7 +1562,7 @@ struct CommandToPipelineAndBindGroupMapper {
 
 impl CommandToPipelineAndBindGroupMapper {
     fn new(
-        device: Arc<wgpu::Device>,
+        device: wgpu::Device,
         empty_texture: Rc<wgpu::Texture>,
         shader_module: Rc<wgpu::ShaderModule>,
         bind_group_layout: Rc<wgpu::BindGroupLayout>,
