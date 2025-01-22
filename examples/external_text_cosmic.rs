@@ -17,9 +17,6 @@ use imgref::{Img, ImgRef};
 use rgb::RGBA8;
 use swash::scale::image::Content;
 
-#[cfg(target_arch = "wasm32")]
-use winit::window::Window;
-
 const TEXTURE_SIZE: usize = 512;
 
 pub struct FontTexture {
