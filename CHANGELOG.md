@@ -1,10 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.13.0] - Unreleased
+## [0.13.0] - 2025-01-29
 
  - Bump MSRV to 1.81.
  - Bump wgpu to 0.24.
+ - **breaking**: The WGPU renderer is now constructed with a wgpu Device/Queue
+   ithat's not wrapped in an Arc anymore. These types implement clone themselves.
 
 ## [0.12.0] - 2025-01-14
 
@@ -236,3 +238,4 @@ All notable changes to this project will be documented in this file.
 [0.11.1]: https://github.com/femtovg/femtovg/releases/tag/v0.11.1
 [0.11.3]: https://github.com/femtovg/femtovg/releases/tag/v0.11.3
 [0.12.0]: https://github.com/femtovg/femtovg/releases/tag/v0.12.0
+[0.13.0]: https://github.com/femtovg/femtovg/releases/tag/v0.13.0
