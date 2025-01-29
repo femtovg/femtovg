@@ -139,7 +139,7 @@ impl From<&Params> for UniformArray {
 }
 
 pub struct Image {
-    texture: Rc<wgpu::Texture>,
+    texture: wgpu::Texture,
     info: ImageInfo,
 }
 
@@ -157,13 +157,13 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    empty_texture: Rc<wgpu::Texture>,
-    stencil_buffer: Option<Rc<wgpu::Texture>>,
-    stencil_buffer_for_textures: HashMap<Rc<wgpu::Texture>, Rc<wgpu::Texture>>,
+    empty_texture: wgpu::Texture,
+    stencil_buffer: Option<wgpu::Texture>,
+    stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
-    bind_group_layout: Rc<wgpu::BindGroupLayout>,
-    viewport_bind_group_layout: Rc<wgpu::BindGroupLayout>,
-    pipeline_layout: Rc<wgpu::PipelineLayout>,
+    bind_group_layout: wgpu::BindGroupLayout,
+    viewport_bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
 }
 
@@ -183,11 +183,11 @@ impl WGPURenderer {
             label: None,
             view_formats: &[],
         };
-        let empty_texture = Rc::new(device.create_texture(&wgpu::TextureDescriptor {
+        let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("empty"),
             view_formats: &[],
             ..texture_descriptor
-        }));
+        });
 
         queue.write_texture(
             empty_texture.as_image_copy(),
@@ -200,7 +200,7 @@ impl WGPURenderer {
             wgpu::Extent3d::default(),
         );
 
-        let viewport_bind_group_layout = Rc::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let viewport_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Bind Group Layout for Viewport uniform"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -212,9 +212,9 @@ impl WGPURenderer {
                 },
                 count: None,
             }],
-        }));
+        });
 
-        let bind_group_layout = Rc::new(device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -260,13 +260,13 @@ impl WGPURenderer {
                     count: None,
                 },
             ],
-        }));
+        });
 
-        let pipeline_layout = Rc::new(device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&viewport_bind_group_layout, &bind_group_layout],
             push_constant_ranges: &[],
-        }));
+        });
 
         Self {
             device,
@@ -305,7 +305,7 @@ impl Renderer for WGPURenderer {
         self.screen_view[0] = surface_texture.width() as f32;
         self.screen_view[1] = surface_texture.height() as f32;
 
-        let texture_view = std::rc::Rc::new(surface_texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let texture_view = surface_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Main Vertex Buffer"),
@@ -322,7 +322,7 @@ impl Renderer for WGPURenderer {
         let stencil_buffer = self
             .stencil_buffer
             .get_or_insert_with(|| {
-                Rc::new(self.device.create_texture(&wgpu::TextureDescriptor {
+                self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("Stencil buffer"),
                     size: wgpu::Extent3d {
                         width: surface_texture.width(),
@@ -335,7 +335,7 @@ impl Renderer for WGPURenderer {
                     format: wgpu::TextureFormat::Stencil8,
                     view_formats: &[],
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                }))
+                })
             })
             .clone();
 
@@ -470,7 +470,7 @@ impl Renderer for WGPURenderer {
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, crate::ErrorKind> {
         Ok(Image {
-            texture: Rc::new(self.device.create_texture(&wgpu::TextureDescriptor {
+            texture: self.device.create_texture(&wgpu::TextureDescriptor {
                 label: None,
                 size: wgpu::Extent3d {
                     width: info.width() as u32,
@@ -489,7 +489,7 @@ impl Renderer for WGPURenderer {
                     | wgpu::TextureUsages::COPY_DST
                     | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
-            })),
+            }),
             info,
         })
     }
@@ -500,7 +500,7 @@ impl Renderer for WGPURenderer {
         info: crate::ImageInfo,
     ) -> Result<Self::Image, crate::ErrorKind> {
         Ok(Image {
-            texture: Rc::new(native_texture),
+            texture: native_texture,
             info,
         })
     }
@@ -642,7 +642,7 @@ fn gaussian_blur_filter(
     // on the number of iterations in the fragment shader.
     blur_params.image_blur_filter_sigma = sigma.min(8.);
 
-    let horizontal_blur_buffer = Rc::new(device.create_texture(&wgpu::TextureDescriptor {
+    let horizontal_blur_buffer = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("blur horizontal"),
         size: wgpu::Extent3d {
             width: source_image.texture.width(),
@@ -655,7 +655,7 @@ fn gaussian_blur_filter(
         format: source_image.texture.format(),
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
-    }));
+    });
 
     render_pass_builder.set_render_target_texture(
         &horizontal_blur_buffer,
@@ -1255,7 +1255,7 @@ impl PipelineState {
 #[derive(Clone, PartialEq)]
 enum ImageOrTexture {
     Image(ImageId),
-    Texture(Rc<wgpu::Texture>),
+    Texture(wgpu::Texture),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1271,7 +1271,7 @@ impl BindGroupState {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         bind_group_layout: &wgpu::BindGroupLayout,
-        empty_texture: &Rc<wgpu::Texture>,
+        empty_texture: &wgpu::Texture,
     ) -> wgpu::BindGroup {
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Fragment Uniform Buffer"),
@@ -1320,20 +1320,20 @@ impl BindGroupState {
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
     encoder: &'a mut wgpu::CommandEncoder,
-    surface_view: std::rc::Rc<wgpu::TextureView>,
+    surface_view: wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
-    texture_view: std::rc::Rc<wgpu::TextureView>,
-    stencil_buffer: Option<Rc<wgpu::Texture>>,
+    texture_view: wgpu::TextureView,
+    stencil_buffer: Option<wgpu::Texture>,
     viewport: [f32; 2],
     vertex_buffer: wgpu::Buffer,
     rendering_to_texture: bool,
-    viewport_bind_group_layout: Rc<wgpu::BindGroupLayout>,
+    viewport_bind_group_layout: wgpu::BindGroupLayout,
     current_bind_group_state: Option<BindGroupState>,
     rpass: Option<wgpu::RenderPass<'a>>,
-    screen_stencil_buffer: Rc<wgpu::Texture>,
+    screen_stencil_buffer: wgpu::Texture,
     screen_view: [f32; 2],
     screen_surface_format: wgpu::TextureFormat,
-    stencil_buffer_for_textures: &'a mut HashMap<Rc<wgpu::Texture>, Rc<wgpu::Texture>>,
+    stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group: wgpu::BindGroup,
 }
 
@@ -1343,10 +1343,10 @@ impl<'a> RenderPassBuilder<'a> {
         encoder: &'a mut wgpu::CommandEncoder,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
-        viewport_bind_group_layout: Rc<wgpu::BindGroupLayout>,
-        stencil_buffer_for_textures: &'a mut HashMap<Rc<wgpu::Texture>, Rc<wgpu::Texture>>,
-        texture_view: Rc<wgpu::TextureView>,
-        stencil_buffer: Rc<wgpu::Texture>,
+        viewport_bind_group_layout: wgpu::BindGroupLayout,
+        stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
+        texture_view: wgpu::TextureView,
+        stencil_buffer: wgpu::Texture,
         vertex_buffer: wgpu::Buffer,
     ) -> Self {
         let viewport_bind_group = Self::create_viewport_bind_group(&device, &screen_view, &viewport_bind_group_layout);
@@ -1410,7 +1410,7 @@ impl<'a> RenderPassBuilder<'a> {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         image: Option<&ImageOrTexture>,
-        empty_texture: &Rc<wgpu::Texture>,
+        empty_texture: &wgpu::Texture,
     ) -> (wgpu::TextureView, wgpu::Sampler) {
         let texture_and_flags = image.and_then(|image_or_texture| match image_or_texture {
             ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| (img.texture.clone(), img.info.flags())),
@@ -1452,10 +1452,10 @@ impl<'a> RenderPassBuilder<'a> {
     fn set_render_target_texture(
         &mut self,
         texture: &wgpu::Texture,
-        stencil_buffer: Option<Rc<wgpu::Texture>>,
+        stencil_buffer: Option<wgpu::Texture>,
         load: wgpu::LoadOp<wgpu::Color>,
     ) {
-        self.texture_view = std::rc::Rc::new(texture.create_view(&Default::default()));
+        self.texture_view = texture.create_view(&Default::default());
         self.set_viewport([texture.width() as f32, texture.height() as f32]);
         self.stencil_buffer = stencil_buffer;
         self.surface_format = texture.format();
@@ -1476,7 +1476,7 @@ impl<'a> RenderPassBuilder<'a> {
             .stencil_buffer_for_textures
             .entry(image.texture.clone())
             .or_insert_with(|| {
-                Rc::new(self.device.create_texture(&wgpu::TextureDescriptor {
+                self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("Stencil buffer"),
                     size: wgpu::Extent3d {
                         width: image.texture.width(),
@@ -1489,7 +1489,7 @@ impl<'a> RenderPassBuilder<'a> {
                     format: wgpu::TextureFormat::Stencil8,
                     view_formats: &[],
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                }))
+                })
             })
             .clone();
 
@@ -1550,23 +1550,23 @@ impl<'a> RenderPassBuilder<'a> {
 
 struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
-    empty_texture: Rc<wgpu::Texture>,
+    empty_texture: wgpu::Texture,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
     current_bind_group: Option<wgpu::BindGroup>,
-    bind_group_layout: Rc<wgpu::BindGroupLayout>,
+    bind_group_layout: wgpu::BindGroupLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
-    pipeline_layout: Rc<wgpu::PipelineLayout>,
+    pipeline_layout: wgpu::PipelineLayout,
 }
 
 impl CommandToPipelineAndBindGroupMapper {
     fn new(
         device: wgpu::Device,
-        empty_texture: Rc<wgpu::Texture>,
+        empty_texture: wgpu::Texture,
         shader_module: Rc<wgpu::ShaderModule>,
-        bind_group_layout: Rc<wgpu::BindGroupLayout>,
-        pipeline_layout: Rc<wgpu::PipelineLayout>,
+        bind_group_layout: wgpu::BindGroupLayout,
+        pipeline_layout: wgpu::PipelineLayout,
         pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     ) -> Self {
         Self {
