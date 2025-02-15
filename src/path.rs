@@ -509,7 +509,7 @@ pub struct PathIter<'a> {
     coords: &'a [Position],
 }
 
-impl<'a> Iterator for PathIter<'a> {
+impl Iterator for PathIter<'_> {
     type Item = Verb;
 
     fn next(&mut self) -> Option<Self::Item> {
