@@ -479,7 +479,7 @@ impl TextContextImpl {
         Ok(res)
     }
 
-    pub fn measure_font(&mut self, font_size: f32, font_ids: &[Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, font_size: f32, font_ids: &[Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = font_ids.first() {
             if let Some(font) = self.font(*id) {
                 return Ok(font.metrics(font_size));
