@@ -124,7 +124,7 @@ pub trait Renderer {
     /// Associated surface type.
     type Surface;
 
-    /// Associated type to hold commands created via flush_to_surface.
+    /// Associated type to hold commands created via `flush_to_surface`.
     type CommandBuffer;
 
     /// Set the size of the renderer.
@@ -225,7 +225,7 @@ pub enum ShaderType {
     FillColor,
     /// Texture copy unclipped shader.
     TextureCopyUnclipped,
-    /// Fill color shader without clipping, used for clear_rect()
+    /// Fill color shader without clipping, used for `clear_rect()`
     FillColorUnclipped,
 }
 
