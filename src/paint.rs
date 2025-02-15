@@ -229,8 +229,8 @@ pub enum GlyphTexture {
 impl GlyphTexture {
     pub(crate) fn image_id(&self) -> Option<ImageId> {
         match self {
-            GlyphTexture::None => None,
-            GlyphTexture::AlphaMask(image_id) | GlyphTexture::ColorTexture(image_id) => Some(*image_id),
+            Self::None => None,
+            Self::AlphaMask(image_id) | Self::ColorTexture(image_id) => Some(*image_id),
         }
     }
 }
