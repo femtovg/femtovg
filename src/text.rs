@@ -187,8 +187,9 @@ pub struct FontTexture {
     pub(crate) image_id: ImageId,
 }
 
-/// `TextContext` provides functionality for text processing in femtovg. You can
-/// add fonts using the [`Self::add_font_file()`], [`Self::add_font_mem()`] and
+/// `TextContext` provides functionality for text processing in femtovg.
+///
+/// You can add fonts using the [`Self::add_font_file()`], [`Self::add_font_mem()`] and
 /// [`Self::add_font_dir()`] functions. For each registered font a [`FontId`] is
 /// returned.
 ///
