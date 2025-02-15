@@ -406,7 +406,7 @@ fn draw_paragraph<T: Renderer>(
 
     let mut height = 0.0;
     let mut width = 0.0;
-    for line_range in lines.iter() {
+    for line_range in &lines {
         let metrics = canvas
             .measure_text(x, y, &hover_text[line_range.clone()], &paint)
             .expect("Cannot measure text");
@@ -433,7 +433,7 @@ fn draw_paragraph<T: Renderer>(
 
     let paint = paint.with_color(Color::rgba(0, 0, 0, 220));
 
-    for (_, line_range) in lines.into_iter().enumerate() {
+    for line_range in lines {
         if let Ok(res) = canvas.fill_text(x, y, &hover_text[line_range], &paint) {
             y += res.height();
         }
