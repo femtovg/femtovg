@@ -81,9 +81,7 @@ impl RenderCache {
                 // perform cache lookup for rendered glyph
                 let Some(rendered) = self.rendered_glyphs.entry(cache_key).or_insert_with(|| {
                     // resterize glyph
-                    let Some(rendered) = self.swash_cache.get_image_uncached(system, cache_key) else {
-                        return None;
-                    };
+                    let rendered = self.swash_cache.get_image_uncached(system, cache_key)?;
 
                     // upload it to the GPU
                     // pick an atlas texture for our glyph
