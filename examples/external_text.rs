@@ -2,8 +2,7 @@ mod helpers;
 
 use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping, SubpixelBin, SwashCache};
 use femtovg::{
-    Atlas, Canvas, Color, DrawCommand, ErrorKind, GlyphDrawCommands, ImageFlags, ImageId, ImageSource, Paint, Quad,
-    Renderer,
+    Atlas, Canvas, Color, DrawCommand, GlyphDrawCommands, ImageFlags, ImageId, ImageSource, Paint, Quad, Renderer,
 };
 use helpers::WindowSurface;
 use std::{collections::HashMap, sync::Arc};
@@ -60,7 +59,7 @@ impl RenderCache {
         canvas: &mut Canvas<T>,
         buffer: &Buffer,
         position: (f32, f32),
-    ) -> Result<GlyphDrawCommands, ErrorKind> {
+    ) -> GlyphDrawCommands {
         let mut alpha_cmd_map = HashMap::new();
         let mut color_cmd_map = HashMap::new();
 
@@ -183,10 +182,10 @@ impl RenderCache {
             }
         }
 
-        Ok(GlyphDrawCommands {
+        GlyphDrawCommands {
             alpha_glyphs: alpha_cmd_map.into_values().collect(),
             color_glyphs: color_cmd_map.into_values().collect(),
-        })
+        }
     }
 }
 
@@ -222,9 +221,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
 
                     buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
                     buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
-                    let cmds = cache
-                        .fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0))
-                        .unwrap();
+                    let cmds = cache.fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0));
                     canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()), 1.0);
 
                     surface.present(&mut canvas);
