@@ -463,17 +463,17 @@ impl TextContextImpl {
         let mut start = 0;
 
         while start < text.len() {
-            if let Ok(index) = self.break_text(max_width, &text[start..], text_settings) {
-                if index == 0 {
-                    break;
-                }
+            let Ok(index) = self.break_text(max_width, &text[start..], text_settings) else {
+                break;
+            };
 
-                let index = start + index;
-                res.push(start..index);
-                start += &text[start..index].len();
-            } else {
+            if index == 0 {
                 break;
             }
+
+            let index = start + index;
+            res.push(start..index);
+            start += &text[start..index].len();
         }
 
         Ok(res)
