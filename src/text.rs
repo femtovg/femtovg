@@ -589,130 +589,132 @@ fn shape_run(
     // this controls whether we should break within words
     let mut first_word_in_paragraph = true;
 
-    if let Some(paragraph) = bidi_info.paragraphs.first() {
-        let line = paragraph.range.clone();
+    let Some(paragraph) = bidi_info.paragraphs.first() else {
+        return result;
+    };
 
-        let (levels, runs) = bidi_info.visual_runs(paragraph, line);
+    let line = paragraph.range.clone();
 
-        for run in runs {
-            let sub_text = &text[run.clone()];
+    let (levels, runs) = bidi_info.visual_runs(paragraph, line);
 
-            if sub_text.is_empty() {
-                continue;
+    for run in runs {
+        let sub_text = &text[run.clone()];
+
+        if sub_text.is_empty() {
+            continue;
+        }
+
+        let hb_direction = if levels[run.start].is_rtl() {
+            rustybuzz::Direction::RightToLeft
+        } else {
+            rustybuzz::Direction::LeftToRight
+        };
+
+        let mut words = Vec::new();
+        let mut word_break_reached = false;
+        let mut byte_index = run.start;
+
+        for mut word_txt in sub_text.split_word_bounds() {
+            let id = ShapingId::new(font_size, font_ids, word_txt, max_width);
+
+            if !context.shaped_words_cache.contains(&id) {
+                let word = shape_word(word_txt, hb_direction, context, font_size, &font_ids, letter_spacing);
+                context.shaped_words_cache.put(id, word);
             }
 
-            let hb_direction = if levels[run.start].is_rtl() {
-                rustybuzz::Direction::RightToLeft
-            } else {
-                rustybuzz::Direction::LeftToRight
-            };
+            if let Some(Ok(word)) = context.shaped_words_cache.get(&id) {
+                let mut word = word.clone();
 
-            let mut words = Vec::new();
-            let mut word_break_reached = false;
-            let mut byte_index = run.start;
+                if let Some(max_width) = max_width {
+                    if result.width + word.width >= max_width {
+                        word_break_reached = true;
+                        if first_word_in_paragraph {
+                            // search for the largest prefix of the word that can fit
+                            let mut bytes_included = 0;
+                            let mut subword_width = 0.0;
+                            let target_width = max_width - result.width;
+                            for glyph in word.glyphs {
+                                bytes_included = glyph.byte_index;
+                                let glyph_width = glyph.advance_x + letter_spacing;
 
-            for mut word_txt in sub_text.split_word_bounds() {
-                let id = ShapingId::new(font_size, font_ids, word_txt, max_width);
-
-                if !context.shaped_words_cache.contains(&id) {
-                    let word = shape_word(word_txt, hb_direction, context, font_size, &font_ids, letter_spacing);
-                    context.shaped_words_cache.put(id, word);
-                }
-
-                if let Some(Ok(word)) = context.shaped_words_cache.get(&id) {
-                    let mut word = word.clone();
-
-                    if let Some(max_width) = max_width {
-                        if result.width + word.width >= max_width {
-                            word_break_reached = true;
-                            if first_word_in_paragraph {
-                                // search for the largest prefix of the word that can fit
-                                let mut bytes_included = 0;
-                                let mut subword_width = 0.0;
-                                let target_width = max_width - result.width;
-                                for glyph in word.glyphs {
-                                    bytes_included = glyph.byte_index;
-                                    let glyph_width = glyph.advance_x + letter_spacing;
-
-                                    // nuance: we want to include the first glyph even if it breaks
-                                    // the bounds. this is to allow pathologically small bounds to
-                                    // at least complete rendering
-                                    if subword_width + glyph_width >= target_width && bytes_included != 0 {
-                                        break;
-                                    }
-
-                                    subword_width += glyph_width;
-                                }
-
-                                if bytes_included == 0 {
-                                    // just in case - never mind!
+                                // nuance: we want to include the first glyph even if it breaks
+                                // the bounds. this is to allow pathologically small bounds to
+                                // at least complete rendering
+                                if subword_width + glyph_width >= target_width && bytes_included != 0 {
                                     break;
                                 }
 
-                                let subword_txt = &word_txt[..bytes_included];
-                                let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width));
-                                if !context.shaped_words_cache.contains(&id) {
-                                    let subword = shape_word(
-                                        subword_txt,
-                                        hb_direction,
-                                        context,
-                                        font_size,
-                                        &font_ids,
-                                        letter_spacing,
-                                    );
-                                    context.shaped_words_cache.put(id, subword);
-                                }
+                                subword_width += glyph_width;
+                            }
 
-                                if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
-                                    // replace the outer variables so we can continue normally
-                                    word = subword.clone();
-                                    word_txt = subword_txt;
-                                } else {
-                                    break;
-                                }
-                            } else if word.glyphs.iter().all(|g| g.c.is_whitespace()) {
-                                // the last word we've broken in the middle of is whitespace.
-                                // include this word for now, but we will discard its metrics in a moment.
-                            } else {
-                                // we are not breaking up words - discard this word
+                            if bytes_included == 0 {
+                                // just in case - never mind!
                                 break;
                             }
+
+                            let subword_txt = &word_txt[..bytes_included];
+                            let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width));
+                            if !context.shaped_words_cache.contains(&id) {
+                                let subword = shape_word(
+                                    subword_txt,
+                                    hb_direction,
+                                    context,
+                                    font_size,
+                                    &font_ids,
+                                    letter_spacing,
+                                );
+                                context.shaped_words_cache.put(id, subword);
+                            }
+
+                            if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
+                                // replace the outer variables so we can continue normally
+                                word = subword.clone();
+                                word_txt = subword_txt;
+                            } else {
+                                break;
+                            }
+                        } else if word.glyphs.iter().all(|g| g.c.is_whitespace()) {
+                            // the last word we've broken in the middle of is whitespace.
+                            // include this word for now, but we will discard its metrics in a moment.
+                        } else {
+                            // we are not breaking up words - discard this word
+                            break;
                         }
                     }
-
-                    // if we have broken in the middle of whitespace, do not include this word in metrics
-                    if !word_break_reached || !word.glyphs.iter().all(|g| g.c.is_whitespace()) {
-                        result.width += word.width;
-                    }
-
-                    for glyph in &mut word.glyphs {
-                        glyph.byte_index += byte_index;
-                        debug_assert!(text.get(glyph.byte_index..).is_some());
-                    }
-                    words.push(word);
-                    first_word_in_paragraph = false;
                 }
 
-                byte_index += word_txt.len();
-
-                if word_break_reached {
-                    break;
+                // if we have broken in the middle of whitespace, do not include this word in metrics
+                if !word_break_reached || !word.glyphs.iter().all(|g| g.c.is_whitespace()) {
+                    result.width += word.width;
                 }
+
+                for glyph in &mut word.glyphs {
+                    glyph.byte_index += byte_index;
+                    debug_assert!(text.get(glyph.byte_index..).is_some());
+                }
+                words.push(word);
+                first_word_in_paragraph = false;
             }
 
-            if levels[run.start].is_rtl() {
-                words.reverse();
-            }
-
-            for word in words {
-                result.glyphs.extend(word.glyphs.clone());
-            }
-
-            result.final_byte_index = byte_index;
+            byte_index += word_txt.len();
 
             if word_break_reached {
                 break;
             }
+        }
+
+        if levels[run.start].is_rtl() {
+            words.reverse();
+        }
+
+        for word in words {
+            result.glyphs.extend(word.glyphs.clone());
+        }
+
+        result.final_byte_index = byte_index;
+
+        if word_break_reached {
+            break;
         }
     }
 
