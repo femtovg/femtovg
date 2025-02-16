@@ -24,18 +24,64 @@ pub enum GlyphRendering<'a> {
     RenderAsImage(image::DynamicImage),
 }
 
-/// Information about a font.
+#[derive(Copy, Clone, Default, Debug)]
+struct FontFlags(u8);
+
 // TODO: underline, strikeout, subscript, superscript metrics
+impl FontFlags {
+    fn new(regular: bool, italic: bool, bold: bool, oblique: bool, variable: bool) -> Self {
+        let mut flags = 0;
+        if regular {
+            flags |= 0x1;
+        }
+        if italic {
+            flags |= 0x2;
+        }
+        if bold {
+            flags |= 0x4;
+        }
+        if oblique {
+            flags |= 0x8;
+        }
+        if variable {
+            flags |= 0x10;
+        }
+        Self(flags)
+    }
+
+    #[inline]
+    fn regular(&self) -> bool {
+        self.0 & 0x1 > 0
+    }
+
+    #[inline]
+    fn italic(&self) -> bool {
+        self.0 & 0x2 > 0
+    }
+
+    #[inline]
+    fn bold(&self) -> bool {
+        self.0 & 0x4 > 0
+    }
+
+    #[inline]
+    fn oblique(&self) -> bool {
+        self.0 & 0x8 > 0
+    }
+
+    #[inline]
+    fn variable(&self) -> bool {
+        self.0 & 0x10 > 0
+    }
+}
+
+/// Information about a font.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,
     height: f32,
-    regular: bool,
-    italic: bool,
-    bold: bool,
-    oblique: bool,
-    variable: bool,
+    flags: FontFlags,
     weight: u16,
     width: u16,
 }
@@ -64,27 +110,27 @@ impl FontMetrics {
 
     /// Returns if the font is regular.
     pub fn regular(&self) -> bool {
-        self.regular
+        self.flags.regular()
     }
 
     /// Returns if the font is italic.
     pub fn italic(&self) -> bool {
-        self.italic
+        self.flags.italic()
     }
 
     /// Returns if the font is bold.
     pub fn bold(&self) -> bool {
-        self.bold
+        self.flags.bold()
     }
 
     /// Returns if the font is oblique.
     pub fn oblique(&self) -> bool {
-        self.oblique
+        self.flags.oblique()
     }
 
     /// Returns if the font is a variable font.
     pub fn variable(&self) -> bool {
-        self.variable
+        self.flags.variable()
     }
 
     /// Returns the weight of the font.
@@ -116,11 +162,13 @@ impl Font {
             ascender: ttf_font.ascender() as f32,
             descender: ttf_font.descender() as f32,
             height: ttf_font.height() as f32,
-            regular: ttf_font.is_regular(),
-            italic: ttf_font.is_italic(),
-            bold: ttf_font.is_bold(),
-            oblique: ttf_font.is_oblique(),
-            variable: ttf_font.is_variable(),
+            flags: FontFlags::new(
+                ttf_font.is_regular(),
+                ttf_font.is_italic(),
+                ttf_font.is_bold(),
+                ttf_font.is_oblique(),
+                ttf_font.is_variable(),
+            ),
             width: ttf_font.width().to_number(),
             weight: ttf_font.weight().to_number(),
         };
