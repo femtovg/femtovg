@@ -554,7 +554,7 @@ pub fn shape(
             text_settings.letter_spacing,
             text,
             max_width,
-        )?;
+        );
         context.shaping_run_cache.put(id, metrics);
     }
 
@@ -574,7 +574,7 @@ fn shape_run(
     letter_spacing: f32,
     text: &str,
     max_width: Option<f32>,
-) -> Result<TextMetrics, ErrorKind> {
+) -> TextMetrics {
     let mut result = TextMetrics {
         x: 0.0,
         y: 0.0,
@@ -716,7 +716,7 @@ fn shape_run(
         }
     }
 
-    Ok(result)
+    result
 }
 
 fn shape_word(
