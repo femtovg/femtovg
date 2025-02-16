@@ -252,9 +252,9 @@ impl Default for StrokeSettings {
             stencil_strokes: true,
             miter_limit: 10.0,
             line_width: 1.0,
-            line_cap_start: Default::default(),
-            line_cap_end: Default::default(),
-            line_join: Default::default(),
+            line_cap_start: LineCap::default(),
+            line_cap_end: LineCap::default(),
+            line_join: LineJoin::default(),
         }
     }
 }
@@ -276,8 +276,8 @@ impl Default for TextSettings {
             font_ids: Default::default(),
             font_size: 16.0,
             letter_spacing: 0.0,
-            text_baseline: Default::default(),
-            text_align: Default::default(),
+            text_baseline: Baseline::default(),
+            text_align: Align::default(),
         }
     }
 }
@@ -323,7 +323,7 @@ impl Default for Paint {
             shape_anti_alias: true,
             stroke: StrokeSettings::default(),
             text: TextSettings::default(),
-            fill_rule: Default::default(),
+            fill_rule: FillRule::default(),
         }
     }
 }

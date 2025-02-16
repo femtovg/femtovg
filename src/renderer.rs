@@ -97,9 +97,9 @@ impl Command {
             drawables: Vec::new(),
             triangles_verts: None,
             image: None,
-            glyph_texture: Default::default(),
-            fill_rule: Default::default(),
-            composite_operation: Default::default(),
+            glyph_texture: GlyphTexture::default(),
+            fill_rule: FillRule::default(),
+            composite_operation: CompositeOperationState::default(),
         }
     }
 }

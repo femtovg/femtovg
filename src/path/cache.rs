@@ -76,7 +76,7 @@ impl Default for Contour {
             solidity: None,
             fill: Vec::new(),
             stroke: Vec::new(),
-            convexity: Default::default(),
+            convexity: Convexity::default(),
         }
     }
 }

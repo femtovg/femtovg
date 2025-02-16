@@ -298,7 +298,7 @@ impl Default for TextContextImpl {
         let fnv_words = FnvBuildHasher::default();
 
         Self {
-            fonts: Default::default(),
+            fonts: SlotMap::default(),
             shaping_run_cache: LruCache::with_hasher(
                 std::num::NonZeroUsize::new(DEFAULT_LRU_CACHE_CAPACITY).unwrap(),
                 fnv_run,

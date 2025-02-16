@@ -1,4 +1,4 @@
-use std::{mem, rc::Rc};
+use std::{collections::HashMap, mem, rc::Rc};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::c_void;
@@ -13,7 +13,7 @@ use rgb::RGBA8;
 use crate::{
     renderer::{GlyphTexture, ImageId, Vertex},
     BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageInfo, ImageSource, ImageStore,
-    Scissor,
+    Scissor, Transform2D,
 };
 
 use glow::HasContext;
@@ -186,7 +186,7 @@ impl OpenGl {
             current_program_needs_glyph_texture: true,
             vert_arr: None,
             vert_buff: None,
-            framebuffers: Default::default(),
+            framebuffers: HashMap::default(),
             context,
             screen_target: None,
             current_render_target: RenderTarget::Screen,
@@ -582,9 +582,9 @@ impl OpenGl {
         );
         let mut blur_params = Params::new(
             images,
-            &Default::default(),
+            &Transform2D::default(),
             &image_paint.flavor,
-            &Default::default(),
+            &GlyphTexture::default(),
             &Scissor::default(),
             0.,
             0.,

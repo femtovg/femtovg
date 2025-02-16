@@ -268,9 +268,9 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            composite_operation: Default::default(),
+            composite_operation: CompositeOperationState::default(),
             transform: Transform2D::identity(),
-            scissor: Default::default(),
+            scissor: Scissor::default(),
             alpha: 1.0,
         }
     }
@@ -307,8 +307,8 @@ where
             width: 0,
             height: 0,
             renderer,
-            text_context: Default::default(),
-            glyph_atlas: Default::default(),
+            text_context: Rc::default(),
+            glyph_atlas: Rc::default(),
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
@@ -336,7 +336,7 @@ where
             height: 0,
             renderer,
             text_context: text_context.0,
-            glyph_atlas: Default::default(),
+            glyph_atlas: Rc::default(),
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
@@ -463,7 +463,7 @@ where
 
     /// Resets current state to default values. Does not affect the state stack.
     pub fn reset(&mut self) {
-        *self.state_mut() = Default::default();
+        *self.state_mut() = State::default();
     }
 
     /// Saves the current state before calling the callback and restores it afterwards

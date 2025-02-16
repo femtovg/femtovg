@@ -130,7 +130,7 @@ impl Font {
             face_index,
             units_per_em,
             metrics,
-            glyphs: Default::default(),
+            glyphs: RefCell::default(),
         })
     }
 
