@@ -48,8 +48,8 @@ impl RenderCache {
     pub(crate) fn new() -> Self {
         Self {
             swash_cache: SwashCache::new(),
-            rendered_glyphs: Default::default(),
-            glyph_textures: Default::default(),
+            rendered_glyphs: HashMap::default(),
+            glyph_textures: Vec::default(),
         }
     }
 
