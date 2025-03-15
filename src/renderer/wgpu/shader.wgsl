@@ -11,15 +11,13 @@ struct Params {
     stroke_mult: f32,
     stroke_thr: f32,
     tex_type: f32,
-    _unused_shader_type: f32,
+    shader_type: f32,
     glyph_texture_type: f32, // 0 -> no glyph rendering, 1 -> alpha mask, 2 -> color texture
     image_blur_filter_sigma: f32,
     image_blur_filter_direction: vec2<f32>,
     image_blur_filter_coeff: vec3<f32>,
 }
 
-override shader_type: i32;
-override enable_glyph_texture: bool;
 override render_to_texture: bool;
 
 const SHADER_TYPE_FillGradient: i32 = 0;
@@ -90,16 +88,17 @@ var glyph_sampler: sampler;
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var result: vec4<f32>;
+    let shader_type_int: i32 = i32(params.shader_type);
 
     var strokeAlpha: f32 = 1.0;
-    if (shader_type != SHADER_TYPE_TextureCopyUnclipped && shader_type != SHADER_TYPE_FillColorUnclipped && shader_type != SHADER_TYPE_FilterImage) {
+    if (shader_type_int != SHADER_TYPE_TextureCopyUnclipped && shader_type_int != SHADER_TYPE_FillColorUnclipped && shader_type_int != SHADER_TYPE_FilterImage) {
         strokeAlpha = strokeMask(vertex, params);
         if (strokeAlpha < params.stroke_thr) {
             discard;
         }
     }
 
-    switch (shader_type) {
+    switch (shader_type_int) {
         case SHADER_TYPE_FillGradient: {
             // Gradient
             result = renderGradient(vertex, params);
@@ -139,7 +138,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
     var scissor: f32 = scissorMask(vertex.fpos, params);
 
-    if (enable_glyph_texture) {
+    if (params.glyph_texture_type != 0.0) {
         // Textured tris
         var mask: vec4<f32> = textureSample(glyph_texture, glyph_sampler, vertex.ftcoord);
 
@@ -152,7 +151,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
         mask *= scissor;
         result *= mask;
-    } else if (shader_type != SHADER_TYPE_Stencil && shader_type != SHADER_TYPE_FilterImage) {
+    } else if (shader_type_int != SHADER_TYPE_Stencil && shader_type_int != SHADER_TYPE_FilterImage) {
         // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;
