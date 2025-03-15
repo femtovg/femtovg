@@ -1188,17 +1188,10 @@ impl PipelineState {
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
-        let constants = HashMap::from([
-            ("shader_type".to_string(), self.shader_type.to_f32() as f64),
-            (
-                "enable_glyph_texture".to_string(),
-                if self.enable_glyph_texture { 1.0 } else { 0.0 },
-            ),
-            (
-                "render_to_texture".to_string(),
-                if self.render_to_texture { 1.0 } else { 0. },
-            ),
-        ]);
+        let constants = HashMap::from([(
+            "render_to_texture".to_string(),
+            if self.render_to_texture { 1.0 } else { 0. },
+        )]);
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
