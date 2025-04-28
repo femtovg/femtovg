@@ -1,7 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.14.0]
+## [0.15.0] - TBD
+
+ - Bumped WGPU renderer to use WGPU 25.x.
+
+## [0.14.0] - 2025-03-25
 
 - Bump MSRV to 1.84.
 - Fixed WGPU web rendering (thanks @JoshBurbidge)
