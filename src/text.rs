@@ -757,6 +757,10 @@ fn shape_word(
                 has_missing = true;
             }
 
+            if c.is_control() {
+                continue;
+            }
+
             let scale = font.scale(font_size);
 
             let mut g = ShapedGlyph {

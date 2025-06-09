@@ -32,7 +32,8 @@ use winit::window::Window;
 fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
     let fonts = Fonts {
         sans: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
+            // .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
+            .add_font_mem(include_bytes!("/opt/android-studio/jbr/lib/fonts/Inter-Regular.otf"))
             .expect("Cannot add font"),
         bold: canvas
             .add_font_mem(&resource!("examples/assets/Roboto-Bold.ttf"))
