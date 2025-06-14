@@ -1,12 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.14.1]
+## [0.14.1] - 2025-06-14
 
  - Fixed accidental rendering of newline (and other control characters) when using the Inter font. (#236) (thanks @peterprototypes)
  - WGPU renderer: Fixed panic when rendering empty scenes.
 
-## [0.14.0]
+## [0.14.0] - 2025-03-24
 
 - Bump MSRV to 1.84.
 - Fixed WGPU web rendering (thanks @JoshBurbidge)
