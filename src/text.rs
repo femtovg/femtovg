@@ -927,7 +927,7 @@ impl GlyphAtlas {
 
         let initial_render_target = canvas.current_render_target;
 
-        for glyph in &text_layout.glyphs {
+        for glyph in text_layout.glyphs.iter().filter(|g| !g.c.is_control()) {
             let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
 
             let id = RenderedGlyphId::new(
@@ -1258,7 +1258,7 @@ pub fn render_direct<T: Renderer>(
 
     let mut face_cache: HashMap<FontId, rustybuzz::Face> = HashMap::default();
 
-    for glyph in &text_layout.glyphs {
+    for glyph in text_layout.glyphs.iter().filter(|g| !g.c.is_control()) {
         let (glyph_rendering, scale) = {
             let font = text_context.font(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
             let face = face_cache.entry(glyph.font_id).or_insert_with(|| font.face_ref());
