@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.14.1]
+
+ - Fixed accidental rendering of newline (and other control characters) when using the Inter font. (#236) (thanks @peterprototypes)
+
 ## [0.14.0]
 
 - Bump MSRV to 1.84.
