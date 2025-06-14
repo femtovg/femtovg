@@ -1529,7 +1529,10 @@ impl<'a> RenderPassBuilder<'a> {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        // A wgpu buffer slice of length 0 is invalid and panics.
+        if self.vertex_buffer.size() > 0 {
+            rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        }
         rpass.set_viewport(0., 0., self.viewport[0], self.viewport[1], 0., 0.);
         self.current_bind_group_state.take();
         rpass.set_bind_group(0, &self.viewport_bind_group, &[]);
