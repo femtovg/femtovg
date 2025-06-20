@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - TBD
+
+ - Bumped WGPU renderer to use WGPU 25.x.
+
 ## [0.14.1] - 2025-06-14
 
  - Fixed accidental rendering of newline (and other control characters) when using the Inter font. (#236) (thanks @peterprototypes)
