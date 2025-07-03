@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.15.0] - TBD
+## [0.15.0] - 2025-07-03
 
  - Bumped WGPU renderer to use WGPU 25.x.
 
