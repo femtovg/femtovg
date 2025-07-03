@@ -247,7 +247,7 @@ impl Font {
         face: &rustybuzz::Face<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
-    ) -> Option<GlyphRendering> {
+    ) -> Option<GlyphRendering<'_>> {
         #[cfg(feature = "image-loading")]
         if let Some(image) = face
             .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
