@@ -104,6 +104,7 @@ pub async fn start_wgpu(
             },
             noop: wgpu::NoopBackendOptions::default(),
         },
+        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
     })
     .await;
 
