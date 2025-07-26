@@ -1512,6 +1512,7 @@ impl<'a> RenderPassBuilder<'a> {
                     load,
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: stencil_view
                 .as_ref()
