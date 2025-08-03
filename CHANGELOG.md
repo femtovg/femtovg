@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2025-08-03
+
+ - Bumped WGPU renderer to use WGPU 26.x.
+
 ## [0.15.0] - 2025-07-03
 
  - Bumped WGPU renderer to use WGPU 25.x.
@@ -255,3 +259,5 @@ All notable changes to this project will be documented in this file.
 [0.13.0]: https://github.com/femtovg/femtovg/releases/tag/v0.13.0
 [0.14.0]: https://github.com/femtovg/femtovg/releases/tag/v0.14.0
 [0.14.1]: https://github.com/femtovg/femtovg/releases/tag/v0.14.1
+[0.15.0]: https://github.com/femtovg/femtovg/releases/tag/v0.15.0
+[0.16.0]: https://github.com/femtovg/femtovg/releases/tag/v0.16.0
