@@ -1275,7 +1275,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
-                WindowEvent::RedrawRequested { .. } => {
+                WindowEvent::RedrawRequested => {
                     let dpi_factor = window.scale_factor();
                     let size = window.inner_size();
                     canvas.set_size(size.width, size.height, dpi_factor as f32);

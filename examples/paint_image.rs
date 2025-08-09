@@ -125,7 +125,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                         Shape::Polar => Shape::Rect,
                     };
                 }
-                WindowEvent::RedrawRequested { .. } => {
+                WindowEvent::RedrawRequested => {
                     let dpi_factor = window.scale_factor();
                     let window_size = window.inner_size();
                     canvas.set_size(window_size.width, window_size.height, dpi_factor as f32);

@@ -119,7 +119,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     }
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
-                WindowEvent::RedrawRequested { .. } => {
+                WindowEvent::RedrawRequested => {
                     let now = Instant::now();
                     let dt = (now - prevt).as_secs_f32();
                     prevt = now;

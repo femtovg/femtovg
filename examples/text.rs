@@ -134,7 +134,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     font_size += *y / 2.0;
                     font_size = font_size.max(2.0);
                 }
-                WindowEvent::RedrawRequested { .. } => {
+                WindowEvent::RedrawRequested => {
                     let dpi_factor = window.scale_factor();
                     let size = window.inner_size();
                     canvas.set_size(size.width, size.height, dpi_factor as f32);

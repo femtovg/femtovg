@@ -41,7 +41,7 @@ fn main() {
                         window.request_redraw();
                     }
                     WindowEvent::CloseRequested => target.exit(),
-                    WindowEvent::RedrawRequested { .. } => {
+                    WindowEvent::RedrawRequested => {
                         render(&context, &surface, &window, &mut canvas, mouse_position);
                     }
                     _ => {}

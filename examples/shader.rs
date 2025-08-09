@@ -114,7 +114,7 @@ fn main() {
                 ..
             } => event_loop_window_target.exit(),
             Event::WindowEvent {
-                event: WindowEvent::RedrawRequested { .. },
+                event: WindowEvent::RedrawRequested,
                 ..
             } => {
                 prepare_framebuffer_for_render(&context, framebuffer);
