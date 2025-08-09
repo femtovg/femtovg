@@ -256,7 +256,7 @@ impl Font {
             })
         {
             return Some(GlyphRendering::RenderAsImage(image));
-        };
+        }
 
         self.glyph(face, codepoint).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())

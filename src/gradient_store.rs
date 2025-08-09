@@ -138,7 +138,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
         // If the first stop is >1.0 then we're done.
         if s0 > 1.0 {
             break;
-        };
+        }
     }
     imgref::Img::new(dest.to_vec(), 256, 1)
 }
