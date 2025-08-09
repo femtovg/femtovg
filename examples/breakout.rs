@@ -490,7 +490,7 @@ impl Game {
                 let strength = 4.0;
                 let old_velocity = ball.velocity;
                 ball.velocity.x = 100.0 * percentage * strength;
-                ball.velocity.y = -1.0 * ball.velocity.y.abs();
+                ball.velocity.y = -ball.velocity.y.abs();
                 ball.velocity = ball.velocity.normalize() * old_velocity.length();
             }
         }
