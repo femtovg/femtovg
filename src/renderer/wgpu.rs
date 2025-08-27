@@ -515,12 +515,12 @@ impl Renderer for WGPURenderer {
         #[cfg(target_arch = "wasm32")]
         if let crate::ImageSource::HtmlImageElement(htmlimage) = data {
             self.queue.copy_external_image_to_texture(
-                &wgpu::ImageCopyExternalImage {
+                &wgpu::CopyExternalImageSourceInfo {
                     source: wgpu::ExternalImageSource::HTMLImageElement(htmlimage.clone()),
                     origin: wgpu::Origin2d::ZERO,
                     flip_y: false,
                 },
-                wgpu::ImageCopyTextureTagged {
+                wgpu::CopyExternalImageDestInfo {
                     texture: &image.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
