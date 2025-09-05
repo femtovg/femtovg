@@ -3,6 +3,8 @@ precision highp float;
 
 #define UNIFORMARRAY_SIZE 14
 
+#define TAU 6.28318530717958647692528676655900577
+
 uniform vec4 frag[UNIFORMARRAY_SIZE];
 
 #define scissorMat mat3(frag[0].xyz, frag[1].xyz, frag[2].xyz)
@@ -37,6 +39,8 @@ varying vec2 fpos;
  #define SHADER_TYPE_FilterImage 4
  #define SHADER_TYPE_FillColor 5
  #define SHADER_TYPE_TextureCopyUnclipped 6
+ #define SHADER_TYPE_FillGradientConical 8
+ #define SHADER_TYPE_FillImageGradientConical 9
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -76,6 +80,24 @@ vec4 renderImageGradient() {
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
     return texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
+}
+
+float conicalAngleFraction() {
+    vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+    // atan returns a value between -pi and pi.
+    // normally you'd use atan(pt.y,pt.x) but its switched
+    // around here to be clockwise and start from the top.
+    return (-atan(pt.x,pt.y) / TAU) + 0.5;
+}
+
+vec4 renderGradientConical() {
+    float d = conicalAngleFraction();
+    return mix(innerCol,outerCol,d);
+}
+
+vec4 renderImageGradientConical() {
+    float d = conicalAngleFraction();
+    return texture2D(tex, vec2(d, 0.0));
 }
 
 vec4 renderImage() {
@@ -168,6 +190,10 @@ void main(void) {
 #elif SELECT_SHADER == SHADER_TYPE_FilterImage
     // Filter Image
     result = renderFilteredImage();
+#elif SELECT_SHADER == SHADER_TYPE_FillGradientConical
+    result = renderGradientConical();
+#elif SELECT_SHADER == SHADER_TYPE_FillImageGradientConical
+    result = renderImageGradientConical();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif

@@ -225,6 +225,25 @@ impl Params {
                     }
                 }
             }
+            &PaintFlavor::ConicalGradient {
+                center: Position { x: cx, y: cy },
+                colors,
+            } => {
+                let mut transform = Transform2D::translation(*cx, *cy);
+                transform *= *global_transform;
+                inv_transform = transform.inverse();
+
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradientConical;
+                    }
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradientConical;
+                    }
+                }
+            }
         }
 
         params.paint_mat = inv_transform.to_mat3x4();

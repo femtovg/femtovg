@@ -227,6 +227,10 @@ pub enum ShaderType {
     TextureCopyUnclipped,
     /// Fill color shader without clipping, used for `clear_rect()`
     FillColorUnclipped,
+    /// Fill conical gradient shader.
+    FillGradientConical,
+    /// Fill image conical gradient shader.
+    FillImageGradientConical,
 }
 
 impl ShaderType {
@@ -241,6 +245,8 @@ impl ShaderType {
             Self::FillColor => 5,
             Self::TextureCopyUnclipped => 6,
             Self::FillColorUnclipped => 7,
+            Self::FillGradientConical => 8,
+            Self::FillImageGradientConical => 9,
         }
     }
 
