@@ -601,7 +601,7 @@ impl Paint {
     }
 
     /// Creates and returns a multi-stop conic gradient.
-    /// 
+    ///
     /// Parameters (`cx`,`cy`) specify the center.
     pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
         Self::with_flavor(PaintFlavor::ConicGradient {
