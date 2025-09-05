@@ -28,8 +28,8 @@ const SHADER_TYPE_FilterImage: i32 = 4;
 const SHADER_TYPE_FillColor: i32 = 5;
 const SHADER_TYPE_TextureCopyUnclipped: i32 = 6;
 const SHADER_TYPE_FillColorUnclipped: i32 = 7;
-const SHADER_TYPE_FillGradientConical: i32 = 8;
-const SHADER_TYPE_FillImageGradientConical: i32 = 9;
+const SHADER_TYPE_FillGradientConic: i32 = 8;
+const SHADER_TYPE_FillImageGradientConic: i32 = 9;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -135,12 +135,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             // Plain color fill
             return params.inner_col;
         }
-        case SHADER_TYPE_FillGradientConical: {
-            let d = conicalAngleFraction(vertex, params);
+        case SHADER_TYPE_FillGradientConic: {
+            let d = conicAngleFraction(vertex, params);
             return mix(params.inner_col,params.outer_col,d);
         }
-        case SHADER_TYPE_FillImageGradientConical: {
-            let d = conicalAngleFraction(vertex, params);
+        case SHADER_TYPE_FillImageGradientConic: {
+            let d = conicAngleFraction(vertex, params);
             return textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));
         }
         default: {
@@ -172,7 +172,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return result;
 }
 
-fn conicalAngleFraction(vertex: VertexOutput, params: Params) -> f32 {
+fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
     return (-atan2(pt.x,pt.y) / TAU) + 0.5;
 }

@@ -172,13 +172,13 @@ impl OpenGl {
                 Some(MainProgram::new(
                     &context,
                     antialias,
-                    ShaderType::FillGradientConical,
+                    ShaderType::FillGradientConic,
                     with_glyph_texture,
                 )?),
                 Some(MainProgram::new(
                     &context,
                     antialias,
-                    ShaderType::FillImageGradientConical,
+                    ShaderType::FillImageGradientConic,
                     with_glyph_texture,
                 )?),
             ])

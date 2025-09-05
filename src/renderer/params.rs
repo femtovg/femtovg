@@ -225,7 +225,7 @@ impl Params {
                     }
                 }
             }
-            &PaintFlavor::ConicalGradient {
+            &PaintFlavor::ConicGradient {
                 center: Position { x: cx, y: cy },
                 colors,
             } => {
@@ -237,10 +237,10 @@ impl Params {
                     GradientColors::TwoStop { start_color, end_color } => {
                         params.inner_col = start_color.premultiplied().to_array();
                         params.outer_col = end_color.premultiplied().to_array();
-                        params.shader_type = ShaderType::FillGradientConical;
+                        params.shader_type = ShaderType::FillGradientConic;
                     }
                     GradientColors::MultiStop { .. } => {
-                        params.shader_type = ShaderType::FillImageGradientConical;
+                        params.shader_type = ShaderType::FillImageGradientConic;
                     }
                 }
             }

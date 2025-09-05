@@ -179,7 +179,7 @@ pub enum PaintFlavor {
         out_radius: f32,
         colors: GradientColors,
     },
-    ConicalGradient {
+    ConicGradient {
         center: Position,
         colors: GradientColors,
     },
@@ -204,7 +204,7 @@ impl PaintFlavor {
             Self::RadialGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
-            Self::ConicalGradient { colors, .. } => {
+            Self::ConicGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
         }
@@ -215,7 +215,7 @@ impl PaintFlavor {
             Self::LinearGradient { colors, .. } => Some(colors),
             Self::BoxGradient { colors, .. } => Some(colors),
             Self::RadialGradient { colors, .. } => Some(colors),
-            Self::ConicalGradient { colors, .. } => Some(colors),
+            Self::ConicGradient { colors, .. } => Some(colors),
             _ => None,
         }
     }
@@ -600,11 +600,11 @@ impl Paint {
         })
     }
 
-    /// Creates and returns a multi-stop conical gradient.
+    /// Creates and returns a multi-stop conic gradient.
     /// 
     /// Parameters (`cx`,`cy`) specify the center.
-    pub fn conical_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
-        Self::with_flavor(PaintFlavor::ConicalGradient {
+    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+        Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
             colors: GradientColors::from_stops(stops),
         })
