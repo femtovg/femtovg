@@ -1,9 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.17.0] - TBD
+## [0.17.0] - 2025-09-05
 
 - Bump MSRV to 1.85.
+- Added support for conical gradients.
 
 ## [0.16.0] - 2025-08-03
 
@@ -265,3 +266,4 @@ All notable changes to this project will be documented in this file.
 [0.14.1]: https://github.com/femtovg/femtovg/releases/tag/v0.14.1
 [0.15.0]: https://github.com/femtovg/femtovg/releases/tag/v0.15.0
 [0.16.0]: https://github.com/femtovg/femtovg/releases/tag/v0.16.0
+[0.17.0]: https://github.com/femtovg/femtovg/releases/tag/v0.17.0
