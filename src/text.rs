@@ -909,6 +909,9 @@ impl GlyphAtlas {
     pub(crate) fn render_atlas<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
+        font_id: FontId,
+        font: &Font,
+        font_face: &rustybuzz::Face<'_>,
         glyphs: impl Iterator<Item = PositionedGlyph>,
         font_size: f32,
         line_width: f32,
@@ -930,7 +933,7 @@ impl GlyphAtlas {
 
             let id = RenderedGlyphId::new(
                 glyph.glyph_id,
-                glyph.font_id,
+                font_id,
                 font_size,
                 line_width,
                 mode,
@@ -939,7 +942,7 @@ impl GlyphAtlas {
 
             if !self.rendered_glyphs.borrow().contains_key(&id) {
                 if let Some(glyph) =
-                    self.render_glyph(canvas, font_size, line_width, mode, glyph.font_id, glyph.glyph_id)?
+                    self.render_glyph(canvas, font_size, line_width, mode, font, &font_face, glyph.glyph_id)?
                 {
                     self.rendered_glyphs.borrow_mut().insert(id, glyph);
                 } else {
@@ -1001,22 +1004,18 @@ impl GlyphAtlas {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        font_id: FontId,
+        font: &Font,
+        font_face: &rustybuzz::Face<'_>,
         glyph_id: u16,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
-        let text_context = canvas.text_context.clone();
-        let mut text_context = text_context.borrow_mut();
-
         let (mut glyph_representation, glyph_metrics, scale) = {
-            let font = text_context.font_mut(font_id).ok_or(ErrorKind::NoFontFound)?;
-            let face = font.face_ref();
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font.glyph(&face, glyph_id).map(|g| g.metrics.clone());
+            let maybe_glyph_metrics = font.glyph(&font_face, glyph_id).map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(&face, glyph_id, font_size as u16),
+                font.glyph_rendering_representation(&font_face, glyph_id, font_size as u16),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -1251,6 +1250,7 @@ impl GlyphAtlas {
 
 pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
+    font: &Font,
     glyphs: impl Iterator<Item = PositionedGlyph>,
     paint_flavor: &PaintFlavor,
     anti_alias: bool,
@@ -1258,14 +1258,10 @@ pub fn render_direct<T: Renderer>(
     font_size: f32,
     mode: RenderMode,
 ) -> Result<(), ErrorKind> {
-    let text_context = canvas.text_context.clone();
+    let face = font.face_ref();
 
     for glyph in glyphs {
-        let mut text_context = text_context.borrow_mut();
         let (glyph_rendering, scale) = {
-            let font = text_context.font_mut(glyph.font_id).ok_or(ErrorKind::NoFontFound)?;
-            let face = font.face_ref();
-
             let scale = font.scale(font_size);
 
             let Some(glyph_rendering) = font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16)

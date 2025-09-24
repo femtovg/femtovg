@@ -1300,21 +1300,23 @@ where
     }
 
     /// Fills the provided glyphs with the specified Paint.
-    pub fn fill_glyphs(
+    pub fn fill_glyph_run(
         &mut self,
+        font_id: FontId,
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyphs(glyphs, &paint, RenderMode::Fill)
+        self.draw_glyph_run(glyphs, &paint, font_id, RenderMode::Fill)
     }
 
     /// Strokes the provided glyphs with the specified Paint.
-    pub fn stroke_glyphs(
+    pub fn stroke_glyph_run(
         &mut self,
+        font_id: FontId,
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyphs(glyphs, &paint, RenderMode::Stroke)
+        self.draw_glyph_run(glyphs, &paint, font_id, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
@@ -1377,6 +1379,8 @@ where
         paint: &Paint,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
+        use itertools::Itertools;
+
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
@@ -1393,30 +1397,34 @@ where
             None,
         )?;
 
-        self.draw_glyphs(
-            layout
-                .glyphs
-                .iter()
-                .filter(|shaped_glyph| !shaped_glyph.c.is_control())
-                .map(|shaped_glyph| PositionedGlyph {
+        for (font_id, glyph_run) in &layout
+            .glyphs
+            .iter()
+            .filter(|shaped_glyph| !shaped_glyph.c.is_control())
+            .chunk_by(|g| g.font_id)
+        {
+            self.draw_glyph_run(
+                glyph_run.map(|shaped_glyph| PositionedGlyph {
                     x: (shaped_glyph.x - shaped_glyph.bearing_x) * invscale,
                     y: (shaped_glyph.y + shaped_glyph.bearing_y) * invscale,
-                    font_id: shaped_glyph.font_id,
                     glyph_id: shaped_glyph.glyph_id,
                 }),
-            &paint,
-            render_mode,
-        )?;
+                &paint,
+                font_id,
+                render_mode,
+            )?;
+        }
 
         layout.scale(invscale);
 
         Ok(layout)
     }
 
-    fn draw_glyphs(
+    fn draw_glyph_run(
         &mut self,
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
+        font_id: FontId,
         render_mode: RenderMode,
     ) -> Result<(), ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1427,34 +1435,42 @@ where
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let text_context = self.text_context.clone();
+        let mut text_context = text_context.borrow_mut();
 
         let need_direct_rendering = paint.text.font_size > 92.0;
+
+        let Some(font) = text_context.font_mut(font_id) else {
+            return Err(ErrorKind::NoFontFound);
+        };
+
+        let font_face = font.face_ref();
 
         // TODO: create on demand
 
         let mut color_glyphs = Vec::new();
 
         let glyphs_it = glyphs.into_iter();
-        let non_color_glyphs = glyphs_it.filter(|glyph| {
-            if text_context
-                .borrow_mut()
-                .font_mut(glyph.font_id)
-                .and_then(|font| font.glyph(&font.face_ref(), glyph.glyph_id))
-                .map(|glyph| glyph.path.is_none())
-                .unwrap_or(false)
-            {
-                color_glyphs.push(glyph.clone());
+        let non_color_glyphs = glyphs_it
+            .filter(|glyph| {
+                if font
+                    .glyph(&font.face_ref(), glyph.glyph_id)
+                    .map(|glyph| glyph.path.is_none())
+                    .unwrap_or(false)
+                {
+                    color_glyphs.push(glyph.clone());
 
-                false
-            } else {
-                true
-            }
-        });
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect::<Vec<_>>();
 
         let mut draw_commands = if need_direct_rendering {
             text::render_direct(
                 self,
-                non_color_glyphs,
+                &font,
+                non_color_glyphs.into_iter(),
                 &paint.flavor,
                 paint.shape_anti_alias,
                 &stroke,
@@ -1465,7 +1481,10 @@ where
         } else {
             self.glyph_atlas.clone().render_atlas(
                 self,
-                non_color_glyphs,
+                font_id,
+                font,
+                &font_face,
+                non_color_glyphs.into_iter(),
                 paint.text.font_size,
                 paint.stroke.line_width,
                 render_mode,
@@ -1481,6 +1500,9 @@ where
 
             atlas.render_atlas(
                 self,
+                font_id,
+                font,
+                &font_face,
                 color_glyphs.into_iter(),
                 paint.text.font_size,
                 paint.stroke.line_width,
@@ -1608,8 +1630,6 @@ pub struct PositionedGlyph {
     pub x: f32,
     /// The glyph will be drawn at the specified x position.
     pub y: f32,
-    /// The font to use for looking up the glyph outline.
-    pub font_id: FontId,
     /// The TrueType glyph id to use when rendering the glyph. This is specific
     /// to the font registered under the font_id field.
     pub glyph_id: u16,
