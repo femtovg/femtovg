@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.18.1] - 2025-09-25
+
+- Fix regression causing panic when rendering text.
+
 ## [0.18.0] - 2025-09-25
 
 - Added API to drawing runs of glyphs from the same font.
@@ -272,3 +276,4 @@ All notable changes to this project will be documented in this file.
 [0.16.0]: https://github.com/femtovg/femtovg/releases/tag/v0.16.0
 [0.17.0]: https://github.com/femtovg/femtovg/releases/tag/v0.17.0
 [0.18.0]: https://github.com/femtovg/femtovg/releases/tag/v0.18.0
+[0.18.1]: https://github.com/femtovg/femtovg/releases/tag/v0.18.1
