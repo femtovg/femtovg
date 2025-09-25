@@ -1012,9 +1012,7 @@ impl GlyphAtlas {
 
         let (mut glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font
-                .glyph(&font_face, glyph_id)
-                .map(|g| std::cell::Ref::map(g, |g| &g.metrics));
+            let maybe_glyph_metrics = font.glyph(&font_face, glyph_id).map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
                 font.glyph_rendering_representation(&font_face, glyph_id, font_size as u16),
