@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - TBD
+
+- Added API to drawing runs of glyphs from the same font.
+
 ## [0.17.0] - 2025-09-05
 
 - Bump MSRV to 1.85.
