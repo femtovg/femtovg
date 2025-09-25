@@ -6,7 +6,6 @@ use std::collections::hash_map::Entry;
 
 use crate::{ErrorKind, Path};
 
-#[derive(Clone)]
 pub struct GlyphMetrics {
     pub width: f32,
     pub height: f32,
