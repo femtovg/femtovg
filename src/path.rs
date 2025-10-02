@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::geometry::{Position, Transform2D, Vector};
+#[cfg(feature = "textlayout")]
 use rustybuzz::ttf_parser;
 
 mod cache;

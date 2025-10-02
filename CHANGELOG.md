@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - TBD
+
+- breaking: Make text layout an optional feature
+
 ## [0.18.1] - 2025-09-25
 
 - Fix regression causing panic when rendering text.
@@ -277,3 +281,4 @@ All notable changes to this project will be documented in this file.
 [0.17.0]: https://github.com/femtovg/femtovg/releases/tag/v0.17.0
 [0.18.0]: https://github.com/femtovg/femtovg/releases/tag/v0.18.0
 [0.18.1]: https://github.com/femtovg/femtovg/releases/tag/v0.18.1
+[0.19.0]: https://github.com/femtovg/femtovg/releases/tag/v0.19.0

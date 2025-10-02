@@ -19,7 +19,9 @@ TODO:
 #[macro_use]
 extern crate serde;
 
-use std::{cell::RefCell, ops::Range, path::Path as FilePath, rc::Rc};
+#[cfg(feature = "textlayout")]
+use std::ops::Range;
+use std::{cell::RefCell, path::Path as FilePath, rc::Rc};
 
 use imgref::ImgVec;
 use rgb::RGBA8;
@@ -29,10 +31,11 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{
-    Align, Atlas, Baseline, DrawCommand, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode, TextContext,
-    TextMetrics,
-};
+pub use text::{Align, Atlas, Baseline, DrawCommand, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode};
+
+pub use text::TextContext;
+#[cfg(feature = "textlayout")]
+pub use text::TextMetrics;
 
 use text::{GlyphAtlas, TextContextImpl};
 
@@ -1191,21 +1194,25 @@ where
     // Text
 
     /// Adds a font file to the canvas
+    #[cfg(feature = "textlayout")]
     pub fn add_font<P: AsRef<FilePath>>(&mut self, file_path: P) -> Result<FontId, ErrorKind> {
         self.text_context.borrow_mut().add_font_file(file_path)
     }
 
     /// Adds a font to the canvas by reading it from the specified chunk of memory.
+    #[cfg(feature = "textlayout")]
     pub fn add_font_mem(&mut self, data: &[u8]) -> Result<FontId, ErrorKind> {
         self.text_context.borrow_mut().add_font_mem(data)
     }
 
     /// Adds all .ttf files from a directory
+    #[cfg(feature = "textlayout")]
     pub fn add_font_dir<P: AsRef<FilePath>>(&mut self, dir_path: P) -> Result<Vec<FontId>, ErrorKind> {
         self.text_context.borrow_mut().add_font_dir(dir_path)
     }
 
     /// Returns information on how the provided text will be drawn with the specified paint.
+    #[cfg(feature = "textlayout")]
     pub fn measure_text<S: AsRef<str>>(
         &self,
         x: f32,
@@ -1232,6 +1239,7 @@ where
     }
 
     /// Returns font metrics for a particular Paint.
+    #[cfg(feature = "textlayout")]
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
@@ -1243,6 +1251,7 @@ where
     /// Returns the maximum index-th byte of text that will fit inside `max_width`.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
+    #[cfg(feature = "textlayout")]
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
@@ -1258,6 +1267,7 @@ where
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside `max_width`
+    #[cfg(feature = "textlayout")]
     pub fn break_text_vec<S: AsRef<str>>(
         &self,
         max_width: f32,
@@ -1278,6 +1288,7 @@ where
     }
 
     /// Fills the provided string with the specified Paint.
+    #[cfg(feature = "textlayout")]
     pub fn fill_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -1289,6 +1300,7 @@ where
     }
 
     /// Strokes the provided string with the specified Paint.
+    #[cfg(feature = "textlayout")]
     pub fn stroke_text<S: AsRef<str>>(
         &mut self,
         x: f32,
@@ -1371,6 +1383,7 @@ where
 
     // Private
 
+    #[cfg(feature = "textlayout")]
     fn draw_text(
         &mut self,
         x: f32,
