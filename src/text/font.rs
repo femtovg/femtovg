@@ -1,8 +1,7 @@
 use fnv::FnvHashMap;
-use rustybuzz::ttf_parser;
-use rustybuzz::ttf_parser::{Face as TtfFont, GlyphId};
 use std::cell::{Ref, RefCell};
 use std::collections::hash_map::Entry;
+use ttf_parser::{Face as TtfFont, GlyphId};
 
 use crate::{ErrorKind, Path};
 
@@ -183,8 +182,8 @@ impl Font {
         })
     }
 
-    pub fn face_ref(&self) -> rustybuzz::Face<'_> {
-        rustybuzz::Face::from_slice(self.data.as_ref().as_ref(), self.face_index).unwrap()
+    pub fn face_ref(&self) -> ttf_parser::Face<'_> {
+        ttf_parser::Face::parse(self.data.as_ref().as_ref(), self.face_index).unwrap()
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
@@ -199,7 +198,7 @@ impl Font {
         size / self.units_per_em as f32
     }
 
-    pub fn glyph(&self, face: &rustybuzz::Face<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
+    pub fn glyph(&self, face: &ttf_parser::Face<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
         if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(codepoint) {
             let mut path = Path::new();
 
@@ -245,7 +244,7 @@ impl Font {
 
     pub fn glyph_rendering_representation(
         &self,
-        face: &rustybuzz::Face<'_>,
+        face: &ttf_parser::Face<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
     ) -> Option<GlyphRendering<'_>> {
