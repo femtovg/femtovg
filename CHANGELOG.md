@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.19.0] - TBD
 
+- breaking: Upgraded WGPU renderer to use WGPU 27.x.
 - breaking: Make text layout an optional feature
 
 ## [0.18.1] - 2025-09-25
