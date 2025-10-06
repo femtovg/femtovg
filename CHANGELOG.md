@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.19.0] - TBD
 
+- Bump MSRV to 1.88.
 - breaking: Upgraded WGPU renderer to use WGPU 27.x.
 - breaking: Make text layout an optional feature
 
