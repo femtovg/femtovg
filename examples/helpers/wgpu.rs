@@ -89,6 +89,8 @@ pub async fn start_wgpu(
 
     let backends = wgpu::Backends::from_env().unwrap_or_default();
     let dx12_shader_compiler = wgpu::Dx12Compiler::from_env().unwrap_or_default();
+    let dx12_presentation_system = wgpu::wgt::Dx12SwapchainKind::from_env().unwrap_or_default();
+    let dx12_latency_waitable_object = wgpu::wgt::Dx12UseFrameLatencyWaitableObject::from_env().unwrap_or_default();
     let gles_minor_version = wgpu::Gles3MinorVersion::from_env().unwrap_or_default();
 
     let instance = wgpu::util::new_instance_with_webgpu_detection(&wgpu::InstanceDescriptor {
@@ -97,6 +99,8 @@ pub async fn start_wgpu(
         backend_options: wgpu::BackendOptions {
             dx12: wgpu::Dx12BackendOptions {
                 shader_compiler: dx12_shader_compiler,
+                presentation_system: dx12_presentation_system,
+                latency_waitable_object: dx12_latency_waitable_object,
             },
             gl: wgpu::GlBackendOptions {
                 gles_minor_version,
@@ -121,6 +125,7 @@ pub async fn start_wgpu(
             required_features: wgpu::Features::empty(),
             // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
             required_limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             trace: wgpu::Trace::default(),
         })
