@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.19.1] - 2025-10-08
+
+- Fix docs.rs build
+
 ## [0.19.0] - 2025-10-07
 
 - Bump MSRV to 1.88.
@@ -284,3 +288,4 @@ All notable changes to this project will be documented in this file.
 [0.18.0]: https://github.com/femtovg/femtovg/releases/tag/v0.18.0
 [0.18.1]: https://github.com/femtovg/femtovg/releases/tag/v0.18.1
 [0.19.0]: https://github.com/femtovg/femtovg/releases/tag/v0.19.0
+[0.19.1]: https://github.com/femtovg/femtovg/releases/tag/v0.19.1
