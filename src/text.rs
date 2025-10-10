@@ -119,6 +119,7 @@ pub struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
+    bearing_x: i32,
     bearing_y: i32,
     atlas_x: u32,
     atlas_y: u32,
@@ -459,7 +460,7 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                q.x0 = glyph.x.trunc() - line_width_offset - GLYPH_PADDING as f32;
+                q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
                 q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
                 q.x1 = q.x0 + rendered.width as f32;
                 q.y1 = q.y0 + rendered.height as f32;
@@ -532,13 +533,15 @@ impl GlyphAtlas {
         canvas.save();
         canvas.reset();
 
+        let rendered_bearing_x = (glyph_metrics.bearing_x * scale).round();
         let rendered_bearing_y = (glyph_metrics.bearing_y * scale).round();
-        let x = dst_x as f32 - (glyph_metrics.bearing_x * scale) + line_width_offset + padding as f32;
+        let x = dst_x as f32 - rendered_bearing_x + line_width_offset + padding as f32;
         let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
 
         let rendered_glyph = RenderedGlyph {
             width: width - 2 * GLYPH_MARGIN,
             height: height - 2 * GLYPH_MARGIN,
+            bearing_x: rendered_bearing_x as i32,
             bearing_y: rendered_bearing_y as i32,
             atlas_x: dst_x as u32 + GLYPH_MARGIN,
             atlas_y: dst_y as u32 + GLYPH_MARGIN,

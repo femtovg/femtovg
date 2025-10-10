@@ -1418,8 +1418,8 @@ where
         {
             self.draw_glyph_run(
                 glyph_run.map(|shaped_glyph| PositionedGlyph {
-                    x: (shaped_glyph.x - shaped_glyph.bearing_x) * invscale,
-                    y: (shaped_glyph.y + shaped_glyph.bearing_y) * invscale,
+                    x: shaped_glyph.x * invscale,
+                    y: shaped_glyph.y * invscale,
                     glyph_id: shaped_glyph.glyph_id,
                 }),
                 &paint,
