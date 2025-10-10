@@ -25,8 +25,6 @@ pub struct ShapedGlyph {
     pub advance_y: f32,
     pub offset_x: f32,
     pub offset_y: f32,
-    pub bearing_x: f32,
-    pub bearing_y: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -445,15 +443,11 @@ fn shape_word(
                 advance_y: position.y_advance as f32 * scale,
                 offset_x: position.x_offset as f32 * scale,
                 offset_y: position.y_offset as f32 * scale,
-                bearing_x: 0.0,
-                bearing_y: 0.0,
             };
 
             if let Some(glyph) = font.glyph(&face, g.glyph_id) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
-                g.bearing_x = glyph.metrics.bearing_x * scale;
-                g.bearing_y = glyph.metrics.bearing_y * scale;
             }
 
             shaped_word.width += g.advance_x + letter_spacing;
@@ -516,8 +510,8 @@ fn layout(
     };
 
     for glyph in &mut res.glyphs {
-        glyph.x = cursor_x + glyph.offset_x + glyph.bearing_x;
-        glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y - glyph.bearing_y;
+        glyph.x = cursor_x + glyph.offset_x;
+        glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y;
 
         min_y = min_y.min(glyph.y);
         max_y = max_y.max(glyph.y + glyph.height);
