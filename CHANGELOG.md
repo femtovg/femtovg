@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.19.3] - 2025-10-13
+
+- Fix regression in text rendering performance.
+
 ## [0.19.2] - 2025-10-10
 
 - Fix erroneous glyph position regression of commit a1e215782a60df7e4fde9271fe7f95c134ac832f
@@ -295,3 +299,4 @@ All notable changes to this project will be documented in this file.
 [0.19.0]: https://github.com/femtovg/femtovg/releases/tag/v0.19.0
 [0.19.1]: https://github.com/femtovg/femtovg/releases/tag/v0.19.1
 [0.19.2]: https://github.com/femtovg/femtovg/releases/tag/v0.19.2
+[0.19.3]: https://github.com/femtovg/femtovg/releases/tag/v0.19.3
