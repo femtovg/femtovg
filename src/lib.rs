@@ -1467,8 +1467,7 @@ where
             .filter(|glyph| {
                 if font
                     .glyph(&font_face, glyph.glyph_id)
-                    .map(|glyph| glyph.path.is_none())
-                    .unwrap_or(false)
+                    .is_some_and(|glyph| glyph.path.is_none())
                 {
                     color_glyphs.push(glyph.clone());
 
