@@ -1,6 +1,7 @@
 use super::run;
 
 mod perf_graph;
+#[allow(unused_imports)]
 pub use perf_graph::PerfGraph;
 
 pub trait WindowSurface {

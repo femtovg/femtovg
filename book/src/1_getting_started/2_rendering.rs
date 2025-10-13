@@ -30,6 +30,7 @@ fn main() {
 
     render(&context, &surface, &window, &mut canvas);
 
+    #[allow(clippy::empty_loop)]
     loop {}
 }
 

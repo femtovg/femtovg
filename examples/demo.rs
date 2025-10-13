@@ -378,6 +378,7 @@ fn draw_paragraph<T: Renderer>(
 
         if let Ok(res) = canvas.measure_text(x - 10.0, gutter_y, &text, &paint) {
             let mut path = Path::new();
+            #[allow(clippy::manual_midpoint)]
             path.rounded_rect(
                 res.x - 4.0,
                 res.y - 2.0,

@@ -436,6 +436,7 @@ impl MulAssign for Transform2D {
 impl Div for Transform2D {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, other: Self) -> Self::Output {
         self * other.inverse()
     }
