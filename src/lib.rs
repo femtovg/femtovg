@@ -1466,7 +1466,7 @@ where
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
                 if font
-                    .glyph(&font.face_ref(), glyph.glyph_id)
+                    .glyph(&font_face, glyph.glyph_id)
                     .map(|glyph| glyph.path.is_none())
                     .unwrap_or(false)
                 {
@@ -1504,27 +1504,29 @@ where
             )?
         };
 
-        let color_commands = {
-            let atlas = if need_direct_rendering {
-                self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
-            } else {
-                self.glyph_atlas.clone()
+        if !color_glyphs.is_empty() {
+            let color_commands = {
+                let atlas = if need_direct_rendering {
+                    self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
+                } else {
+                    self.glyph_atlas.clone()
+                };
+
+                atlas.render_atlas(
+                    self,
+                    font_id,
+                    font,
+                    &font_face,
+                    color_glyphs.into_iter(),
+                    paint.text.font_size,
+                    paint.stroke.line_width,
+                    render_mode,
+                )?
             };
 
-            atlas.render_atlas(
-                self,
-                font_id,
-                font,
-                &font_face,
-                color_glyphs.into_iter(),
-                paint.text.font_size,
-                paint.stroke.line_width,
-                render_mode,
-            )?
-        };
-
-        draw_commands.alpha_glyphs.extend(color_commands.alpha_glyphs);
-        draw_commands.color_glyphs.extend(color_commands.color_glyphs);
+            draw_commands.alpha_glyphs.extend(color_commands.alpha_glyphs);
+            draw_commands.color_glyphs.extend(color_commands.color_glyphs);
+        }
 
         self.draw_glyph_commands(draw_commands, &paint);
 
