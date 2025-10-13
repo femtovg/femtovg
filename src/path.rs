@@ -144,11 +144,11 @@ impl Path {
         let key = transform.cache_key();
 
         // this shouldn't need a bool once non lexic lifetimes are stable
-        let mut needs_rebuild = true;
-
-        if let Some((transform_cache_key, _cache)) = &*self.cache.borrow() {
-            needs_rebuild = key != *transform_cache_key;
-        }
+        let needs_rebuild = if let Some((transform_cache_key, _cache)) = &*self.cache.borrow() {
+            key != *transform_cache_key
+        } else {
+            true
+        };
 
         if needs_rebuild {
             let path_cache = PathCache::new(self.verbs(), transform, tess_tol, dist_tol);
