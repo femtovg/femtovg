@@ -1636,8 +1636,8 @@ impl<T: Renderer> Drop for Canvas<T> {
     }
 }
 
-/// This struct holds the parameter needs to draw a single glyph using the low-level fill_glyphs
-/// and stroke_glyphs API.
+/// This struct holds the parameter needs to draw a single glyph using the low-level `fill_glyphs`
+/// and `stroke_glyphs` API.
 #[derive(Clone)]
 pub struct PositionedGlyph {
     /// The glyph will be drawn at the specified x position.
@@ -1645,7 +1645,7 @@ pub struct PositionedGlyph {
     /// The glyph will be drawn at the specified x position.
     pub y: f32,
     /// The TrueType glyph id to use when rendering the glyph. This is specific
-    /// to the font registered under the font_id field.
+    /// to the font registered under the `font_id` field.
     pub glyph_id: u16,
 }
 
