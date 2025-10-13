@@ -426,18 +426,22 @@ impl GlyphAtlas {
                 subpixel_location as u8,
             );
 
-            if !self.rendered_glyphs.borrow().contains_key(&id) {
-                if let Some(glyph) =
-                    self.render_glyph(canvas, font_size, line_width, mode, font, &font_face, glyph.glyph_id)?
-                {
-                    self.rendered_glyphs.borrow_mut().insert(id, glyph);
-                } else {
-                    continue;
+            let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
+            let glyph_cache_entry = rendered_glyphs.entry(id);
+            let glyph_cache_entry = match glyph_cache_entry {
+                std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
+                std::collections::hash_map::Entry::Vacant(_) => {
+                    if let Some(glyph) =
+                        self.render_glyph(canvas, font_size, line_width, mode, font, &font_face, glyph.glyph_id)?
+                    {
+                        glyph_cache_entry.insert_entry(glyph)
+                    } else {
+                        continue;
+                    }
                 }
-            }
+            };
 
-            let rendered_glyphs = self.rendered_glyphs.borrow();
-            let rendered = rendered_glyphs.get(&id).unwrap();
+            let rendered = glyph_cache_entry.get();
 
             if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
                 let image_id = texture.image_id;
