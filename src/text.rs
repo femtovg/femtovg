@@ -432,7 +432,7 @@ impl GlyphAtlas {
                 std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
                 std::collections::hash_map::Entry::Vacant(_) => {
                     if let Some(glyph) =
-                        self.render_glyph(canvas, font_size, line_width, mode, font, &font_face, glyph.glyph_id)?
+                        self.render_glyph(canvas, font_size, line_width, mode, font, font_face, glyph.glyph_id)?
                     {
                         glyph_cache_entry.insert_entry(glyph)
                     } else {
@@ -502,10 +502,10 @@ impl GlyphAtlas {
 
         let (mut glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font.glyph(&font_face, glyph_id).map(|g| g.metrics.clone());
+            let maybe_glyph_metrics = font.glyph(font_face, glyph_id).map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(&font_face, glyph_id, font_size as u16),
+                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)

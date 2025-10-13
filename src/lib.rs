@@ -1318,7 +1318,7 @@ where
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, &paint, font_id, RenderMode::Fill)
+        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Fill)
     }
 
     /// Strokes the provided glyphs with the specified Paint.
@@ -1328,7 +1328,7 @@ where
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, &paint, font_id, RenderMode::Stroke)
+        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
@@ -1422,7 +1422,7 @@ where
                     y: shaped_glyph.y * invscale,
                     glyph_id: shaped_glyph.glyph_id,
                 }),
-                &paint,
+                paint,
                 font_id,
                 render_mode,
             )?;
@@ -1482,7 +1482,7 @@ where
         let mut draw_commands = if need_direct_rendering {
             text::render_direct(
                 self,
-                &font,
+                font,
                 non_color_glyphs.into_iter(),
                 &paint.flavor,
                 paint.shape_anti_alias,
@@ -1528,7 +1528,7 @@ where
             draw_commands.color_glyphs.extend(color_commands.color_glyphs);
         }
 
-        self.draw_glyph_commands(draw_commands, &paint);
+        self.draw_glyph_commands(draw_commands, paint);
 
         Ok(())
     }
