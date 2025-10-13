@@ -504,7 +504,7 @@ fn layout(
     // Baseline alignment
     let alignment_offset_y = match text_settings.text_baseline {
         Baseline::Top => ascender,
-        Baseline::Middle => (ascender + descender) / 2.0,
+        Baseline::Middle => ascender.midpoint(descender),
         Baseline::Alphabetic => 0.0,
         Baseline::Bottom => descender,
     };
