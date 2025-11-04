@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![warn(missing_debug_implementations)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 /*!
@@ -280,6 +281,7 @@ impl Default for State {
 }
 
 /// Main 2D drawing context.
+#[derive(Debug)]
 pub struct Canvas<T: Renderer> {
     width: u32,
     height: u32,
@@ -1638,7 +1640,7 @@ impl<T: Renderer> Drop for Canvas<T> {
 
 /// This struct holds the parameter needs to draw a single glyph using the low-level `fill_glyphs`
 /// and `stroke_glyphs` API.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PositionedGlyph {
     /// The glyph will be drawn at the specified x position.
     pub x: f32,
@@ -1658,7 +1660,7 @@ pub use rgb;
 
 /// Internal structure that implements the Renderer trait for unit testing.
 #[cfg(test)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RecordingRenderer {
     /// Vector of the last commands submitted to the renderer.
     pub last_commands: Rc<RefCell<Vec<renderer::Command>>>,
@@ -1724,6 +1726,7 @@ impl Renderer for RecordingRenderer {
 
 /// Dummy image type used for tests.
 #[cfg(test)]
+#[derive(Debug)]
 pub struct DummyImage {
     info: ImageInfo,
 }

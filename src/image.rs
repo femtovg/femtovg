@@ -196,6 +196,7 @@ impl ImageInfo {
     }
 }
 
+#[derive(Debug)]
 pub struct ImageStore<T>(SlotMap<DefaultKey, (ImageInfo, T)>);
 
 impl<T> Default for ImageStore<T> {

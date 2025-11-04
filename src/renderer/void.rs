@@ -8,6 +8,7 @@ use crate::{ErrorKind, ImageInfo, ImageSource, ImageStore};
 use super::{Command, ImageId, Renderer, Vertex};
 
 /// Void renderer used for testing
+#[derive(Debug)]
 pub struct Void;
 
 impl Renderer for Void {
@@ -66,6 +67,7 @@ impl Renderer for Void {
     }
 }
 
+#[derive(Debug)]
 pub struct VoidImage {
     info: ImageInfo,
 }

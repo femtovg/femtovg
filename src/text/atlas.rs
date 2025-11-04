@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+#[derive(Debug)]
 struct Node {
     x: usize,
     y: usize,
@@ -7,6 +8,7 @@ struct Node {
 }
 
 /// Represents an atlas for packing rectangles.
+#[derive(Debug)]
 pub struct Atlas {
     width: usize,
     height: usize,
