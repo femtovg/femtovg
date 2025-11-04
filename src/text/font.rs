@@ -1,11 +1,12 @@
 use fnv::FnvHashMap;
 use std::cell::{Ref, RefCell};
 use std::collections::hash_map::Entry;
+use std::fmt;
 use ttf_parser::{Face as TtfFont, GlyphId};
 
 use crate::{ErrorKind, Path};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GlyphMetrics {
     pub width: f32,
     pub height: f32,
@@ -13,6 +14,7 @@ pub struct GlyphMetrics {
     pub bearing_y: f32,
 }
 
+#[derive(Debug)]
 pub struct Glyph {
     pub path: Option<Path>, // None means render as image
     pub metrics: GlyphMetrics,
@@ -141,6 +143,18 @@ impl FontMetrics {
     /// Returns the width of the font.
     pub fn width(&self) -> u16 {
         self.width
+    }
+}
+
+impl fmt::Debug for Font {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Font")
+            .field("data", &format_args!(".."))
+            .field("face_index", &self.face_index)
+            .field("units_per_em", &self.units_per_em)
+            .field("metrics", &self.metrics)
+            .field("glyphs", &self.glyphs)
+            .finish()
     }
 }
 

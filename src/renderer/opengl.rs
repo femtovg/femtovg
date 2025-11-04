@@ -34,6 +34,7 @@ use uniform_array::UniformArray;
 
 /// Represents an OpenGL renderer.
 #[allow(clippy::struct_excessive_bools)]
+#[derive(Debug)]
 pub struct OpenGl {
     debug: bool,
     antialias: bool,

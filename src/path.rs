@@ -505,6 +505,7 @@ impl Path {
 }
 
 /// An iterator over the verbs and coordinates of a path.
+#[derive(Debug)]
 pub struct PathIter<'a> {
     verbs: slice::Iter<'a, PackedVerb>,
     coords: &'a [Position],

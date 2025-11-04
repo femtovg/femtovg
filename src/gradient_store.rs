@@ -11,10 +11,12 @@ use crate::{
 //
 // If many gradients are used in a frame, we could combine them into a single texture
 // and update the texture immediately prior to giving the renderer the command list.
+#[derive(Debug)]
 pub struct GradientStore {
     this_frame: BTreeMap<MultiStopGradient, ImageId>,
     prev_frame: BTreeMap<MultiStopGradient, ImageId>,
 }
+
 impl GradientStore {
     /// Create a new empty gradient store
     pub fn new() -> Self {

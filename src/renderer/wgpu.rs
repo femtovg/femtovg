@@ -138,17 +138,20 @@ impl From<&Params> for UniformArray {
     }
 }
 
+#[derive(Debug)]
 pub struct Image {
     texture: wgpu::Texture,
     info: ImageInfo,
 }
 
+#[derive(Debug)]
 struct CachedPipeline {
     pipeline: wgpu::RenderPipeline,
     accessed: bool,
 }
 
 /// WGPU renderer.
+#[derive(Debug)]
 pub struct WGPURenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -1121,7 +1124,7 @@ enum StencilTest {
     },
 }
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct PipelineState {
     shader_type: ShaderType,
     enable_glyph_texture: bool,

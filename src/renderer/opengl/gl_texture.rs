@@ -4,6 +4,7 @@ use glow::HasContext;
 
 use crate::{ErrorKind, ImageFlags, ImageInfo, ImageSource, PixelFormat};
 
+#[derive(Debug)]
 pub struct GlTexture {
     id: <glow::Context as glow::HasContext>::Texture,
     info: ImageInfo,

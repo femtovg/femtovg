@@ -55,6 +55,7 @@ impl Drop for Shader {
     }
 }
 
+#[derive(Debug)]
 pub struct Program {
     context: Rc<glow::Context>,
     id: <glow::Context as glow::HasContext>::Program,
@@ -129,6 +130,7 @@ impl Drop for Program {
     }
 }
 
+#[derive(Debug)]
 pub struct MainProgram {
     context: Rc<glow::Context>,
     program: Program,

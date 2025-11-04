@@ -126,6 +126,7 @@ pub struct RenderedGlyph {
     color_glyph: bool,
 }
 
+#[derive(Debug)]
 pub struct FontTexture {
     pub atlas: Atlas,
     pub(crate) image_id: ImageId,
@@ -147,7 +148,7 @@ pub struct FontTexture {
 /// parameter. If you need measurements that take a [`crate::Canvas`]'s transform or dpi into
 /// account (see [`crate::Canvas::set_size()`]), you need to use the measurement functions
 /// on the canvas.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct TextContext(pub(crate) Rc<RefCell<TextContextImpl>>);
 
 impl TextContext {
@@ -189,6 +190,7 @@ impl TextContext {
     }
 }
 
+#[derive(Debug)]
 pub struct TextContextImpl {
     fonts: SlotMap<DefaultKey, Font>,
     #[cfg(feature = "textlayout")]
@@ -377,7 +379,7 @@ pub struct Quad {
 }
 
 /// Represents the drawing commands for glyphs, separated into alpha and color glyphs.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct GlyphDrawCommands {
     /// Drawing commands for alpha (opacity) glyphs.
     pub alpha_glyphs: Vec<DrawCommand>,
@@ -385,7 +387,7 @@ pub struct GlyphDrawCommands {
     pub color_glyphs: Vec<DrawCommand>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, RenderedGlyph>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,

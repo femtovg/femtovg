@@ -6,6 +6,7 @@ use crate::ErrorKind;
 
 use super::GlTexture;
 
+#[derive(Debug)]
 pub struct Framebuffer {
     context: Rc<glow::Context>,
     fbo: <glow::Context as glow::HasContext>::Framebuffer,
