@@ -265,7 +265,7 @@ impl WGPURenderer {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[&viewport_bind_group_layout, &bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         Self {
@@ -1236,7 +1236,7 @@ impl PipelineState {
                     bias: Default::default(),
                 }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         })
     }
@@ -1526,6 +1526,7 @@ impl<'a> RenderPassBuilder<'a> {
                 }),
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
         // A wgpu buffer slice of length 0 is invalid and panics.
         if self.vertex_buffer.size() > 0 {

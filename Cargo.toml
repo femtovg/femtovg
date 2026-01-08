@@ -33,7 +33,7 @@ image = { version = "0.25.0", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive", "rc"] }
 glow = { version = "0.16.0", default-features = false }
 log = "0.4"
-wgpu = { version = "27", optional = true, default-features = false, features = ["wgsl"] }
+wgpu = { version = "28", optional = true, default-features = false, features = ["wgsl"] }
 itertools = "0.14"
 ttf-parser = { version = "0.25.1" }
 
@@ -71,7 +71,7 @@ cosmic-text = "0.12.1"
 swash = "0.1.19"
 lazy_static = "1.4.0"
 spin_on = "0.1"
-wgpu = { version = "27" }
+wgpu = { version = "28" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.31.0"
@@ -88,7 +88,7 @@ console_error_panic_hook = "0.1.5"
 instant = { version = "0.1", features = ["wasm-bindgen", "now"] }
 resource = { version = "0.5.0", features = ["force-static"] }
 getrandom = { version = "0.2.2", features = ["js"] }
-wgpu = { version = "27", features = ["webgl"] }
+wgpu = { version = "28", features = ["webgl"] }
 wasm-bindgen-futures = { version = "0.4.45" }
 
 [[example]]
