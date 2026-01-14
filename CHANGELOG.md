@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-01-14
+
+- Bumped wgpu dependency to wgpu-28
+- Bumped MSRV to 1.92
+
 ## [0.19.3] - 2025-10-13
 
 - Fix regression in text rendering performance.
@@ -300,3 +305,4 @@ All notable changes to this project will be documented in this file.
 [0.19.1]: https://github.com/femtovg/femtovg/releases/tag/v0.19.1
 [0.19.2]: https://github.com/femtovg/femtovg/releases/tag/v0.19.2
 [0.19.3]: https://github.com/femtovg/femtovg/releases/tag/v0.19.3
+[0.20.0]: https://github.com/femtovg/femtovg/releases/tag/v0.20.0
