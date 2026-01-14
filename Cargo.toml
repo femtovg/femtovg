@@ -13,7 +13,7 @@ categories = ["graphics"]
 repository = "https://github.com/femtovg/femtovg"
 edition = "2021"
 exclude = ["assets", "examples"]
-rust-version = "1.92"
+rust-version = "1.88"
 
 [profile.release]
 debug = true
