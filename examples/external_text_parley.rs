@@ -129,7 +129,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     surface.resize(physical_size.width, physical_size.height);
                 }
                 WindowEvent::CloseRequested => event_loop_window_target.exit(),
-                WindowEvent::RedrawRequested { .. } => {
+                WindowEvent::RedrawRequested => {
                     let size = window.inner_size();
                     canvas.set_size(size.width, size.height, 1.0);
                     canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
@@ -153,7 +153,7 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                                     path.rect(inline_box.x, inline_box.y, inline_box.width, inline_box.height);
                                     canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 255)));
                                 }
-                            };
+                            }
                         }
                     }
 
