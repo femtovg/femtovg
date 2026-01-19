@@ -20,7 +20,7 @@ debug = true
 
 [dependencies]
 fnv = { version = "1.0.7" }
-rgb = "0.8.50"
+rgb = "0.8.91-alpha.3"
 bytemuck = { version = "1.16", features = ["derive"] }
 imgref = "1.11.0"
 bitflags = "2.6.0"
