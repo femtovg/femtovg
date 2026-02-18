@@ -387,10 +387,31 @@ pub struct GlyphDrawCommands {
     pub color_glyphs: Vec<DrawCommand>,
 }
 
-#[derive(Default, Debug)]
 pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, Option<RenderedGlyph>>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
+    #[cfg(feature = "swash")]
+    swash_scale_context: RefCell<swash::scale::ScaleContext>,
+}
+
+impl Default for GlyphAtlas {
+    fn default() -> Self {
+        Self {
+            rendered_glyphs: RefCell::default(),
+            glyph_textures: RefCell::default(),
+            #[cfg(feature = "swash")]
+            swash_scale_context: RefCell::new(swash::scale::ScaleContext::new()),
+        }
+    }
+}
+
+impl std::fmt::Debug for GlyphAtlas {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlyphAtlas")
+            .field("rendered_glyphs", &self.rendered_glyphs)
+            .field("glyph_textures", &self.glyph_textures)
+            .finish()
+    }
 }
 
 impl GlyphAtlas {
@@ -433,8 +454,16 @@ impl GlyphAtlas {
             let glyph_cache_entry = match glyph_cache_entry {
                 std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
                 std::collections::hash_map::Entry::Vacant(_) => {
-                    let result =
-                        self.render_glyph(canvas, font_size, line_width, mode, font, font_face, glyph.glyph_id)?;
+                    let result = self.render_glyph(
+                        canvas,
+                        font_size,
+                        line_width,
+                        mode,
+                        font,
+                        font_face,
+                        glyph.glyph_id,
+                        subpixel_location / 10.0,
+                    )?;
                     glyph_cache_entry.insert_entry(result)
                 }
             };
@@ -497,7 +526,15 @@ impl GlyphAtlas {
         font: &Font,
         font_face: &ttf_parser::Face<'_>,
         glyph_id: u16,
+        _subpixel_x: f32,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
+        #[cfg(feature = "swash")]
+        if mode == RenderMode::Fill {
+            if let Some(result) = self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x)? {
+                return Ok(Some(result));
+            }
+        }
+
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
         let (mut glyph_representation, glyph_metrics, scale) = {
@@ -638,6 +675,81 @@ impl GlyphAtlas {
         canvas.restore();
 
         Ok(Some(rendered_glyph))
+    }
+
+    #[cfg(feature = "swash")]
+    fn render_glyph_swash<T: Renderer>(
+        &self,
+        canvas: &mut Canvas<T>,
+        font: &Font,
+        font_size: f32,
+        glyph_id: u16,
+        subpixel_x: f32,
+    ) -> Result<Option<RenderedGlyph>, ErrorKind> {
+        use swash::scale::{Render, Source, StrikeWith};
+        use swash::zeno::Format;
+
+        let font_ref = match swash::FontRef::from_index(font.data(), font.face_index() as usize) {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        let image = {
+            let mut scale_context = self.swash_scale_context.borrow_mut();
+            let mut scaler = scale_context.builder(font_ref).size(font_size).hint(true).build();
+
+            Render::new(&[
+                Source::ColorOutline(0),
+                Source::ColorBitmap(StrikeWith::BestFit),
+                Source::Outline,
+            ])
+            .format(Format::Alpha)
+            .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
+            .render(&mut scaler, glyph_id)
+        };
+
+        let image = match image {
+            Some(img) if img.placement.width > 0 && img.placement.height > 0 => img,
+            _ => return Ok(None),
+        };
+
+        let padding = GLYPH_PADDING + GLYPH_MARGIN;
+        let glyph_width = image.placement.width;
+        let glyph_height = image.placement.height;
+        let alloc_width = glyph_width + 2 * padding;
+        let alloc_height = glyph_height + 2 * padding;
+
+        let (dst_index, dst_image_id, (dst_x, dst_y)) =
+            self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize)?;
+
+        let is_color = image.content == swash::scale::image::Content::Color;
+
+        let pixels: Vec<rgb::RGBA8> = if is_color {
+            image
+                .data
+                .chunks_exact(4)
+                .map(|c| rgb::RGBA8::new(c[0], c[1], c[2], c[3]))
+                .collect()
+        } else {
+            image.data.iter().map(|&a| rgb::RGBA8::new(a, 0, 0, 0)).collect()
+        };
+
+        let target_x = dst_x + GLYPH_MARGIN as usize + GLYPH_PADDING as usize;
+        let target_y = dst_y + GLYPH_MARGIN as usize + GLYPH_PADDING as usize;
+
+        let img = imgref::Img::new(&pixels[..], glyph_width as usize, glyph_height as usize);
+        canvas.update_image(dst_image_id, crate::image::ImageSource::from(img), target_x, target_y)?;
+
+        Ok(Some(RenderedGlyph {
+            texture_index: dst_index,
+            width: alloc_width - 2 * GLYPH_MARGIN,
+            height: alloc_height - 2 * GLYPH_MARGIN,
+            bearing_x: image.placement.left,
+            bearing_y: image.placement.top,
+            atlas_x: dst_x as u32 + GLYPH_MARGIN,
+            atlas_y: dst_y as u32 + GLYPH_MARGIN,
+            color_glyph: is_color,
+        }))
     }
 
     // Returns (texture index, image id, glyph padding box)

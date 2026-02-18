@@ -36,6 +36,7 @@ log = "0.4"
 wgpu = { version = "28", optional = true, default-features = false, features = ["wgsl"] }
 itertools = "0.14"
 ttf-parser = { version = "0.25.1" }
+swash = { version = "0.1.19", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 glutin = { version = "0.31", optional = true, default-features = false }
@@ -54,6 +55,7 @@ image-loading = ["image"]
 debug_inspector = []
 wgpu = ["dep:wgpu"]
 textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:lru"]
+swash = ["dep:swash"]
 
 [dev-dependencies]
 winit = { version = "0.29.1" }

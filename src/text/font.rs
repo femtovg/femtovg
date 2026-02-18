@@ -196,6 +196,16 @@ impl Font {
         })
     }
 
+    #[allow(dead_code)]
+    pub fn data(&self) -> &[u8] {
+        (*self.data).as_ref()
+    }
+
+    #[allow(dead_code)]
+    pub fn face_index(&self) -> u32 {
+        self.face_index
+    }
+
     pub fn face_ref(&self) -> ttf_parser::Face<'_> {
         ttf_parser::Face::parse(self.data.as_ref().as_ref(), self.face_index).unwrap()
     }
