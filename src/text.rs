@@ -389,7 +389,7 @@ pub struct GlyphDrawCommands {
 
 #[derive(Default, Debug)]
 pub struct GlyphAtlas {
-    pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, RenderedGlyph>>,
+    pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, Option<RenderedGlyph>>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
 }
 
@@ -433,17 +433,15 @@ impl GlyphAtlas {
             let glyph_cache_entry = match glyph_cache_entry {
                 std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
                 std::collections::hash_map::Entry::Vacant(_) => {
-                    if let Some(glyph) =
-                        self.render_glyph(canvas, font_size, line_width, mode, font, font_face, glyph.glyph_id)?
-                    {
-                        glyph_cache_entry.insert_entry(glyph)
-                    } else {
-                        continue;
-                    }
+                    let result =
+                        self.render_glyph(canvas, font_size, line_width, mode, font, font_face, glyph.glyph_id)?;
+                    glyph_cache_entry.insert_entry(result)
                 }
             };
 
-            let rendered = glyph_cache_entry.get();
+            let Some(rendered) = glyph_cache_entry.get() else {
+                continue;
+            };
 
             if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
                 let image_id = texture.image_id;
