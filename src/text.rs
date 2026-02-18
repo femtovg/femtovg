@@ -709,6 +709,7 @@ impl GlyphAtlas {
         };
 
         let image = match image {
+            // Guard against glyphs with no visual (spaces)
             Some(img) if img.placement.width > 0 && img.placement.height > 0 => img,
             _ => return Ok(None),
         };
