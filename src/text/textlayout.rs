@@ -399,8 +399,8 @@ fn shape_word(
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
     context.find_font(font_ids, |(font_id, font)| {
-        let face = font.face_ref();
-        let face = rustybuzz::Face::from_face(face);
+        let font_face = font.face_ref();
+        let face = rustybuzz::Face::from_face(font_face.0.clone());
         // Call harfbuzz
         let output = {
             let mut buffer = rustybuzz::UnicodeBuffer::new();
@@ -445,7 +445,7 @@ fn shape_word(
                 offset_y: position.y_offset as f32 * scale,
             };
 
-            if let Some(glyph) = font.glyph(&face, g.glyph_id) {
+            if let Some(glyph) = font.glyph(&font_face, g.glyph_id) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
             }

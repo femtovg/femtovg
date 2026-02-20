@@ -35,7 +35,7 @@ glow = { version = "0.16.0", default-features = false }
 log = "0.4"
 wgpu = { version = "28", optional = true, default-features = false, features = ["wgsl"] }
 itertools = "0.14"
-ttf-parser = { version = "0.25.1" }
+ttf-parser = { version = "0.25.1", optional = true }
 swash = { version = "0.2.6", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -54,7 +54,7 @@ default = ["image-loading", "textlayout"]
 image-loading = ["image"]
 debug_inspector = []
 wgpu = ["dep:wgpu"]
-textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:lru"]
+textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:lru", "dep:ttf-parser"]
 swash = ["dep:swash"]
 
 [dev-dependencies]

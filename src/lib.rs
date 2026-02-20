@@ -308,12 +308,14 @@ where
 {
     /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
+        let text_context = Rc::new(RefCell::new(TextContextImpl::default()));
+        let glyph_atlas = Rc::new(GlyphAtlas::new(&text_context));
         let mut canvas = Self {
             width: 0,
             height: 0,
             renderer,
-            text_context: Rc::default(),
-            glyph_atlas: Rc::default(),
+            text_context,
+            glyph_atlas,
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
@@ -336,12 +338,13 @@ where
     /// provided [`TextContext`]. Note that the context is explicitly shared, so that any fonts
     /// registered with a clone of this context will also be visible to this canvas.
     pub fn new_with_text_context(renderer: T, text_context: TextContext) -> Result<Self, ErrorKind> {
+        let glyph_atlas = Rc::new(GlyphAtlas::new(&text_context.0));
         let mut canvas = Self {
             width: 0,
             height: 0,
             renderer,
             text_context: text_context.0,
-            glyph_atlas: Rc::default(),
+            glyph_atlas,
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
@@ -1508,7 +1511,9 @@ where
         if !color_glyphs.is_empty() {
             let color_commands = {
                 let atlas = if need_direct_rendering {
-                    self.ephemeral_glyph_atlas.get_or_insert_with(Default::default).clone()
+                    self.ephemeral_glyph_atlas
+                        .get_or_insert_with(|| Rc::new(GlyphAtlas::new(&self.text_context)))
+                        .clone()
                 } else {
                     self.glyph_atlas.clone()
                 };

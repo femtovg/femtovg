@@ -526,6 +526,7 @@ impl Iterator for PathIter<'_> {
     }
 }
 
+#[cfg(feature = "textlayout")]
 impl ttf_parser::OutlineBuilder for Path {
     fn move_to(&mut self, x: f32, y: f32) {
         self.move_to(x, y);

@@ -2,9 +2,21 @@ use fnv::FnvHashMap;
 use std::cell::{Ref, RefCell};
 use std::collections::hash_map::Entry;
 use std::fmt;
+#[cfg(all(feature = "swash", not(feature = "textlayout")))]
+use std::rc::Rc;
+#[cfg(feature = "textlayout")]
 use ttf_parser::{Face as TtfFont, GlyphId};
 
 use crate::{ErrorKind, Path};
+
+/// Abstraction over the parsed font face, so callers don't need cfg blocks.
+/// With `textlayout`, this wraps a `ttf_parser::Face`.
+/// Otherwise, this is a zero-sized type.
+#[cfg(feature = "textlayout")]
+pub(crate) struct FontFaceRef<'a>(pub(crate) ttf_parser::Face<'a>);
+
+#[cfg(not(feature = "textlayout"))]
+pub(crate) struct FontFaceRef<'a>(std::marker::PhantomData<&'a ()>);
 
 #[derive(Clone, Debug)]
 pub struct GlyphMetrics {
@@ -164,10 +176,17 @@ pub struct Font {
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: RefCell<FnvHashMap<u16, Glyph>>,
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    swash_scale_context: Rc<RefCell<swash::scale::ScaleContext>>,
 }
 
 impl Font {
-    pub fn new_with_data<T: AsRef<[u8]> + 'static>(data: T, face_index: u32) -> Result<Self, ErrorKind> {
+    #[cfg(feature = "textlayout")]
+    pub fn new_with_data<T: AsRef<[u8]> + 'static>(
+        data: T,
+        face_index: u32,
+        _text_context: &super::TextContextImpl,
+    ) -> Result<Self, ErrorKind> {
         let ttf_font = TtfFont::parse(data.as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
 
         let units_per_em = ttf_font.units_per_em();
@@ -196,6 +215,72 @@ impl Font {
         })
     }
 
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    pub fn new_with_data<T: AsRef<[u8]> + 'static>(
+        data: T,
+        face_index: u32,
+        text_context: &super::TextContextImpl,
+    ) -> Result<Self, ErrorKind> {
+        let font_ref =
+            swash::FontRef::from_index(data.as_ref(), face_index as usize).ok_or(ErrorKind::FontParseError)?;
+
+        let swash_metrics = font_ref.metrics(&[]);
+        let attrs = font_ref.attributes();
+
+        let units_per_em = swash_metrics.units_per_em;
+
+        let weight = attrs.weight().0;
+        let stretch = attrs.stretch();
+        let style = attrs.style();
+
+        let is_bold = weight >= 700;
+        let is_italic = matches!(style, swash::Style::Italic);
+        let is_oblique = matches!(style, swash::Style::Oblique(_));
+        let is_variable = font_ref.variations().next().is_some();
+
+        let is_regular = weight == 400 && matches!(style, swash::Style::Normal) && stretch == swash::Stretch::NORMAL;
+
+        let width: u16 = match stretch.raw() {
+            0 => 1,   // UltraCondensed
+            25 => 2,  // ExtraCondensed
+            50 => 3,  // Condensed
+            75 => 4,  // SemiCondensed
+            100 => 5, // Normal
+            125 => 6, // SemiExpanded
+            150 => 7, // Expanded
+            200 => 8, // ExtraExpanded
+            300 => 9, // UltraExpanded
+            _ => 5,
+        };
+
+        let metrics = FontMetrics {
+            ascender: swash_metrics.ascent,
+            descender: -swash_metrics.descent,
+            height: swash_metrics.ascent + swash_metrics.descent + swash_metrics.leading,
+            flags: FontFlags::new(is_regular, is_italic, is_bold, is_oblique, is_variable),
+            weight,
+            width,
+        };
+
+        Ok(Self {
+            data: Box::new(data),
+            face_index,
+            units_per_em,
+            metrics,
+            glyphs: RefCell::default(),
+            swash_scale_context: text_context.swash_scale_context(),
+        })
+    }
+
+    #[cfg(not(any(feature = "textlayout", feature = "swash")))]
+    pub fn new_with_data<T: AsRef<[u8]> + 'static>(
+        _data: T,
+        _face_index: u32,
+        _text_context: &super::TextContextImpl,
+    ) -> Result<Self, ErrorKind> {
+        Err(ErrorKind::FontParseError)
+    }
+
     #[allow(dead_code)]
     pub fn data(&self) -> &[u8] {
         (*self.data).as_ref()
@@ -206,8 +291,24 @@ impl Font {
         self.face_index
     }
 
-    pub fn face_ref(&self) -> ttf_parser::Face<'_> {
-        ttf_parser::Face::parse(self.data.as_ref().as_ref(), self.face_index).unwrap()
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn face_ref(&self) -> FontFaceRef<'_> {
+        FontFaceRef(ttf_parser::Face::parse(self.data.as_ref().as_ref(), self.face_index).unwrap())
+    }
+
+    #[cfg(not(feature = "textlayout"))]
+    pub(crate) fn face_ref(&self) -> FontFaceRef<'_> {
+        FontFaceRef(std::marker::PhantomData)
+    }
+
+    #[cfg(feature = "swash")]
+    pub(crate) fn swash_font_ref(&self) -> Option<swash::FontRef<'_>> {
+        swash::FontRef::from_index(self.data.as_ref().as_ref(), self.face_index as usize)
+    }
+
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    fn swash_scale_context(&self) -> &RefCell<swash::scale::ScaleContext> {
+        &self.swash_scale_context
     }
 
     pub fn metrics(&self, size: f32) -> FontMetrics {
@@ -222,13 +323,15 @@ impl Font {
         size / self.units_per_em as f32
     }
 
-    pub fn glyph(&self, face: &ttf_parser::Face<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn glyph(&self, face: &FontFaceRef<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
         if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(codepoint) {
             let mut path = Path::new();
 
             let id = GlyphId(codepoint);
 
             let maybe_glyph = if let Some(image) = face
+                .0
                 .glyph_raster_image(id, u16::MAX)
                 .filter(|img| img.format == ttf_parser::RasterImageFormat::PNG)
             {
@@ -247,7 +350,7 @@ impl Font {
                     },
                 })
             } else {
-                face.outline_glyph(id, &mut path).map(|bbox| Glyph {
+                face.0.outline_glyph(id, &mut path).map(|bbox| Glyph {
                     path: Some(path),
                     metrics: GlyphMetrics {
                         width: bbox.width() as f32,
@@ -266,23 +369,90 @@ impl Font {
         Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&codepoint)).ok()
     }
 
-    pub fn glyph_rendering_representation(
+    #[cfg(not(any(feature = "textlayout", feature = "swash")))]
+    pub(crate) fn glyph(&self, _face: &FontFaceRef<'_>, _codepoint: u16) -> Option<Ref<'_, Glyph>> {
+        None
+    }
+
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    pub(crate) fn glyph(&self, _face: &FontFaceRef<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
+        if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(codepoint) {
+            let font_ref = self.swash_font_ref()?;
+
+            let mut scale_context = self.swash_scale_context().borrow_mut();
+            let mut scaler = scale_context
+                .builder(font_ref)
+                .size(self.units_per_em as f32)
+                .hint(false)
+                .build();
+
+            let maybe_glyph = if let Some(outline) = scaler.scale_outline(codepoint) {
+                use swash::zeno::{Command, PathData};
+                let bounds = outline.bounds();
+                let mut path = Path::new();
+                for cmd in outline.path().commands() {
+                    match cmd {
+                        Command::MoveTo(p) => path.move_to(p.x, p.y),
+                        Command::LineTo(p) => path.line_to(p.x, p.y),
+                        Command::QuadTo(c, p) => path.quad_to(c.x, c.y, p.x, p.y),
+                        Command::CurveTo(c1, c2, p) => path.bezier_to(c1.x, c1.y, c2.x, c2.y, p.x, p.y),
+                        Command::Close => path.close(),
+                    }
+                }
+                Some(Glyph {
+                    path: Some(path),
+                    metrics: GlyphMetrics {
+                        width: bounds.width(),
+                        height: bounds.height(),
+                        bearing_x: bounds.min.x,
+                        bearing_y: bounds.max.y,
+                    },
+                })
+            } else {
+                None
+            };
+
+            if let Some(glyph) = maybe_glyph {
+                entry.insert(glyph);
+            }
+        }
+
+        Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&codepoint)).ok()
+    }
+
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn glyph_rendering_representation(
         &self,
-        face: &ttf_parser::Face<'_>,
+        face: &FontFaceRef<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
     ) -> Option<GlyphRendering<'_>> {
         #[cfg(feature = "image-loading")]
-        if let Some(image) = face
-            .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
-            .and_then(|raster_glyph_image| {
-                image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
-            })
+        if let Some(image) =
+            face.0
+                .glyph_raster_image(GlyphId(codepoint), pixels_per_em)
+                .and_then(|raster_glyph_image| {
+                    image::load_from_memory_with_format(raster_glyph_image.data, image::ImageFormat::Png).ok()
+                })
         {
             return Some(GlyphRendering::RenderAsImage(image));
         }
 
         self.glyph(face, codepoint).and_then(|glyph| {
+            Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
+                .ok()
+                .map(GlyphRendering::RenderAsPath)
+        })
+    }
+
+    #[cfg(not(feature = "textlayout"))]
+    pub(crate) fn glyph_rendering_representation(
+        &self,
+        _face: &FontFaceRef<'_>,
+        codepoint: u16,
+        #[allow(unused_variables)] pixels_per_em: u16,
+    ) -> Option<GlyphRendering<'_>> {
+        self.glyph(_face, codepoint).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
                 .ok()
                 .map(GlyphRendering::RenderAsPath)

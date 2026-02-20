@@ -190,13 +190,20 @@ impl TextContext {
     }
 }
 
-#[derive(Debug)]
 pub struct TextContextImpl {
     fonts: SlotMap<DefaultKey, Font>,
     #[cfg(feature = "textlayout")]
     shaping_run_cache: textlayout::ShapingRunCache<fnv::FnvBuildHasher>,
     #[cfg(feature = "textlayout")]
     shaped_words_cache: textlayout::ShapedWordsCache<fnv::FnvBuildHasher>,
+    #[cfg(feature = "swash")]
+    swash_scale_context: Rc<RefCell<swash::scale::ScaleContext>>,
+}
+
+impl std::fmt::Debug for TextContextImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextContextImpl").field("fonts", &self.fonts).finish()
+    }
 }
 
 impl Default for TextContextImpl {
@@ -218,11 +225,18 @@ impl Default for TextContextImpl {
                 std::num::NonZeroUsize::new(DEFAULT_LRU_CACHE_CAPACITY).unwrap(),
                 fnv_words,
             ),
+            #[cfg(feature = "swash")]
+            swash_scale_context: Rc::new(RefCell::new(swash::scale::ScaleContext::new())),
         }
     }
 }
 
 impl TextContextImpl {
+    #[cfg(feature = "swash")]
+    pub(crate) fn swash_scale_context(&self) -> Rc<RefCell<swash::scale::ScaleContext>> {
+        self.swash_scale_context.clone()
+    }
+
     pub fn add_font_dir<T: AsRef<FilePath>>(&mut self, path: T) -> Result<Vec<FontId>, ErrorKind> {
         let path = path.as_ref();
         let mut fonts = Vec::new();
@@ -257,7 +271,12 @@ impl TextContextImpl {
     ) -> Result<impl Iterator<Item = FontId> + '_, ErrorKind> {
         let data = std::fs::read(path)?;
 
+        #[cfg(feature = "textlayout")]
         let count = ttf_parser::fonts_in_collection(&data).unwrap_or(1);
+        #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+        let count = swash::FontDataRef::new(&data).map_or(1, |d| d.len() as u32);
+        #[cfg(not(any(feature = "textlayout", feature = "swash")))]
+        let count = 1u32;
         Ok((0..count).filter_map(move |index| self.add_font_mem_with_index(&data, index).ok()))
     }
 
@@ -269,7 +288,7 @@ impl TextContextImpl {
         self.clear_caches();
 
         let data_copy = data.to_owned();
-        let font = Font::new_with_data(data_copy, face_index)?;
+        let font = Font::new_with_data(data_copy, face_index, self)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -280,7 +299,7 @@ impl TextContextImpl {
     ) -> Result<FontId, ErrorKind> {
         self.clear_caches();
 
-        let font = Font::new_with_data(data, face_index)?;
+        let font = Font::new_with_data(data, face_index, self)?;
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -391,16 +410,16 @@ pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, Option<RenderedGlyph>>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
     #[cfg(feature = "swash")]
-    swash_scale_context: RefCell<swash::scale::ScaleContext>,
+    swash_scale_context: Rc<RefCell<swash::scale::ScaleContext>>,
 }
 
-impl Default for GlyphAtlas {
-    fn default() -> Self {
+impl GlyphAtlas {
+    pub(crate) fn new(_text_context: &Rc<RefCell<TextContextImpl>>) -> Self {
         Self {
             rendered_glyphs: RefCell::default(),
             glyph_textures: RefCell::default(),
             #[cfg(feature = "swash")]
-            swash_scale_context: RefCell::new(swash::scale::ScaleContext::new()),
+            swash_scale_context: (**_text_context).borrow().swash_scale_context(),
         }
     }
 }
@@ -420,7 +439,7 @@ impl GlyphAtlas {
         canvas: &mut Canvas<T>,
         font_id: FontId,
         font: &Font,
-        font_face: &ttf_parser::Face<'_>,
+        font_face: &font::FontFaceRef<'_>,
         glyphs: impl Iterator<Item = PositionedGlyph>,
         font_size: f32,
         line_width: f32,
@@ -524,7 +543,7 @@ impl GlyphAtlas {
         line_width: f32,
         mode: RenderMode,
         font: &Font,
-        font_face: &ttf_parser::Face<'_>,
+        font_face: &font::FontFaceRef<'_>,
         glyph_id: u16,
         _subpixel_x: f32,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
@@ -689,7 +708,7 @@ impl GlyphAtlas {
         use swash::scale::{Render, Source, StrikeWith};
         use swash::zeno::Format;
 
-        let font_ref = match swash::FontRef::from_index(font.data(), font.face_index() as usize) {
+        let font_ref = match font.swash_font_ref() {
             Some(f) => f,
             None => return Ok(None),
         };
