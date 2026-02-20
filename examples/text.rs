@@ -4,8 +4,7 @@ use femtovg::{Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint
 use instant::Instant;
 use resource::resource;
 use winit::{
-    event::{ElementState, Event, WindowEvent},
-    event_loop::EventLoop,
+    event::{ElementState, WindowEvent},
     keyboard::KeyCode,
     window::Window,
 };
@@ -29,7 +28,11 @@ fn main() {
 #[cfg(target_arch = "wasm32")]
 use winit::window::Window;
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     let fonts = Fonts {
         sans: canvas
             .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
@@ -69,139 +72,131 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
     let mut x = 5.0;
     let mut y = 380.0;
 
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
-                #[cfg(not(target_arch = "wasm32"))]
-                WindowEvent::Resized(physical_size) => {
-                    surface.resize(physical_size.width, physical_size.height);
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| match event {
+            #[cfg(not(target_arch = "wasm32"))]
+            WindowEvent::Resized(physical_size) => {
+                surface.resize(physical_size.width, physical_size.height);
+            }
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(keycode),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => {
+                if keycode == KeyCode::KeyW {
+                    y -= 0.1;
                 }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
-                WindowEvent::KeyboardInput {
-                    event:
-                        winit::event::KeyEvent {
-                            physical_key: winit::keyboard::PhysicalKey::Code(keycode),
-                            state: ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => {
-                    if *keycode == KeyCode::KeyW {
-                        y -= 0.1;
-                    }
 
-                    if *keycode == KeyCode::KeyS {
-                        y += 0.1;
-                    }
-
-                    if *keycode == KeyCode::KeyA {
-                        x -= 0.1;
-                    }
-
-                    if *keycode == KeyCode::KeyD {
-                        x += 0.1;
-                    }
-
-                    if *keycode == KeyCode::NumpadAdd {
-                        font_size += 1.0;
-                    }
-
-                    if *keycode == KeyCode::NumpadSubtract {
-                        font_size -= 1.0;
-                    }
+                if keycode == KeyCode::KeyS {
+                    y += 0.1;
                 }
+
+                if keycode == KeyCode::KeyA {
+                    x -= 0.1;
+                }
+
+                if keycode == KeyCode::KeyD {
+                    x += 0.1;
+                }
+
+                if keycode == KeyCode::NumpadAdd {
+                    font_size += 1.0;
+                }
+
+                if keycode == KeyCode::NumpadSubtract {
+                    font_size -= 1.0;
+                }
+            }
+            #[cfg(feature = "debug_inspector")]
+            WindowEvent::MouseInput {
+                device_id: _,
+                state: ElementState::Pressed,
+                ..
+            } => {
+                let len = canvas.debug_inspector_get_font_textures().len();
+                let next = match font_texture_to_show {
+                    None => 0,
+                    Some(i) => i + 1,
+                };
+                font_texture_to_show = if next < len { Some(next) } else { None };
+            }
+            WindowEvent::MouseWheel {
+                device_id: _,
+                delta: winit::event::MouseScrollDelta::LineDelta(_, y),
+                ..
+            } => {
+                font_size += y / 2.0;
+                font_size = font_size.max(2.0);
+            }
+            WindowEvent::RedrawRequested => {
+                let dpi_factor = window.scale_factor();
+                let size = window.inner_size();
+                canvas.set_size(size.width, size.height, dpi_factor as f32);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
+
+                let elapsed = start.elapsed().as_secs_f32();
+                let now = Instant::now();
+                let dt = (now - prevt).as_secs_f32();
+                prevt = now;
+
+                perf.update(dt);
+
+                draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size, supports_emojis);
+                draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
+                draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
+                draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
+
+                draw_complex(&mut canvas, 300.0, 340.0, font_size);
+
+                draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
+                draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
+                draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
+
+                let paint = Paint::color(Color::hex("B7410E"))
+                    .with_font(&[fonts.bold])
+                    .with_text_baseline(Baseline::Top)
+                    .with_text_align(Align::Right);
+                let _ = canvas.fill_text(
+                    size.width as f32 - 10.0,
+                    10.0,
+                    format!("Scroll to increase / decrease font size. Current: {font_size}"),
+                    &paint,
+                );
                 #[cfg(feature = "debug_inspector")]
-                WindowEvent::MouseInput {
-                    device_id: _,
-                    state: ElementState::Pressed,
-                    ..
-                } => {
-                    let len = canvas.debug_inspector_get_font_textures().len();
-                    let next = match font_texture_to_show {
-                        None => 0,
-                        Some(i) => i + 1,
-                    };
-                    font_texture_to_show = if next < len { Some(next) } else { None };
-                }
-                WindowEvent::MouseWheel {
-                    device_id: _,
-                    delta: winit::event::MouseScrollDelta::LineDelta(_, y),
-                    ..
-                } => {
-                    font_size += *y / 2.0;
-                    font_size = font_size.max(2.0);
-                }
-                WindowEvent::RedrawRequested => {
-                    let dpi_factor = window.scale_factor();
-                    let size = window.inner_size();
-                    canvas.set_size(size.width, size.height, dpi_factor as f32);
-                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
+                let _ = canvas.fill_text(
+                    size.width as f32 - 10.0,
+                    24.0,
+                    format!("Click to show font atlas texture. Current: {font_texture_to_show:?}"),
+                    &paint,
+                );
 
-                    let elapsed = start.elapsed().as_secs_f32();
-                    let now = Instant::now();
-                    let dt = (now - prevt).as_secs_f32();
-                    prevt = now;
+                canvas.save();
+                canvas.reset();
+                perf.render(&mut canvas, 5.0, 5.0);
+                canvas.restore();
 
-                    perf.update(dt);
-
-                    draw_baselines(&mut canvas, &fonts, 5.0, 50.0, font_size, supports_emojis);
-                    draw_alignments(&mut canvas, &fonts, 120.0, 200.0, font_size);
-                    draw_paragraph(&mut canvas, &fonts, x, y, font_size, LOREM_TEXT);
-                    draw_inc_size(&mut canvas, &fonts, 300.0, 10.0);
-
-                    draw_complex(&mut canvas, 300.0, 340.0, font_size);
-
-                    draw_stroked(&mut canvas, &fonts, size.width as f32 - 200.0, 100.0);
-                    draw_gradient_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 180.0);
-                    draw_image_fill(&mut canvas, &fonts, size.width as f32 - 200.0, 260.0, image_id, elapsed);
-
-                    let paint = Paint::color(Color::hex("B7410E"))
-                        .with_font(&[fonts.bold])
-                        .with_text_baseline(Baseline::Top)
-                        .with_text_align(Align::Right);
-                    let _ = canvas.fill_text(
-                        size.width as f32 - 10.0,
-                        10.0,
-                        format!("Scroll to increase / decrease font size. Current: {font_size}"),
-                        &paint,
-                    );
-                    #[cfg(feature = "debug_inspector")]
-                    let _ = canvas.fill_text(
-                        size.width as f32 - 10.0,
-                        24.0,
-                        format!("Click to show font atlas texture. Current: {font_texture_to_show:?}"),
-                        &paint,
-                    );
-
+                #[cfg(feature = "debug_inspector")]
+                if let Some(index) = font_texture_to_show {
                     canvas.save();
                     canvas.reset();
-                    perf.render(&mut canvas, 5.0, 5.0);
-                    canvas.restore();
-
-                    #[cfg(feature = "debug_inspector")]
-                    if let Some(index) = font_texture_to_show {
-                        canvas.save();
-                        canvas.reset();
-                        let textures = canvas.debug_inspector_get_font_textures();
-                        if let Some(&id) = textures.get(index) {
-                            canvas.debug_inspector_draw_image(id);
-                        }
-                        canvas.restore();
+                    let textures = canvas.debug_inspector_get_font_textures();
+                    if let Some(&id) = textures.get(index) {
+                        canvas.debug_inspector_draw_image(id);
                     }
-
-                    surface.present(&mut canvas);
+                    canvas.restore();
                 }
-                _ => (),
-            },
 
-            Event::AboutToWait => window.request_redraw(),
+                surface.present(&mut canvas);
+            }
             _ => (),
-        }
-    })
-    .unwrap();
+        }),
+        device_event: None,
+    }
 }
 
 fn draw_baselines<T: Renderer>(

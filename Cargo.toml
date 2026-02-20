@@ -39,7 +39,7 @@ ttf-parser = { version = "0.25.1" }
 swash = { version = "0.2.6", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-glutin = { version = "0.31", optional = true, default-features = false }
+glutin = { version = "0.32", optional = true, default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web_sys = { version = "0.3", package = "web-sys", features = [
@@ -58,7 +58,7 @@ textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "
 swash = ["dep:swash"]
 
 [dev-dependencies]
-winit = { version = "0.29.1" }
+winit = { version = "0.30.12" }
 euclid = "0.22.3"
 rand = "0.8"
 svg = "0.14.0"
@@ -72,13 +72,13 @@ image = { version = "0.25.0", default-features = false, features = [
 cosmic-text = "0.14.2"
 swash = "0.2.6"
 lazy_static = "1.4.0"
-spin_on = "0.1"
+pollster = "0.4"
 wgpu = { version = "28" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-glutin = "0.31.0"
-glutin-winit = "0.4.0"
-raw-window-handle = "0.5.0"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
+raw-window-handle = "0.6.2"
 parley = { git = "https://github.com/linebender/parley", rev = "7b9a6f938068d37a3e4218a048cda920803c1f89" }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

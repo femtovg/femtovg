@@ -12,8 +12,7 @@ use femtovg::{Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget}
 use helpers::WindowSurface;
 use instant::Instant;
 use winit::{
-    event::{ElementState, Event, WindowEvent},
-    event_loop::EventLoop,
+    event::{ElementState, WindowEvent},
     window::Window,
 };
 
@@ -35,7 +34,11 @@ enum Shape {
     Polar,
 }
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     // Prepare the image, in this case a grid.
     let grid_size: usize = 16;
     let image_id = canvas
@@ -87,17 +90,14 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
 
     let mut swap_directions = false;
 
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| {
+            match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     surface.resize(physical_size.width, physical_size.height);
                 }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::CloseRequested => event_loop.exit(),
                 WindowEvent::ModifiersChanged(modifiers) => {
                     swap_directions = modifiers.state().shift_key();
                 }
@@ -107,11 +107,11 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     ..
                 } => {
                     if swap_directions {
-                        time_warp += *y as i32;
-                        zoom += *x as i32;
+                        time_warp += y as i32;
+                        zoom += x as i32;
                     } else {
-                        time_warp += *x as i32;
-                        zoom += *y as i32;
+                        time_warp += x as i32;
+                        zoom += y as i32;
                     }
                 }
                 WindowEvent::MouseInput {
@@ -202,11 +202,8 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     surface.present(&mut canvas);
                 }
                 _ => (),
-            },
-
-            Event::AboutToWait => window.request_redraw(),
-            _ => (),
-        }
-    })
-    .unwrap();
+            }
+        }),
+        device_event: None,
+    }
 }

@@ -26,11 +26,7 @@ use swash::{
     scale::{image::Content, Render, ScaleContext, Scaler, Source, StrikeWith},
     zeno, FontRef, GlyphId,
 };
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::EventLoop,
-    window::Window,
-};
+use winit::{event::WindowEvent, window::Window};
 use zeno::{Format, Vector};
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
@@ -79,7 +75,11 @@ pub struct FontTexture {
     image_id: ImageId,
 }
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     // The text we are going to style and lay out
     let text = String::from(LOREM_TEXT);
 
@@ -118,17 +118,14 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
 
     let mut render_cache = RenderCache::default();
 
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| {
+            match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     surface.resize(physical_size.width, physical_size.height);
                 }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::CloseRequested => event_loop.exit(),
                 WindowEvent::RedrawRequested => {
                     let size = window.inner_size();
                     canvas.set_size(size.width, size.height, 1.0);
@@ -160,13 +157,10 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     surface.present(&mut canvas);
                 }
                 _ => (),
-            },
-            Event::AboutToWait => window.request_redraw(),
-
-            _ => (),
-        }
-    })
-    .unwrap();
+            }
+        }),
+        device_event: None,
+    }
 }
 
 fn main() {

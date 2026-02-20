@@ -5,11 +5,11 @@ use femtovg::{Canvas, Color};
 use glutin::surface::Surface;
 use glutin::{context::PossiblyCurrentContext, display::Display};
 use glutin_winit::DisplayBuilder;
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
+use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalPosition;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::EventLoop;
-use winit::window::WindowBuilder;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use glutin::{
@@ -20,45 +20,80 @@ use glutin::{
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
 
-fn main() {
-    let event_loop = EventLoop::new().unwrap();
-    let (context, gl_display, window, surface) = create_window(&event_loop);
-
-    let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
-        .expect("Cannot create renderer");
-
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(1000, 600, window.scale_factor() as f32);
-
-    let mut mouse_position = PhysicalPosition::new(0., 0.);
-
-    event_loop
-        .run(move |event, target| {
-            if let Event::WindowEvent { event, .. } = event {
-                match event {
-                    WindowEvent::CursorMoved { position, .. } => {
-                        mouse_position = position;
-                        window.request_redraw();
-                    }
-                    WindowEvent::CloseRequested => target.exit(),
-                    WindowEvent::RedrawRequested => {
-                        render(&context, &surface, &window, &mut canvas, mouse_position);
-                    }
-                    _ => {}
-                }
-            }
-        })
-        .unwrap();
+struct App {
+    state: Option<AppState>,
 }
 
-fn create_window(event_loop: &EventLoop<()>) -> (PossiblyCurrentContext, Display, Window, Surface<WindowSurface>) {
-    let window_builder = WindowBuilder::new()
+struct AppState {
+    context: PossiblyCurrentContext,
+    surface: Surface<WindowSurface>,
+    window: Window,
+    canvas: Canvas<OpenGl>,
+    mouse_position: PhysicalPosition<f64>,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.state.is_some() {
+            return;
+        }
+
+        let (context, gl_display, window, surface) = create_window(event_loop);
+
+        let renderer = unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast()) }
+            .expect("Cannot create renderer");
+
+        let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
+        canvas.set_size(1000, 600, window.scale_factor() as f32);
+
+        self.state = Some(AppState {
+            context,
+            surface,
+            window,
+            canvas,
+            mouse_position: PhysicalPosition::new(0., 0.),
+        });
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: winit::window::WindowId, event: WindowEvent) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+
+        match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                state.mouse_position = position;
+                state.window.request_redraw();
+            }
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => {
+                render(
+                    &state.context,
+                    &state.surface,
+                    &state.window,
+                    &mut state.canvas,
+                    state.mouse_position,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn main() {
+    let event_loop = EventLoop::new().unwrap();
+    let mut app = App { state: None };
+    event_loop.run_app(&mut app).unwrap();
+}
+
+fn create_window(event_loop: &ActiveEventLoop) -> (PossiblyCurrentContext, Display, Window, Surface<WindowSurface>) {
+    let window_attrs = Window::default_attributes()
         .with_inner_size(PhysicalSize::new(1000., 600.))
         .with_title("Femtovg");
 
     let template = ConfigTemplateBuilder::new().with_alpha_size(8);
 
-    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+    let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attrs));
 
     let (window, gl_config) = display_builder
         .build(event_loop, template, |mut configs| configs.next().unwrap())
@@ -68,13 +103,15 @@ fn create_window(event_loop: &EventLoop<()>) -> (PossiblyCurrentContext, Display
 
     let gl_display = gl_config.display();
 
-    let context_attributes = ContextAttributesBuilder::new().build(Some(window.raw_window_handle()));
+    let raw_window_handle = window.window_handle().unwrap().as_raw();
+    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
 
     let mut not_current_gl_context =
         Some(unsafe { gl_display.create_context(&gl_config, &context_attributes).unwrap() });
 
+    let raw_window_handle = window.window_handle().unwrap().as_raw();
     let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-        window.raw_window_handle(),
+        raw_window_handle,
         NonZeroU32::new(1000).unwrap(),
         NonZeroU32::new(600).unwrap(),
     );

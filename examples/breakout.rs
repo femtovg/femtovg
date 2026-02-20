@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use femtovg::{Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
@@ -8,8 +10,8 @@ use rand::{
 };
 use resource::resource;
 use winit::{
-    event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
-    event_loop::{EventLoop, EventLoopWindowTarget},
+    event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+    event_loop::ActiveEventLoop,
     window::Window,
 };
 
@@ -165,7 +167,7 @@ impl Game {
         }
     }
 
-    fn handle_events(&mut self, window: &Window, event: &Event<()>, event_loop_target: &EventLoopWindowTarget<()>) {
+    fn handle_window_event(&mut self, window: &Window, event: &WindowEvent, event_loop: &ActiveEventLoop) {
         if self.state == State::InGame {
             let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
             window.set_cursor_visible(false);
@@ -175,65 +177,62 @@ impl Game {
         }
 
         match event {
-            Event::WindowEvent { ref event, .. } => match event {
-                WindowEvent::KeyboardInput {
-                    event:
-                        winit::event::KeyEvent {
-                            physical_key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape),
-                            state: ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => match self.state {
-                    State::TitleScreen => event_loop_target.exit(),
-                    State::InGame => self.state = State::Paused,
-                    State::Paused => self.state = State::TitleScreen,
-                    State::Win { .. } | State::GameOver { .. } => self.state = State::TitleScreen,
-                    State::RoundInfo { .. } => (),
-                },
-                WindowEvent::MouseInput {
-                    button: MouseButton::Left,
-                    state: ElementState::Pressed,
-                    ..
-                } => match self.state {
-                    State::TitleScreen => {
-                        self.state = State::RoundInfo { time: 3.0 };
-                    }
-                    State::RoundInfo { .. } => {
-                        self.state = State::InGame;
+            WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        physical_key: winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape),
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => match self.state {
+                State::TitleScreen => event_loop.exit(),
+                State::InGame => self.state = State::Paused,
+                State::Paused => self.state = State::TitleScreen,
+                State::Win { .. } | State::GameOver { .. } => self.state = State::TitleScreen,
+                State::RoundInfo { .. } => (),
+            },
+            WindowEvent::MouseInput {
+                button: MouseButton::Left,
+                state: ElementState::Pressed,
+                ..
+            } => match self.state {
+                State::TitleScreen => {
+                    self.state = State::RoundInfo { time: 3.0 };
+                }
+                State::RoundInfo { .. } => {
+                    self.state = State::InGame;
 
-                        self.paddle_rect.origin.x = self.size.width / 2.0 - self.paddle_rect.size.width / 2.0;
-                        self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
-                        self.balls[0].on_paddle = true;
+                    self.paddle_rect.origin.x = self.size.width / 2.0 - self.paddle_rect.size.width / 2.0;
+                    self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
+                    self.balls[0].on_paddle = true;
+                }
+                State::Paused => self.state = State::InGame,
+                State::InGame => {
+                    if self.balls[0].on_paddle {
+                        self.balls[0].velocity = Vector::new(100.0, -350.0);
+                        self.balls[0].on_paddle = false;
                     }
-                    State::Paused => self.state = State::InGame,
-                    State::InGame => {
-                        if self.balls[0].on_paddle {
-                            self.balls[0].velocity = Vector::new(100.0, -350.0);
-                            self.balls[0].on_paddle = false;
-                        }
-                    }
-                    _ => (),
-                },
+                }
                 _ => (),
             },
-            Event::DeviceEvent {
-                event: DeviceEvent::MouseMotion { delta },
-                ..
-            } => {
-                if self.state == State::InGame {
-                    // Move the paddle
-                    self.paddle_rect.origin.x += delta.0 as f32;
-
-                    // Clamp it to the window
-                    self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
-                    self.paddle_rect.origin = self.paddle_rect.origin.clamp(
-                        Point::new(0.0, self.paddle_rect.origin.y),
-                        Point::new(self.size.width - self.paddle_rect.size.width, self.paddle_rect.origin.y),
-                    );
-                }
-            }
             _ => (),
+        }
+    }
+
+    fn handle_device_event(&mut self, event: &DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta } = event {
+            if self.state == State::InGame {
+                // Move the paddle
+                self.paddle_rect.origin.x += delta.0 as f32;
+
+                // Clamp it to the window
+                self.paddle_rect.origin.y = self.size.height - self.paddle_rect.size.height - 10.0;
+                self.paddle_rect.origin = self.paddle_rect.origin.clamp(
+                    Point::new(0.0, self.paddle_rect.origin.y),
+                    Point::new(self.size.width - self.paddle_rect.size.width, self.paddle_rect.origin.y),
+                );
+            }
         }
     }
 
@@ -896,7 +895,11 @@ enum Cmd {
     B(u8), // Brick Id
 }
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     let level1 = vec![
         vec![
             Cmd::Spac,
@@ -1259,22 +1262,23 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
     let mut game = Game::new(&mut canvas, levels);
     game.size = Size::new(window.inner_size().width as f32, window.inner_size().height as f32);
 
+    let game = Rc::new(RefCell::new(game));
+    let game2 = game.clone();
+
     let start = Instant::now();
     let mut prevt = start;
 
-    el.run(move |event, event_loop_window_target| {
-        game.handle_events(&window, &event, event_loop_window_target);
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| {
+            game.borrow_mut().handle_window_event(&window, &event, event_loop);
 
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
+            match event {
                 WindowEvent::Resized(physical_size) => {
                     #[cfg(not(target_arch = "wasm32"))]
                     surface.resize(physical_size.width, physical_size.height);
-                    game.size = Size::new(physical_size.width as f32, physical_size.height as f32);
+                    game.borrow_mut().size = Size::new(physical_size.width as f32, physical_size.height as f32);
                 }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::CloseRequested => event_loop.exit(),
                 WindowEvent::RedrawRequested => {
                     let dpi_factor = window.scale_factor();
                     let size = window.inner_size();
@@ -1285,19 +1289,19 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
                     let dt = (now - prevt).as_secs_f32();
                     prevt = now;
 
+                    let mut game = game.borrow_mut();
                     game.update(dt);
                     game.draw(&mut canvas);
 
                     surface.present(&mut canvas);
                 }
                 _ => (),
-            },
-
-            Event::AboutToWait => window.request_redraw(),
-            _ => (),
-        }
-    })
-    .unwrap();
+            }
+        }),
+        device_event: Some(Box::new(move |_device_id, event, _event_loop| {
+            game2.borrow_mut().handle_device_event(&event);
+        })),
+    }
 }
 
 fn vector_direction(target: Vector) -> Direction {

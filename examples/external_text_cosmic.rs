@@ -6,11 +6,7 @@ use femtovg::{
 };
 use helpers::WindowSurface;
 use std::{collections::HashMap, sync::Arc};
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::EventLoop,
-    window::Window,
-};
+use winit::{event::WindowEvent, window::Window};
 
 use imgref::{Img, ImgRef};
 use rgb::RGBA8;
@@ -193,44 +189,41 @@ fn main() {
     helpers::start();
 }
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     let mut font_system = FontSystem::new();
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 25.0));
     let mut cache = RenderCache::new();
 
     buffer.set_text(&mut font_system, LOREM_TEXT, &Attrs::new(), Shaping::Advanced);
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
-                #[cfg(not(target_arch = "wasm32"))]
-                WindowEvent::Resized(physical_size) => {
-                    surface.resize(physical_size.width, physical_size.height);
-                }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
-                WindowEvent::RedrawRequested => {
-                    let dpi_factor = window.scale_factor() as f32;
-                    let size = window.inner_size();
-                    canvas.set_size(size.width, size.height, 1.0);
-                    canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| match event {
+            #[cfg(not(target_arch = "wasm32"))]
+            WindowEvent::Resized(physical_size) => {
+                surface.resize(physical_size.width, physical_size.height);
+            }
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => {
+                let dpi_factor = window.scale_factor() as f32;
+                let size = window.inner_size();
+                canvas.set_size(size.width, size.height, 1.0);
+                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
-                    buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
-                    buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
-                    let cmds = cache.fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0));
-                    canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()));
+                buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
+                buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
+                let cmds = cache.fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0));
+                canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()));
 
-                    surface.present(&mut canvas);
-                }
-                _ => (),
-            },
-            Event::AboutToWait => window.request_redraw(),
-
+                surface.present(&mut canvas);
+            }
             _ => (),
-        }
-    })
-    .unwrap();
+        }),
+        device_event: None,
+    }
 }
 
 const LOREM_TEXT: &str = r"

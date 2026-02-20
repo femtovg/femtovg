@@ -10,17 +10,40 @@ use glutin::{
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
-use raw_window_handle::HasRawWindowHandle;
-use winit::{event::Event, event::WindowEvent, event_loop::EventLoop, window::WindowBuilder};
+use raw_window_handle::HasWindowHandle;
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::Window,
+};
 
 const WINDOW_WIDTH: f32 = 640.0;
 const WINDOW_HEIGHT: f32 = 480.0;
 
-fn main() {
-    let el = EventLoop::new().unwrap();
+struct App {
+    // State after resumed
+    state: Option<AppState>,
+}
 
-    let (window, gl_context, surface, display) = {
-        let window_builder = WindowBuilder::new()
+struct AppState {
+    window: Window,
+    gl_context: glutin::context::PossiblyCurrentContext,
+    surface: glutin::surface::Surface<WindowSurface>,
+    context: Context,
+    framebuffer: NativeFramebuffer,
+    texture_colorbuffer: NativeTexture,
+    shader_program: Program,
+    canvas: Canvas<OpenGl>,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.state.is_some() {
+            return;
+        }
+
+        let window_attrs = Window::default_attributes()
             .with_inner_size(winit::dpi::PhysicalSize::<f32>::new(WINDOW_WIDTH, WINDOW_HEIGHT))
             .with_resizable(false)
             .with_decorations(true)
@@ -28,12 +51,10 @@ fn main() {
 
         let template = ConfigTemplateBuilder::new().with_alpha_size(8);
 
-        let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+        let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attrs));
 
         let (window, gl_config) = display_builder
-            .build(&el, template, |configs| {
-                // Find the config with the maximum number of samples, so our triangle will
-                // be smooth.
+            .build(event_loop, template, |configs| {
                 configs
                     .reduce(|accum, config| {
                         let transparency_check = config.supports_transparency().unwrap_or(false)
@@ -51,14 +72,14 @@ fn main() {
 
         let window = window.unwrap();
 
-        let raw_window_handle = Some(window.raw_window_handle());
+        let raw_window_handle = window.window_handle().unwrap().as_raw();
 
         let gl_display = gl_config.display();
 
-        let context_attributes = ContextAttributesBuilder::new().build(raw_window_handle);
+        let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
         let fallback_context_attributes = ContextAttributesBuilder::new()
             .with_context_api(ContextApi::Gles(None))
-            .build(raw_window_handle);
+            .build(Some(raw_window_handle));
         let mut not_current_gl_context = Some(unsafe {
             gl_display
                 .create_context(&gl_config, &context_attributes)
@@ -70,7 +91,7 @@ fn main() {
         });
 
         let (width, height): (u32, u32) = window.inner_size().into();
-        let raw_window_handle = window.raw_window_handle();
+        let raw_window_handle = window.window_handle().unwrap().as_raw();
         let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
             raw_window_handle,
             NonZeroU32::new(width).unwrap(),
@@ -81,71 +102,86 @@ fn main() {
 
         let gl_context = not_current_gl_context.take().unwrap().make_current(&surface).unwrap();
 
-        (window, gl_context, surface, gl_display)
-    };
+        let context: Context;
+        let framebuffer: NativeFramebuffer;
+        let texture_colorbuffer: NativeTexture;
+        let shader_program: Program;
+        let mut renderer: OpenGl;
 
-    let context: Context;
-    let framebuffer: NativeFramebuffer;
-    let texture_colorbuffer: NativeTexture;
-    let shader_program: Program;
-    let mut renderer: OpenGl;
+        unsafe {
+            context = glow::Context::from_loader_function_cstr(|symbol| gl_display.get_proc_address(symbol).cast());
+            renderer = OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s).cast())
+                .expect("Cannot create renderer");
 
-    unsafe {
-        context = glow::Context::from_loader_function_cstr(|symbol| display.get_proc_address(symbol).cast());
-        renderer =
-            OpenGl::new_from_function_cstr(|s| display.get_proc_address(s).cast()).expect("Cannot create renderer");
+            shader_program = create_shader_program(&context);
+            (framebuffer, texture_colorbuffer) = create_framebuffer_colorbuffer(&context);
 
-        shader_program = create_shader_program(&context);
-        (framebuffer, texture_colorbuffer) = create_framebuffer_colorbuffer(&context);
+            renderer.set_screen_target(Some(framebuffer));
+        }
 
-        renderer.set_screen_target(Some(framebuffer));
+        let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
+        canvas.set_size(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, 1.0);
+
+        self.state = Some(AppState {
+            window,
+            gl_context,
+            surface,
+            context,
+            framebuffer,
+            texture_colorbuffer,
+            shader_program,
+            canvas,
+        });
     }
 
-    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
-    canvas.set_size(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32, 1.0);
-
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: winit::window::WindowId, event: WindowEvent) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
 
         match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => event_loop_window_target.exit(),
-            Event::WindowEvent {
-                event: WindowEvent::RedrawRequested,
-                ..
-            } => {
-                prepare_framebuffer_for_render(&context, framebuffer);
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => {
+                prepare_framebuffer_for_render(&state.context, state.framebuffer);
 
-                // draw red rectangle on white background
+                let dpi_factor = state.window.scale_factor();
+                let size = state.window.inner_size();
+                state.canvas.set_size(size.width, size.height, dpi_factor as f32);
+                state
+                    .canvas
+                    .clear_rect(0, 0, size.width, size.height, Color::rgbf(1., 1., 1.));
 
-                let dpi_factor = window.scale_factor();
-                let size = window.inner_size();
-                canvas.set_size(size.width, size.height, dpi_factor as f32);
-                canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(1., 1., 1.));
-
-                canvas.save();
+                state.canvas.save();
 
                 let paint = Paint::color(Color::rgbf(1., 0., 0.));
                 let mut path = Path::new();
                 path.rect(WINDOW_WIDTH / 2. - 25., WINDOW_HEIGHT / 2. - 25., 50., 50.);
-                canvas.fill_path(&path, &paint);
-                canvas.restore();
+                state.canvas.fill_path(&path, &paint);
+                state.canvas.restore();
 
-                canvas.flush();
+                state.canvas.flush();
 
-                // shader inverts colors
-                render_framebuffer_to_screen(&context, shader_program, texture_colorbuffer);
+                render_framebuffer_to_screen(&state.context, state.shader_program, state.texture_colorbuffer);
 
-                surface.swap_buffers(&gl_context).unwrap();
+                state.surface.swap_buffers(&state.gl_context).unwrap();
             }
-            Event::AboutToWait => window.request_redraw(),
             _ => (),
         }
-    })
-    .unwrap();
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(state) = self.state.as_ref() {
+            state.window.request_redraw();
+        }
+    }
+}
+
+fn main() {
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+
+    let mut app = App { state: None };
+    event_loop.run_app(&mut app).unwrap();
 }
 
 fn create_shader_program(context: &glow::Context) -> NativeProgram {

@@ -7,8 +7,7 @@ use femtovg::{
 use instant::Instant;
 use resource::resource;
 use winit::{
-    event::{ElementState, Event, KeyEvent, MouseButton, WindowEvent},
-    event_loop::EventLoop,
+    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
@@ -34,7 +33,11 @@ struct Fonts {
     icons: FontId,
 }
 
-fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut surface: W, window: Arc<Window>) {
+fn run<W: WindowSurface + 'static>(
+    mut canvas: Canvas<W::Renderer>,
+    mut surface: W,
+    window: Arc<Window>,
+) -> helpers::Callbacks {
     let fonts = Fonts {
         regular: canvas
             .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
@@ -97,12 +100,9 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
 
     let mut perf = PerfGraph::new();
 
-    el.run(move |event, event_loop_window_target| {
-        event_loop_window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
-
-        match event {
-            Event::LoopExiting => event_loop_window_target.exit(),
-            Event::WindowEvent { ref event, .. } => match event {
+    helpers::Callbacks {
+        window_event: Box::new(move |event, event_loop| {
+            match event {
                 #[cfg(not(target_arch = "wasm32"))]
                 WindowEvent::Resized(physical_size) => {
                     surface.resize(physical_size.width, physical_size.height);
@@ -294,14 +294,12 @@ fn run<W: WindowSurface>(mut canvas: Canvas<W::Renderer>, el: EventLoop<()>, mut
 
                     surface.present(&mut canvas);
                 }
-                WindowEvent::CloseRequested => event_loop_window_target.exit(),
+                WindowEvent::CloseRequested => event_loop.exit(),
                 _ => (),
-            },
-            Event::AboutToWait => window.request_redraw(),
-            _ => (),
-        }
-    })
-    .unwrap();
+            }
+        }),
+        device_event: None,
+    }
 }
 
 fn draw_paragraph<T: Renderer>(
