@@ -3,7 +3,7 @@
 
 //! Original example by Parley Authors, modified for femtovg.
 //! You can find the original example source code at
-//! https://github.com/linebender/parley/blob/7b9a6f938068d37a3e4218a048cda920803c1f89/examples/swash_render/src/main.rs
+//! https://github.com/linebender/parley/blob/v0.7.0/examples/swash_render/src/main.rs
 
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::shadow_unrelated)]
@@ -18,20 +18,20 @@ use imgref::{Img, ImgRef};
 use parley::{
     layout::{Alignment, Glyph, GlyphRun, Layout, PositionedLayoutItem},
     style::{FontStack, StyleProperty},
-    FontContext, LayoutContext,
+    AlignmentOptions, FontContext, LayoutContext, LineHeight,
 };
 use rgb::RGBA8;
 use std::{collections::HashMap, sync::Arc};
 use swash::{
     scale::{image::Content, Render, ScaleContext, Scaler, Source, StrikeWith},
-    zeno, FontRef, GlyphId,
+    zeno, FontRef,
 };
 use winit::{event::WindowEvent, window::Window};
 use zeno::{Format, Vector};
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct GlyphCacheKey {
-    glyph_id: GlyphId,
+    glyph_id: u32,
     font_index: u32,
     size: u32,
     subpixel_offset_x: u8,
@@ -39,7 +39,7 @@ pub struct GlyphCacheKey {
 }
 
 impl GlyphCacheKey {
-    fn new(glyph_id: GlyphId, font_index: u32, font_size: f32, subpixel_offset: Vector) -> Self {
+    fn new(glyph_id: u32, font_index: u32, font_size: f32, subpixel_offset: Vector) -> Self {
         Self {
             glyph_id,
             font_index,
@@ -102,14 +102,14 @@ fn run<W: WindowSurface + 'static>(
     let font_stack = FontStack::from("system-ui");
 
     // Creatse a RangedBuilder
-    let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale);
+    let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale, false);
 
     // Set default text colour styles (set foreground text color)
     builder.push_default(brush_style);
 
     // Set default font family
     builder.push_default(font_stack);
-    builder.push_default(StyleProperty::LineHeight(1.3));
+    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.3)));
     builder.push_default(StyleProperty::FontSize(16.0));
 
     // Build the builder into a Layout
@@ -135,7 +135,7 @@ fn run<W: WindowSurface + 'static>(
 
                     // Perform layout (including bidi resolution and shaping) with start alignment
                     layout.break_all_lines(max_advance);
-                    layout.align(max_advance, Alignment::Start);
+                    layout.align(max_advance, Alignment::Start, AlignmentOptions::default());
 
                     // Iterate over laid out lines
                     for line in layout.lines() {
@@ -326,7 +326,7 @@ fn render_glyph(scaler: &mut Scaler<'_>, glyph: Glyph, offset: Vector) -> (Vec<R
     // Apply the fractional offset
     .offset(offset)
     // Render the image
-    .render(scaler, glyph.id)
+    .render(scaler, glyph.id as u16)
     .unwrap();
 
     let glyph_width = rendered_glyph.placement.width as usize;
