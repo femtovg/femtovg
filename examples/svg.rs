@@ -3,7 +3,6 @@ use std::sync::Arc;
 use femtovg::{Canvas, Color, FillRule, ImageFlags, Paint, Path};
 use instant::Instant;
 use resource::resource;
-use usvg::TreeParsing;
 use winit::{
     event::{ElementState, MouseButton, WindowEvent},
     window::Window,
@@ -162,48 +161,58 @@ fn run<W: WindowSurface + 'static>(
 }
 
 fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
-    use usvg::NodeKind;
-    use usvg::PathSegment;
-
     let mut paths = Vec::new();
 
-    for node in svg.root.descendants() {
-        if let NodeKind::Path(svg_path) = &*node.borrow() {
-            let mut path = Path::new();
+    fn collect_paths(children: &[usvg::Node], paths: &mut Vec<(Path, Option<Paint>, Option<Paint>)>) {
+        use usvg::tiny_skia_path::PathSegment;
+        use usvg::Node;
 
-            for command in svg_path.data.segments() {
-                match command {
-                    PathSegment::MoveTo { x, y } => path.move_to(x as f32, y as f32),
-                    PathSegment::LineTo { x, y } => path.line_to(x as f32, y as f32),
-                    PathSegment::CurveTo { x1, y1, x2, y2, x, y } => {
-                        path.bezier_to(x1 as f32, y1 as f32, x2 as f32, y2 as f32, x as f32, y as f32)
-                    }
-                    PathSegment::ClosePath => path.close(),
+        for node in children {
+            match node {
+                Node::Group(group) => {
+                    collect_paths(group.children(), paths);
                 }
+                Node::Path(svg_path) => {
+                    let mut path = Path::new();
+
+                    for command in svg_path.data().segments() {
+                        match command {
+                            PathSegment::MoveTo(pt) => path.move_to(pt.x, pt.y),
+                            PathSegment::LineTo(pt) => path.line_to(pt.x, pt.y),
+                            PathSegment::CubicTo(pt1, pt2, pt) => {
+                                path.bezier_to(pt1.x, pt1.y, pt2.x, pt2.y, pt.x, pt.y)
+                            }
+                            PathSegment::QuadTo(pt1, pt) => path.quad_to(pt1.x, pt1.y, pt.x, pt.y),
+                            PathSegment::Close => path.close(),
+                        }
+                    }
+
+                    let to_femto_color = |usvg_paint: &usvg::Paint| match usvg_paint {
+                        usvg::Paint::Color(usvg::Color { red, green, blue }) => Some(Color::rgb(*red, *green, *blue)),
+                        _ => None,
+                    };
+
+                    let fill = svg_path
+                        .fill()
+                        .and_then(|fill| to_femto_color(&fill.paint()))
+                        .map(|col| Paint::color(col).with_anti_alias(true));
+
+                    let stroke = svg_path.stroke().and_then(|stroke| {
+                        to_femto_color(&stroke.paint()).map(|paint| {
+                            Paint::color(paint)
+                                .with_line_width(stroke.width().get())
+                                .with_anti_alias(true)
+                        })
+                    });
+
+                    paths.push((path, fill, stroke))
+                }
+                _ => {}
             }
-
-            let to_femto_color = |usvg_paint: &usvg::Paint| match usvg_paint {
-                usvg::Paint::Color(usvg::Color { red, green, blue }) => Some(Color::rgb(*red, *green, *blue)),
-                _ => None,
-            };
-
-            let fill = svg_path
-                .fill
-                .as_ref()
-                .and_then(|fill| to_femto_color(&fill.paint))
-                .map(|col| Paint::color(col).with_anti_alias(true));
-
-            let stroke = svg_path.stroke.as_ref().and_then(|stroke| {
-                to_femto_color(&stroke.paint).map(|paint| {
-                    Paint::color(paint)
-                        .with_line_width(stroke.width.get() as f32)
-                        .with_anti_alias(true)
-                })
-            });
-
-            paths.push((path, fill, stroke))
         }
     }
+
+    collect_paths(svg.root().children(), &mut paths);
 
     paths
 }
