@@ -68,7 +68,7 @@ image = { version = "0.25.0", default-features = false, features = [
     "jpeg",
     "png",
 ] }
-cosmic-text = "0.14.2"
+cosmic-text = "0.18.2"
 swash = "0.2.6"
 lazy_static = "1.4.0"
 pollster = "0.4"

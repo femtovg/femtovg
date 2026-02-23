@@ -198,7 +198,7 @@ fn run<W: WindowSurface + 'static>(
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 25.0));
     let mut cache = RenderCache::new();
 
-    buffer.set_text(&mut font_system, LOREM_TEXT, &Attrs::new(), Shaping::Advanced);
+    buffer.set_text(&mut font_system, LOREM_TEXT, &Attrs::new(), Shaping::Advanced, None);
 
     helpers::Callbacks {
         window_event: Box::new(move |event, event_loop| match event {
