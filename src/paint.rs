@@ -1,9 +1,117 @@
 // TODO: prefix paint creation functions with make_ or new_
 // so that they are easier to find when autocompleting
 
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+
+const MAX_FONT_VARIATIONS: usize = 4;
+
+/// Compact inline storage for font variation axis settings.
+///
+/// Stores up to 4 variation axis overrides (e.g. weight, italic, slant, width)
+/// without heap allocation. Each entry is a (tag, value) pair where the tag is
+/// the 4-byte OpenType axis tag stored as a `u32`.
+#[derive(Clone, Debug)]
+pub(crate) struct FontVariations {
+    entries: [(u32, f32); MAX_FONT_VARIATIONS],
+    len: u8,
+}
+
+impl Default for FontVariations {
+    fn default() -> Self {
+        Self {
+            entries: [(0, 0.0); MAX_FONT_VARIATIONS],
+            len: 0,
+        }
+    }
+}
+
+impl Hash for FontVariations {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Sort entries by tag before hashing to ensure order-independence.
+        let len = self.len as usize;
+        let mut sorted = self.entries;
+        sorted[..len].sort_unstable_by_key(|&(tag, _)| tag);
+        for &(tag, val) in &sorted[..len] {
+            tag.hash(state);
+            val.to_bits().hash(state);
+        }
+    }
+}
+
+impl FontVariations {
+    /// Converts a 4-byte tag (e.g. `b"wght"`) to its `u32` representation.
+    pub(crate) fn tag_to_u32(tag: &[u8; 4]) -> u32 {
+        u32::from_be_bytes(*tag)
+    }
+
+    /// Sets a variation axis value. If the tag already exists, updates it.
+    /// Panics if the collection is full and the tag is new.
+    pub(crate) fn set(&mut self, tag: u32, value: f32) {
+        for i in 0..self.len as usize {
+            if self.entries[i].0 == tag {
+                self.entries[i].1 = value;
+                return;
+            }
+        }
+        assert!(
+            (self.len as usize) < MAX_FONT_VARIATIONS,
+            "FontVariations: too many axes (max {})",
+            MAX_FONT_VARIATIONS
+        );
+        self.entries[self.len as usize] = (tag, value);
+        self.len += 1;
+    }
+
+    /// Gets the value for a variation axis, or `None` if not set.
+    pub(crate) fn get(&self, tag: u32) -> Option<f32> {
+        for i in 0..self.len as usize {
+            if self.entries[i].0 == tag {
+                return Some(self.entries[i].1);
+            }
+        }
+        None
+    }
+
+    /// Removes a variation axis. Returns whether the tag was present.
+    pub(crate) fn remove(&mut self, tag: u32) -> bool {
+        for i in 0..self.len as usize {
+            if self.entries[i].0 == tag {
+                // Swap-remove
+                let last = self.len as usize - 1;
+                self.entries[i] = self.entries[last];
+                self.entries[last] = (0, 0.0);
+                self.len -= 1;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns true if no variation axes are set.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Iterates over all set (tag, value) pairs.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (u32, f32)> + '_ {
+        self.entries[..self.len as usize].iter().copied()
+    }
+
+    /// Computes a hash of the variation settings for use in cache keys.
+    pub(crate) fn hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        Hash::hash(self, &mut hasher);
+        hasher.finish()
+    }
+
+    /// Removes all variation axes.
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -276,7 +384,8 @@ pub struct TextSettings {
     pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
-    pub(crate) font_weight: Option<f32>,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub(crate) font_variations: FontVariations,
 }
 
 impl Default for TextSettings {
@@ -287,7 +396,7 @@ impl Default for TextSettings {
             letter_spacing: 0.0,
             text_baseline: Baseline::default(),
             text_align: Align::default(),
-            font_weight: None,
+            font_variations: FontVariations::default(),
         }
     }
 }
@@ -864,12 +973,14 @@ impl Paint {
         self
     }
 
+    // --- Font weight (wght axis) ---
+
     /// Returns the current font weight override for variable fonts.
     ///
     /// Returns `None` if no weight override is set, meaning the font's default weight is used.
     #[inline]
     pub fn font_weight(&self) -> Option<f32> {
-        self.text.font_weight
+        self.text.font_variations.get(FontVariations::tag_to_u32(b"wght"))
     }
 
     /// Sets the font weight for variable fonts.
@@ -878,7 +989,9 @@ impl Paint {
     /// This only affects variable fonts; for static fonts it has no effect.
     #[inline]
     pub fn set_font_weight(&mut self, weight: f32) {
-        self.text.font_weight = Some(weight);
+        self.text
+            .font_variations
+            .set(FontVariations::tag_to_u32(b"wght"), weight);
     }
 
     /// Returns the paint with the font weight set to the specified value.
@@ -894,7 +1007,119 @@ impl Paint {
     /// Clears the font weight override, reverting to the font's default weight.
     #[inline]
     pub fn clear_font_weight(&mut self) {
-        self.text.font_weight = None;
+        self.text.font_variations.remove(FontVariations::tag_to_u32(b"wght"));
+    }
+
+    // --- Font italic (ital axis) ---
+
+    /// Returns the current font italic override for variable fonts.
+    ///
+    /// Returns `None` if no italic override is set.
+    /// `true` means italic (ital=1), `false` means upright (ital=0).
+    #[inline]
+    pub fn font_italic(&self) -> Option<bool> {
+        self.text
+            .font_variations
+            .get(FontVariations::tag_to_u32(b"ital"))
+            .map(|v| v >= 0.5)
+    }
+
+    /// Sets the font italic for variable fonts.
+    ///
+    /// `true` sets `ital=1` (italic), `false` sets `ital=0` (upright).
+    /// This only affects variable fonts with an `ital` axis.
+    #[inline]
+    pub fn set_font_italic(&mut self, italic: bool) {
+        self.text
+            .font_variations
+            .set(FontVariations::tag_to_u32(b"ital"), if italic { 1.0 } else { 0.0 });
+    }
+
+    /// Returns the paint with the font italic set to the specified value.
+    #[inline]
+    pub fn with_font_italic(mut self, italic: bool) -> Self {
+        self.set_font_italic(italic);
+        self
+    }
+
+    /// Clears the font italic override.
+    #[inline]
+    pub fn clear_font_italic(&mut self) {
+        self.text.font_variations.remove(FontVariations::tag_to_u32(b"ital"));
+    }
+
+    // --- Font slant (slnt axis) ---
+
+    /// Returns the current font slant override for variable fonts.
+    ///
+    /// Returns `None` if no slant override is set.
+    /// The value is in degrees; negative values slant backward (typical italic direction).
+    #[inline]
+    pub fn font_slant(&self) -> Option<f32> {
+        self.text.font_variations.get(FontVariations::tag_to_u32(b"slnt"))
+    }
+
+    /// Sets the font slant for variable fonts.
+    ///
+    /// The value is in degrees; negative values slant backward (typical italic direction).
+    /// For example, `-12.0` is a common italic slant.
+    /// This only affects variable fonts with a `slnt` axis.
+    #[inline]
+    pub fn set_font_slant(&mut self, degrees: f32) {
+        self.text
+            .font_variations
+            .set(FontVariations::tag_to_u32(b"slnt"), degrees);
+    }
+
+    /// Returns the paint with the font slant set to the specified value.
+    #[inline]
+    pub fn with_font_slant(mut self, degrees: f32) -> Self {
+        self.set_font_slant(degrees);
+        self
+    }
+
+    /// Clears the font slant override.
+    #[inline]
+    pub fn clear_font_slant(&mut self) {
+        self.text.font_variations.remove(FontVariations::tag_to_u32(b"slnt"));
+    }
+
+    // --- Generic font variation API ---
+
+    /// Returns the value of a font variation axis by its 4-byte tag.
+    ///
+    /// For example, `paint.font_variation(b"wdth")` returns the width axis value.
+    #[inline]
+    pub fn font_variation(&self, tag: &[u8; 4]) -> Option<f32> {
+        self.text.font_variations.get(FontVariations::tag_to_u32(tag))
+    }
+
+    /// Sets a font variation axis by its 4-byte tag.
+    ///
+    /// For example, `paint.set_font_variation(b"wdth", 75.0)` sets the width axis.
+    /// This only affects variable fonts with the specified axis.
+    #[inline]
+    pub fn set_font_variation(&mut self, tag: &[u8; 4], value: f32) {
+        self.text.font_variations.set(FontVariations::tag_to_u32(tag), value);
+    }
+
+    /// Returns the paint with a font variation axis set.
+    #[inline]
+    pub fn with_font_variation(mut self, tag: &[u8; 4], value: f32) -> Self {
+        self.set_font_variation(tag, value);
+        self
+    }
+
+    /// Clears a single font variation axis by its 4-byte tag.
+    #[inline]
+    pub fn clear_font_variation(&mut self, tag: &[u8; 4]) {
+        self.text.font_variations.remove(FontVariations::tag_to_u32(tag));
+    }
+
+    /// Clears all font variation overrides.
+    #[inline]
+    pub fn clear_font_variations(&mut self) {
+        self.text.font_variations.clear();
     }
 
     /// Returns the current fill rule for filling paths.
