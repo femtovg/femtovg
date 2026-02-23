@@ -63,7 +63,7 @@ euclid = "0.22.3"
 rand = "0.8"
 usvg = { version = "0.47.0" }
 instant = { version = "0.1", features = ["now"] }
-resource = "0.5.0"
+resource = "0.6.1"
 image = { version = "0.25.0", default-features = false, features = [
     "jpeg",
     "png",
