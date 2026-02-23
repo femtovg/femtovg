@@ -29,7 +29,6 @@ pub fn quantize(a: f32, d: f32) -> f32 {
 
 struct Fonts {
     regular: FontId,
-    bold: FontId,
     icons: FontId,
 }
 
@@ -40,10 +39,7 @@ fn run<W: WindowSurface + 'static>(
 ) -> helpers::Callbacks {
     let fonts = Fonts {
         regular: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
-            .expect("Cannot add font"),
-        bold: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
+            .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
             .expect("Cannot add font"),
         icons: canvas
             .add_font_mem(&resource!("examples/assets/entypo.ttf"))
@@ -656,7 +652,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
 
     let text_paint = Paint::color(Color::rgba(0, 0, 0, 32))
         .with_font_size(16.0)
-        .with_font(&[fonts.bold])
+        .with_font(&[fonts.regular])
+        .with_font_weight(300.0)
         .with_text_align(Align::Center)
         .with_color(Color::rgba(220, 220, 220, 160));
 
@@ -984,7 +981,8 @@ fn draw_button<T: Renderer>(
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 96))
         .with_font_size(15.0)
-        .with_font(&[fonts.bold])
+        .with_font(&[fonts.regular])
+        .with_font_weight(300.0)
         .with_text_align(Align::Left)
         .with_text_baseline(Baseline::Middle);
 
@@ -1007,10 +1005,12 @@ fn draw_button<T: Renderer>(
         let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 - iw * 0.75, y + h * 0.5, icon, &paint);
     }
 
-    let paint = paint
+    let paint = Paint::color(Color::rgba(0, 0, 0, 160))
         .with_font_size(15.0)
         .with_font(&[fonts.regular])
-        .with_color(Color::rgba(0, 0, 0, 160));
+        .with_font_weight(400.0)
+        .with_text_align(Align::Left)
+        .with_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, &paint);
     let paint = paint.with_color(Color::rgba(255, 255, 255, 160));
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5, text, &paint);

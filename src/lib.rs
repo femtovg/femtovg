@@ -32,7 +32,9 @@ mod text;
 mod error;
 pub use error::ErrorKind;
 
-pub use text::{Align, Atlas, Baseline, DrawCommand, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode};
+pub use text::{
+    Align, Atlas, Baseline, DrawCommand, FontId, FontMetrics, GlyphDrawCommands, Quad, RenderMode, VariationAxisInfo,
+};
 
 pub use text::TextContext;
 #[cfg(feature = "textlayout")]
@@ -1216,6 +1218,16 @@ where
         self.text_context.borrow_mut().add_font_dir(dir_path)
     }
 
+    /// Returns the variation axes available for the specified font.
+    ///
+    /// For variable fonts, this returns information about each axis (e.g. weight, width).
+    /// For static fonts, this returns an empty vector.
+    pub fn font_variation_axes(&self, font_id: FontId) -> Result<Vec<VariationAxisInfo>, ErrorKind> {
+        let ctx = self.text_context.borrow();
+        let font = ctx.font(font_id).ok_or(ErrorKind::NoFontFound)?;
+        Ok(font.variation_axes())
+    }
+
     /// Returns information on how the provided text will be drawn with the specified paint.
     #[cfg(feature = "textlayout")]
     pub fn measure_text<S: AsRef<str>>(
@@ -1248,9 +1260,11 @@ where
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
-        self.text_context
-            .borrow_mut()
-            .measure_font(paint.text.font_size * scale, &paint.text.font_ids)
+        self.text_context.borrow_mut().measure_font(
+            paint.text.font_size * scale,
+            &paint.text.font_ids,
+            paint.text.font_weight,
+        )
     }
 
     /// Returns the maximum index-th byte of text that will fit inside `max_width`.
@@ -1457,11 +1471,13 @@ where
 
         let need_direct_rendering = paint.text.font_size > 92.0;
 
+        let font_weight = paint.text.font_weight;
+
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
         };
 
-        let font_face = font.face_ref();
+        let font_face = font.face_ref_with_variations(font_weight);
 
         // TODO: create on demand
 
@@ -1471,7 +1487,7 @@ where
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
                 if font
-                    .glyph(&font_face, glyph.glyph_id)
+                    .glyph(&font_face, glyph.glyph_id, font_weight)
                     .is_some_and(|glyph| glyph.path.is_none())
                 {
                     color_glyphs.push(glyph.clone());
@@ -1493,6 +1509,7 @@ where
                 &stroke,
                 paint.text.font_size,
                 render_mode,
+                font_weight,
             )?;
             GlyphDrawCommands::default()
         } else {
@@ -1505,6 +1522,7 @@ where
                 paint.text.font_size,
                 paint.stroke.line_width,
                 render_mode,
+                font_weight,
             )?
         };
 
@@ -1527,6 +1545,7 @@ where
                     paint.text.font_size,
                     paint.stroke.line_width,
                     render_mode,
+                    font_weight,
                 )?
             };
 
