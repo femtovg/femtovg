@@ -88,7 +88,7 @@ web_sys = { version = "0.3", package = "web-sys", features = [
 console_error_panic_hook = "0.1.5"
 instant = { version = "0.1", features = ["wasm-bindgen", "now"] }
 resource = { version = "0.6.1", features = ["force-static"] }
-getrandom = { version = "0.2.2", features = ["js"] }
+getrandom = { version = "0.4.1", features = ["js"] }
 wgpu = { version = "28", features = ["webgl"] }
 wasm-bindgen-futures = { version = "0.4.45" }
 
