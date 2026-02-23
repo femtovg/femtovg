@@ -1263,7 +1263,7 @@ where
         self.text_context.borrow_mut().measure_font(
             paint.text.font_size * scale,
             &paint.text.font_ids,
-            paint.text.font_weight,
+            &paint.text.font_variations,
         )
     }
 
@@ -1471,13 +1471,13 @@ where
 
         let need_direct_rendering = paint.text.font_size > 92.0;
 
-        let font_weight = paint.text.font_weight;
+        let variations = &paint.text.font_variations;
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
         };
 
-        let font_face = font.face_ref_with_variations(font_weight);
+        let font_face = font.face_ref_with_variations(variations);
 
         // TODO: create on demand
 
@@ -1487,7 +1487,7 @@ where
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
                 if font
-                    .glyph(&font_face, glyph.glyph_id, font_weight)
+                    .glyph(&font_face, glyph.glyph_id, variations)
                     .is_some_and(|glyph| glyph.path.is_none())
                 {
                     color_glyphs.push(glyph.clone());
@@ -1509,7 +1509,7 @@ where
                 &stroke,
                 paint.text.font_size,
                 render_mode,
-                font_weight,
+                variations,
             )?;
             GlyphDrawCommands::default()
         } else {
@@ -1522,7 +1522,7 @@ where
                 paint.text.font_size,
                 paint.stroke.line_width,
                 render_mode,
-                font_weight,
+                variations,
             )?
         };
 
@@ -1545,7 +1545,7 @@ where
                     paint.text.font_size,
                     paint.stroke.line_width,
                     render_mode,
-                    font_weight,
+                    variations,
                 )?
             };
 

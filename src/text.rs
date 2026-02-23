@@ -6,7 +6,7 @@ use rustybuzz::ttf_parser;
 use slotmap::{DefaultKey, SlotMap};
 
 use crate::{
-    paint::{PaintFlavor, StrokeSettings},
+    paint::{FontVariations, PaintFlavor, StrokeSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, PositionedGlyph,
     RenderTarget, Renderer,
 };
@@ -92,7 +92,7 @@ pub struct RenderedGlyphId {
     line_width: u32,
     render_mode: RenderMode,
     subpixel_location: u8,
-    font_weight_bits: u32,
+    variation_hash: u64,
 }
 
 impl RenderedGlyphId {
@@ -103,7 +103,7 @@ impl RenderedGlyphId {
         line_width: f32,
         mode: RenderMode,
         subpixel_location: u8,
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Self {
         Self {
             glyph_index,
@@ -112,7 +112,7 @@ impl RenderedGlyphId {
             line_width: (line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
-            font_weight_bits: font_weight.map(|w| w.to_bits()).unwrap_or(0),
+            variation_hash: variations.hash(),
         }
     }
 }
@@ -189,7 +189,7 @@ impl TextContext {
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         self.0
             .borrow_mut()
-            .measure_font(paint.text.font_size, &paint.text.font_ids, paint.text.font_weight)
+            .measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
     }
 
     /// Returns the variation axes available for the specified font.
@@ -371,11 +371,11 @@ impl TextContextImpl {
         &self,
         font_size: f32,
         font_ids: &[Option<FontId>; 8],
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = font_ids.first() {
             if let Some(font) = self.font(*id) {
-                return Ok(font.metrics_with_variations(font_size, font_weight));
+                return Ok(font.metrics_with_variations(font_size, variations));
             }
         }
 
@@ -463,7 +463,7 @@ impl GlyphAtlas {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
@@ -486,7 +486,7 @@ impl GlyphAtlas {
                 line_width,
                 mode,
                 subpixel_location as u8,
-                font_weight,
+                variations,
             );
 
             let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
@@ -503,7 +503,7 @@ impl GlyphAtlas {
                         font_face,
                         glyph.glyph_id,
                         subpixel_location / 10.0,
-                        font_weight,
+                        variations,
                     )?;
                     glyph_cache_entry.insert_entry(result)
                 }
@@ -569,13 +569,11 @@ impl GlyphAtlas {
         font_face: &font::FontFaceRef<'_>,
         glyph_id: u16,
         _subpixel_x: f32,
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         #[cfg(feature = "swash")]
         if mode == RenderMode::Fill {
-            if let Some(result) =
-                self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, font_weight)?
-            {
+            if let Some(result) = self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, variations)? {
                 return Ok(Some(result));
             }
         }
@@ -584,10 +582,10 @@ impl GlyphAtlas {
 
         let (mut glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font.glyph(font_face, glyph_id, font_weight).map(|g| g.metrics.clone());
+            let maybe_glyph_metrics = font.glyph(font_face, glyph_id, variations).map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, font_weight),
+                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, variations),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -730,7 +728,7 @@ impl GlyphAtlas {
         font_size: f32,
         glyph_id: u16,
         subpixel_x: f32,
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         use swash::scale::{Render, Source, StrikeWith};
         use swash::zeno::Format;
@@ -743,8 +741,9 @@ impl GlyphAtlas {
         let image = {
             let mut scale_context = self.swash_scale_context.borrow_mut();
             let mut scaler_builder = scale_context.builder(font_ref).size(font_size).hint(true);
-            if let Some(weight) = font_weight {
-                scaler_builder = scaler_builder.variations(&[(*b"wght", weight)]);
+            let vars: Vec<([u8; 4], f32)> = variations.iter().map(|(tag, val)| (tag.to_be_bytes(), val)).collect();
+            if !vars.is_empty() {
+                scaler_builder = scaler_builder.variations(&vars);
             }
             let mut scaler = scaler_builder.build();
 
@@ -932,16 +931,16 @@ pub fn render_direct<T: Renderer>(
     stroke: &StrokeSettings,
     font_size: f32,
     mode: RenderMode,
-    font_weight: Option<f32>,
+    variations: &FontVariations,
 ) -> Result<(), ErrorKind> {
-    let face = font.face_ref_with_variations(font_weight);
+    let face = font.face_ref_with_variations(variations);
 
     for glyph in glyphs {
         let (glyph_rendering, scale) = {
             let scale = font.scale(font_size);
 
             let Some(glyph_rendering) =
-                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16, font_weight)
+                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16, variations)
             else {
                 continue;
             };

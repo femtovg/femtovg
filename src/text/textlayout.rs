@@ -6,7 +6,10 @@ use std::{
 use fnv::FnvHasher;
 use lru::LruCache;
 
-use crate::{paint::TextSettings, Align, Baseline, ErrorKind, FontId, Paint};
+use crate::{
+    paint::{FontVariations, TextSettings},
+    Align, Baseline, ErrorKind, FontId, Paint,
+};
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
@@ -38,7 +41,7 @@ pub(super) struct ShapingId {
     size: u32,
     word_hash: u64,
     font_ids: [Option<FontId>; 8],
-    font_weight_bits: u32,
+    variation_hash: u64,
 }
 
 impl ShapingId {
@@ -47,7 +50,7 @@ impl ShapingId {
         font_ids: [Option<FontId>; 8],
         word: &str,
         max_width: Option<f32>,
-        font_weight: Option<f32>,
+        variations: &FontVariations,
     ) -> Self {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
@@ -59,7 +62,7 @@ impl ShapingId {
             size: (font_size * 10.0).trunc() as u32,
             word_hash: hasher.finish(),
             font_ids,
-            font_weight_bits: font_weight.map(|w| w.to_bits()).unwrap_or(0),
+            variation_hash: variations.hash(),
         }
     }
 }
@@ -219,13 +222,13 @@ pub fn shape(
     text: &str,
     max_width: Option<f32>,
 ) -> Result<TextMetrics, ErrorKind> {
-    let font_weight = text_settings.font_weight;
+    let variations = &text_settings.font_variations;
     let id = ShapingId::new(
         text_settings.font_size,
         text_settings.font_ids,
         text,
         max_width,
-        font_weight,
+        variations,
     );
 
     if !context.shaping_run_cache.contains(&id) {
@@ -236,7 +239,7 @@ pub fn shape(
             text_settings.letter_spacing,
             text,
             max_width,
-            font_weight,
+            variations,
         );
         context.shaping_run_cache.put(id, metrics);
     }
@@ -257,7 +260,7 @@ fn shape_run(
     letter_spacing: f32,
     text: &str,
     max_width: Option<f32>,
-    font_weight: Option<f32>,
+    variations: &FontVariations,
 ) -> TextMetrics {
     let mut result = TextMetrics {
         x: 0.0,
@@ -299,7 +302,7 @@ fn shape_run(
         let mut byte_index = run.start;
 
         for mut word_txt in sub_text.split_word_bounds() {
-            let id = ShapingId::new(font_size, font_ids, word_txt, max_width, font_weight);
+            let id = ShapingId::new(font_size, font_ids, word_txt, max_width, variations);
 
             if !context.shaped_words_cache.contains(&id) {
                 let word = shape_word(
@@ -309,7 +312,7 @@ fn shape_run(
                     font_size,
                     &font_ids,
                     letter_spacing,
-                    font_weight,
+                    variations,
                 );
                 context.shaped_words_cache.put(id, word);
             }
@@ -345,7 +348,7 @@ fn shape_run(
                             }
 
                             let subword_txt = &word_txt[..bytes_included];
-                            let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width), font_weight);
+                            let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width), variations);
                             if !context.shaped_words_cache.contains(&id) {
                                 let subword = shape_word(
                                     subword_txt,
@@ -354,7 +357,7 @@ fn shape_run(
                                     font_size,
                                     &font_ids,
                                     letter_spacing,
-                                    font_weight,
+                                    variations,
                                 );
                                 context.shaped_words_cache.put(id, subword);
                             }
@@ -421,12 +424,12 @@ fn shape_word(
     font_size: f32,
     font_ids: &[Option<FontId>; 8],
     letter_spacing: f32,
-    font_weight: Option<f32>,
+    variations: &FontVariations,
 ) -> Result<ShapedWord, ErrorKind> {
     // find_font will call the closure with each font matching the provided style
     // until a font capable of shaping the word is found
     context.find_font(font_ids, |(font_id, font)| {
-        let font_face = font.face_ref_with_variations(font_weight);
+        let font_face = font.face_ref_with_variations(variations);
         let face = rustybuzz::Face::from_face(font_face.0.clone());
         // Call harfbuzz
         let output = {
@@ -472,7 +475,7 @@ fn shape_word(
                 offset_y: position.y_offset as f32 * scale,
             };
 
-            if let Some(glyph) = font.glyph(&font_face, g.glyph_id, font_weight) {
+            if let Some(glyph) = font.glyph(&font_face, g.glyph_id, variations) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
             }

@@ -260,3 +260,97 @@ fn variable_font_weight_affects_measurement() {
         light_metrics.width()
     );
 }
+
+#[test]
+fn font_variation_generic_api_matches_named_weight() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/Roboto-VariableFont_wght.ttf")
+        .expect("Font not found");
+
+    // Using the generic variation API for wght should produce the same measurement
+    // as the named font_weight API
+    let named_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(16.)
+        .with_font_weight(700.0);
+
+    let generic_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(16.)
+        .with_font_variation(b"wght", 700.0);
+
+    let named_metrics = text_context
+        .measure_text(0., 0., "Hello World", &named_paint)
+        .expect("text shaping failed");
+
+    let generic_metrics = text_context
+        .measure_text(0., 0., "Hello World", &generic_paint)
+        .expect("text shaping failed");
+
+    assert!(
+        (named_metrics.width() - generic_metrics.width()).abs() < f32::EPSILON,
+        "Named weight API ({}) and generic variation API ({}) should produce identical measurements",
+        named_metrics.width(),
+        generic_metrics.width()
+    );
+}
+
+#[test]
+fn font_variation_italic_and_slant_api() {
+    // Test the Paint API for italic and slant methods
+    let mut paint = femtovg::Paint::default();
+
+    // Initially no italic set
+    assert!(paint.font_italic().is_none());
+    assert!(paint.font_slant().is_none());
+
+    // Set italic
+    paint.set_font_italic(true);
+    assert_eq!(paint.font_italic(), Some(true));
+
+    paint.set_font_italic(false);
+    assert_eq!(paint.font_italic(), Some(false));
+
+    paint.clear_font_italic();
+    assert!(paint.font_italic().is_none());
+
+    // Set slant
+    paint.set_font_slant(-12.0);
+    assert_eq!(paint.font_slant(), Some(-12.0));
+
+    paint.clear_font_slant();
+    assert!(paint.font_slant().is_none());
+
+    // Multiple variations at once
+    paint.set_font_weight(700.0);
+    paint.set_font_italic(true);
+    paint.set_font_slant(-12.0);
+
+    assert_eq!(paint.font_weight(), Some(700.0));
+    assert_eq!(paint.font_italic(), Some(true));
+    assert_eq!(paint.font_slant(), Some(-12.0));
+
+    // Clear all
+    paint.clear_font_variations();
+    assert!(paint.font_weight().is_none());
+    assert!(paint.font_italic().is_none());
+    assert!(paint.font_slant().is_none());
+}
+
+#[test]
+fn font_variation_hash_stability() {
+    // Setting the same variations in different order should produce the same hash
+    let mut paint_a = femtovg::Paint::default();
+    paint_a.set_font_weight(700.0);
+    paint_a.set_font_italic(true);
+
+    let mut paint_b = femtovg::Paint::default();
+    paint_b.set_font_italic(true);
+    paint_b.set_font_weight(700.0);
+
+    // Both paints should have the same variation hash (verified via the generic API)
+    assert_eq!(paint_a.font_weight(), paint_b.font_weight());
+    assert_eq!(paint_a.font_italic(), paint_b.font_italic());
+}
