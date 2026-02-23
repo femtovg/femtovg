@@ -276,6 +276,7 @@ pub struct TextSettings {
     pub(crate) letter_spacing: f32,
     pub(crate) text_baseline: Baseline,
     pub(crate) text_align: Align,
+    pub(crate) font_weight: Option<f32>,
 }
 
 impl Default for TextSettings {
@@ -286,6 +287,7 @@ impl Default for TextSettings {
             letter_spacing: 0.0,
             text_baseline: Baseline::default(),
             text_align: Align::default(),
+            font_weight: None,
         }
     }
 }
@@ -860,6 +862,39 @@ impl Paint {
     pub fn with_text_align(mut self, align: Align) -> Self {
         self.set_text_align(align);
         self
+    }
+
+    /// Returns the current font weight override for variable fonts.
+    ///
+    /// Returns `None` if no weight override is set, meaning the font's default weight is used.
+    #[inline]
+    pub fn font_weight(&self) -> Option<f32> {
+        self.text.font_weight
+    }
+
+    /// Sets the font weight for variable fonts.
+    ///
+    /// Common values: 100 (Thin), 300 (Light), 400 (Regular), 700 (Bold), 900 (Black).
+    /// This only affects variable fonts; for static fonts it has no effect.
+    #[inline]
+    pub fn set_font_weight(&mut self, weight: f32) {
+        self.text.font_weight = Some(weight);
+    }
+
+    /// Returns the paint with the font weight set to the specified value.
+    ///
+    /// Common values: 100 (Thin), 300 (Light), 400 (Regular), 700 (Bold), 900 (Black).
+    /// This only affects variable fonts; for static fonts it has no effect.
+    #[inline]
+    pub fn with_font_weight(mut self, weight: f32) -> Self {
+        self.set_font_weight(weight);
+        self
+    }
+
+    /// Clears the font weight override, reverting to the font's default weight.
+    #[inline]
+    pub fn clear_font_weight(&mut self) {
+        self.text.font_weight = None;
     }
 
     /// Returns the current fill rule for filling paths.

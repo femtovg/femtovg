@@ -24,7 +24,7 @@ fn run<W: WindowSurface + 'static>(
     window: Arc<Window>,
 ) -> helpers::Callbacks {
     canvas
-        .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
+        .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
         .expect("Cannot add font");
 
     let start = Instant::now();

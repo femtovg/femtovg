@@ -15,8 +15,8 @@ mod atlas;
 pub use atlas::Atlas;
 
 mod font;
-pub use font::FontMetrics;
 use font::{Font, GlyphRendering};
+pub use font::{FontMetrics, VariationAxisInfo};
 
 #[cfg(feature = "textlayout")]
 mod textlayout;
@@ -92,6 +92,7 @@ pub struct RenderedGlyphId {
     line_width: u32,
     render_mode: RenderMode,
     subpixel_location: u8,
+    font_weight_bits: u32,
 }
 
 impl RenderedGlyphId {
@@ -102,6 +103,7 @@ impl RenderedGlyphId {
         line_width: f32,
         mode: RenderMode,
         subpixel_location: u8,
+        font_weight: Option<f32>,
     ) -> Self {
         Self {
             glyph_index,
@@ -110,6 +112,7 @@ impl RenderedGlyphId {
             line_width: (line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
+            font_weight_bits: font_weight.map(|w| w.to_bits()).unwrap_or(0),
         }
     }
 }
@@ -186,7 +189,17 @@ impl TextContext {
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
         self.0
             .borrow_mut()
-            .measure_font(paint.text.font_size, &paint.text.font_ids)
+            .measure_font(paint.text.font_size, &paint.text.font_ids, paint.text.font_weight)
+    }
+
+    /// Returns the variation axes available for the specified font.
+    ///
+    /// For variable fonts, this returns information about each axis (e.g. weight, width).
+    /// For static fonts, this returns an empty vector.
+    pub fn font_variation_axes(&self, font_id: FontId) -> Result<Vec<VariationAxisInfo>, ErrorKind> {
+        let ctx = RefCell::borrow(&self.0);
+        let font = ctx.font(font_id).ok_or(ErrorKind::NoFontFound)?;
+        Ok(font.variation_axes())
     }
 }
 
@@ -354,10 +367,15 @@ impl TextContextImpl {
         self.shaped_words_cache.clear();
     }
 
-    pub fn measure_font(&self, font_size: f32, font_ids: &[Option<FontId>; 8]) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(
+        &self,
+        font_size: f32,
+        font_ids: &[Option<FontId>; 8],
+        font_weight: Option<f32>,
+    ) -> Result<FontMetrics, ErrorKind> {
         if let Some(Some(id)) = font_ids.first() {
             if let Some(font) = self.font(*id) {
-                return Ok(font.metrics(font_size));
+                return Ok(font.metrics_with_variations(font_size, font_weight));
             }
         }
 
@@ -434,6 +452,7 @@ impl std::fmt::Debug for GlyphAtlas {
 }
 
 impl GlyphAtlas {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_atlas<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
@@ -444,6 +463,7 @@ impl GlyphAtlas {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
+        font_weight: Option<f32>,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
@@ -466,6 +486,7 @@ impl GlyphAtlas {
                 line_width,
                 mode,
                 subpixel_location as u8,
+                font_weight,
             );
 
             let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
@@ -482,6 +503,7 @@ impl GlyphAtlas {
                         font_face,
                         glyph.glyph_id,
                         subpixel_location / 10.0,
+                        font_weight,
                     )?;
                     glyph_cache_entry.insert_entry(result)
                 }
@@ -536,6 +558,7 @@ impl GlyphAtlas {
 
     // Renders the glyph into the atlas and returns the RenderedGlyph struct for it.
     // Returns Ok(None) if there exists no path or image for the glyph in the font (missing glyph).
+    #[allow(clippy::too_many_arguments)]
     fn render_glyph<T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
@@ -546,10 +569,13 @@ impl GlyphAtlas {
         font_face: &font::FontFaceRef<'_>,
         glyph_id: u16,
         _subpixel_x: f32,
+        font_weight: Option<f32>,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         #[cfg(feature = "swash")]
         if mode == RenderMode::Fill {
-            if let Some(result) = self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x)? {
+            if let Some(result) =
+                self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, font_weight)?
+            {
                 return Ok(Some(result));
             }
         }
@@ -558,10 +584,10 @@ impl GlyphAtlas {
 
         let (mut glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font.glyph(font_face, glyph_id).map(|g| g.metrics.clone());
+            let maybe_glyph_metrics = font.glyph(font_face, glyph_id, font_weight).map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16),
+                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, font_weight),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -704,6 +730,7 @@ impl GlyphAtlas {
         font_size: f32,
         glyph_id: u16,
         subpixel_x: f32,
+        font_weight: Option<f32>,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         use swash::scale::{Render, Source, StrikeWith};
         use swash::zeno::Format;
@@ -715,7 +742,11 @@ impl GlyphAtlas {
 
         let image = {
             let mut scale_context = self.swash_scale_context.borrow_mut();
-            let mut scaler = scale_context.builder(font_ref).size(font_size).hint(true).build();
+            let mut scaler_builder = scale_context.builder(font_ref).size(font_size).hint(true);
+            if let Some(weight) = font_weight {
+                scaler_builder = scaler_builder.variations(&[(*b"wght", weight)]);
+            }
+            let mut scaler = scaler_builder.build();
 
             Render::new(&[
                 Source::ColorOutline(0),
@@ -891,6 +922,7 @@ impl GlyphAtlas {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
     font: &Font,
@@ -900,14 +932,16 @@ pub fn render_direct<T: Renderer>(
     stroke: &StrokeSettings,
     font_size: f32,
     mode: RenderMode,
+    font_weight: Option<f32>,
 ) -> Result<(), ErrorKind> {
-    let face = font.face_ref();
+    let face = font.face_ref_with_variations(font_weight);
 
     for glyph in glyphs {
         let (glyph_rendering, scale) = {
             let scale = font.scale(font_size);
 
-            let Some(glyph_rendering) = font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16)
+            let Some(glyph_rendering) =
+                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16, font_weight)
             else {
                 continue;
             };

@@ -149,7 +149,7 @@ fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
 
     canvas
-        .add_font("examples/assets/Roboto-Regular.ttf")
+        .add_font("examples/assets/Roboto-VariableFont_wght.ttf")
         .expect("Font not found");
 
     let paint = Paint::color(Color::black()).with_text_baseline(Baseline::Top);
@@ -166,7 +166,7 @@ fn text_measure_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
     let font_id = text_context
-        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .add_font_file("examples/assets/Roboto-VariableFont_wght.ttf")
         .expect("Font not found");
 
     let test_paint = femtovg::Paint::default().with_font(&[font_id]).with_font_size(16.);
@@ -184,7 +184,7 @@ fn font_measure_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
     let font_id = text_context
-        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .add_font_file("examples/assets/Roboto-VariableFont_wght.ttf")
         .expect("Font not found");
 
     let test_paint = femtovg::Paint::default().with_font(&[font_id]).with_font_size(16.);
@@ -193,7 +193,7 @@ fn font_measure_without_canvas() {
         .measure_font(&test_paint)
         .expect("font measuring failed unexpectedly");
 
-    assert_eq!(metrics.ascender().ceil(), 17.);
+    assert_eq!(metrics.ascender().ceil(), 15.);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn break_text_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
     let font_id = text_context
-        .add_font_file("examples/assets/Roboto-Regular.ttf")
+        .add_font_file("examples/assets/Roboto-VariableFont_wght.ttf")
         .expect("Font not found");
 
     let test_paint = femtovg::Paint::default().with_font(&[font_id]).with_font_size(16.);
@@ -218,5 +218,45 @@ fn break_text_without_canvas() {
             .map(|range| &text[range.start..range.end])
             .collect::<Vec<_>>(),
         vec!["Multiple ", "Lines ", "Broken"]
+    );
+}
+
+#[test]
+fn variable_font_weight_affects_measurement() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/Roboto-VariableFont_wght.ttf")
+        .expect("Font not found");
+
+    // Verify the font has a wght axis
+    let axes = text_context.font_variation_axes(font_id).unwrap();
+    let wght_axis = axes.iter().find(|a| &a.tag == b"wght");
+    assert!(wght_axis.is_some(), "Font should have a wght axis");
+
+    let light_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(16.)
+        .with_font_weight(300.0);
+
+    let bold_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(16.)
+        .with_font_weight(700.0);
+
+    let light_metrics = text_context
+        .measure_text(0., 0., "Hello World", &light_paint)
+        .expect("text shaping failed");
+
+    let bold_metrics = text_context
+        .measure_text(0., 0., "Hello World", &bold_paint)
+        .expect("text shaping failed");
+
+    // Bold text should be wider than light text
+    assert!(
+        bold_metrics.width() > light_metrics.width(),
+        "Bold ({}) should be wider than light ({})",
+        bold_metrics.width(),
+        light_metrics.width()
     );
 }

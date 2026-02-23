@@ -72,17 +72,11 @@ enum State {
     Win { time: f32 },
 }
 
-struct Fonts {
-    regular: FontId,
-    bold: FontId,
-    light: FontId,
-}
-
 struct Game {
     state: State,
     balls: Vec<Ball>,
     logo_image_id: ImageId,
-    fonts: Fonts,
+    font: FontId,
     paddle_rect: Rect,
     size: Size,
     bricks: Vec<Brick>,
@@ -104,17 +98,9 @@ impl Game {
 
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 
-        let fonts = Fonts {
-            regular: canvas
-                .add_font_mem(&resource!("examples/assets/Roboto-Regular.ttf"))
-                .expect("Cannot add font"),
-            bold: canvas
-                .add_font_mem(&resource!("examples/assets/Roboto-Bold.ttf"))
-                .expect("Cannot add font"),
-            light: canvas
-                .add_font_mem(&resource!("examples/assets/Roboto-Light.ttf"))
-                .expect("Cannot add font"),
-        };
+        let font = canvas
+            .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
+            .expect("Cannot add font");
 
         let mut game = Self {
             state: State::TitleScreen,
@@ -125,7 +111,7 @@ impl Game {
                 on_paddle: true,
             }],
             logo_image_id,
-            fonts,
+            font,
             paddle_rect,
             size: Size::new(canvas.width() as f32, canvas.height() as f32),
             bricks: Vec::new(),
@@ -545,7 +531,8 @@ impl Game {
         // title
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
-            .with_font(&[self.fonts.bold])
+            .with_font(&[self.font])
+            .with_font_weight(700.0)
             .with_font_size(80.0)
             .with_line_width(4.0);
         let _ = canvas.stroke_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
@@ -556,7 +543,7 @@ impl Game {
         // Info
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
-            .with_font(&[self.fonts.regular])
+            .with_font(&[self.font])
             .with_font_size(16.0);
         let text = "Click anywhere to START.";
         let _ = canvas.fill_text(self.size.width / 2.0, (self.size.height / 2.0) + 40.0, text, &paint);
@@ -645,7 +632,7 @@ impl Game {
 
         // powerups
         for powerup in &self.powerups {
-            powerup.draw(canvas, &self.fonts);
+            powerup.draw(canvas, self.font);
         }
 
         self.draw_bricks(canvas);
@@ -653,13 +640,15 @@ impl Game {
         // lives
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Right)
-            .with_font(&[self.fonts.bold])
+            .with_font(&[self.font])
+            .with_font_weight(700.0)
             .with_font_size(22.0);
         let _ = canvas.fill_text(self.size.width - 20.0, 25.0, format!("Lives: {}", self.lives), &paint);
 
         // score
         let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_font(&[self.fonts.bold])
+            .with_font(&[self.font])
+            .with_font_weight(700.0)
             .with_font_size(22.0);
         let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint);
     }
@@ -708,7 +697,8 @@ impl Game {
         // title
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
-            .with_font(&[self.fonts.bold])
+            .with_font(&[self.font])
+            .with_font_weight(700.0)
             .with_font_size(80.0)
             .with_line_width(4.0);
 
@@ -732,7 +722,7 @@ impl Game {
         // Info
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
-            .with_font(&[self.fonts.regular])
+            .with_font(&[self.font])
             .with_font_size(16.0);
         let _ = canvas.fill_text(
             self.size.width / 2.0,
@@ -773,7 +763,7 @@ struct Powerup {
 }
 
 impl Powerup {
-    fn draw<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>, fonts: &Fonts) {
+    fn draw<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>, font: FontId) {
         let mut path = Path::new();
         path.rounded_rect(
             self.rect.origin.x,
@@ -788,7 +778,8 @@ impl Powerup {
         let text_paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
             .with_text_baseline(Baseline::Middle)
-            .with_font(&[fonts.light])
+            .with_font(&[font])
+            .with_font_weight(300.0)
             .with_font_size(16.0);
         let _ = canvas.fill_text(
             self.rect.center().x,

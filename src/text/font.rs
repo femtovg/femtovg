@@ -18,6 +18,23 @@ pub(crate) struct FontFaceRef<'a>(pub(crate) ttf_parser::Face<'a>);
 #[cfg(not(feature = "textlayout"))]
 pub(crate) struct FontFaceRef<'a>(std::marker::PhantomData<&'a ()>);
 
+/// Information about a font variation axis (e.g. weight, width, optical size).
+#[derive(Clone, Debug)]
+pub struct VariationAxisInfo {
+    /// Four-byte axis tag (e.g. `*b"wght"` for weight).
+    pub tag: [u8; 4],
+    /// Minimum value for this axis.
+    pub min_value: f32,
+    /// Default value for this axis.
+    pub def_value: f32,
+    /// Maximum value for this axis.
+    pub max_value: f32,
+    /// Name table ID for this axis's name.
+    pub name_id: u16,
+    /// Whether this axis is hidden from the user.
+    pub hidden: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct GlyphMetrics {
     pub width: f32,
@@ -170,12 +187,20 @@ impl fmt::Debug for Font {
     }
 }
 
+/// Key for the glyph cache: (glyph_id, font_weight_bits).
+/// `font_weight_bits` is the bit representation of the font weight, or 0 for the default.
+type GlyphCacheKey = (u16, u32);
+
+fn font_weight_bits(font_weight: Option<f32>) -> u32 {
+    font_weight.map(|w| w.to_bits()).unwrap_or(0)
+}
+
 pub struct Font {
     data: Box<dyn AsRef<[u8]>>,
     face_index: u32,
     units_per_em: u16,
     metrics: FontMetrics,
-    glyphs: RefCell<FnvHashMap<u16, Glyph>>,
+    glyphs: RefCell<FnvHashMap<GlyphCacheKey, Glyph>>,
     #[cfg(all(feature = "swash", not(feature = "textlayout")))]
     swash_scale_context: Rc<RefCell<swash::scale::ScaleContext>>,
 }
@@ -315,6 +340,22 @@ impl Font {
         &self.swash_scale_context
     }
 
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn face_ref_with_variations(&self, font_weight: Option<f32>) -> FontFaceRef<'_> {
+        let mut face = self.face_ref();
+        if let Some(weight) = font_weight {
+            face.0.set_variation(ttf_parser::Tag::from_bytes(b"wght"), weight);
+        }
+        face
+    }
+
+    #[cfg(not(feature = "textlayout"))]
+    pub(crate) fn face_ref_with_variations(&self, _font_weight: Option<f32>) -> FontFaceRef<'_> {
+        // Without ttf-parser, face is a phantom type. Variations are applied
+        // through the swash scaler in the glyph() method instead.
+        self.face_ref()
+    }
+
     pub fn metrics(&self, size: f32) -> FontMetrics {
         let mut metrics = self.metrics;
 
@@ -323,13 +364,117 @@ impl Font {
         metrics
     }
 
+    #[cfg(feature = "textlayout")]
+    pub fn metrics_with_variations(&self, size: f32, font_weight: Option<f32>) -> FontMetrics {
+        if font_weight.is_none() {
+            return self.metrics(size);
+        }
+
+        let face = self.face_ref_with_variations(font_weight);
+        let mut metrics = FontMetrics {
+            ascender: face.0.ascender() as f32,
+            descender: face.0.descender() as f32,
+            height: face.0.height() as f32,
+            ..self.metrics
+        };
+        metrics.scale(self.scale(size));
+        metrics
+    }
+
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    pub fn metrics_with_variations(&self, size: f32, font_weight: Option<f32>) -> FontMetrics {
+        if font_weight.is_none() {
+            return self.metrics(size);
+        }
+        let Some(font_ref) = self.swash_font_ref() else {
+            return self.metrics(size);
+        };
+        let settings: Vec<swash::Setting<f32>> = font_weight
+            .map(|w| swash::Setting {
+                tag: swash::tag_from_bytes(b"wght"),
+                value: w,
+            })
+            .into_iter()
+            .collect();
+        let coords: Vec<swash::NormalizedCoord> = font_ref.variations().normalized_coords(settings).collect();
+        let swash_metrics = font_ref.metrics(&coords);
+        let mut metrics = FontMetrics {
+            ascender: swash_metrics.ascent,
+            descender: -swash_metrics.descent,
+            height: swash_metrics.ascent + swash_metrics.descent + swash_metrics.leading,
+            ..self.metrics
+        };
+        metrics.scale(self.scale(size));
+        metrics
+    }
+
+    #[cfg(not(any(feature = "textlayout", feature = "swash")))]
+    pub fn metrics_with_variations(&self, size: f32, _font_weight: Option<f32>) -> FontMetrics {
+        self.metrics(size)
+    }
+
     pub fn scale(&self, size: f32) -> f32 {
         size / self.units_per_em as f32
     }
 
     #[cfg(feature = "textlayout")]
-    pub(crate) fn glyph(&self, face: &FontFaceRef<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
-        if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(codepoint) {
+    pub fn variation_axes(&self) -> Vec<VariationAxisInfo> {
+        let face = self.face_ref();
+        let mut axes = Vec::new();
+        if let Some(table) = face.0.tables().fvar {
+            for axis in table.axes {
+                axes.push(VariationAxisInfo {
+                    tag: axis.tag.to_bytes(),
+                    min_value: axis.min_value,
+                    def_value: axis.def_value,
+                    max_value: axis.max_value,
+                    name_id: axis.name_id,
+                    hidden: axis.hidden,
+                });
+            }
+        }
+        axes
+    }
+
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    pub fn variation_axes(&self) -> Vec<VariationAxisInfo> {
+        let Some(font_ref) = self.swash_font_ref() else {
+            return Vec::new();
+        };
+        font_ref
+            .variations()
+            .map(|v| {
+                let name_id = match v.name_id() {
+                    swash::StringId::Other(id) => id,
+                    _ => 0,
+                };
+                VariationAxisInfo {
+                    tag: v.tag().to_be_bytes(),
+                    min_value: v.min_value(),
+                    def_value: v.default_value(),
+                    max_value: v.max_value(),
+                    name_id,
+                    hidden: v.is_hidden(),
+                }
+            })
+            .collect()
+    }
+
+    #[cfg(not(any(feature = "textlayout", feature = "swash")))]
+    pub fn variation_axes(&self) -> Vec<VariationAxisInfo> {
+        Vec::new()
+    }
+
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn glyph(
+        &self,
+        face: &FontFaceRef<'_>,
+        codepoint: u16,
+        font_weight: Option<f32>,
+    ) -> Option<Ref<'_, Glyph>> {
+        let cache_key: GlyphCacheKey = (codepoint, font_weight_bits(font_weight));
+
+        if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(cache_key) {
             let mut path = Path::new();
 
             let id = GlyphId(codepoint);
@@ -370,25 +515,39 @@ impl Font {
             }
         }
 
-        Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&codepoint)).ok()
+        Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&cache_key)).ok()
     }
 
     #[cfg(not(any(feature = "textlayout", feature = "swash")))]
-    pub(crate) fn glyph(&self, _face: &FontFaceRef<'_>, _codepoint: u16) -> Option<Ref<'_, Glyph>> {
+    pub(crate) fn glyph(
+        &self,
+        _face: &FontFaceRef<'_>,
+        _codepoint: u16,
+        _font_weight: Option<f32>,
+    ) -> Option<Ref<'_, Glyph>> {
         None
     }
 
     #[cfg(all(feature = "swash", not(feature = "textlayout")))]
-    pub(crate) fn glyph(&self, _face: &FontFaceRef<'_>, codepoint: u16) -> Option<Ref<'_, Glyph>> {
-        if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(codepoint) {
+    pub(crate) fn glyph(
+        &self,
+        _face: &FontFaceRef<'_>,
+        codepoint: u16,
+        font_weight: Option<f32>,
+    ) -> Option<Ref<'_, Glyph>> {
+        let cache_key: GlyphCacheKey = (codepoint, font_weight_bits(font_weight));
+        if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(cache_key) {
             let font_ref = self.swash_font_ref()?;
 
             let mut scale_context = self.swash_scale_context().borrow_mut();
-            let mut scaler = scale_context
+            let mut scaler_builder = scale_context
                 .builder(font_ref)
                 .size(self.units_per_em as f32)
-                .hint(false)
-                .build();
+                .hint(false);
+            if let Some(weight) = font_weight {
+                scaler_builder = scaler_builder.variations(&[(*b"wght", weight)]);
+            }
+            let mut scaler = scaler_builder.build();
 
             let maybe_glyph = if let Some(outline) = scaler.scale_outline(codepoint) {
                 use swash::zeno::{Command, PathData};
@@ -421,7 +580,7 @@ impl Font {
             }
         }
 
-        Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&codepoint)).ok()
+        Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&cache_key)).ok()
     }
 
     #[cfg(feature = "textlayout")]
@@ -430,6 +589,7 @@ impl Font {
         face: &FontFaceRef<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
+        font_weight: Option<f32>,
     ) -> Option<GlyphRendering<'_>> {
         #[cfg(feature = "image-loading")]
         if let Some(image) =
@@ -442,7 +602,7 @@ impl Font {
             return Some(GlyphRendering::RenderAsImage(image));
         }
 
-        self.glyph(face, codepoint).and_then(|glyph| {
+        self.glyph(face, codepoint, font_weight).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
                 .ok()
                 .map(GlyphRendering::RenderAsPath)
@@ -455,8 +615,9 @@ impl Font {
         _face: &FontFaceRef<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
+        font_weight: Option<f32>,
     ) -> Option<GlyphRendering<'_>> {
-        self.glyph(_face, codepoint).and_then(|glyph| {
+        self.glyph(_face, codepoint, font_weight).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
                 .ok()
                 .map(GlyphRendering::RenderAsPath)
