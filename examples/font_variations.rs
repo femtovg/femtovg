@@ -13,7 +13,7 @@ use helpers::WindowSurface;
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    helpers::start(800, 600, "Variable Font Weight", true);
+    helpers::start(800, 700, "Font Variations", true);
     #[cfg(target_arch = "wasm32")]
     helpers::start();
 }
@@ -24,10 +24,11 @@ fn run<W: WindowSurface + 'static>(
     window: Arc<Window>,
 ) -> helpers::Callbacks {
     let font_id = canvas
-        .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
+        .add_font_mem(&resource!("examples/assets/RobotoFlex-VariableFont.ttf"))
         .expect("Cannot add font");
 
     let mut weight: f32 = 400.0;
+    let mut slant: f32 = 0.0;
 
     helpers::Callbacks {
         window_event: Box::new(move |event, event_loop| match event {
@@ -46,8 +47,10 @@ fn run<W: WindowSurface + 'static>(
                 ..
             } => {
                 match keycode {
-                    KeyCode::ArrowUp => weight = (weight + 50.0).min(900.0),
+                    KeyCode::ArrowUp => weight = (weight + 50.0).min(1000.0),
                     KeyCode::ArrowDown => weight = (weight - 50.0).max(100.0),
+                    KeyCode::ArrowLeft => slant = (slant - 1.0).max(-10.0),
+                    KeyCode::ArrowRight => slant = (slant + 1.0).min(0.0),
                     _ => {}
                 }
                 window.request_redraw();
@@ -58,7 +61,7 @@ fn run<W: WindowSurface + 'static>(
                 canvas.set_size(size.width, size.height, dpi_factor as f32);
                 canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.95, 0.95, 0.95));
 
-                draw_weight_demo(&mut canvas, font_id, weight);
+                draw_demo(&mut canvas, font_id, weight, slant);
 
                 surface.present(&mut canvas);
             }
@@ -68,7 +71,7 @@ fn run<W: WindowSurface + 'static>(
     }
 }
 
-fn draw_weight_demo<T: Renderer>(canvas: &mut Canvas<T>, font_id: femtovg::FontId, current_weight: f32) {
+fn draw_demo<T: Renderer>(canvas: &mut Canvas<T>, font_id: femtovg::FontId, weight: f32, slant: f32) {
     let x = 40.0;
     let mut y = 40.0;
 
@@ -77,57 +80,92 @@ fn draw_weight_demo<T: Renderer>(canvas: &mut Canvas<T>, font_id: femtovg::FontI
         .with_font(&[font_id])
         .with_font_size(28.0)
         .with_font_weight(700.0);
-    let _ = canvas.fill_text(x, y, "Variable Font Weight Demo", &title_paint);
-    y += 50.0;
+    let _ = canvas.fill_text(x, y, "Font Variations Demo", &title_paint);
+    y += 40.0;
 
     // Instructions
     let hint_paint = Paint::color(Color::rgbf(0.5, 0.5, 0.5))
         .with_font(&[font_id])
-        .with_font_size(16.0);
-    let _ = canvas.fill_text(x, y, "Press Up/Down arrow keys to change weight", &hint_paint);
-    y += 50.0;
+        .with_font_size(15.0);
+    let _ = canvas.fill_text(x, y, "Up/Down: weight    Left/Right: slant", &hint_paint);
+    y += 40.0;
 
-    // Current dynamic weight
-    let label = format!("Current weight: {}", current_weight as u32);
+    // Current values
+    let label = format!("Weight: {}   Slant: {}", weight as i32, slant as i32);
     let dynamic_paint = Paint::color(Color::rgbf(0.0, 0.4, 0.8))
         .with_font(&[font_id])
-        .with_font_size(36.0)
-        .with_font_weight(current_weight);
+        .with_font_size(32.0)
+        .with_font_weight(weight)
+        .with_font_slant(slant);
     let _ = canvas.fill_text(x, y, &label, &dynamic_paint);
-    y += 60.0;
+    y += 50.0;
 
-    // Sample text at current weight
+    // Sample text with both variations
     let sample_paint = Paint::color(Color::black())
         .with_font(&[font_id])
-        .with_font_size(24.0)
-        .with_font_weight(current_weight);
+        .with_font_size(22.0)
+        .with_font_weight(weight)
+        .with_font_slant(slant);
     let _ = canvas.fill_text(x, y, "The quick brown fox jumps over the lazy dog", &sample_paint);
-    y += 60.0;
+    y += 50.0;
 
-    // Fixed weight spectrum
+    // --- Weight spectrum ---
+    let section_paint = Paint::color(Color::rgbf(0.3, 0.3, 0.3))
+        .with_font(&[font_id])
+        .with_font_size(18.0)
+        .with_font_weight(600.0);
+    let _ = canvas.fill_text(x, y, "Weight axis (wght)", &section_paint);
+    y += 30.0;
+
     let weights: &[(f32, &str)] = &[
         (100.0, "Thin 100"),
-        (200.0, "ExtraLight 200"),
         (300.0, "Light 300"),
         (400.0, "Regular 400"),
         (500.0, "Medium 500"),
-        (600.0, "SemiBold 600"),
         (700.0, "Bold 700"),
-        (800.0, "ExtraBold 800"),
         (900.0, "Black 900"),
     ];
 
     for &(w, label) in weights {
-        let color = if (w - current_weight).abs() < 1.0 {
+        let color = if (w - weight).abs() < 25.0 {
             Color::rgbf(0.0, 0.4, 0.8)
         } else {
             Color::black()
         };
         let paint = Paint::color(color)
             .with_font(&[font_id])
-            .with_font_size(22.0)
-            .with_font_weight(w);
+            .with_font_size(20.0)
+            .with_font_weight(w)
+            .with_font_slant(slant);
         let _ = canvas.fill_text(x, y, label, &paint);
-        y += 34.0;
+        y += 30.0;
+    }
+
+    y += 10.0;
+
+    // --- Slant spectrum ---
+    let _ = canvas.fill_text(x, y, "Slant axis (slnt)", &section_paint);
+    y += 30.0;
+
+    let slants: &[(f32, &str)] = &[
+        (0.0, "Upright (0)"),
+        (-3.0, "Slight slant (-3)"),
+        (-6.0, "Medium slant (-6)"),
+        (-10.0, "Full slant (-10)"),
+    ];
+
+    for &(s, label) in slants {
+        let color = if (s - slant).abs() < 0.5 {
+            Color::rgbf(0.0, 0.4, 0.8)
+        } else {
+            Color::black()
+        };
+        let paint = Paint::color(color)
+            .with_font(&[font_id])
+            .with_font_size(20.0)
+            .with_font_weight(weight)
+            .with_font_slant(s);
+        let _ = canvas.fill_text(x, y, label, &paint);
+        y += 30.0;
     }
 }

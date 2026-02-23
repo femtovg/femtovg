@@ -99,7 +99,7 @@ impl Game {
         let paddle_rect = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 20.0));
 
         let font = canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
+            .add_font_mem(&resource!("examples/assets/RobotoFlex-VariableFont.ttf"))
             .expect("Cannot add font");
 
         let mut game = Self {

@@ -39,7 +39,7 @@ fn run<W: WindowSurface + 'static>(
 ) -> helpers::Callbacks {
     let fonts = Fonts {
         regular: canvas
-            .add_font_mem(&resource!("examples/assets/Roboto-VariableFont_wght.ttf"))
+            .add_font_mem(&resource!("examples/assets/RobotoFlex-VariableFont.ttf"))
             .expect("Cannot add font"),
         icons: canvas
             .add_font_mem(&resource!("examples/assets/entypo.ttf"))

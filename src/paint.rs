@@ -1027,12 +1027,17 @@ impl Paint {
     /// Sets the font italic for variable fonts.
     ///
     /// `true` sets `ital=1` (italic), `false` sets `ital=0` (upright).
-    /// This only affects variable fonts with an `ital` axis.
+    /// Also sets the `slnt` axis as a fallback (`-12` for italic, `0` for upright),
+    /// so fonts with only a `slnt` axis (no `ital`) will still render slanted.
+    /// An explicit `set_font_slant()` call after this will override the fallback value.
     #[inline]
     pub fn set_font_italic(&mut self, italic: bool) {
         self.text
             .font_variations
             .set(FontVariations::tag_to_u32(b"ital"), if italic { 1.0 } else { 0.0 });
+        self.text
+            .font_variations
+            .set(FontVariations::tag_to_u32(b"slnt"), if italic { -12.0 } else { 0.0 });
     }
 
     /// Returns the paint with the font italic set to the specified value.
@@ -1042,10 +1047,11 @@ impl Paint {
         self
     }
 
-    /// Clears the font italic override.
+    /// Clears the font italic override, removing both `ital` and `slnt` axes.
     #[inline]
     pub fn clear_font_italic(&mut self) {
         self.text.font_variations.remove(FontVariations::tag_to_u32(b"ital"));
+        self.text.font_variations.remove(FontVariations::tag_to_u32(b"slnt"));
     }
 
     // --- Font slant (slnt axis) ---
