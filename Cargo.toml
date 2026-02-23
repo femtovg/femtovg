@@ -60,7 +60,7 @@ swash = ["dep:swash"]
 [dev-dependencies]
 winit = { version = "0.30.12" }
 euclid = "0.22.3"
-rand = "0.8"
+rand = "0.10"
 usvg = { version = "0.47.0" }
 instant = { version = "0.1", features = ["now"] }
 resource = "0.6.1"
