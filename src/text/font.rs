@@ -240,16 +240,18 @@ impl Font {
 
         let is_regular = weight == 400 && matches!(style, swash::Style::Normal) && stretch == swash::Stretch::NORMAL;
 
-        let width: u16 = match stretch.raw() {
-            0 => 1,   // UltraCondensed
-            25 => 2,  // ExtraCondensed
-            50 => 3,  // Condensed
-            75 => 4,  // SemiCondensed
-            100 => 5, // Normal
-            125 => 6, // SemiExpanded
-            150 => 7, // Expanded
-            200 => 8, // ExtraExpanded
-            300 => 9, // UltraExpanded
+        // Map swash::Stretch to usWidthClass values as per
+        // https://learn.microsoft.com/en-us/typography/opentype/spec/os2#uswidthclass
+        let width: u16 = match stretch {
+            swash::Stretch::ULTRA_CONDENSED => 1,
+            swash::Stretch::EXTRA_CONDENSED => 2,
+            swash::Stretch::CONDENSED => 3,
+            swash::Stretch::SEMI_CONDENSED => 4,
+            swash::Stretch::NORMAL => 5,
+            swash::Stretch::SEMI_EXPANDED => 6,
+            swash::Stretch::EXPANDED => 7,
+            swash::Stretch::EXTRA_EXPANDED => 8,
+            swash::Stretch::ULTRA_EXPANDED => 9,
             _ => 5,
         };
 
