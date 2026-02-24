@@ -258,6 +258,8 @@ impl Font {
         let metrics = FontMetrics {
             ascender: swash_metrics.ascent,
             descender: -swash_metrics.descent,
+            // swash ascent and descent are both positive (distance from baseline),
+            // unlike ttf-parser where descent is negative, so this is a sum not a difference.
             height: swash_metrics.ascent + swash_metrics.descent + swash_metrics.leading,
             flags: FontFlags::new(is_regular, is_italic, is_bold, is_oblique, is_variable),
             weight,
