@@ -183,6 +183,7 @@ pub enum PaintFlavor {
         center: Position,
         colors: GradientColors,
     },
+    CustomFragmentShader(String),
 }
 
 // Convenience method to fetch the GradientColors out of a PaintFlavor
@@ -207,6 +208,7 @@ impl PaintFlavor {
             Self::ConicGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
+            Self::CustomFragmentShader(_) => {}
         }
     }
 
@@ -608,6 +610,11 @@ impl Paint {
             center: Position { x: cx, y: cy },
             colors: GradientColors::from_stops(stops),
         })
+    }
+
+    /// Creates a brush from custom shader code.
+    pub fn custom_fragment_shader(shader: String) -> Self {
+        Self::with_flavor(PaintFlavor::CustomFragmentShader(shader))
     }
 
     /// Sets the color of the paint.

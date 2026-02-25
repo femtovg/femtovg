@@ -208,7 +208,7 @@ impl Vertex {
 /// Represents different types of shaders used by the renderer.
 ///
 /// The default value is `FillGradient`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub enum ShaderType {
     /// Fill gradient shader.
     #[default]
@@ -231,11 +231,13 @@ pub enum ShaderType {
     FillGradientConic,
     /// Fill image conic gradient shader.
     FillImageGradientConic,
+    /// Fill via custom fragment shader code.
+    CustomFragmentShader(String),
 }
 
 impl ShaderType {
     /// Convert the shader type to a u8 value.
-    pub fn to_u8(self) -> u8 {
+    pub fn to_u8(&self) -> u8 {
         match self {
             Self::FillGradient => 0,
             Self::FillImage => 1,
@@ -247,11 +249,12 @@ impl ShaderType {
             Self::FillColorUnclipped => 7,
             Self::FillGradientConic => 8,
             Self::FillImageGradientConic => 9,
+            Self::CustomFragmentShader(_) => 5,
         }
     }
 
     /// Convert the shader type to a f32 value.
-    pub fn to_f32(self) -> f32 {
+    pub fn to_f32(&self) -> f32 {
         self.to_u8() as f32
     }
 }

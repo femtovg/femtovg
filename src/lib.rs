@@ -1148,7 +1148,7 @@ where
         );
         params.shader_type = ShaderType::TextureCopyUnclipped;
 
-        let mut cmd = Command::new(CommandType::Triangles { params });
+        let mut cmd = Command::new(CommandType::Triangles { params: params.clone() });
         cmd.composite_operation = self.state().composite_operation;
 
         let x0 = target_rect.x;
