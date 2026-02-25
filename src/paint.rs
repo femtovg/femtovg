@@ -975,7 +975,7 @@ impl Paint {
 
     // --- Font weight (wght axis) ---
 
-    /// Returns the current font weight override for variable fonts.
+    /// Returns the current font weight override for variable fonts, in design space.
     ///
     /// Returns `None` if no weight override is set, meaning the font's default weight is used.
     #[inline]
@@ -985,7 +985,10 @@ impl Paint {
 
     /// Sets the font weight for variable fonts.
     ///
+    /// The value is in design space (e.g. 100–900 for the `wght` axis), not normalized.
     /// Common values: 100 (Thin), 300 (Light), 400 (Regular), 700 (Bold), 900 (Black).
+    /// The actual supported range depends on the font; query it with
+    /// [`Canvas::font_variation_axes`](crate::Canvas::font_variation_axes).
     /// This only affects variable fonts; for static fonts it has no effect.
     #[inline]
     pub fn set_font_weight(&mut self, weight: f32) {
@@ -996,8 +999,7 @@ impl Paint {
 
     /// Returns the paint with the font weight set to the specified value.
     ///
-    /// Common values: 100 (Thin), 300 (Light), 400 (Regular), 700 (Bold), 900 (Black).
-    /// This only affects variable fonts; for static fonts it has no effect.
+    /// See [`set_font_weight`](Self::set_font_weight) for details on values and range.
     #[inline]
     pub fn with_font_weight(mut self, weight: f32) -> Self {
         self.set_font_weight(weight);
@@ -1056,10 +1058,10 @@ impl Paint {
 
     // --- Font slant (slnt axis) ---
 
-    /// Returns the current font slant override for variable fonts.
+    /// Returns the current font slant override for variable fonts, in design space (degrees).
     ///
     /// Returns `None` if no slant override is set.
-    /// The value is in degrees; negative values slant backward (typical italic direction).
+    /// Negative values slant backward (typical italic direction).
     #[inline]
     pub fn font_slant(&self) -> Option<f32> {
         self.text.font_variations.get(FontVariations::tag_to_u32(b"slnt"))
@@ -1067,8 +1069,11 @@ impl Paint {
 
     /// Sets the font slant for variable fonts.
     ///
-    /// The value is in degrees; negative values slant backward (typical italic direction).
+    /// The value is in design space (degrees for the `slnt` axis), not normalized.
+    /// Negative values slant backward (typical italic direction).
     /// For example, `-12.0` is a common italic slant.
+    /// The actual supported range depends on the font; query it with
+    /// [`Canvas::font_variation_axes`](crate::Canvas::font_variation_axes).
     /// This only affects variable fonts with a `slnt` axis.
     #[inline]
     pub fn set_font_slant(&mut self, degrees: f32) {
@@ -1078,6 +1083,8 @@ impl Paint {
     }
 
     /// Returns the paint with the font slant set to the specified value.
+    ///
+    /// See [`set_font_slant`](Self::set_font_slant) for details on values and range.
     #[inline]
     pub fn with_font_slant(mut self, degrees: f32) -> Self {
         self.set_font_slant(degrees);
@@ -1092,9 +1099,10 @@ impl Paint {
 
     // --- Generic font variation API ---
 
-    /// Returns the value of a font variation axis by its 4-byte tag.
+    /// Returns the value of a font variation axis by its 4-byte tag, in design space.
     ///
     /// For example, `paint.font_variation(b"wdth")` returns the width axis value.
+    /// Returns `None` if the axis has not been set.
     #[inline]
     pub fn font_variation(&self, tag: &[u8; 4]) -> Option<f32> {
         self.text.font_variations.get(FontVariations::tag_to_u32(tag))
@@ -1102,7 +1110,11 @@ impl Paint {
 
     /// Sets a font variation axis by its 4-byte tag.
     ///
-    /// For example, `paint.set_font_variation(b"wdth", 75.0)` sets the width axis.
+    /// Values are in design space (the raw axis values defined in the font's
+    /// `fvar` table), not normalized coordinates. For example,
+    /// `paint.set_font_variation(b"wdth", 75.0)` sets the width axis to 75%
+    /// condensed. The valid range depends on the font; query it with
+    /// [`Canvas::font_variation_axes`](crate::Canvas::font_variation_axes).
     /// This only affects variable fonts with the specified axis.
     #[inline]
     pub fn set_font_variation(&mut self, tag: &[u8; 4], value: f32) {
@@ -1110,6 +1122,8 @@ impl Paint {
     }
 
     /// Returns the paint with a font variation axis set.
+    ///
+    /// See [`set_font_variation`](Self::set_font_variation) for details on values and range.
     #[inline]
     pub fn with_font_variation(mut self, tag: &[u8; 4], value: f32) -> Self {
         self.set_font_variation(tag, value);
