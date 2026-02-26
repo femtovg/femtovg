@@ -415,7 +415,7 @@ impl Renderer for WGPURenderer {
                         fill_params,
                     );
                 }
-                super::CommandType::Stroke { params } => {
+                super::CommandType::Stroke { ref params } => {
                     stroke(
                         &command,
                         &mut pipeline_and_bindgroup_mapper,
@@ -424,7 +424,10 @@ impl Renderer for WGPURenderer {
                         images,
                     );
                 }
-                super::CommandType::StencilStroke { params1, params2 } => {
+                super::CommandType::StencilStroke {
+                    ref params1,
+                    ref params2,
+                } => {
                     stencil_stroke(
                         &command,
                         &mut pipeline_and_bindgroup_mapper,
@@ -739,9 +742,9 @@ fn stencil_stroke(
     command: &super::Command,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
-    params2: Params,
+    params2: &Params,
     images: &mut ImageStore<Image>,
-    params1: Params,
+    params1: &Params,
 ) {
     if !command
         .drawables
@@ -872,7 +875,7 @@ fn stroke(
     command: &super::Command,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
-    params: Params,
+    params: &Params,
     images: &mut ImageStore<Image>,
 ) {
     for drawable in &command.drawables {
@@ -1190,8 +1193,18 @@ impl PipelineState {
         device: &wgpu::Device,
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
+        custom_shader_source: Option<&str>,
     ) -> wgpu::RenderPipeline {
         let constants = [("render_to_texture", if self.render_to_texture { 1.0 } else { 0. })];
+
+        let fragment_module = if let Some(source) = custom_shader_source {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            })
+        } else {
+            shader_module.clone()
+        };
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -1210,7 +1223,7 @@ impl PipelineState {
                 },
             },
             fragment: Some(wgpu::FragmentState {
-                module: shader_module,
+                module: &fragment_module,
                 entry_point: Some("fs_main"),
                 compilation_options: PipelineCompilationOptions {
                     constants: &constants,
@@ -1617,7 +1630,7 @@ impl CommandToPipelineAndBindGroupMapper {
             color_blend,
             stencil_test,
             render_pass_builder.surface_format,
-            params.shader_type,
+            params.shader_type.clone(),
             params.uses_glyph_texture(),
             render_pass_builder.rendering_to_texture,
             primitive_topology,
@@ -1626,8 +1639,18 @@ impl CommandToPipelineAndBindGroupMapper {
         );
 
         let mut pipeline_cache = self.pipeline_cache.borrow_mut();
+        let custom_shader_source = match &params.shader_type {
+            ShaderType::CustomFragmentShader(ref xyz) => Some(xyz.as_str()),
+            _ => None,
+        };
+
         let render_pipeline = pipeline_cache.entry(pipeline_state.clone()).or_insert_with(|| {
-            let pipeline = pipeline_state.materialize(&self.device, &self.pipeline_layout, &self.shader_module);
+            let pipeline = pipeline_state.materialize(
+                &self.device,
+                &self.pipeline_layout,
+                &self.shader_module,
+                custom_shader_source,
+            );
             CachedPipeline {
                 pipeline,
                 accessed: false,

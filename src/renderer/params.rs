@@ -6,7 +6,7 @@ use crate::{
 
 use super::ShaderType;
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Params {
     pub(crate) scissor_mat: [f32; 12],
     pub(crate) paint_mat: [f32; 12],
@@ -244,6 +244,10 @@ impl Params {
                     }
                 }
             }
+            PaintFlavor::CustomFragmentShader(source) => {
+                params.shader_type = ShaderType::CustomFragmentShader(source.clone());
+                inv_transform = global_transform.inverse();
+            }
         }
 
         params.paint_mat = inv_transform.to_mat3x4();
@@ -251,7 +255,7 @@ impl Params {
         params
     }
 
-    pub(crate) fn uses_glyph_texture(self) -> bool {
+    pub(crate) fn uses_glyph_texture(&self) -> bool {
         self.glyph_texture_type != 0
     }
 }
