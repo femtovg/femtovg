@@ -18,8 +18,6 @@ struct Params {
     image_blur_filter_coeff: vec3<f32>,
 }
 
-override render_to_texture: bool;
-
 const SHADER_TYPE_FillGradient: i32 = 0;
 const SHADER_TYPE_FillImage: i32 = 1;
 const SHADER_TYPE_Stencil: i32 = 2;
@@ -66,11 +64,19 @@ fn vs_main(
     var result: VertexOutput;
     result.ftcoord = tcoord;
     result.fpos = vertex;
-    if (render_to_texture) {
-        result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 2.0 * vertex.y / viewSize.y - 1.0, 0, 1);
-    } else {
-        result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0, 1);
-    }
+    result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0, 1);
+    return result;
+}
+
+@vertex
+fn vs_main_texture(
+    @location(0) vertex: vec2<f32>,
+    @location(1) tcoord: vec2<f32>,
+) -> VertexOutput {
+    var result: VertexOutput;
+    result.ftcoord = tcoord;
+    result.fpos = vertex;
+    result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 2.0 * vertex.y / viewSize.y - 1.0, 0, 1);
     return result;
 }
 

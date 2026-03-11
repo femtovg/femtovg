@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use rgb::bytemuck;
 use wgpu::util::DeviceExt;
-use wgpu::PipelineCompilationOptions;
 
 use crate::image::ImageStore;
 use crate::paint::GlyphTexture;
@@ -1191,31 +1190,29 @@ impl PipelineState {
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
-        let constants = [("render_to_texture", if self.render_to_texture { 1.0 } else { 0. })];
+        let vertex_entry_point = if self.render_to_texture {
+            "vs_main_texture"
+        } else {
+            "vs_main"
+        };
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(pipeline_layout),
             vertex: wgpu::VertexState {
                 module: shader_module,
-                entry_point: Some("vs_main"),
+                entry_point: Some(vertex_entry_point),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
                 }],
-                compilation_options: PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
+                compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader_module,
                 entry_point: Some("fs_main"),
-                compilation_options: PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
+                compilation_options: Default::default(),
                 targets: &[Some(self.color_target_state.clone())],
             }),
             primitive: wgpu::PrimitiveState {
