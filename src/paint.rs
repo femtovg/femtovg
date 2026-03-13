@@ -14,13 +14,12 @@ pub struct GradientStop(pub f32, pub Color);
 impl Eq for GradientStop {}
 impl Ord for GradientStop {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if (other.0, other.1) < (self.0, self.1) {
-            std::cmp::Ordering::Less
-        } else if (self.0, self.1) < (other.0, other.1) {
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Equal
-        }
+        self.0
+            .total_cmp(&other.0)
+            .then(self.1.r.total_cmp(&other.1.r))
+            .then(self.1.g.total_cmp(&other.1.g))
+            .then(self.1.b.total_cmp(&other.1.b))
+            .then(self.1.a.total_cmp(&other.1.a))
     }
 }
 
@@ -69,13 +68,9 @@ impl PartialOrd for MultiStopGradient {
 
 impl Ord for MultiStopGradient {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if (&other.shared_stops, other.tint) < (&self.shared_stops, self.tint) {
-            std::cmp::Ordering::Less
-        } else if (&self.shared_stops, self.tint) < (&other.shared_stops, other.tint) {
-            std::cmp::Ordering::Greater
-        } else {
-            std::cmp::Ordering::Equal
-        }
+        self.shared_stops
+            .cmp(&other.shared_stops)
+            .then(self.tint.total_cmp(&other.tint))
     }
 }
 
