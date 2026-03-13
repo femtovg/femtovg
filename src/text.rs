@@ -529,8 +529,8 @@ impl GlyphAtlas {
         canvas.set_render_target(initial_render_target);
 
         Ok(GlyphDrawCommands {
-            alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
-            color_glyphs: color_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+            alpha_glyphs: alpha_cmd_map.into_values().collect(),
+            color_glyphs: color_cmd_map.into_values().collect(),
         })
     }
 
