@@ -849,7 +849,6 @@ where
     }
 
     fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
-        let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -866,6 +865,8 @@ where
         {
             return;
         }
+
+        let mut paint_flavor = paint_flavor.clone();
 
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
@@ -1019,7 +1020,6 @@ where
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
-        let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1034,6 +1034,7 @@ where
             return;
         }
 
+        let mut paint_flavor = paint_flavor.clone();
         let scissor = self.state().scissor;
 
         // Scale stroke width by current transform scale.
