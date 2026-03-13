@@ -1398,8 +1398,6 @@ where
         paint: &Paint,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
-        use itertools::Itertools;
-
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
@@ -1416,14 +1414,12 @@ where
             None,
         )?;
 
-        for (font_id, glyph_run) in &layout
-            .glyphs
-            .iter()
-            .filter(|shaped_glyph| !shaped_glyph.c.is_control())
-            .chunk_by(|g| g.font_id)
-        {
+        let visible_glyphs: Vec<_> = layout.glyphs.iter().filter(|g| !g.c.is_control()).collect();
+
+        for chunk in visible_glyphs.chunk_by(|a, b| a.font_id == b.font_id) {
+            let font_id = chunk[0].font_id;
             self.draw_glyph_run(
-                glyph_run.map(|shaped_glyph| PositionedGlyph {
+                chunk.iter().map(|shaped_glyph| PositionedGlyph {
                     x: shaped_glyph.x * invscale,
                     y: shaped_glyph.y * invscale,
                     glyph_id: shaped_glyph.glyph_id,
