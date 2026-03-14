@@ -370,16 +370,18 @@ impl Paint {
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let image_id = canvas.load_image_file("examples/assets/rust-logo.png", ImageFlags::GENERATE_MIPMAPS).expect("Cannot create image");
-    /// let fill_paint = Paint::image(image_id, 10.0, 10.0, 85.0, 85.0, 0.0, 1.0);
+    /// let fill_paint = Paint::image(image_id, [10.0, 10.0], [85.0, 85.0], 0.0, 1.0);
     ///
     /// let mut path = Path::new();
     /// path.rect([10.0, 10.0], [85.0, 85.0]);
     /// canvas.fill_path(&path, &fill_paint);
     /// ```
-    pub fn image(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, alpha: f32) -> Self {
+    pub fn image(id: ImageId, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>, angle: f32, alpha: f32) -> Self {
+        let [x, y] = pos.into();
+        let [width, height] = size.into();
         Self::with_flavor(PaintFlavor::Image {
             id,
-            center: Position { x: cx, y: cy },
+            center: Position { x, y },
             width,
             height,
             angle,
@@ -389,10 +391,18 @@ impl Paint {
 
     /// Like `image`, but allows for adding a tint, or a color which will transform each pixel's
     /// color via channel-wise multiplication.
-    pub fn image_tint(id: ImageId, cx: f32, cy: f32, width: f32, height: f32, angle: f32, tint: Color) -> Self {
+    pub fn image_tint(
+        id: ImageId,
+        pos: impl Into<[f32; 2]>,
+        size: impl Into<[f32; 2]>,
+        angle: f32,
+        tint: Color,
+    ) -> Self {
+        let [x, y] = pos.into();
+        let [width, height] = size.into();
         Self::with_flavor(PaintFlavor::Image {
             id,
-            center: Position { x: cx, y: cy },
+            center: Position { x, y },
             width,
             height,
             angle,
@@ -410,19 +420,19 @@ impl Paint {
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
-    /// let bg = Paint::linear_gradient(0.0, 0.0, 0.0, 100.0, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
+    /// let bg = Paint::linear_gradient([0.0, 0.0], [0.0, 100.0], Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
     /// let mut path = Path::new();
     /// path.rounded_rect([0.0, 0.0], [100.0, 100.0], 5.0);
     /// canvas.fill_path(&path, &bg);
     /// ```
     pub fn linear_gradient(
-        start_x: f32,
-        start_y: f32,
-        end_x: f32,
-        end_y: f32,
+        start: impl Into<[f32; 2]>,
+        end: impl Into<[f32; 2]>,
         start_color: Color,
         end_color: Color,
     ) -> Self {
+        let [start_x, start_y] = start.into();
+        let [end_x, end_y] = end.into();
         Self::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
@@ -440,8 +450,8 @@ impl Paint {
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let bg = Paint::linear_gradient_stops(
-    ///    0.0, 0.0,
-    ///    0.0, 100.0,
+    ///    [0.0, 0.0],
+    ///    [0.0, 100.0],
     ///    [
     ///         (0.0, Color::rgba(255, 255, 255, 16)),
     ///         (0.5, Color::rgba(0, 0, 0, 16)),
@@ -452,12 +462,12 @@ impl Paint {
     /// canvas.fill_path(&path, &bg);
     /// ```
     pub fn linear_gradient_stops(
-        start_x: f32,
-        start_y: f32,
-        end_x: f32,
-        end_y: f32,
+        start: impl Into<[f32; 2]>,
+        end: impl Into<[f32; 2]>,
         stops: impl IntoIterator<Item = (f32, Color)>,
     ) -> Self {
+        let [start_x, start_y] = start.into();
+        let [end_x, end_y] = end.into();
         Self::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
@@ -465,7 +475,6 @@ impl Paint {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     /// Creates and returns a box gradient.
     ///
     /// Box gradient is a feathered rounded rectangle, it is useful for rendering
@@ -481,10 +490,8 @@ impl Paint {
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let bg = Paint::box_gradient(
-    ///    0.0,
-    ///    0.0,
-    ///    100.0,
-    ///    100.0,
+    ///    [0.0, 0.0],
+    ///    [100.0, 100.0],
     ///    10.0,
     ///    10.0,
     ///    Color::rgba(0, 0, 0, 128),
@@ -496,15 +503,15 @@ impl Paint {
     /// canvas.fill_path(&path, &bg);
     /// ```
     pub fn box_gradient(
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
+        pos: impl Into<[f32; 2]>,
+        size: impl Into<[f32; 2]>,
         radius: f32,
         feather: f32,
         inner_color: Color,
         outer_color: Color,
     ) -> Self {
+        let [x, y] = pos.into();
+        let [width, height] = size.into();
         Self::with_flavor(PaintFlavor::BoxGradient {
             pos: Position { x, y },
             width,
@@ -531,8 +538,7 @@ impl Paint {
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let bg = Paint::radial_gradient(
-    ///    50.0,
-    ///    50.0,
+    ///    [50.0, 50.0],
     ///    18.0,
     ///    24.0,
     ///    Color::rgba(0, 0, 0, 128),
@@ -544,13 +550,13 @@ impl Paint {
     /// canvas.fill_path(&path, &bg);
     /// ```
     pub fn radial_gradient(
-        cx: f32,
-        cy: f32,
+        center: impl Into<[f32; 2]>,
         in_radius: f32,
         out_radius: f32,
         inner_color: Color,
         outer_color: Color,
     ) -> Self {
+        let [cx, cy] = center.into();
         Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
             in_radius,
@@ -576,8 +582,7 @@ impl Paint {
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let bg = Paint::radial_gradient_stops(
-    ///    50.0,
-    ///    50.0,
+    ///    [50.0, 50.0],
     ///    18.0,
     ///    24.0,
     ///    [
@@ -592,12 +597,12 @@ impl Paint {
     /// canvas.fill_path(&path, &bg);
     /// ```
     pub fn radial_gradient_stops(
-        cx: f32,
-        cy: f32,
+        center: impl Into<[f32; 2]>,
         in_radius: f32,
         out_radius: f32,
         stops: impl IntoIterator<Item = (f32, Color)>,
     ) -> Self {
+        let [cx, cy] = center.into();
         Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
             in_radius,
@@ -609,7 +614,8 @@ impl Paint {
     /// Creates and returns a multi-stop conic gradient.
     ///
     /// Parameters (`cx`,`cy`) specify the center.
-    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+    pub fn conic_gradient_stops(center: impl Into<[f32; 2]>, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+        let [cx, cy] = center.into();
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
             colors: GradientColors::from_stops(stops),

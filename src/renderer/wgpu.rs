@@ -611,10 +611,8 @@ fn gaussian_blur_filter(
 
     let image_paint = crate::Paint::image(
         command.image.unwrap(),
-        0.,
-        0.,
-        source_image.texture.width() as _,
-        source_image.texture.height() as _,
+        [0., 0.],
+        [source_image.texture.width() as _, source_image.texture.height() as _],
         0.,
         1.,
     );

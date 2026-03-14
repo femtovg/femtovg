@@ -587,10 +587,8 @@ impl OpenGl {
 
         let image_paint = crate::Paint::image(
             cmd.image.unwrap(),
-            0.,
-            0.,
-            source_image_info.width() as _,
-            source_image_info.height() as _,
+            [0., 0.],
+            [source_image_info.width() as _, source_image_info.height() as _],
             0.,
             1.,
         );

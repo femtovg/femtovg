@@ -507,8 +507,7 @@ impl Game {
         }
 
         let paint = Paint::radial_gradient(
-            self.size.width / 2.0,
-            self.size.height / 2.0,
+            [self.size.width / 2.0, self.size.height / 2.0],
             10.0,
             self.size.height / 2.0,
             Color::rgb(90, 90, 90),
@@ -534,7 +533,7 @@ impl Game {
 
         // rust logo
         let logo_pos = Point::new((self.size.width / 2.0) - 50.0, (self.size.height / 2.0) - 180.0);
-        let logo_paint = Paint::image(self.logo_image_id, logo_pos.x, logo_pos.y, 100.0, 100.0, 0.0, 1.0);
+        let logo_paint = Paint::image(self.logo_image_id, [logo_pos.x, logo_pos.y], [100.0, 100.0], 0.0, 1.0);
         let mut path = Path::new();
         path.circle([logo_pos.x + 50.0, logo_pos.y + 50.0], 60.0);
         //canvas.fill_path(&path, &Paint::color(Color::rgba(200, 200, 200, 200)));
@@ -567,10 +566,8 @@ impl Game {
         let side_size = 15.0;
 
         let highlight = Paint::linear_gradient(
-            self.paddle_rect.origin.x,
-            self.paddle_rect.origin.y,
-            self.paddle_rect.origin.x,
-            self.paddle_rect.origin.y + 10.0,
+            [self.paddle_rect.origin.x, self.paddle_rect.origin.y],
+            [self.paddle_rect.origin.x, self.paddle_rect.origin.y + 10.0],
             Color::rgba(255, 255, 255, 100),
             Color::rgba(255, 255, 255, 40),
         );
@@ -628,10 +625,8 @@ impl Game {
             canvas.fill_path(&path, &Paint::color(Color::rgb(183, 65, 14)));
 
             let bg = Paint::linear_gradient(
-                ball.position.x,
-                ball.position.y - ball.radius,
-                ball.position.x,
-                ball.position.y,
+                [ball.position.x, ball.position.y - ball.radius],
+                [ball.position.x, ball.position.y],
                 Color::rgba(255, 255, 255, 60),
                 Color::rgba(255, 255, 255, 16),
             );

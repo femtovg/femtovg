@@ -1599,7 +1599,7 @@ where
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect([0f32, 0f32], [width, height]);
-            self.fill_path(&path, &Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
+            self.fill_path(&path, &Paint::image(id, [0f32, 0f32], [width, height], 0f32, 1f32));
         }
     }
 }
@@ -1735,7 +1735,7 @@ fn test_image_blit_fast_path() {
     let image = canvas
         .create_image_empty(30, 30, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
-    let paint = Paint::image(image, 0., 0., 30., 30., 0., 0.).with_anti_alias(false);
+    let paint = Paint::image(image, [0., 0.], [30., 30.], 0., 0.).with_anti_alias(false);
     canvas.fill_path(&path, &paint);
     canvas.flush_to_surface(&());
 

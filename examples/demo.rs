@@ -279,7 +279,7 @@ fn run<W: WindowSurface + 'static>(
                         let x = size.width as f32 - 512.0;
                         let y = size.height as f32 - 512.0;
 
-                        let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
+                        let paint = Paint::image(image_id, [x, y], [512.0, 512.0], 0.0, 1.0);
 
                         let mut path = Path::new();
                         path.rect([x, y], [512.0, 512.0]);
@@ -450,10 +450,8 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     let blink = 1.0 - (t * 0.5).sin().powf(200.0) * 0.8;
 
     let bg = Paint::linear_gradient(
-        x,
-        y + h * 0.5,
-        x + w * 0.1,
-        y + h,
+        [x, y + h * 0.5],
+        [x + w * 0.1, y + h],
         Color::rgba(0, 0, 0, 32),
         Color::rgba(0, 0, 0, 16),
     );
@@ -463,10 +461,8 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     canvas.fill_path(&path, &bg);
 
     let bg = Paint::linear_gradient(
-        x,
-        y + h * 0.25,
-        x + w * 0.1,
-        y + h,
+        [x, y + h * 0.25],
+        [x + w * 0.1, y + h],
         Color::rgba(220, 220, 220, 255),
         Color::rgba(128, 128, 128, 255),
     );
@@ -504,8 +500,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     canvas.fill_path(&path, &Paint::color(Color::rgba(32, 32, 32, 255)));
 
     let gloss = Paint::radial_gradient(
-        lx - ex * 0.25,
-        ly - ey * 0.5,
+        [lx - ex * 0.25, ly - ey * 0.5],
         ex * 0.1,
         ex * 0.75,
         Color::rgba(255, 255, 255, 128),
@@ -516,8 +511,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     canvas.fill_path(&path, &gloss);
 
     let gloss = Paint::radial_gradient(
-        rx - ex * 0.25,
-        ry - ey * 0.5,
+        [rx - ex * 0.25, ry - ey * 0.5],
         ex * 0.1,
         ex * 0.75,
         Color::rgba(255, 255, 255, 128),
@@ -549,10 +543,8 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
 
     // Graph background
     let bg = Paint::linear_gradient(
-        x,
-        y,
-        x,
-        y + h,
+        [x, y],
+        [x, y + h],
         Color::rgba(0, 160, 192, 0),
         Color::rgba(0, 160, 192, 64),
     );
@@ -590,8 +582,7 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
     // Graph sample pos
     for i in 0..6 {
         let bg = Paint::radial_gradient(
-            sx[i],
-            sy[i] + 2.0,
+            [sx[i], sy[i] + 2.0],
             3.0,
             8.0,
             Color::rgba(0, 0, 0, 32),
@@ -627,10 +618,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
 
     // Drop shadow
     let shadow_paint = Paint::box_gradient(
-        x,
-        y + 2.0,
-        w,
-        h,
+        [x, y + 2.0],
+        [w, h],
         corner_radius * 2.0,
         10.0,
         Color::rgba(0, 0, 0, 128),
@@ -644,10 +633,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
 
     // Header
     let header_paint = Paint::linear_gradient(
-        x,
-        y,
-        x,
-        y + 15.0,
+        [x, y],
+        [x, y + 15.0],
         Color::rgba(255, 255, 255, 8),
         Color::rgba(0, 0, 0, 16),
     );
@@ -697,10 +684,8 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         let by = cy + a1.sin() * (r0 + r1) * 0.5;
 
         let paint = Paint::linear_gradient(
-            ax,
-            ay,
-            bx,
-            by,
+            [ax, ay],
+            [bx, by],
             Color::hsla(a0 / (PI * 2.0), 1.0, 0.55, 1.0),
             Color::hsla(a1 / (PI * 2.0), 1.0, 0.55, 1.0),
         );
@@ -726,10 +711,8 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     canvas.stroke_path(&path, &paint);
 
     let paint = Paint::box_gradient(
-        r0 - 3.0,
-        -5.0,
-        r1 - r0 + 6.0,
-        10.0,
+        [r0 - 3.0, -5.0],
+        [r1 - r0 + 6.0, 10.0],
         2.0,
         4.0,
         Color::rgba(0, 0, 0, 128),
@@ -754,19 +737,15 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     path.line_to([bx, by]);
     path.close();
     let paint = Paint::linear_gradient(
-        r,
-        0.0,
-        ax,
-        ay,
+        [r, 0.0],
+        [ax, ay],
         Color::hsla(hue, 1.0, 0.5, 1.0),
         Color::rgba(255, 255, 255, 255),
     );
     canvas.fill_path(&path, &paint);
     let paint = Paint::linear_gradient(
-        (r + ax) * 0.5,
-        ay * 0.5,
-        bx,
-        by,
+        [(r + ax) * 0.5, ay * 0.5],
+        [bx, by],
         Color::rgba(0, 0, 0, 0),
         Color::rgba(0, 0, 0, 255),
     );
@@ -782,7 +761,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     path.circle([ax, ay], 5.0);
     canvas.stroke_path(&path, &paint);
 
-    let paint = Paint::radial_gradient(ax, ay, 7.0, 9.0, Color::rgba(0, 0, 0, 64), Color::rgba(0, 0, 0, 0));
+    let paint = Paint::radial_gradient([ax, ay], 7.0, 9.0, Color::rgba(0, 0, 0, 64), Color::rgba(0, 0, 0, 0));
     let mut path = Path::new();
     path.rect([ax - 20.0, ay - 20.0], [40.0, 40.0]);
     path.circle([ax, ay], 7.0);
@@ -798,10 +777,8 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &s
     let corner_radius = (h / 2.0) - 1.0;
 
     let bg = Paint::box_gradient(
-        x,
-        y + 1.5,
-        w,
-        h,
+        [x, y + 1.5],
+        [w, h],
         h / 2.0,
         5.0,
         Color::rgba(0, 0, 0, 16),
@@ -836,7 +813,12 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &s
 fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x: f32, y: f32, w: f32, h: f32) {
     let corner_radius = 4.0;
 
-    let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
+    let bg = Paint::linear_gradient(
+        [x, y],
+        [x, y + h],
+        Color::rgba(255, 255, 255, 16),
+        Color::rgba(0, 0, 0, 16),
+    );
     let mut path = Path::new();
     path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, h - 2.0], corner_radius);
     canvas.fill_path(&path, &bg);
@@ -871,10 +853,8 @@ fn draw_label<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, x
 
 fn draw_edit_box_base<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32) {
     let paint = Paint::box_gradient(
-        x + 1.0,
-        y + 2.5,
-        w - 2.0,
-        h - 2.0,
+        [x + 1.0, y + 2.5],
+        [w - 2.0, h - 2.0],
         3.0,
         4.0,
         Color::rgba(255, 255, 255, 32),
@@ -937,10 +917,8 @@ fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, text: &str
     let _ = canvas.fill_text(x + 28.0, y + h * 0.5, text, &paint);
 
     let paint = Paint::box_gradient(
-        x + 1.0,
-        y + (h * 0.5).floor() - 9.0 + 1.0,
-        18.0,
-        18.0,
+        [x + 1.0, y + (h * 0.5).floor() - 9.0 + 1.0],
+        [18.0, 18.0],
         3.0,
         3.0,
         Color::rgba(0, 0, 0, 32),
@@ -973,7 +951,12 @@ fn draw_button<T: Renderer>(
 
     let a = if color.is_black() { 16 } else { 32 };
 
-    let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, a), Color::rgba(0, 0, 0, a));
+    let bg = Paint::linear_gradient(
+        [x, y],
+        [x, y + h],
+        Color::rgba(255, 255, 255, a),
+        Color::rgba(0, 0, 0, a),
+    );
 
     let mut path = Path::new();
     path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, h - 2.0], corner_radius - 1.0);
@@ -1030,10 +1013,8 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
 
     // Slot
     let mut bg = Paint::box_gradient(
-        x,
-        cy - 2.0 + 1.0,
-        w,
-        4.0,
+        [x, cy - 2.0 + 1.0],
+        [w, 4.0],
         2.0,
         2.0,
         Color::rgba(0, 0, 0, 32),
@@ -1045,8 +1026,7 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
 
     // Knob Shadow
     bg = Paint::radial_gradient(
-        x + (pos * w).floor(),
-        cy + 1.0,
+        [x + (pos * w).floor(), cy + 1.0],
         kr - 3.0,
         kr + 3.0,
         Color::rgba(0, 0, 0, 64),
@@ -1063,10 +1043,8 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
 
     // Knob
     bg = Paint::linear_gradient(
-        x,
-        cy - kr,
-        x,
-        cy + kr,
+        [x, cy - kr],
+        [x, cy + kr],
         Color::rgba(255, 255, 255, 16),
         Color::rgba(0, 0, 0, 16),
     );
@@ -1094,10 +1072,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     // Drop shadow
     let shadow_paint = Paint::box_gradient(
-        x,
-        y + 4.0,
-        w,
-        h,
+        [x, y + 4.0],
+        [w, h],
         corner_radius * 2.0,
         20.0,
         Color::rgba(0, 0, 0, 128),
@@ -1155,16 +1131,14 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
             draw_spinner(canvas, tx + thumb / 2.0, ty + thumb / 2.0, thumb * 0.25, t);
         }
 
-        let img_paint = Paint::image(*image, tx + ix, ty + iy, iw, ih, 0.0 / 180.0 * PI, a);
+        let img_paint = Paint::image(*image, [tx + ix, ty + iy], [iw, ih], 0.0 / 180.0 * PI, a);
         let mut path = Path::new();
         path.rounded_rect([tx, ty], [thumb, thumb], 5.0);
         canvas.fill_path(&path, &img_paint);
 
         let shadow_paint = Paint::box_gradient(
-            tx - 1.0,
-            ty,
-            thumb + 2.0,
-            thumb + 2.0,
+            [tx - 1.0, ty],
+            [thumb + 2.0, thumb + 2.0],
             5.0,
             3.0,
             Color::rgba(0, 0, 0, 128),
@@ -1185,10 +1159,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     // Hide fades
     let fade_paint = Paint::linear_gradient(
-        x,
-        y,
-        x,
-        y + 6.0,
+        [x, y],
+        [x, y + 6.0],
         Color::rgba(200, 200, 200, 255),
         Color::rgba(200, 200, 200, 0),
     );
@@ -1197,10 +1169,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     canvas.fill_path(&path, &fade_paint);
 
     let fade_paint = Paint::linear_gradient(
-        x,
-        y + h,
-        x,
-        y + h - 6.0,
+        [x, y + h],
+        [x, y + h - 6.0],
         Color::rgba(200, 200, 200, 255),
         Color::rgba(200, 200, 200, 0),
     );
@@ -1210,10 +1180,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     // Scroll bar
     let shadow_paint = Paint::box_gradient(
-        x + w - 12.0 + 1.0,
-        y + 4.0 + 1.0,
-        8.0,
-        h - 8.0,
+        [x + w - 12.0 + 1.0, y + 4.0 + 1.0],
+        [8.0, h - 8.0],
         3.0,
         4.0,
         Color::rgba(0, 0, 0, 32),
@@ -1225,10 +1193,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     let scrollh = (h / stackh) * (h - 8.0);
     let shadow_paint = Paint::box_gradient(
-        x + w - 12.0 - 1.0,
-        y + 4.0 + (h - 8.0 - scrollh) * u - 1.0,
-        8.0,
-        scrollh,
+        [x + w - 12.0 - 1.0, y + 4.0 + (h - 8.0 - scrollh) * u - 1.0],
+        [8.0, scrollh],
         3.0,
         4.0,
         Color::rgba(220, 220, 220, 255),
@@ -1436,7 +1402,7 @@ fn draw_spinner<T: Renderer>(canvas: &mut Canvas<T>, cx: f32, cy: f32, r: f32, t
     let bx = cx + a1.cos() * (r0 + r1) * 0.5;
     let by = cy + a1.sin() * (r0 + r1) * 0.5;
 
-    let paint = Paint::linear_gradient(ax, ay, bx, by, Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 128));
+    let paint = Paint::linear_gradient([ax, ay], [bx, by], Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 128));
     canvas.fill_path(&path, &paint);
 
     canvas.restore();

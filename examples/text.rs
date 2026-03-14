@@ -340,10 +340,8 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32
     let _ = canvas.stroke_text(x, y, "RUST", &paint);
 
     let paint = Paint::linear_gradient(
-        x,
-        y - 60.0,
-        x,
-        y,
+        [x, y - 60.0],
+        [x, y],
         Color::rgba(225, 133, 82, 255),
         Color::rgba(93, 55, 70, 255),
     )
@@ -368,7 +366,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, x: f32, y
     let _ = canvas.stroke_text(x, y, text, &paint);
 
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
-    let paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50)
+    let paint = Paint::image(image_id, [x, y - t * 10.0], [120.0, 120.0], 0.0, 0.50)
         .with_font(&[fonts.bold])
         .with_font_size(72.0);
     let _ = canvas.fill_text(x, y, text, &paint);

@@ -86,10 +86,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "x linear opaque",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             Color::rgba(255, 0, 0, 255),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -100,10 +98,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "y linear opaque",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             Color::rgba(255, 0, 0, 255),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -114,10 +110,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "xy linear opaque",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             Color::rgba(255, 0, 0, 255),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -130,10 +124,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "x linear 50%",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             Color::rgba(255, 0, 0, 128),
             Color::rgba(0, 0, 255, 128),
         ),
@@ -144,10 +136,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "y linear 50%",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             Color::rgba(255, 0, 0, 128),
             Color::rgba(0, 0, 255, 128),
         ),
@@ -158,10 +148,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "xy linear 50%",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             Color::rgba(255, 0, 0, 128),
             Color::rgba(0, 0, 255, 128),
         ),
@@ -174,10 +162,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "x linear 0-100",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             Color::rgba(255, 0, 0, 0),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -188,10 +174,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "y linear 0-100",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             Color::rgba(255, 0, 0, 0),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -202,10 +186,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "xy linear 0-100",
         Paint::linear_gradient(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             Color::rgba(255, 0, 0, 0),
             Color::rgba(0, 0, 255, 255),
         ),
@@ -219,8 +201,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "radial opaque",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             Color::rgba(255, 0, 0, 255),
@@ -233,8 +214,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "0,0 rad opaque",
         Paint::radial_gradient(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             Color::rgba(255, 0, 0, 255),
@@ -247,8 +227,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "fill rad opaque",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             Color::rgba(255, 0, 0, 255),
@@ -263,8 +242,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "radial 50%",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             Color::rgba(255, 0, 0, 128),
@@ -277,8 +255,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "0,0 rad 50%",
         Paint::radial_gradient(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             Color::rgba(255, 0, 0, 128),
@@ -291,8 +268,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "fill rad 50%",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             Color::rgba(255, 0, 0, 128),
@@ -307,8 +283,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "radial 0-100",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             Color::rgba(255, 0, 0, 0),
@@ -321,8 +296,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "0,0 rad 0-100",
         Paint::radial_gradient(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             Color::rgba(255, 0, 0, 0),
@@ -335,8 +309,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "fill rad 0-100",
         Paint::radial_gradient(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             Color::rgba(255, 0, 0, 0),
@@ -352,10 +325,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms x linear op",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -369,10 +340,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms y linear op",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -386,10 +355,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms xy linear op",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 255)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -404,10 +371,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms x linear 50%",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
@@ -421,10 +386,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms y linear 50%",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
@@ -438,10 +401,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms xy linear 50%",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 128)),
                 (0.5, Color::rgba(0, 255, 0, 128)),
@@ -456,10 +417,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms x linear 0-100",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -473,10 +432,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms y linear 0-100",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            0.0,
-            100.0,
+            [0.0, 0.0],
+            [0.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -490,10 +447,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms xy linear 0-100%",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            100.0,
+            [0.0, 0.0],
+            [100.0, 100.0],
             [
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
@@ -509,8 +464,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms radial opq",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             [
@@ -526,8 +480,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms 0,0 rad opq",
         Paint::radial_gradient_stops(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             [
@@ -543,8 +496,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms rad opq",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             [
@@ -561,8 +513,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms radial 50%",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             [
@@ -578,8 +529,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms 0,0 rad 50%",
         Paint::radial_gradient_stops(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             [
@@ -595,8 +545,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms rad 50%",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             [
@@ -613,8 +562,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms radial 0-100",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             0.0,
             50.0,
             [
@@ -630,8 +578,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms 0,0 rad 0-100",
         Paint::radial_gradient_stops(
-            0.0,
-            0.0,
+            [0.0, 0.0],
             0.0,
             100.0,
             [
@@ -647,8 +594,7 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms rad 0-100",
         Paint::radial_gradient_stops(
-            50.0,
-            50.0,
+            [50.0, 50.0],
             25.0,
             75.0,
             [
@@ -667,10 +613,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms pad start",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.5, Color::rgba(255, 0, 0, 255)), (1.0, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -680,10 +624,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms pad both",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.4, Color::rgba(255, 0, 0, 255)), (0.6, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -693,10 +635,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms pad end",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.0, Color::rgba(255, 0, 0, 255)), (0.5, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -706,10 +646,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms same stop",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.5, Color::rgba(255, 0, 0, 255)), (0.5, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -718,14 +656,14 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         x,
         y,
         "ms one stop",
-        Paint::linear_gradient_stops(0.0, 0.0, 100.0, 0.0, [(0.5, Color::rgba(255, 0, 0, 255))]),
+        Paint::linear_gradient_stops([0.0, 0.0], [100.0, 0.0], [(0.5, Color::rgba(255, 0, 0, 255))]),
     );
     x += 110.0;
     r(
         x,
         y,
         "ms zero stops",
-        Paint::linear_gradient_stops(0.0, 0.0, 100.0, 0.0, []),
+        Paint::linear_gradient_stops([0.0, 0.0], [100.0, 0.0], []),
     );
     x += 110.0;
     r(
@@ -733,10 +671,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms non-seq 1",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.5, Color::rgba(255, 0, 0, 255)), (0.0, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -746,10 +682,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms non-seq 2",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [(0.5, Color::rgba(255, 0, 0, 255)), (0.3, Color::rgba(0, 0, 255, 255))],
         ),
     );
@@ -759,10 +693,8 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         y,
         "ms non-seq 3",
         Paint::linear_gradient_stops(
-            0.0,
-            0.0,
-            100.0,
-            0.0,
+            [0.0, 0.0],
+            [100.0, 0.0],
             [
                 (0.5, Color::rgba(255, 0, 0, 255)),
                 (0.6, Color::rgba(0, 255, 0, 255)),
