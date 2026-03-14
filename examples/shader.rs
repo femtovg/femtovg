@@ -155,7 +155,7 @@ impl ApplicationHandler for App {
 
                 let paint = Paint::color(Color::rgbf(1., 0., 0.));
                 let mut path = Path::new();
-                path.rect(WINDOW_WIDTH / 2. - 25., WINDOW_HEIGHT / 2. - 25., 50., 50.);
+                path.rect([WINDOW_WIDTH / 2. - 25., WINDOW_HEIGHT / 2. - 25.], [50., 50.]);
                 state.canvas.fill_path(&path, &paint);
                 state.canvas.restore();
 

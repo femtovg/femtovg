@@ -136,14 +136,8 @@ impl Path {
     }
 
     pub(crate) fn cache<'a>(&'a self, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> RefMut<'a, PathCache> {
-        // The path cache saves a flattened and transformed version of the path. If client code calls
-        // (fill|stroke)_path repeatedly with the same Path under the same transform circumstances then it will be
-        // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
-        // and if it will produce the correct cache keys under different float edge cases.
-
         let key = transform.cache_key();
 
-        // this shouldn't need a bool once non lexic lifetimes are stable
         let needs_rebuild = if let Some((transform_cache_key, _cache)) = &*self.cache.borrow() {
             key != *transform_cache_key
         } else {
@@ -158,20 +152,28 @@ impl Path {
         RefMut::map(self.cache.borrow_mut(), |cache| &mut cache.as_mut().unwrap().1)
     }
 
-    // Path funcs
-
     /// Starts a new sub-path with the specified point as the first point.
-    pub fn move_to(&mut self, x: f32, y: f32) {
+    pub fn move_to(&mut self, pos: impl Into<[f32; 2]>) {
+        let [x, y] = pos.into();
         self.append(&[PackedVerb::MoveTo], &[Position { x, y }]);
     }
 
     /// Adds a line segment from the last point in the path to the specified point.
-    pub fn line_to(&mut self, x: f32, y: f32) {
+    pub fn line_to(&mut self, pos: impl Into<[f32; 2]>) {
+        let [x, y] = pos.into();
         self.append(&[PackedVerb::LineTo], &[Position { x, y }]);
     }
 
     /// Adds a cubic bezier segment from the last point in the path via two control points to the specified point.
-    pub fn bezier_to(&mut self, c1x: f32, c1y: f32, c2x: f32, c2y: f32, x: f32, y: f32) {
+    pub fn bezier_to(
+        &mut self,
+        control1: impl Into<[f32; 2]>,
+        control2: impl Into<[f32; 2]>,
+        pos: impl Into<[f32; 2]>,
+    ) {
+        let [c1x, c1y] = control1.into();
+        let [c2x, c2y] = control2.into();
+        let [x, y] = pos.into();
         self.append(
             &[PackedVerb::BezierTo],
             &[
@@ -183,7 +185,9 @@ impl Path {
     }
 
     /// Adds a quadratic bezier segment from the last point in the path via a control point to the specified point.
-    pub fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+    pub fn quad_to(&mut self, control: impl Into<[f32; 2]>, pos: impl Into<[f32; 2]>) {
+        let [cx, cy] = control.into();
+        let [x, y] = pos.into();
         let pos0 = self.last_pos;
         let cpos = Position { x: cx, y: cy };
         let pos = Position { x, y };
@@ -206,10 +210,11 @@ impl Path {
         }
     }
 
-    /// Creates new circle arc shaped sub-path. The arc center is at `cx`,`cy`, the arc radius is `r`,
+    /// Creates new circle arc shaped sub-path. The arc center is at `center`, the arc radius is `r`,
     /// and the arc is drawn from angle `a0` to `a1`, and swept in direction `dir` (Winding)
     /// Angles are specified in radians.
-    pub fn arc(&mut self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, dir: Solidity) {
+    pub fn arc(&mut self, center: impl Into<[f32; 2]>, r: f32, a0: f32, a1: f32, dir: Solidity) {
+        let [cx, cy] = center.into();
         let cpos = Position { x: cx, y: cy };
 
         let mut da = a1 - a0;
@@ -274,12 +279,14 @@ impl Path {
     }
 
     /// Adds an arc segment at the corner defined by the last path point and two specified points.
-    pub fn arc_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, radius: f32) {
+    pub fn arc_to(&mut self, pos1: impl Into<[f32; 2]>, pos2: impl Into<[f32; 2]>, radius: f32) {
         if self.verbs.is_empty() {
             return;
         }
 
         let pos0 = self.last_pos;
+        let [x1, y1] = pos1.into();
+        let [x2, y2] = pos2.into();
         let pos1 = Position { x: x1, y: y1 };
         let pos2 = Position { x: x2, y: y2 };
 
@@ -289,7 +296,7 @@ impl Path {
             || Position::segment_distance(pos1, pos0, pos2) < self.dist_tol * self.dist_tol
             || radius < self.dist_tol
         {
-            self.line_to(pos1.x, pos1.y);
+            self.line_to([pos1.x, pos1.y]);
         }
 
         let mut dpos0 = pos0 - pos1;
@@ -302,7 +309,7 @@ impl Path {
         let d = radius / (a / 2.0).tan();
 
         if d > 10000.0 {
-            return self.line_to(pos1.x, pos1.y);
+            return self.line_to([pos1.x, pos1.y]);
         }
 
         let (cpos, a0, a1, dir);
@@ -319,11 +326,13 @@ impl Path {
             dir = Solidity::Solid;
         }
 
-        self.arc(cpos.x, cpos.y, radius, a0 + PI / 2.0, a1 + PI / 2.0, dir);
+        self.arc([cpos.x, cpos.y], radius, a0 + PI / 2.0, a1 + PI / 2.0, dir);
     }
 
     /// Creates a new rectangle shaped sub-path.
-    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub fn rect(&mut self, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>) {
+        let [x, y] = pos.into();
+        let [w, h] = size.into();
         self.append(
             &[
                 PackedVerb::MoveTo,
@@ -347,24 +356,27 @@ impl Path {
     }
 
     /// Creates a new rounded rectangle shaped sub-path.
-    pub fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
-        self.rounded_rect_varying(x, y, w, h, r, r, r, r);
+    pub fn rounded_rect(&mut self, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>, r: f32) {
+        let pos = pos.into();
+        let size = size.into();
+        self.rounded_rect_varying(pos, size, r, r, r, r);
     }
 
     /// Creates a new rounded rectangle shaped sub-path with varying radii for each corner.
     pub fn rounded_rect_varying(
         &mut self,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
+        pos: impl Into<[f32; 2]>,
+        size: impl Into<[f32; 2]>,
         rad_top_left: f32,
         rad_top_right: f32,
         rad_bottom_right: f32,
         rad_bottom_left: f32,
     ) {
+        let [x, y] = pos.into();
+        let [w, h] = size.into();
+
         if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {
-            self.rect(x, y, w, h);
+            self.rect([x, y], [w, h]);
         } else {
             let halfw = w.abs() * 0.5;
             let halfh = h.abs() * 0.5;
@@ -455,7 +467,9 @@ impl Path {
     }
 
     /// Creates a new ellipse shaped sub-path.
-    pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32) {
+    pub fn ellipse(&mut self, center: impl Into<[f32; 2]>, radii: impl Into<[f32; 2]>) {
+        let [cx, cy] = center.into();
+        let [rx, ry] = radii.into();
         self.append(
             &[
                 PackedVerb::MoveTo,
@@ -489,8 +503,9 @@ impl Path {
     }
 
     /// Creates a new circle shaped sub-path.
-    pub fn circle(&mut self, cx: f32, cy: f32, r: f32) {
-        self.ellipse(cx, cy, r, r);
+    pub fn circle(&mut self, center: impl Into<[f32; 2]>, r: f32) {
+        let center = center.into();
+        self.ellipse(center, [r, r]);
     }
 
     /// Appends a slice of verbs and coordinates to the path.
@@ -529,19 +544,19 @@ impl Iterator for PathIter<'_> {
 #[cfg(feature = "textlayout")]
 impl ttf_parser::OutlineBuilder for Path {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.move_to(x, y);
+        self.move_to([x, y]);
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        self.line_to(x, y);
+        self.line_to([x, y]);
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.quad_to(x1, y1, x, y);
+        self.quad_to([x1, y1], [x, y]);
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.bezier_to(x1, y1, x2, y2, x, y);
+        self.bezier_to([x1, y1], [x2, y2], [x, y]);
     }
 
     fn close(&mut self) {

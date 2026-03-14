@@ -396,10 +396,10 @@ impl Font {
                 let mut path = Path::new();
                 for cmd in outline.path().commands() {
                     match cmd {
-                        Command::MoveTo(p) => path.move_to(p.x, p.y),
-                        Command::LineTo(p) => path.line_to(p.x, p.y),
-                        Command::QuadTo(c, p) => path.quad_to(c.x, c.y, p.x, p.y),
-                        Command::CurveTo(c1, c2, p) => path.bezier_to(c1.x, c1.y, c2.x, c2.y, p.x, p.y),
+                        Command::MoveTo(p) => path.move_to([p.x, p.y]),
+                        Command::LineTo(p) => path.line_to([p.x, p.y]),
+                        Command::QuadTo(c, p) => path.quad_to([c.x, c.y], [p.x, p.y]),
+                        Command::CurveTo(c1, c2, p) => path.bezier_to([c1.x, c1.y], [c2.x, c2.y], [p.x, p.y]),
                         Command::Close => path.close(),
                     }
                 }

@@ -177,12 +177,12 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
 
                     for command in svg_path.data().segments() {
                         match command {
-                            PathSegment::MoveTo(pt) => path.move_to(pt.x, pt.y),
-                            PathSegment::LineTo(pt) => path.line_to(pt.x, pt.y),
+                            PathSegment::MoveTo(pt) => path.move_to([pt.x, pt.y]),
+                            PathSegment::LineTo(pt) => path.line_to([pt.x, pt.y]),
                             PathSegment::CubicTo(pt1, pt2, pt) => {
-                                path.bezier_to(pt1.x, pt1.y, pt2.x, pt2.y, pt.x, pt.y)
+                                path.bezier_to([pt1.x, pt1.y], [pt2.x, pt2.y], [pt.x, pt.y])
                             }
-                            PathSegment::QuadTo(pt1, pt) => path.quad_to(pt1.x, pt1.y, pt.x, pt.y),
+                            PathSegment::QuadTo(pt1, pt) => path.quad_to([pt1.x, pt1.y], [pt.x, pt.y]),
                             PathSegment::Close => path.close(),
                         }
                     }

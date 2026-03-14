@@ -282,7 +282,7 @@ fn run<W: WindowSurface + 'static>(
                         let paint = Paint::image(image_id, x, y, 512.0, 512.0, 0.0, 1.0);
 
                         let mut path = Path::new();
-                        path.rect(x, y, 512.0, 512.0);
+                        path.rect([x, y], [512.0, 512.0]);
                         canvas.fill_path(&path, &paint);
                         canvas.stroke_path(&path, &Paint::color(Color::hex("454545")));
                     }
@@ -353,7 +353,7 @@ fn draw_paragraph<T: Renderer>(
                 }
 
                 let mut path = Path::new();
-                path.rect(caret_x, y, 1.0, res.height());
+                path.rect([caret_x, y], [1.0, res.height()]);
                 canvas.fill_path(&path, &Paint::color(Color::rgba(255, 192, 0, 255)));
 
                 gutter = line_num + 1;
@@ -378,10 +378,8 @@ fn draw_paragraph<T: Renderer>(
             let mut path = Path::new();
             #[allow(clippy::manual_midpoint)]
             path.rounded_rect(
-                res.x - 4.0,
-                res.y - 2.0,
-                res.width() + 8.0,
-                res.height() + 4.0,
+                [res.x - 4.0, res.y - 2.0],
+                [res.width() + 8.0, res.height() + 4.0],
                 (res.height() + 4.0) / 2.0 - 1.0,
             );
             canvas.fill_path(&path, &paint);
@@ -422,11 +420,11 @@ fn draw_paragraph<T: Renderer>(
     canvas.set_global_alpha(a);
 
     let mut path = Path::new();
-    path.rounded_rect(x - 2.0, y - 2.0, width + 4.0, height + 4.0, 3.0);
+    path.rounded_rect([x - 2.0, y - 2.0], [width + 4.0, height + 4.0], 3.0);
     let px = x + width / 2.0;
-    path.move_to(px, y - 10.0);
-    path.line_to(px + 7.0, y + 1.0);
-    path.line_to(px - 7.0, y + 1.0);
+    path.move_to([px, y - 10.0]);
+    path.line_to([px + 7.0, y + 1.0]);
+    path.line_to([px - 7.0, y + 1.0]);
     path.solidity(Solidity::Solid);
     canvas.fill_path(&path, &paint);
 
@@ -460,8 +458,8 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
         Color::rgba(0, 0, 0, 16),
     );
     let mut path = Path::new();
-    path.ellipse(lx + 3.0, ly + 16.0, ex, ey);
-    path.ellipse(rx + 3.0, ry + 16.0, ex, ey);
+    path.ellipse([lx + 3.0, ly + 16.0], [ex, ey]);
+    path.ellipse([rx + 3.0, ry + 16.0], [ex, ey]);
     canvas.fill_path(&path, &bg);
 
     let bg = Paint::linear_gradient(
@@ -473,8 +471,8 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
         Color::rgba(128, 128, 128, 255),
     );
     let mut path = Path::new();
-    path.ellipse(lx, ly, ex, ey);
-    path.ellipse(rx, ry, ex, ey);
+    path.ellipse([lx, ly], [ex, ey]);
+    path.ellipse([rx, ry], [ex, ey]);
     canvas.fill_path(&path, &bg);
 
     let mut dx = (mx - rx) / (ex * 10.0);
@@ -488,7 +486,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     dx *= ex * 0.4;
     dy *= ey * 0.5;
     let mut path = Path::new();
-    path.ellipse(lx + dx, ly + dy + ey * 0.25 * (1.0 - blink), br, br * blink);
+    path.ellipse([lx + dx, ly + dy + ey * 0.25 * (1.0 - blink)], [br, br * blink]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(32, 32, 32, 255)));
 
     let mut dx = (mx - rx) / (ex * 10.0);
@@ -502,7 +500,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
     dx *= ex * 0.4;
     dy *= ey * 0.5;
     let mut path = Path::new();
-    path.ellipse(rx + dx, ry + dy + ey * 0.25 * (1.0 - blink), br, br * blink);
+    path.ellipse([rx + dx, ry + dy + ey * 0.25 * (1.0 - blink)], [br, br * blink]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(32, 32, 32, 255)));
 
     let gloss = Paint::radial_gradient(
@@ -514,7 +512,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
         Color::rgba(255, 255, 255, 0),
     );
     let mut path = Path::new();
-    path.ellipse(lx, ly, ex, ey);
+    path.ellipse([lx, ly], [ex, ey]);
     canvas.fill_path(&path, &gloss);
 
     let gloss = Paint::radial_gradient(
@@ -526,7 +524,7 @@ fn draw_eyes<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f32
         Color::rgba(255, 255, 255, 0),
     );
     let mut path = Path::new();
-    path.ellipse(rx, ry, ex, ey);
+    path.ellipse([rx, ry], [ex, ey]);
     canvas.fill_path(&path, &gloss);
 }
 
@@ -560,22 +558,30 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
     );
 
     let mut path = Path::new();
-    path.move_to(sx[0], sy[0]);
+    path.move_to([sx[0], sy[0]]);
 
     for i in 1..6 {
-        path.bezier_to(sx[i - 1] + dx * 0.5, sy[i - 1], sx[i] - dx * 0.5, sy[i], sx[i], sy[i]);
+        path.bezier_to(
+            [sx[i - 1] + dx * 0.5, sy[i - 1]],
+            [sx[i] - dx * 0.5, sy[i]],
+            [sx[i], sy[i]],
+        );
     }
 
-    path.line_to(x + w, y + h);
-    path.line_to(x, y + h);
+    path.line_to([x + w, y + h]);
+    path.line_to([x, y + h]);
     canvas.fill_path(&path, &bg);
 
     // Graph line
     let mut path = Path::new();
-    path.move_to(sx[0], sy[0] + 2.0);
+    path.move_to([sx[0], sy[0] + 2.0]);
 
     for i in 1..6 {
-        path.bezier_to(sx[i - 1] + dx * 0.5, sy[i - 1], sx[i] - dx * 0.5, sy[i], sx[i], sy[i]);
+        path.bezier_to(
+            [sx[i - 1] + dx * 0.5, sy[i - 1]],
+            [sx[i] - dx * 0.5, sy[i]],
+            [sx[i], sy[i]],
+        );
     }
 
     let line = Paint::color(Color::rgba(0, 160, 192, 255)).with_line_width(3.0);
@@ -592,19 +598,19 @@ fn draw_graph<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, h: f3
             Color::rgba(0, 0, 0, 0),
         );
         let mut path = Path::new();
-        path.rect(sx[i] - 10.0, sy[i] - 10.0 + 2.0, 20.0, 20.0);
+        path.rect([sx[i] - 10.0, sy[i] - 10.0 + 2.0], [20.0, 20.0]);
         canvas.fill_path(&path, &bg);
     }
 
     let mut path = Path::new();
     for i in 0..6 {
-        path.circle(sx[i], sy[i], 4.0);
+        path.circle([sx[i], sy[i]], 4.0);
     }
     canvas.fill_path(&path, &Paint::color(Color::rgba(0, 160, 192, 255)));
 
     let mut path = Path::new();
     for i in 0..6 {
-        path.circle(sx[i], sy[i], 2.0);
+        path.circle([sx[i], sy[i]], 2.0);
     }
     canvas.fill_path(&path, &Paint::color(Color::rgba(220, 220, 220, 255)));
 }
@@ -616,7 +622,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
 
     // Window
     let mut path = Path::new();
-    path.rounded_rect(x, y, w, h, corner_radius);
+    path.rounded_rect([x, y], [w, h], corner_radius);
     canvas.fill_path(&path, &Paint::color(Color::rgba(28, 30, 34, 192)));
 
     // Drop shadow
@@ -631,8 +637,8 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
         Color::rgba(0, 0, 0, 0),
     );
     let mut path = Path::new();
-    path.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
-    path.rounded_rect(x, y, w, h, corner_radius);
+    path.rect([x - 10.0, y - 10.0], [w + 20.0, h + 30.0]);
+    path.rounded_rect([x, y], [w, h], corner_radius);
     path.solidity(Solidity::Hole);
     canvas.fill_path(&path, &shadow_paint);
 
@@ -646,12 +652,12 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
         Color::rgba(0, 0, 0, 16),
     );
     let mut path = Path::new();
-    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, 30.0, corner_radius - 1.0);
+    path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, 30.0], corner_radius - 1.0);
     canvas.fill_path(&path, &header_paint);
 
     let mut path = Path::new();
-    path.move_to(x + 0.5, y + 0.5 + 30.0);
-    path.line_to(x + 0.5 + w - 1.0, y + 0.5 + 30.0);
+    path.move_to([x + 0.5, y + 0.5 + 30.0]);
+    path.line_to([x + 0.5 + w - 1.0, y + 0.5 + 30.0]);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
 
     let text_paint = Paint::color(Color::rgba(0, 0, 0, 32))
@@ -681,8 +687,8 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         let a1 = (i as f32 + 1.0) / 6.0 * PI * 2.0 + aeps;
 
         let mut path = Path::new();
-        path.arc(cx, cy, r0, a0, a1, Solidity::Hole);
-        path.arc(cx, cy, r1, a1, a0, Solidity::Solid);
+        path.arc([cx, cy], r0, a0, a1, Solidity::Hole);
+        path.arc([cx, cy], r1, a1, a0, Solidity::Solid);
         path.close();
 
         let ax = cx + a0.cos() * (r0 + r1) * 0.5;
@@ -703,8 +709,8 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     }
 
     let mut path = Path::new();
-    path.circle(cx, cy, r0 - 0.5);
-    path.circle(cx, cy, r1 + 0.5);
+    path.circle([cx, cy], r0 - 0.5);
+    path.circle([cx, cy], r1 + 0.5);
     let paint = Paint::color(Color::rgba(0, 0, 0, 64)).with_line_width(1.0);
     canvas.stroke_path(&path, &paint);
 
@@ -715,7 +721,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     // Marker on
     let mut path = Path::new();
-    path.rect(r0 - 1.0, -3.0, r1 - r0 + 2.0, 6.0);
+    path.rect([r0 - 1.0, -3.0], [r1 - r0 + 2.0, 6.0]);
     let paint = Paint::color(Color::rgba(255, 255, 255, 192)).with_line_width(2.0);
     canvas.stroke_path(&path, &paint);
 
@@ -730,8 +736,8 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         Color::rgba(0, 0, 0, 0),
     );
     let mut path = Path::new();
-    path.rect(r0 - 2.0 - 10.0, -4.0 - 10.0, r1 - r0 + 4.0 + 20.0, 8.0 + 20.0);
-    path.rect(r0 - 2.0, -4.0, r1 - r0 + 4.0, 8.0);
+    path.rect([r0 - 2.0 - 10.0, -4.0 - 10.0], [r1 - r0 + 4.0 + 20.0, 8.0 + 20.0]);
+    path.rect([r0 - 2.0, -4.0], [r1 - r0 + 4.0, 8.0]);
     path.solidity(Solidity::Hole);
     canvas.fill_path(&path, &paint);
 
@@ -743,9 +749,9 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     let by = (-120.0 / 180.0 * PI).sin() * r;
 
     let mut path = Path::new();
-    path.move_to(r, 0.0);
-    path.line_to(ax, ay);
-    path.line_to(bx, by);
+    path.move_to([r, 0.0]);
+    path.line_to([ax, ay]);
+    path.line_to([bx, by]);
     path.close();
     let paint = Paint::linear_gradient(
         r,
@@ -773,13 +779,13 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     let ay = (120.0 / 180.0 * PI).sin() * r * 0.4;
     let paint = Paint::color(Color::rgba(255, 255, 255, 192)).with_line_width(2.0);
     let mut path = Path::new();
-    path.circle(ax, ay, 5.0);
+    path.circle([ax, ay], 5.0);
     canvas.stroke_path(&path, &paint);
 
     let paint = Paint::radial_gradient(ax, ay, 7.0, 9.0, Color::rgba(0, 0, 0, 64), Color::rgba(0, 0, 0, 0));
     let mut path = Path::new();
-    path.rect(ax - 20.0, ay - 20.0, 40.0, 40.0);
-    path.circle(ax, ay, 7.0);
+    path.rect([ax - 20.0, ay - 20.0], [40.0, 40.0]);
+    path.circle([ax, ay], 7.0);
     path.solidity(Solidity::Hole);
     canvas.fill_path(&path, &paint);
 
@@ -802,7 +808,7 @@ fn draw_search_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &s
         Color::rgba(0, 0, 0, 92),
     );
     let mut path = Path::new();
-    path.rounded_rect(x, y, w, h, corner_radius);
+    path.rounded_rect([x, y], [w, h], corner_radius);
     canvas.fill_path(&path, &bg);
 
     let text_paint = Paint::color(Color::rgba(255, 255, 255, 64))
@@ -832,11 +838,11 @@ fn draw_drop_down<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &st
 
     let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
     let mut path = Path::new();
-    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, corner_radius);
+    path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, h - 2.0], corner_radius);
     canvas.fill_path(&path, &bg);
 
     let mut path = Path::new();
-    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, corner_radius - 0.5);
+    path.rounded_rect([x + 0.5, y + 0.5], [w - 1.0, h - 1.0], corner_radius - 0.5);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 48)));
 
     let text_paint = Paint::color(Color::rgba(255, 255, 255, 160))
@@ -876,11 +882,11 @@ fn draw_edit_box_base<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f3
     );
 
     let mut path = Path::new();
-    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, 3.0);
+    path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, h - 2.0], 3.0);
     canvas.fill_path(&path, &paint);
 
     let mut path = Path::new();
-    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, 3.5);
+    path.rounded_rect([x + 0.5, y + 0.5], [w - 1.0, h - 1.0], 3.5);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 48)));
 }
 
@@ -941,7 +947,7 @@ fn draw_check_box<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, text: &str
         Color::rgba(0, 0, 0, 92),
     );
     let mut path = Path::new();
-    path.rounded_rect(x + 1.0, y + (h * 0.5).floor() - 9.0, 18.0, 18.0, 3.0);
+    path.rounded_rect([x + 1.0, y + (h * 0.5).floor() - 9.0], [18.0, 18.0], 3.0);
     canvas.fill_path(&path, &paint);
 
     let paint = Paint::color(Color::rgba(255, 255, 255, 128))
@@ -970,7 +976,7 @@ fn draw_button<T: Renderer>(
     let bg = Paint::linear_gradient(x, y, x, y + h, Color::rgba(255, 255, 255, a), Color::rgba(0, 0, 0, a));
 
     let mut path = Path::new();
-    path.rounded_rect(x + 1.0, y + 1.0, w - 2.0, h - 2.0, corner_radius - 1.0);
+    path.rounded_rect([x + 1.0, y + 1.0], [w - 2.0, h - 2.0], corner_radius - 1.0);
 
     if !color.is_black() {
         canvas.fill_path(&path, &Paint::color(color));
@@ -979,7 +985,7 @@ fn draw_button<T: Renderer>(
     canvas.fill_path(&path, &bg);
 
     let mut path = Path::new();
-    path.rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, corner_radius - 0.5);
+    path.rounded_rect([x + 0.5, y + 0.5], [w - 1.0, h - 1.0], corner_radius - 0.5);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 48)));
 
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 96))
@@ -1034,7 +1040,7 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
         Color::rgba(0, 0, 0, 128),
     );
     let mut path = Path::new();
-    path.rounded_rect(x, cy - 2.0, w, 4.0, 2.0);
+    path.rounded_rect([x, cy - 2.0], [w, 4.0], 2.0);
     canvas.fill_path(&path, &bg);
 
     // Knob Shadow
@@ -1048,12 +1054,10 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
     );
     let mut path = Path::new();
     path.rect(
-        x + (pos * w).floor() - kr - 5.0,
-        cy - kr - 5.0,
-        kr * 2.0 + 5.0 + 5.0,
-        kr * 2.0 + 5.0 + 5.0 + 3.0,
+        [x + (pos * w).floor() - kr - 5.0, cy - kr - 5.0],
+        [kr * 2.0 + 5.0 + 5.0, kr * 2.0 + 5.0 + 5.0 + 3.0],
     );
-    path.circle(x + (pos * w).floor(), cy, kr);
+    path.circle([x + (pos * w).floor(), cy], kr);
     path.solidity(Solidity::Hole);
     canvas.fill_path(&path, &bg);
 
@@ -1067,12 +1071,12 @@ fn draw_slider<T: Renderer>(canvas: &mut Canvas<T>, pos: f32, x: f32, y: f32, w:
         Color::rgba(0, 0, 0, 16),
     );
     let mut path = Path::new();
-    path.circle(x + (pos * w).floor(), cy, kr - 1.0);
+    path.circle([x + (pos * w).floor(), cy], kr - 1.0);
     canvas.fill_path(&path, &Paint::color(Color::rgba(40, 43, 48, 255)));
     canvas.fill_path(&path, &bg);
 
     let mut path = Path::new();
-    path.circle(x + (pos * w).floor(), cy, kr - 0.5);
+    path.circle([x + (pos * w).floor(), cy], kr - 0.5);
     canvas.stroke_path(&path, &Paint::color(Color::rgba(0, 0, 0, 92)));
 
     canvas.restore();
@@ -1100,17 +1104,17 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         Color::rgba(0, 0, 0, 0),
     );
     let mut path = Path::new();
-    path.rect(x - 10.0, y - 10.0, w + 20.0, h + 30.0);
-    path.rounded_rect(x, y, w, h, corner_radius);
+    path.rect([x - 10.0, y - 10.0], [w + 20.0, h + 30.0]);
+    path.rounded_rect([x, y], [w, h], corner_radius);
     path.solidity(Solidity::Hole);
     canvas.fill_path(&path, &shadow_paint);
 
     // Window
     let mut path = Path::new();
-    path.rounded_rect(x, y, w, h, corner_radius);
-    path.move_to(x - 10.0, y + arry);
-    path.line_to(x + 1.0, y + arry - 11.0);
-    path.line_to(x + 1.0, y + arry + 11.0);
+    path.rounded_rect([x, y], [w, h], corner_radius);
+    path.move_to([x - 10.0, y + arry]);
+    path.line_to([x + 1.0, y + arry - 11.0]);
+    path.line_to([x + 1.0, y + arry + 11.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(200, 200, 200, 255)));
 
     canvas.save();
@@ -1153,7 +1157,7 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
         let img_paint = Paint::image(*image, tx + ix, ty + iy, iw, ih, 0.0 / 180.0 * PI, a);
         let mut path = Path::new();
-        path.rounded_rect(tx, ty, thumb, thumb, 5.0);
+        path.rounded_rect([tx, ty], [thumb, thumb], 5.0);
         canvas.fill_path(&path, &img_paint);
 
         let shadow_paint = Paint::box_gradient(
@@ -1167,13 +1171,13 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
             Color::rgba(0, 0, 0, 0),
         );
         let mut path = Path::new();
-        path.rect(tx - 5.0, ty - 5.0, thumb + 10.0, thumb + 10.0);
-        path.rounded_rect(tx, ty, thumb, thumb, 6.0);
+        path.rect([tx - 5.0, ty - 5.0], [thumb + 10.0, thumb + 10.0]);
+        path.rounded_rect([tx, ty], [thumb, thumb], 6.0);
         path.solidity(Solidity::Hole);
         canvas.fill_path(&path, &shadow_paint);
 
         let mut path = Path::new();
-        path.rounded_rect(tx + 0.5, ty + 0.5, thumb - 1.0, thumb - 1.0, 4.0 - 0.5);
+        path.rounded_rect([tx + 0.5, ty + 0.5], [thumb - 1.0, thumb - 1.0], 4.0 - 0.5);
         canvas.stroke_path(&path, &Paint::color(Color::rgba(255, 255, 255, 192)));
     }
 
@@ -1189,7 +1193,7 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         Color::rgba(200, 200, 200, 0),
     );
     let mut path = Path::new();
-    path.rect(x + 4.0, y, w - 8.0, 6.0);
+    path.rect([x + 4.0, y], [w - 8.0, 6.0]);
     canvas.fill_path(&path, &fade_paint);
 
     let fade_paint = Paint::linear_gradient(
@@ -1201,7 +1205,7 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         Color::rgba(200, 200, 200, 0),
     );
     let mut path = Path::new();
-    path.rect(x + 4.0, y + h - 6.0, w - 8.0, 6.0);
+    path.rect([x + 4.0, y + h - 6.0], [w - 8.0, 6.0]);
     canvas.fill_path(&path, &fade_paint);
 
     // Scroll bar
@@ -1216,7 +1220,7 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
         Color::rgba(0, 0, 0, 92),
     );
     let mut path = Path::new();
-    path.rounded_rect(x + w - 12.0, y + 4.0, 8.0, h - 8.0, 3.0);
+    path.rounded_rect([x + w - 12.0, y + 4.0], [8.0, h - 8.0], 3.0);
     canvas.fill_path(&path, &shadow_paint);
 
     let scrollh = (h / stackh) * (h - 8.0);
@@ -1232,10 +1236,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     );
     let mut path = Path::new();
     path.rounded_rect(
-        x + w - 12.0 + 1.0,
-        y + 4.0 + 1.0 + (h - 8.0 - scrollh) * u,
-        8.0 - 2.0,
-        scrollh - 2.0,
+        [x + w - 12.0 + 1.0, y + 4.0 + 1.0 + (h - 8.0 - scrollh) * u],
+        [8.0 - 2.0, scrollh - 2.0],
         2.0,
     );
     canvas.fill_path(&path, &shadow_paint);
@@ -1273,10 +1275,10 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
                 .with_line_width(s * 0.3);
 
             let mut path = Path::new();
-            path.move_to(fx + pts[0], fy + pts[1]);
-            path.line_to(fx + pts[2], fy + pts[3]);
-            path.line_to(fx + pts[4], fy + pts[5]);
-            path.line_to(fx + pts[6], fy + pts[7]);
+            path.move_to([fx + pts[0], fy + pts[1]]);
+            path.line_to([fx + pts[2], fy + pts[3]]);
+            path.line_to([fx + pts[4], fy + pts[5]]);
+            path.line_to([fx + pts[6], fy + pts[7]]);
             canvas.stroke_path(&path, &paint);
 
             let paint = paint
@@ -1286,10 +1288,10 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
                 .with_color(Color::rgba(0, 192, 255, 255));
 
             let mut path = Path::new();
-            path.move_to(fx + pts[0], fy + pts[1]);
-            path.line_to(fx + pts[2], fy + pts[3]);
-            path.line_to(fx + pts[4], fy + pts[5]);
-            path.line_to(fx + pts[6], fy + pts[7]);
+            path.move_to([fx + pts[0], fy + pts[1]]);
+            path.line_to([fx + pts[2], fy + pts[3]]);
+            path.line_to([fx + pts[4], fy + pts[5]]);
+            path.line_to([fx + pts[6], fy + pts[7]]);
             canvas.stroke_path(&path, &paint);
         }
     }
@@ -1304,11 +1306,11 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     let mut evenodd_fill = Paint::color(Color::rgba(220, 220, 220, 120)).with_fill_rule(FillRule::EvenOdd);
 
     let mut path = Path::new();
-    path.move_to(50.0, 0.0);
-    path.line_to(21.0, 90.0);
-    path.line_to(98.0, 35.0);
-    path.line_to(2.0, 35.0);
-    path.line_to(79.0, 90.0);
+    path.move_to([50.0, 0.0]);
+    path.line_to([21.0, 90.0]);
+    path.line_to([98.0, 35.0]);
+    path.line_to([2.0, 35.0]);
+    path.line_to([79.0, 90.0]);
     path.close();
 
     if canvas.contains_point(&path, mousex, mousey, FillRule::EvenOdd) {
@@ -1322,11 +1324,11 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     let mut nonzero_fill = Paint::color(Color::rgba(220, 220, 220, 120)).with_fill_rule(FillRule::NonZero);
 
     let mut path = Path::new();
-    path.move_to(50.0, 0.0);
-    path.line_to(21.0, 90.0);
-    path.line_to(98.0, 35.0);
-    path.line_to(2.0, 35.0);
-    path.line_to(79.0, 90.0);
+    path.move_to([50.0, 0.0]);
+    path.line_to([21.0, 90.0]);
+    path.line_to([98.0, 35.0]);
+    path.line_to([2.0, 35.0]);
+    path.line_to([79.0, 90.0]);
     path.close();
 
     if canvas.contains_point(&path, mousex, mousey, FillRule::NonZero) {
@@ -1347,8 +1349,8 @@ fn draw_widths<T: Renderer>(canvas: &mut Canvas<T>, x: f32, mut y: f32, width: f
         let w = (i as f32 + 0.5) * 0.1;
         paint.set_line_width(w);
         let mut path = Path::new();
-        path.move_to(x, y);
-        path.line_to(x + width, y + width * 0.3);
+        path.move_to([x, y]);
+        path.line_to([x + width, y + width * 0.3]);
         canvas.stroke_path(&path, &paint);
         y += 10.0;
     }
@@ -1363,11 +1365,11 @@ fn draw_caps<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32) {
     canvas.save();
 
     let mut path = Path::new();
-    path.rect(x - line_width / 2.0, y, width + line_width, 40.0);
+    path.rect([x - line_width / 2.0, y], [width + line_width, 40.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 255, 255, 32)));
 
     let mut path = Path::new();
-    path.rect(x, y, width, 40.0);
+    path.rect([x, y], [width, 40.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 255, 255, 32)));
 
     let mut paint = Paint::color(Color::rgba(0, 0, 0, 255)).with_line_width(line_width);
@@ -1375,8 +1377,8 @@ fn draw_caps<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, width: f32) {
     for (i, cap) in caps.iter().enumerate() {
         paint.set_line_cap(*cap);
         let mut path = Path::new();
-        path.move_to(x, y + i as f32 * 10.0 + 5.0);
-        path.line_to(x + width, y + i as f32 * 10.0 + 5.0);
+        path.move_to([x, y + i as f32 * 10.0 + 5.0]);
+        path.line_to([x + width, y + i as f32 * 10.0 + 5.0]);
         canvas.stroke_path(&path, &paint);
     }
 
@@ -1391,7 +1393,7 @@ fn draw_scissor<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, t: f32) {
     canvas.rotate(5.0f32.to_radians());
 
     let mut path = Path::new();
-    path.rect(-20.0, -20.0, 60.0, 40.0);
+    path.rect([-20.0, -20.0], [60.0, 40.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 0, 0, 255)));
 
     canvas.scissor(-20.0, -20.0, 60.0, 40.0);
@@ -1404,13 +1406,13 @@ fn draw_scissor<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, t: f32) {
     canvas.save();
     canvas.reset_scissor();
     let mut path = Path::new();
-    path.rect(-20.0, -10.0, 60.0, 30.0);
+    path.rect([-20.0, -10.0], [60.0, 30.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 128, 0, 64)));
     canvas.restore();
 
     // Draw second rectangle with scissoring.
     //canvas.intersect_scissor(-20.0, -10.0, 60.0, 30.0);
-    path.rect(-20.0, -10.0, 60.0, 30.0);
+    path.rect([-20.0, -10.0], [60.0, 30.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 128, 0, 255)));
 
     canvas.restore();
@@ -1425,8 +1427,8 @@ fn draw_spinner<T: Renderer>(canvas: &mut Canvas<T>, cx: f32, cy: f32, r: f32, t
     canvas.save();
 
     let mut path = Path::new();
-    path.arc(cx, cy, r0, a0, a1, Solidity::Hole);
-    path.arc(cx, cy, r1, a1, a0, Solidity::Solid);
+    path.arc([cx, cy], r0, a0, a1, Solidity::Hole);
+    path.arc([cx, cy], r1, a1, a0, Solidity::Solid);
     path.close();
 
     let ax = cx + a0.cos() * (r0 + r1) * 0.5;

@@ -69,7 +69,7 @@ fn run<W: WindowSurface + 'static>(
 fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
     let mut r = |x, y, name, paint| {
         let mut p = Path::new();
-        p.rect(0.0, 0.0, 100.0, 100.0);
+        p.rect([0.0, 0.0], [100.0, 100.0]);
         canvas.translate(x, y);
         canvas.fill_path(&p, &paint);
         canvas.translate(-x, -y);

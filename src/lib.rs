@@ -1598,7 +1598,7 @@ where
             let width = size.0 as f32;
             let height = size.1 as f32;
             let mut path = Path::new();
-            path.rect(0f32, 0f32, width, height);
+            path.rect([0f32, 0f32], [width, height]);
             self.fill_path(&path, &Paint::image(id, 0f32, 0f32, width, height, 0f32, 1f32));
         }
     }
@@ -1731,7 +1731,7 @@ fn test_image_blit_fast_path() {
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(100, 100, 1.);
     let mut path = Path::new();
-    path.rect(10., 10., 50., 50.);
+    path.rect([10., 10.], [50., 50.]);
     let image = canvas
         .create_image_empty(30, 30, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
