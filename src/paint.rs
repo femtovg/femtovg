@@ -273,6 +273,17 @@ pub struct TextSettings {
     pub(crate) text_align: Align,
 }
 
+impl TextSettings {
+    #[inline]
+    pub(crate) fn scaled(&self, scale: f32) -> Self {
+        Self {
+            font_size: self.font_size * scale,
+            letter_spacing: self.letter_spacing * scale,
+            ..*self
+        }
+    }
+}
+
 impl Default for TextSettings {
     fn default() -> Self {
         Self {

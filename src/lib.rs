@@ -1227,13 +1227,8 @@ where
         paint: &Paint,
     ) -> Result<TextMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
-
-        let mut text_settings = paint.text.clone();
-        text_settings.font_size *= scale;
-        text_settings.letter_spacing *= scale;
-
-        let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
+        let text_settings = paint.text.scaled(scale);
 
         self.text_context
             .borrow_mut()
@@ -1261,9 +1256,7 @@ where
     pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
-        let mut text_settings = paint.text.clone();
-        text_settings.font_size *= scale;
-        text_settings.letter_spacing *= scale;
+        let text_settings = paint.text.scaled(scale);
 
         let max_width = max_width * scale;
 
@@ -1282,9 +1275,7 @@ where
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
-        let mut text_settings = paint.text.clone();
-        text_settings.font_size *= scale;
-        text_settings.letter_spacing *= scale;
+        let text_settings = paint.text.scaled(scale);
 
         let max_width = max_width * scale;
 
@@ -1401,9 +1392,7 @@ where
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let mut text_settings = paint.text.clone();
-        text_settings.font_size *= scale;
-        text_settings.letter_spacing *= scale;
+        let text_settings = paint.text.scaled(scale);
 
         let mut layout = text::shape(
             x * scale,
