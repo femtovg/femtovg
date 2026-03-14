@@ -4,8 +4,8 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
-    ImageInfo, ImageSource, ImageStore,
+    Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
+    geometry::Position, paint::GlyphTexture,
 };
 
 mod opengl;
@@ -151,7 +151,7 @@ pub trait Renderer {
 
     /// Update an image with new data.
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize)
-        -> Result<(), ErrorKind>;
+    -> Result<(), ErrorKind>;
 
     /// Get the native texture associated with an image (default implementation returns an error).
     #[allow(unused_variables)]

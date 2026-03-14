@@ -16,15 +16,16 @@ use femtovg::{
 use helpers::WindowSurface;
 use imgref::{Img, ImgRef};
 use parley::{
+    AlignmentOptions, FontContext, LayoutContext, LineHeight,
     layout::{Alignment, Glyph, GlyphRun, Layout, PositionedLayoutItem},
     style::{FontStack, StyleProperty},
-    AlignmentOptions, FontContext, LayoutContext, LineHeight,
 };
 use rgb::RGBA8;
 use std::{collections::HashMap, sync::Arc};
 use swash::{
-    scale::{image::Content, Render, ScaleContext, Scaler, Source, StrikeWith},
-    zeno, FontRef,
+    FontRef,
+    scale::{Render, ScaleContext, Scaler, Source, StrikeWith, image::Content},
+    zeno,
 };
 use winit::{event::WindowEvent, window::Window};
 use zeno::{Format, Vector};

@@ -2,9 +2,9 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use super::{run, Callbacks, WindowSurface};
+use super::{Callbacks, WindowSurface, run};
 
-use femtovg::{renderer::OpenGl, Canvas};
+use femtovg::{Canvas, renderer::OpenGl};
 #[cfg(not(target_arch = "wasm32"))]
 use glutin::{
     config::ConfigTemplateBuilder,

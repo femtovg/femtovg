@@ -11,9 +11,9 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    renderer::{GlyphTexture, ImageId, Vertex},
     BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageInfo, ImageSource, ImageStore,
     Scissor, Transform2D,
+    renderer::{GlyphTexture, ImageId, Vertex},
 };
 
 use glow::HasContext;
@@ -66,8 +66,8 @@ impl OpenGl {
     where
         F: FnMut(&str) -> *const c_void,
     {
-        let context = glow::Context::from_loader_function(load_fn);
-        let version = context.get_parameter_string(glow::VERSION);
+        let context = unsafe { glow::Context::from_loader_function(load_fn) };
+        let version = unsafe { context.get_parameter_string(glow::VERSION) };
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
         Self::new_from_context(context, is_opengles_2_0)
     }
@@ -82,8 +82,8 @@ impl OpenGl {
     where
         F: FnMut(&std::ffi::CStr) -> *const c_void,
     {
-        let context = glow::Context::from_loader_function_cstr(load_fn);
-        let version = context.get_parameter_string(glow::VERSION);
+        let context = unsafe { glow::Context::from_loader_function_cstr(load_fn) };
+        let version = unsafe { context.get_parameter_string(glow::VERSION) };
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
         Self::new_from_context(context, is_opengles_2_0)
     }
@@ -107,7 +107,7 @@ impl OpenGl {
             _ => {
                 return Err(ErrorKind::GeneralError(
                     "Canvas::getContext failed to retrieve WebGL 2 context".to_owned(),
-                ))
+                ));
             }
         };
 
@@ -525,21 +525,20 @@ impl OpenGl {
             }
             (RenderTarget::Image(id), _) => {
                 let context = self.context.clone();
-                if let Some(texture) = images.get(id) {
-                    if let Ok(fb) = self
+                if let Some(texture) = images.get(id)
+                    && let Ok(fb) = self
                         .framebuffers
                         .entry(id)
                         .or_insert_with(|| Framebuffer::new(&context, texture))
-                    {
-                        fb.bind();
+                {
+                    fb.bind();
 
-                        self.view[0] = texture.info().width() as f32;
-                        self.view[1] = texture.info().height() as f32;
+                    self.view[0] = texture.info().width() as f32;
+                    self.view[1] = texture.info().height() as f32;
 
-                        unsafe {
-                            self.context
-                                .viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
-                        }
+                    unsafe {
+                        self.context
+                            .viewport(0, 0, texture.info().width() as i32, texture.info().height() as i32);
                     }
                 }
             }

@@ -3,9 +3,9 @@ use std::{cmp::Ordering, f32::consts::PI, ops::Range};
 use bitflags::bitflags;
 
 use crate::{
+    FillRule, LineCap, LineJoin, Solidity,
     geometry::{Bounds, Position, Transform2D, Vector},
     renderer::Vertex,
-    FillRule, LineCap, LineJoin, Solidity,
 };
 
 use super::Verb;
@@ -82,7 +82,7 @@ impl Default for Contour {
 }
 
 impl Contour {
-    fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> {
+    fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> + use<'a> {
         PointPairsIter {
             curr: 0,
             points: &points[self.point_range.clone()],
@@ -211,12 +211,12 @@ impl PathCache {
             let mut points = &mut all_points[contour.point_range.clone()];
 
             // If the first and last points are the same, remove the last, mark as closed contour.
-            if let (Some(p0), Some(p1)) = (points.last(), points.first()) {
-                if p0.approx_eq(p1, dist_tol) {
-                    contour.point_range.end -= 1;
-                    contour.closed = true;
-                    points = &mut all_points[contour.point_range.clone()];
-                }
+            if let (Some(p0), Some(p1)) = (points.last(), points.first())
+                && p0.approx_eq(p1, dist_tol)
+            {
+                contour.point_range.end -= 1;
+                contour.closed = true;
+                points = &mut all_points[contour.point_range.clone()];
             }
 
             if points.len() < 2 {
@@ -274,11 +274,11 @@ impl PathCache {
             let new_point = Point::new(x, y, flags);
 
             // If last point equals this new point just OR the flags and ignore the new point
-            if let Some(last_point) = self.points.get_mut(contour.point_range.end) {
-                if last_point.approx_eq(&new_point, dist_tol) {
-                    last_point.flags |= new_point.flags;
-                    return;
-                }
+            if let Some(last_point) = self.points.get_mut(contour.point_range.end)
+                && last_point.approx_eq(&new_point, dist_tol)
+            {
+                last_point.flags |= new_point.flags;
+                return;
             }
 
             self.points.push(new_point);

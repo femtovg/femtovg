@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use femtovg::{renderer::WGPURenderer, Canvas};
+use femtovg::{Canvas, renderer::WGPURenderer};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::Window;
 
-use super::{run, Callbacks, WindowSurface};
+use super::{Callbacks, WindowSurface, run};
 
 pub struct DemoSurface {
     device: wgpu::Device,

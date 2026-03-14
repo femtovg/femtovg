@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
     image::ImageStore,
     paint::{GradientStop, MultiStopGradient},
-    Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
 };
 
 /// `GradientStore` holds image ids for multi-stop gradients. The actual image/textures

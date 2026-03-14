@@ -5,8 +5,8 @@ use std::sync::Arc;
 use femtovg::{Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
 use instant::Instant;
 use rand::{
-    distr::{Distribution, StandardUniform},
     RngExt,
+    distr::{Distribution, StandardUniform},
 };
 use resource::resource;
 use winit::{

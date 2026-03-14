@@ -486,11 +486,7 @@ impl Rect {
         let h = (self.y + self.h).min(other.y + other.h) - y;
 
         let result = Self { x, y, w, h };
-        if result.is_empty() {
-            None
-        } else {
-            Some(result)
-        }
+        if result.is_empty() { None } else { Some(result) }
     }
 
     pub fn is_empty(&self) -> bool {

@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use femtovg::{renderer::OpenGl, Canvas, Color, Paint, Path};
+use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
 use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture, Program};
 use glutin::{
     config::ConfigTemplateBuilder,

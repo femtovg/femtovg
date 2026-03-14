@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin, geometry::Position};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

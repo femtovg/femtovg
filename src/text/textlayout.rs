@@ -6,7 +6,7 @@ use std::{
 use fnv::FnvHasher;
 use lru::LruCache;
 
-use crate::{paint::TextSettings, Align, Baseline, ErrorKind, FontId, Paint};
+use crate::{Align, Baseline, ErrorKind, FontId, Paint, paint::TextSettings};
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
@@ -292,61 +292,55 @@ fn shape_run(
             if let Some(Ok(word)) = context.shaped_words_cache.get(&id) {
                 let mut word = word.clone();
 
-                if let Some(max_width) = max_width {
-                    if result.width + word.width >= max_width {
-                        word_break_reached = true;
-                        if first_word_in_paragraph {
-                            // search for the largest prefix of the word that can fit
-                            let mut bytes_included = 0;
-                            let mut subword_width = 0.0;
-                            let target_width = max_width - result.width;
-                            for glyph in word.glyphs {
-                                bytes_included = glyph.byte_index;
-                                let glyph_width = glyph.advance_x + letter_spacing;
+                if let Some(max_width) = max_width
+                    && result.width + word.width >= max_width
+                {
+                    word_break_reached = true;
+                    if first_word_in_paragraph {
+                        // search for the largest prefix of the word that can fit
+                        let mut bytes_included = 0;
+                        let mut subword_width = 0.0;
+                        let target_width = max_width - result.width;
+                        for glyph in word.glyphs {
+                            bytes_included = glyph.byte_index;
+                            let glyph_width = glyph.advance_x + letter_spacing;
 
-                                // nuance: we want to include the first glyph even if it breaks
-                                // the bounds. this is to allow pathologically small bounds to
-                                // at least complete rendering
-                                if subword_width + glyph_width >= target_width && bytes_included != 0 {
-                                    break;
-                                }
-
-                                subword_width += glyph_width;
-                            }
-
-                            if bytes_included == 0 {
-                                // just in case - never mind!
+                            // nuance: we want to include the first glyph even if it breaks
+                            // the bounds. this is to allow pathologically small bounds to
+                            // at least complete rendering
+                            if subword_width + glyph_width >= target_width && bytes_included != 0 {
                                 break;
                             }
 
-                            let subword_txt = &word_txt[..bytes_included];
-                            let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width));
-                            if !context.shaped_words_cache.contains(&id) {
-                                let subword = shape_word(
-                                    subword_txt,
-                                    hb_direction,
-                                    context,
-                                    font_size,
-                                    &font_ids,
-                                    letter_spacing,
-                                );
-                                context.shaped_words_cache.put(id, subword);
-                            }
+                            subword_width += glyph_width;
+                        }
 
-                            if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
-                                // replace the outer variables so we can continue normally
-                                word = subword.clone();
-                                word_txt = subword_txt;
-                            } else {
-                                break;
-                            }
-                        } else if word.glyphs.iter().all(|g| g.c.is_whitespace()) {
-                            // the last word we've broken in the middle of is whitespace.
-                            // include this word for now, but we will discard its metrics in a moment.
-                        } else {
-                            // we are not breaking up words - discard this word
+                        if bytes_included == 0 {
+                            // just in case - never mind!
                             break;
                         }
+
+                        let subword_txt = &word_txt[..bytes_included];
+                        let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width));
+                        if !context.shaped_words_cache.contains(&id) {
+                            let subword =
+                                shape_word(subword_txt, hb_direction, context, font_size, &font_ids, letter_spacing);
+                            context.shaped_words_cache.put(id, subword);
+                        }
+
+                        if let Some(Ok(subword)) = context.shaped_words_cache.get(&id) {
+                            // replace the outer variables so we can continue normally
+                            word = subword.clone();
+                            word_txt = subword_txt;
+                        } else {
+                            break;
+                        }
+                    } else if word.glyphs.iter().all(|g| g.c.is_whitespace()) {
+                        // the last word we've broken in the middle of is whitespace.
+                        // include this word for now, but we will discard its metrics in a moment.
+                    } else {
+                        // we are not breaking up words - discard this word
+                        break;
                     }
                 }
 

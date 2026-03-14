@@ -164,8 +164,8 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
     let mut paths = Vec::new();
 
     fn collect_paths(children: &[usvg::Node], paths: &mut Vec<(Path, Option<Paint>, Option<Paint>)>) {
-        use usvg::tiny_skia_path::PathSegment;
         use usvg::Node;
+        use usvg::tiny_skia_path::PathSegment;
 
         for node in children {
             match node {

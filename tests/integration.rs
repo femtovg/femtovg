@@ -1,4 +1,4 @@
-use femtovg::{renderer::Void, Baseline, Canvas, Color, FillRule, Paint, Path, Solidity};
+use femtovg::{Baseline, Canvas, Color, FillRule, Paint, Path, Solidity, renderer::Void};
 
 #[test]
 fn path_with_single_move_to() {

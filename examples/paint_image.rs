@@ -86,7 +86,9 @@ fn run<W: WindowSurface + 'static>(
     let mut shape = Shape::Rect;
     let mut time_warp = 0;
 
-    log::error!("Scroll vertically to change zoom, horizontally (or vertically with Shift) to change time warp, click to cycle shape.");
+    log::error!(
+        "Scroll vertically to change zoom, horizontally (or vertically with Shift) to change time warp, click to cycle shape."
+    );
 
     let mut swap_directions = false;
 

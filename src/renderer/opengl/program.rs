@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use glow::HasContext;
 
-use crate::{renderer::ShaderType, ErrorKind};
+use crate::{ErrorKind, renderer::ShaderType};
 
 const GLSL_VERSION: &str = "#version 100";
 

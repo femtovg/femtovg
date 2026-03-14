@@ -1,7 +1,7 @@
 use crate::{
+    ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
     geometry::Position,
     paint::{GlyphTexture, GradientColors},
-    ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
 use super::ShaderType;

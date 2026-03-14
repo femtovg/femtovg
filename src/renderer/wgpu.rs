@@ -5,15 +5,15 @@ use std::rc::Rc;
 use rgb::bytemuck;
 use wgpu::util::DeviceExt;
 
-use crate::image::ImageStore;
-use crate::paint::GlyphTexture;
-use crate::renderer::ShaderType;
 use crate::BlendFactor;
 use crate::FillRule;
 use crate::ImageId;
 use crate::ImageInfo;
 use crate::RenderTarget;
 use crate::Scissor;
+use crate::image::ImageStore;
+use crate::paint::GlyphTexture;
+use crate::renderer::ShaderType;
 
 use super::Renderer;
 

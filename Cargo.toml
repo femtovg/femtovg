@@ -11,7 +11,7 @@ authors = [
 keywords = ["graphics", "canvas", "vector", "drawing", "gpu"]
 categories = ["graphics"]
 repository = "https://github.com/femtovg/femtovg"
-edition = "2021"
+edition = "2024"
 exclude = ["assets", "examples"]
 rust-version = "1.88"
 
