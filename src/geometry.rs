@@ -215,7 +215,8 @@ impl Transform2D {
     }
 
     /// Creates a translation transformation matrix.
-    pub fn translation(tx: f32, ty: f32) -> Self {
+    pub fn translation(offset: impl Into<[f32; 2]>) -> Self {
+        let [tx, ty] = offset.into();
         Self([1.0, 0.0, 0.0, 1.0, tx, ty])
     }
 
@@ -227,12 +228,14 @@ impl Transform2D {
     }
 
     /// Creates a scaling transformation matrix.
-    pub fn scaling(sx: f32, sy: f32) -> Self {
+    pub fn scaling(factor: impl Into<[f32; 2]>) -> Self {
+        let [sx, sy] = factor.into();
         Self([sx, 0.0, 0.0, sy, 0.0, 0.0])
     }
 
     /// Translates the matrix.
-    pub fn translate(&mut self, tx: f32, ty: f32) {
+    pub fn translate(&mut self, offset: impl Into<[f32; 2]>) {
+        let [tx, ty] = offset.into();
         let Self([.., x, y]) = self;
 
         *x += tx;
@@ -251,7 +254,8 @@ impl Transform2D {
     }
 
     /// Scales the matrix.
-    pub fn scale(&mut self, sx: f32, sy: f32) {
+    pub fn scale(&mut self, factor: impl Into<[f32; 2]>) {
+        let [sx, sy] = factor.into();
         let Self([a, b, c, d, x, y]) = self;
 
         *a *= sx;
@@ -320,12 +324,13 @@ impl Transform2D {
     }
 
     /// Transforms a point using the current transformation matrix.
-    pub fn transform_point(&self, sx: f32, sy: f32) -> (f32, f32) {
+    pub fn transform_point(&self, pos: impl Into<[f32; 2]>) -> [f32; 2] {
+        let [sx, sy] = pos.into();
         let &Self([a, b, c, d, x, y]) = self;
 
         let dx = sx * a + sy * c + x;
         let dy = sx * b + sy * d + y;
-        (dx, dy)
+        [dx, dy]
     }
 
     /// Calculates the average scale factor of the current transformation matrix.
@@ -458,7 +463,9 @@ pub struct Rect {
 }
 
 impl Rect {
-    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+    pub fn new(pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>) -> Self {
+        let [x, y] = pos.into();
+        let [w, h] = size.into();
         Self { x, y, w, h }
     }
 
@@ -468,7 +475,7 @@ impl Rect {
         let maxx = (self.x + self.w).min(other.x + other.w);
         let maxy = (self.y + self.h).min(other.y + other.h);
 
-        Self::new(minx, miny, 0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny))
+        Self::new([minx, miny], [0.0f32.max(maxx - minx), 0.0f32.max(maxy - miny)])
     }
 
     pub fn contains_rect(&self, other: &Self) -> bool {

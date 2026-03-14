@@ -87,12 +87,12 @@ fn run<W: WindowSurface + 'static>(
 
                         // Now we need to apply the current canvas transform
                         // to the path bbox:
-                        let a = canvas.transform().inverse().transform_point(bbox.minx, bbox.miny);
-                        let b = canvas.transform().inverse().transform_point(bbox.maxx, bbox.maxy);
+                        let a = canvas.transform().inverse().transform_point([bbox.minx, bbox.miny]);
+                        let b = canvas.transform().inverse().transform_point([bbox.maxx, bbox.maxy]);
 
                         canvas.fill_path(
                             &path,
-                            &Paint::image(filtered_image.unwrap(), [a.0, a.1], [b.0 - a.0, b.1 - a.1], 0f32, 1f32),
+                            &Paint::image(filtered_image.unwrap(), a, [b[0] - a[0], b[1] - a[1]], 0f32, 1f32),
                         );
                     }
 

@@ -129,11 +129,11 @@ fn path_contains_point() {
     path.line_to([79.0, 90.0]);
     path.close();
 
-    assert!(!canvas.contains_point(&path, 50.0, 45.0, FillRule::EvenOdd));
-    assert!(canvas.contains_point(&path, 50.0, 5.0, FillRule::EvenOdd));
+    assert!(!canvas.contains_point(&path, [50.0, 45.0], FillRule::EvenOdd));
+    assert!(canvas.contains_point(&path, [50.0, 5.0], FillRule::EvenOdd));
 
-    assert!(canvas.contains_point(&path, 50.0, 45.0, FillRule::NonZero));
-    assert!(canvas.contains_point(&path, 50.0, 5.0, FillRule::NonZero));
+    assert!(canvas.contains_point(&path, [50.0, 45.0], FillRule::NonZero));
+    assert!(canvas.contains_point(&path, [50.0, 5.0], FillRule::NonZero));
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn text_location_respects_scale() {
         .expect("Font not found");
 
     let paint = Paint::color(Color::black()).with_text_baseline(Baseline::Top);
-    canvas.scale(5.0, 5.0);
+    canvas.scale([5.0, 5.0]);
 
     let res = canvas.measure_text(100.0, 100.0, "Hello", &paint).unwrap();
 

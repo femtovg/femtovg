@@ -611,7 +611,7 @@ impl GlyphAtlas {
 
         match glyph_representation {
             GlyphRendering::RenderAsPath(ref mut path) => {
-                canvas.translate(x, y);
+                canvas.translate([x, y]);
 
                 canvas.set_render_target(RenderTarget::Image(dst_image_id));
                 canvas.clear_rect(
@@ -655,9 +655,9 @@ impl GlyphAtlas {
 
                 for point in &points {
                     canvas.save();
-                    canvas.translate(point.0, point.1);
+                    canvas.translate([point.0, point.1]);
 
-                    canvas.scale(scale, scale);
+                    canvas.scale([scale, scale]);
 
                     if mode == RenderMode::Stroke {
                         canvas.stroke_path_internal(
@@ -922,8 +922,8 @@ pub fn render_direct<T: Renderer>(
             RenderMode::Stroke => stroke.line_width / scale,
         };
 
-        canvas.translate(glyph.x, glyph.y);
-        canvas.scale(scale, -scale);
+        canvas.translate([glyph.x, glyph.y]);
+        canvas.scale([scale, -scale]);
 
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {

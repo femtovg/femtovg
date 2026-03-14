@@ -138,16 +138,16 @@ fn run<W: WindowSurface + 'static>(
 
                     let zoom = (zoom as f32 / 40.0).exp();
                     let time_warp = (time_warp as f32 / 20.0).exp();
-                    canvas.translate(window_size.width as f32 / 2.0, window_size.height as f32 / 2.0);
-                    canvas.scale(zoom, zoom);
-                    canvas.translate(window_size.width as f32 / -2.0, window_size.height as f32 / -2.0);
+                    canvas.translate([window_size.width as f32 / 2.0, window_size.height as f32 / 2.0]);
+                    canvas.scale([zoom, zoom]);
+                    canvas.translate([window_size.width as f32 / -2.0, window_size.height as f32 / -2.0]);
 
                     if let Ok(size) = canvas.image_size(image_id) {
                         let now = Instant::now();
                         let t = (now - start).as_secs_f32() * time_warp;
 
                         // Shake things a bit to notice if we forgot something:
-                        canvas.translate(60.0 * (t / 3.0).cos(), 60.0 * (t / 5.0).sin());
+                        canvas.translate([60.0 * (t / 3.0).cos(), 60.0 * (t / 5.0).sin()]);
 
                         let rx = 100.0 * t.cos();
                         let ry = 100.0 * t.sin();
@@ -190,12 +190,12 @@ fn run<W: WindowSurface + 'static>(
 
                         // Now we need to apply the current canvas transform
                         // to the path bbox:
-                        let a = canvas.transform().inverse().transform_point(bbox.minx, bbox.miny);
-                        let b = canvas.transform().inverse().transform_point(bbox.maxx, bbox.maxy);
+                        let a = canvas.transform().inverse().transform_point([bbox.minx, bbox.miny]);
+                        let b = canvas.transform().inverse().transform_point([bbox.maxx, bbox.maxy]);
 
                         canvas.fill_path(
                             &path,
-                            &Paint::image(image_id, [a.0, a.1], [b.0 - a.0, b.1 - a.1], 0f32, 1f32),
+                            &Paint::image(image_id, a, [b[0] - a[0], b[1] - a[1]], 0f32, 1f32),
                         );
                     }
 

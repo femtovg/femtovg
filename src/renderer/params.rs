@@ -99,17 +99,17 @@ impl Params {
                 params.outer_col = color.premultiplied().to_array();
 
                 let mut transform = Transform2D::rotation(*angle);
-                transform.translate(*cx, *cy);
+                transform.translate([*cx, *cy]);
                 transform *= *global_transform;
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {
-                    let mut m1 = Transform2D::translation(0.0, height * 0.5);
+                    let mut m1 = Transform2D::translation([0.0, height * 0.5]);
                     m1 *= transform;
 
-                    let mut m2 = Transform2D::scaling(1.0, -1.0);
+                    let mut m2 = Transform2D::scaling([1.0, -1.0]);
                     m2 *= m1;
 
-                    let mut m1 = Transform2D::translation(0.0, -height * 0.5);
+                    let mut m1 = Transform2D::translation([0.0, -height * 0.5]);
                     m1 *= m2;
 
                     inv_transform = m1.inverse();
@@ -178,7 +178,7 @@ impl Params {
                 feather,
                 colors,
             } => {
-                let mut transform = Transform2D::translation(x + width * 0.5, y + height * 0.5);
+                let mut transform = Transform2D::translation([x + width * 0.5, y + height * 0.5]);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -206,7 +206,7 @@ impl Params {
                 let r = (in_radius + out_radius) * 0.5;
                 let f = out_radius - in_radius;
 
-                let mut transform = Transform2D::translation(*cx, *cy);
+                let mut transform = Transform2D::translation([*cx, *cy]);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -229,7 +229,7 @@ impl Params {
                 center: Position { x: cx, y: cy },
                 colors,
             } => {
-                let mut transform = Transform2D::translation(*cx, *cy);
+                let mut transform = Transform2D::translation([*cx, *cy]);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 

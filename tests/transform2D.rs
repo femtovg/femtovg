@@ -54,12 +54,12 @@ fn test_division_assignment() {
 #[test]
 fn test_translation() {
     let transform = Transform2D::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-    let (tx, ty) = (2.0, 5.0);
+    let offset = [2.0, 5.0];
 
     let mut translated = transform;
-    translated.translate(tx, ty);
+    translated.translate(offset);
 
-    assert_eq!(translated, transform * Transform2D::translation(tx, ty))
+    assert_eq!(translated, transform * Transform2D::translation(offset))
 }
 
 #[test]
@@ -76,10 +76,10 @@ fn test_rotation() {
 #[test]
 fn test_scaling() {
     let transform = Transform2D::new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-    let (sx, sy) = (2.0, 0.5);
+    let factor = [2.0, 0.5];
 
     let mut scaled = transform;
-    scaled.scale(sx, sy);
+    scaled.scale(factor);
 
-    assert_eq!(scaled, transform * Transform2D::scaling(sx, sy))
+    assert_eq!(scaled, transform * Transform2D::scaling(factor))
 }

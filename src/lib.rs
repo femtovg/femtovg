@@ -198,7 +198,7 @@ impl Scissor {
     /// Returns the bounding rect if the scissor clip if it's an untransformed rectangular clip
     fn as_rect(&self, canvas_width: f32, canvas_height: f32) -> Option<Rect> {
         let Some(extent) = self.extent else {
-            return Some(Rect::new(0., 0., canvas_width, canvas_height));
+            return Some(Rect::new([0., 0.], [canvas_width, canvas_height]));
         };
 
         let Transform2D([a, b, c, d, x, y]) = self.transform;
@@ -216,10 +216,8 @@ impl Scissor {
         let half_width = extent[0];
         let half_height = extent[1];
         Some(Rect::new(
-            x - half_width,
-            y - half_height,
-            half_width * 2.0,
-            half_height * 2.0,
+            [x - half_width, y - half_height],
+            [half_width * 2.0, half_height * 2.0],
         ))
     }
 }
@@ -718,8 +716,9 @@ where
     }
 
     /// Translates the current coordinate system.
-    pub fn translate(&mut self, x: f32, y: f32) {
-        let t = Transform2D::translation(x, y);
+    pub fn translate(&mut self, offset: impl Into<[f32; 2]>) {
+        let [x, y] = offset.into();
+        let t = Transform2D::translation([x, y]);
         self.state_mut().transform.premultiply(&t);
     }
 
@@ -730,8 +729,9 @@ where
     }
 
     /// Scales the current coordinate system.
-    pub fn scale(&mut self, x: f32, y: f32) {
-        let t = Transform2D::scaling(x, y);
+    pub fn scale(&mut self, factor: impl Into<[f32; 2]>) {
+        let [x, y] = factor.into();
+        let t = Transform2D::scaling([x, y]);
         self.state_mut().transform.premultiply(&t);
     }
 
@@ -759,13 +759,15 @@ where
     /// Sets the current scissor rectangle.
     ///
     /// The scissor rectangle is transformed by the current transform.
-    pub fn scissor(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub fn scissor(&mut self, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>) {
+        let [x, y] = pos.into();
+        let [w, h] = size.into();
         let state = self.state_mut();
 
         let w = w.max(0.0);
         let h = h.max(0.0);
 
-        let mut transform = Transform2D::translation(x + w * 0.5, y + h * 0.5);
+        let mut transform = Transform2D::translation([x + w * 0.5, y + h * 0.5]);
         transform *= state.transform;
         state.scissor.transform = transform;
 
@@ -779,12 +781,14 @@ where
     /// the current one, the intersection will be done between the specified
     /// rectangle and the previous scissor rectangle transformed in the current
     /// transform space. The resulting shape is always rectangle.
-    pub fn intersect_scissor(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    pub fn intersect_scissor(&mut self, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>) {
+        let [x, y] = pos.into();
+        let [w, h] = size.into();
         let state = self.state_mut();
 
         // If no previous scissor has been set, set the scissor as current scissor.
         if state.scissor.extent.is_none() {
-            self.scissor(x, y, w, h);
+            self.scissor([x, y], [w, h]);
             return;
         }
 
@@ -801,10 +805,10 @@ where
         let tex = ex * a.abs() + ey * c.abs();
         let tey = ex * b.abs() + ey * d.abs();
 
-        let rect = Rect::new(tx - tex, ty - tey, tex * 2.0, tey * 2.0);
-        let res = rect.intersect(Rect::new(x, y, w, h));
+        let rect = Rect::new([tx - tex, ty - tey], [tex * 2.0, tey * 2.0]);
+        let res = rect.intersect(Rect::new([x, y], [w, h]));
 
-        self.scissor(res.x, res.y, res.w, res.h);
+        self.scissor([res.x, res.y], [res.w, res.h]);
     }
 
     /// Reset and disables scissoring.
@@ -815,7 +819,8 @@ where
     // Paths
 
     /// Returns true if the specified point (x,y) is in the provided path, and false otherwise.
-    pub fn contains_point(&self, path: &Path, x: f32, y: f32, fill_rule: FillRule) -> bool {
+    pub fn contains_point(&self, path: &Path, pos: impl Into<[f32; 2]>, fill_rule: FillRule) -> bool {
+        let [x, y] = pos.into();
         let transform = self.state().transform;
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1164,7 +1169,7 @@ where
 
         // Apply the same mapping from vertex coordinates to texture coordinates as in the fragment shader,
         // but now ahead of time.
-        let mut to_texture_space_transform = Transform2D::scaling(1. / params.extent[0], 1. / params.extent[1]);
+        let mut to_texture_space_transform = Transform2D::scaling([1. / params.extent[0], 1. / params.extent[1]]);
         to_texture_space_transform.premultiply(&Transform2D([
             params.paint_mat[0],
             params.paint_mat[1],
@@ -1174,9 +1179,9 @@ where
             params.paint_mat[9],
         ]));
 
-        let (s0, t0) = to_texture_space_transform.transform_point(target_rect.x, target_rect.y);
-        let (s1, t1) =
-            to_texture_space_transform.transform_point(target_rect.x + target_rect.w, target_rect.y + target_rect.h);
+        let [s0, t0] = to_texture_space_transform.transform_point([target_rect.x, target_rect.y]);
+        let [s1, t1] =
+            to_texture_space_transform.transform_point([target_rect.x + target_rect.w, target_rect.y + target_rect.h]);
 
         let verts = [
             Vertex::new(p0, p1, s0, t0),
@@ -1341,10 +1346,10 @@ where
                 let top = quad.y0;
                 let bottom = quad.y1;
 
-                let (p0, p1) = transform.transform_point(left, top);
-                let (p2, p3) = transform.transform_point(right, top);
-                let (p4, p5) = transform.transform_point(right, bottom);
-                let (p6, p7) = transform.transform_point(left, bottom);
+                let [p0, p1] = transform.transform_point([left, top]);
+                let [p2, p3] = transform.transform_point([right, top]);
+                let [p4, p5] = transform.transform_point([right, bottom]);
+                let [p6, p7] = transform.transform_point([left, bottom]);
 
                 verts.push(Vertex::new(p0, p1, quad.s0, quad.t0));
                 verts.push(Vertex::new(p4, p5, quad.s1, quad.t1));

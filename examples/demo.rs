@@ -111,13 +111,13 @@ fn run<W: WindowSurface + 'static>(
                     device_id: _, position, ..
                 } => {
                     if dragging {
-                        let p0 = canvas.transform().inverse().transform_point(mousex, mousey);
+                        let p0 = canvas.transform().inverse().transform_point([mousex, mousey]);
                         let p1 = canvas
                             .transform()
                             .inverse()
-                            .transform_point(position.x as f32, position.y as f32);
+                            .transform_point([position.x as f32, position.y as f32]);
 
-                        canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
+                        canvas.translate([p1[0] - p0[0], p1[1] - p0[1]]);
                     }
 
                     mousex = position.x as f32;
@@ -128,10 +128,10 @@ fn run<W: WindowSurface + 'static>(
                     delta: winit::event::MouseScrollDelta::LineDelta(_, y),
                     ..
                 } => {
-                    let pt = canvas.transform().inverse().transform_point(mousex, mousey);
-                    canvas.translate(pt.0, pt.1);
-                    canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
-                    canvas.translate(-pt.0, -pt.1);
+                    let pt = canvas.transform().inverse().transform_point([mousex, mousey]);
+                    canvas.translate(pt);
+                    canvas.scale([1.0 + (y / 10.0), 1.0 + (y / 10.0)]);
+                    canvas.translate([-pt[0], -pt[1]]);
                 }
                 WindowEvent::MouseInput {
                     button: MouseButton::Left,
@@ -175,9 +175,9 @@ fn run<W: WindowSurface + 'static>(
                     let height = size.height as f32;
                     let width = size.width as f32;
 
-                    let pt = canvas.transform().inverse().transform_point(mousex, mousey);
-                    let rel_mousex = pt.0;
-                    let rel_mousey = pt.1;
+                    let pt = canvas.transform().inverse().transform_point([mousex, mousey]);
+                    let rel_mousex = pt[0];
+                    let rel_mousey = pt[1];
 
                     draw_graph(&mut canvas, 0.0, height / 2.0, width, height / 2.0, t);
 
@@ -701,7 +701,7 @@ fn draw_colorwheel<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
 
     // Selector
     canvas.save();
-    canvas.translate(cx, cy);
+    canvas.translate([cx, cy]);
     canvas.rotate(hue * PI * 2.0);
 
     // Marker on
@@ -1094,8 +1094,8 @@ fn draw_thumbnails<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, 
     canvas.fill_path(&path, &Paint::color(Color::rgba(200, 200, 200, 255)));
 
     canvas.save();
-    canvas.scissor(x, y, w, h);
-    canvas.translate(0.0, -(stackh - h) * u);
+    canvas.scissor([x, y], [w, h]);
+    canvas.translate([0.0, -(stackh - h) * u]);
 
     let dv = 1.0 / (images.len() as f32 - 1.0);
 
@@ -1267,7 +1267,7 @@ fn draw_lines<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, w: f32, _h: f
 
 fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, mousey: f32) {
     canvas.save();
-    canvas.translate(x, y);
+    canvas.translate([x, y]);
 
     let mut evenodd_fill = Paint::color(Color::rgba(220, 220, 220, 120)).with_fill_rule(FillRule::EvenOdd);
 
@@ -1279,13 +1279,13 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     path.line_to([79.0, 90.0]);
     path.close();
 
-    if canvas.contains_point(&path, mousex, mousey, FillRule::EvenOdd) {
+    if canvas.contains_point(&path, [mousex, mousey], FillRule::EvenOdd) {
         evenodd_fill.set_color(Color::rgb(220, 220, 220));
     }
 
     canvas.fill_path(&path, &evenodd_fill);
 
-    canvas.translate(100.0, 0.0);
+    canvas.translate([100.0, 0.0]);
 
     let mut nonzero_fill = Paint::color(Color::rgba(220, 220, 220, 120)).with_fill_rule(FillRule::NonZero);
 
@@ -1297,7 +1297,7 @@ fn draw_fills<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, mousex: f32, 
     path.line_to([79.0, 90.0]);
     path.close();
 
-    if canvas.contains_point(&path, mousex, mousey, FillRule::NonZero) {
+    if canvas.contains_point(&path, [mousex, mousey], FillRule::NonZero) {
         nonzero_fill.set_color(Color::rgb(220, 220, 220));
     }
 
@@ -1355,17 +1355,17 @@ fn draw_scissor<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, t: f32) {
     canvas.save();
 
     // Draw first rect and set scissor to it's area.
-    canvas.translate(x, y);
+    canvas.translate([x, y]);
     canvas.rotate(5.0f32.to_radians());
 
     let mut path = Path::new();
     path.rect([-20.0, -20.0], [60.0, 40.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 0, 0, 255)));
 
-    canvas.scissor(-20.0, -20.0, 60.0, 40.0);
+    canvas.scissor([-20.0, -20.0], [60.0, 40.0]);
 
     // Draw second rectangle with offset and rotation.
-    canvas.translate(40.0, 0.0);
+    canvas.translate([40.0, 0.0]);
     canvas.rotate(t);
 
     // Draw the intended second rectangle without any scissoring.
@@ -1377,7 +1377,7 @@ fn draw_scissor<T: Renderer>(canvas: &mut Canvas<T>, x: f32, y: f32, t: f32) {
     canvas.restore();
 
     // Draw second rectangle with scissoring.
-    //canvas.intersect_scissor(-20.0, -10.0, 60.0, 30.0);
+    //canvas.intersect_scissor([-20.0, -10.0], [60.0, 30.0]);
     path.rect([-20.0, -10.0], [60.0, 30.0]);
     canvas.fill_path(&path, &Paint::color(Color::rgba(255, 128, 0, 255)));
 

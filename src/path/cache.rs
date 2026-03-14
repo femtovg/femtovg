@@ -143,18 +143,18 @@ impl PathCache {
             match verb {
                 Verb::MoveTo(x, y) => {
                     cache.add_contour();
-                    let (x, y) = transform.transform_point(x, y);
+                    let [x, y] = transform.transform_point([x, y]);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::LineTo(x, y) => {
-                    let (x, y) = transform.transform_point(x, y);
+                    let [x, y] = transform.transform_point([x, y]);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
                     if let Some(last) = cache.points.last().copied() {
-                        let (c1x, c1y) = transform.transform_point(c1x, c1y);
-                        let (c2x, c2y) = transform.transform_point(c2x, c2y);
-                        let (x, y) = transform.transform_point(x, y);
+                        let [c1x, c1y] = transform.transform_point([c1x, c1y]);
+                        let [c2x, c2y] = transform.transform_point([c2x, c2y]);
+                        let [x, y] = transform.transform_point([x, y]);
 
                         cache.tesselate_bezier(
                             last.pos.x,
@@ -897,10 +897,11 @@ impl PathCache {
             && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
         {
             Some(crate::Rect::new(
-                maybe_t1_top_left.x,
-                maybe_t1_top_left.y,
-                maybe_t2_top_right.x - maybe_t1_top_left.x,
-                maybe_t1_bottom_left.y - maybe_t1_top_left.y,
+                [maybe_t1_top_left.x, maybe_t1_top_left.y],
+                [
+                    maybe_t2_top_right.x - maybe_t1_top_left.x,
+                    maybe_t1_bottom_left.y - maybe_t1_top_left.y,
+                ],
             ))
         } else {
             None

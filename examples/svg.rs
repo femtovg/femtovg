@@ -74,13 +74,13 @@ fn run<W: WindowSurface + 'static>(
                 device_id: _, position, ..
             } => {
                 if dragging {
-                    let p0 = canvas.transform().inverse().transform_point(mousex, mousey);
+                    let p0 = canvas.transform().inverse().transform_point([mousex, mousey]);
                     let p1 = canvas
                         .transform()
                         .inverse()
-                        .transform_point(position.x as f32, position.y as f32);
+                        .transform_point([position.x as f32, position.y as f32]);
 
-                    canvas.translate(p1.0 - p0.0, p1.1 - p0.1);
+                    canvas.translate([p1[0] - p0[0], p1[1] - p0[1]]);
                 }
 
                 mousex = position.x as f32;
@@ -91,10 +91,10 @@ fn run<W: WindowSurface + 'static>(
                 delta: winit::event::MouseScrollDelta::LineDelta(_, y),
                 ..
             } => {
-                let pt = canvas.transform().inverse().transform_point(mousex, mousey);
-                canvas.translate(pt.0, pt.1);
-                canvas.scale(1.0 + (y / 10.0), 1.0 + (y / 10.0));
-                canvas.translate(-pt.0, -pt.1);
+                let pt = canvas.transform().inverse().transform_point([mousex, mousey]);
+                canvas.translate(pt);
+                canvas.scale([1.0 + (y / 10.0), 1.0 + (y / 10.0)]);
+                canvas.translate([-pt[0], -pt[1]]);
             }
             WindowEvent::KeyboardInput {
                 event:
@@ -128,7 +128,7 @@ fn run<W: WindowSurface + 'static>(
                 canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.3, 0.3, 0.32));
 
                 canvas.save();
-                canvas.translate(200.0, 200.0);
+                canvas.translate([200.0, 200.0]);
 
                 for (path, fill, stroke) in &paths {
                     if let Some(fill) = fill {
@@ -139,7 +139,7 @@ fn run<W: WindowSurface + 'static>(
                         canvas.stroke_path(path, stroke);
                     }
 
-                    if canvas.contains_point(path, mousex, mousey, FillRule::NonZero) {
+                    if canvas.contains_point(path, [mousex, mousey], FillRule::NonZero) {
                         let paint = Paint::color(Color::rgb(32, 240, 32)).with_line_width(1.0);
                         canvas.stroke_path(path, &paint);
                     }
