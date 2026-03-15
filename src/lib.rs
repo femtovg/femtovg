@@ -9,6 +9,15 @@
  *
  * The coordinate system’s origin is the top-left corner,
  * with positive X rightwards, positive Y downwards.
+ *
+ * Drawing settings are split into explicit types:
+ * - [`Paint`] — color, gradient, or image pattern
+ * - [`StrokeSettings`] — line width, caps, joins (passed to [`Canvas::stroke_path`])
+ * - [`TextSettings`] — font, size, alignment (passed to text methods)
+ * - [`FillRule`] — winding rule (passed to [`Canvas::fill_path`])
+ *
+ * [`Path`] is generic over the number of dimensions (`Path<2>` for 2D, `Path<3>` for 3D, etc.).
+ * Higher-dimensional paths can be projected to 2D for rendering via [`Path::map`].
  */
 
 /*

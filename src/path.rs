@@ -86,6 +86,24 @@ impl<const N: usize> Verb<N> {
 /// describing one or more contours.
 ///
 /// The const generic `N` specifies the number of dimensions (default 2).
+/// Use `Path` (or `Path<2>`) for standard 2D drawing, and `Path<3>` for 3D
+/// geometry that can be projected to 2D via [`map()`](Path::map).
+///
+/// # 3D Example
+/// ```
+/// use femtovg::Path;
+///
+/// let mut path3d = Path::<3>::new();
+/// path3d.move_to([0.0, 0.0, 0.0]);
+/// path3d.line_to([1.0, 1.0, 1.0]);
+/// path3d.bezier_to([0.5, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 1.0, 0.0]);
+/// path3d.close();
+///
+/// let path2d = path3d.map(|[x, y, z]| {
+///     let scale = 400.0 / (400.0 + z);
+///     [x * scale, y * scale]
+/// });
+/// ```
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path<const N: usize = 2> {
@@ -183,8 +201,19 @@ impl<const N: usize> Path<N> {
         }
     }
 
-    /// Transforms all coordinates in the path using the given function, producing a path
-    /// in a different number of dimensions.
+    /// Transforms all coordinates using the given function, producing a path in a
+    /// (potentially different) number of dimensions. This is useful for projecting
+    /// 3D paths to 2D for rendering.
+    ///
+    /// ```
+    /// use femtovg::Path;
+    ///
+    /// let mut path3d = Path::<3>::new();
+    /// path3d.move_to([10.0, 20.0, 30.0]);
+    /// path3d.line_to([40.0, 50.0, 60.0]);
+    ///
+    /// let path2d: Path<2> = path3d.map(|[x, y, _z]| [x, y]);
+    /// ```
     pub fn map<const M: usize>(&self, f: impl Fn([f32; N]) -> [f32; M]) -> Path<M> {
         Path {
             verbs: self.verbs.clone(),

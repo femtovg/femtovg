@@ -5,7 +5,7 @@
 [![Discord](https://img.shields.io/discord/691716054560407592)](https://discord.gg/V69VdVu)
 
 <h2 align="center">femtovg</h2>
-<p align="center">GPU Antialiased 2D vector drawing library written in Rust.</p>
+<p align="center">GPU Antialiased vector drawing library written in Rust.</p>
 
 - [Cargo crate](https://crates.io/crates/femtovg)
 - [Book](https://femtovg.github.io)
@@ -54,12 +54,13 @@ Run with `cargo run --example text`
 * [x] OpenGl ES2 backend
 * [x] WGPU backend
 * [x] Color fonts
+* [x] Dimension-generic paths (`Path<3>` for 3D, projected to 2D via `map()`)
+* [x] Separated Paint, StrokeSettings, TextSettings, and FillRule for explicit APIs
 
 ## Not supported
 * [ ] Stroke dashing
 * [ ] Path scissoring
 * [ ] Custom shaders
-* [ ] 3D transforms
 
 ## Ecosystem
 
