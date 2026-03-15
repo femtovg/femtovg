@@ -6,7 +6,7 @@ use std::{
 use fnv::FnvHasher;
 use lru::LruCache;
 
-use crate::{Align, Baseline, ErrorKind, FontId, Paint, paint::TextSettings};
+use crate::{Align, Baseline, ErrorKind, FontId, paint::TextSettings};
 
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
@@ -60,22 +60,27 @@ pub(super) type ShapedWordsCache<H> = LruCache<ShapingId, Result<ShapedWord, Err
 pub(super) type ShapingRunCache<H> = LruCache<ShapingId, TextMetrics, H>;
 
 impl super::TextContext {
-    /// Returns information on how the provided text will be drawn with the specified paint.
+    /// Returns information on how the provided text will be drawn with the specified text settings.
     pub fn measure_text<S: AsRef<str>>(
         &self,
         x: f32,
         y: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.0.borrow_mut().measure_text(x, y, text, &paint.text)
+        self.0.borrow_mut().measure_text(x, y, text, text_settings)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside `max_width`.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
-    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
-        self.0.borrow_mut().break_text(max_width, text, &paint.text)
+    pub fn break_text<S: AsRef<str>>(
+        &self,
+        max_width: f32,
+        text: S,
+        text_settings: &TextSettings,
+    ) -> Result<usize, ErrorKind> {
+        self.0.borrow_mut().break_text(max_width, text, text_settings)
     }
 
     /// Returnes a list of ranges representing each line of text that will fit inside `max_width`
@@ -83,9 +88,9 @@ impl super::TextContext {
         &self,
         max_width: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
-        self.0.borrow_mut().break_text_vec(max_width, text, &paint.text)
+        self.0.borrow_mut().break_text_vec(max_width, text, text_settings)
     }
 
     /// Adjusts the capacity of the shaping run cache. This is a cache for measurements of whole
@@ -464,7 +469,7 @@ fn layout(
     let mut cursor_y = y;
 
     // Horizontal alignment
-    match text_settings.text_align {
+    match text_settings.align {
         Align::Center => cursor_x -= res.width / 2.0,
         Align::Right => cursor_x -= res.width,
         Align::Left => (),
@@ -496,7 +501,7 @@ fn layout(
     }
 
     // Baseline alignment
-    let alignment_offset_y = match text_settings.text_baseline {
+    let alignment_offset_y = match text_settings.baseline {
         Baseline::Top => ascender,
         Baseline::Middle => ascender.midpoint(descender),
         Baseline::Alphabetic => 0.0,

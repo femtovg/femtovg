@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use femtovg::{Canvas, Color, Paint, Path, renderer::OpenGl};
+use femtovg::{Canvas, Color, FillRule, Paint, Path, renderer::OpenGl};
 use glow::{Context, HasContext, NativeFramebuffer, NativeProgram, NativeTexture, Program};
 use glutin::{
     config::ConfigTemplateBuilder,
@@ -156,7 +156,7 @@ impl ApplicationHandler for App {
                 let paint = Paint::color(Color::rgbf(1., 0., 0.));
                 let mut path = Path::new();
                 path.rect([WINDOW_WIDTH / 2. - 25., WINDOW_HEIGHT / 2. - 25.], [50., 50.]);
-                state.canvas.fill_path(&path, &paint);
+                state.canvas.fill_path(&path, &paint, FillRule::default());
                 state.canvas.restore();
 
                 state.canvas.flush();

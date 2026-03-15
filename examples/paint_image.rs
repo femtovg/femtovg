@@ -8,7 +8,7 @@ use std::sync::Arc;
  * `Canvas::path_bbox()` and use it to set the cx, cy, width, height values
  * in `Paint::image()` as shown in this example.
  */
-use femtovg::{Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use femtovg::{Canvas, Color, FillRule, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 use helpers::WindowSurface;
 use instant::Instant;
 use winit::{
@@ -196,6 +196,7 @@ fn run<W: WindowSurface + 'static>(
                         canvas.fill_path(
                             &path,
                             &Paint::image(image_id, a, [b[0] - a[0], b[1] - a[1]], 0f32, 1f32),
+                            FillRule::default(),
                         );
                     }
 

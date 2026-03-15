@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use femtovg::{Align, Baseline, Canvas, Color, FontId, ImageFlags, ImageId, Paint, Path, Renderer};
+use femtovg::{
+    Align, Baseline, Canvas, Color, FillRule, FontId, ImageFlags, ImageId, Paint, Path, Renderer, StrokeSettings,
+    TextSettings,
+};
 use instant::Instant;
 use rand::{
     RngExt,
@@ -513,7 +516,7 @@ impl Game {
             Color::rgb(90, 90, 90),
             Color::rgb(30, 30, 30),
         );
-        canvas.stroke_path(&path, &paint);
+        canvas.stroke_path(&path, &paint, &StrokeSettings::default());
 
         match self.state {
             State::TitleScreen => self.draw_title_screen(canvas),
@@ -529,7 +532,7 @@ impl Game {
         // curtain
         let mut path = Path::new();
         path.rect([0.0, 0.0], [self.size.width, self.size.height]);
-        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 180)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 180)), FillRule::default());
 
         // rust logo
         let logo_pos = Point::new((self.size.width / 2.0) - 50.0, (self.size.height / 2.0) - 180.0);
@@ -539,26 +542,41 @@ impl Game {
         //canvas.fill_path(&path, &Paint::color(Color::rgba(200, 200, 200, 200)));
         let mut path = Path::new();
         path.rect([logo_pos.x, logo_pos.y], [100.0, 100.0]);
-        canvas.fill_path(&path, &logo_paint);
+        canvas.fill_path(&path, &logo_paint, FillRule::default());
 
         // title
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Center)
-            .with_font(&[self.fonts.bold])
-            .with_font_size(80.0)
-            .with_line_width(4.0);
-        let _ = canvas.stroke_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
+        let paint = Paint::color(Color::rgb(240, 240, 240));
+        let stroke = StrokeSettings::new(4.0);
+        let text_settings = TextSettings::new(&[self.fonts.bold], 80.0).with_align(Align::Center);
+        let _ = canvas.stroke_text(
+            self.size.width / 2.0,
+            self.size.height / 2.0,
+            "rsBREAKOUT",
+            &paint,
+            &text_settings,
+            &stroke,
+        );
 
         let paint = paint.with_color(Color::rgb(143, 80, 49));
-        let _ = canvas.fill_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
+        let _ = canvas.fill_text(
+            self.size.width / 2.0,
+            self.size.height / 2.0,
+            "rsBREAKOUT",
+            &paint,
+            &text_settings,
+        );
 
         // Info
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Center)
-            .with_font(&[self.fonts.regular])
-            .with_font_size(16.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240));
+        let text_settings = TextSettings::new(&[self.fonts.regular], 16.0).with_align(Align::Center);
         let text = "Click anywhere to START.";
-        let _ = canvas.fill_text(self.size.width / 2.0, (self.size.height / 2.0) + 40.0, text, &paint);
+        let _ = canvas.fill_text(
+            self.size.width / 2.0,
+            (self.size.height / 2.0) + 40.0,
+            text,
+            &paint,
+            &text_settings,
+        );
     }
 
     fn draw_game<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
@@ -592,8 +610,8 @@ impl Game {
             self.paddle_rect.size.height / 2.0,
             0.0,
         );
-        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)));
-        canvas.stroke_path(&path, &highlight);
+        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)), FillRule::default());
+        canvas.stroke_path(&path, &highlight, &StrokeSettings::default());
 
         let mut path = Path::new();
         path.rect(
@@ -603,8 +621,8 @@ impl Game {
                 self.paddle_rect.size.height,
             ],
         );
-        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)));
-        canvas.stroke_path(&path, &highlight);
+        canvas.fill_path(&path, &Paint::color(Color::rgb(119, 123, 126)), FillRule::default());
+        canvas.stroke_path(&path, &highlight, &StrokeSettings::default());
 
         let mut path = Path::new();
         path.rounded_rect_varying(
@@ -616,13 +634,13 @@ impl Game {
             25.0,
         );
 
-        canvas.fill_path(&path, &highlight);
+        canvas.fill_path(&path, &highlight, FillRule::default());
 
         // Ball
         for ball in &self.balls {
             let mut path = Path::new();
             path.circle([ball.position.x, ball.position.y], ball.radius);
-            canvas.fill_path(&path, &Paint::color(Color::rgb(183, 65, 14)));
+            canvas.fill_path(&path, &Paint::color(Color::rgb(183, 65, 14)), FillRule::default());
 
             let bg = Paint::linear_gradient(
                 [ball.position.x, ball.position.y - ball.radius],
@@ -636,7 +654,7 @@ impl Game {
                 [ball.position.x, ball.position.y - ball.radius / 2.0],
                 ball.radius / 2.0,
             );
-            canvas.fill_path(&path, &bg);
+            canvas.fill_path(&path, &bg, FillRule::default());
         }
 
         // powerups
@@ -647,17 +665,19 @@ impl Game {
         self.draw_bricks(canvas);
 
         // lives
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Right)
-            .with_font(&[self.fonts.bold])
-            .with_font_size(22.0);
-        let _ = canvas.fill_text(self.size.width - 20.0, 25.0, format!("Lives: {}", self.lives), &paint);
+        let paint = Paint::color(Color::rgb(240, 240, 240));
+        let text_settings = TextSettings::new(&[self.fonts.bold], 22.0).with_align(Align::Right);
+        let _ = canvas.fill_text(
+            self.size.width - 20.0,
+            25.0,
+            format!("Lives: {}", self.lives),
+            &paint,
+            &text_settings,
+        );
 
         // score
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_font(&[self.fonts.bold])
-            .with_font_size(22.0);
-        let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint);
+        let text_settings = TextSettings::new(&[self.fonts.bold], 22.0);
+        let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint, &text_settings);
     }
 
     fn draw_round_info<R: Renderer + 'static>(&self, canvas: &mut Canvas<R>) {
@@ -699,14 +719,12 @@ impl Game {
         // curtain
         let mut path = Path::new();
         path.rect([0.0, 0.0], [self.size.width, self.size.height]);
-        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 32)), FillRule::default());
 
         // title
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Center)
-            .with_font(&[self.fonts.bold])
-            .with_font_size(80.0)
-            .with_line_width(4.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240));
+        let stroke = StrokeSettings::new(4.0);
+        let text_settings = TextSettings::new(&[self.fonts.bold], 80.0).with_align(Align::Center);
 
         let offset = 30.0;
 
@@ -715,6 +733,8 @@ impl Game {
             (self.size.height / 2.0) + offset,
             heading,
             &paint,
+            &text_settings,
+            &stroke,
         );
 
         let paint = paint.with_color(Color::rgb(143, 80, 49));
@@ -723,18 +743,18 @@ impl Game {
             (self.size.height / 2.0) + offset,
             heading,
             &paint,
+            &text_settings,
         );
 
         // Info
-        let paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Center)
-            .with_font(&[self.fonts.regular])
-            .with_font_size(16.0);
+        let paint = Paint::color(Color::rgb(240, 240, 240));
+        let text_settings = TextSettings::new(&[self.fonts.regular], 16.0).with_align(Align::Center);
         let _ = canvas.fill_text(
             self.size.width / 2.0,
             (self.size.height / 2.0) + offset * 2.0,
             subtext,
             &paint,
+            &text_settings,
         );
     }
 }
@@ -777,18 +797,22 @@ impl Powerup {
             5.0,
         );
 
-        canvas.stroke_path(&path, &Paint::color(Color::rgb(240, 240, 240)));
+        canvas.stroke_path(
+            &path,
+            &Paint::color(Color::rgb(240, 240, 240)),
+            &StrokeSettings::default(),
+        );
 
-        let text_paint = Paint::color(Color::rgb(240, 240, 240))
-            .with_text_align(Align::Center)
-            .with_text_baseline(Baseline::Middle)
-            .with_font(&[fonts.light])
-            .with_font_size(16.0);
+        let text_paint = Paint::color(Color::rgb(240, 240, 240));
+        let text_settings = TextSettings::new(&[fonts.light], 16.0)
+            .with_align(Align::Center)
+            .with_baseline(Baseline::Middle);
         let _ = canvas.fill_text(
             self.rect.center().x,
             self.rect.center().y,
             format!("{:?}", self.ty),
             &text_paint,
+            &text_settings,
         );
     }
 }
@@ -863,8 +887,12 @@ impl Brick {
             },
         });
 
-        canvas.fill_path(&path, &paint);
-        canvas.stroke_path(&path, &Paint::color(Color::rgb(240, 240, 240)));
+        canvas.fill_path(&path, &paint, FillRule::default());
+        canvas.stroke_path(
+            &path,
+            &Paint::color(Color::rgb(240, 240, 240)),
+            &StrokeSettings::default(),
+        );
 
         let mut path = Path::new();
         path.rounded_rect_varying(
@@ -875,7 +903,11 @@ impl Brick {
             15.0,
             15.0,
         );
-        canvas.fill_path(&path, &Paint::color(Color::rgba(255, 255, 255, 50)));
+        canvas.fill_path(
+            &path,
+            &Paint::color(Color::rgba(255, 255, 255, 50)),
+            FillRule::default(),
+        );
     }
 }
 

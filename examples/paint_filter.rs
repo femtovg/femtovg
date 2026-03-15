@@ -3,7 +3,7 @@ use std::sync::Arc;
 /**
  * Shows how to use `Canvas::filter_image()` to apply a blur filter.
  */
-use femtovg::{Canvas, Color, ImageFlags, Paint, Path};
+use femtovg::{Canvas, Color, FillRule, ImageFlags, Paint, Path};
 use helpers::WindowSurface;
 use instant::Instant;
 use resource::resource;
@@ -93,6 +93,7 @@ fn run<W: WindowSurface + 'static>(
                         canvas.fill_path(
                             &path,
                             &Paint::image(filtered_image.unwrap(), a, [b[0] - a[0], b[1] - a[1]], 0f32, 1f32),
+                            FillRule::default(),
                         );
                     }
 

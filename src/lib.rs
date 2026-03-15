@@ -57,8 +57,8 @@ pub use geometry::Transform2D;
 use geometry::*;
 
 mod paint;
-pub use paint::Paint;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
+use paint::{GlyphTexture, PaintFlavor};
+pub use paint::{Paint, StrokeSettings, TextSettings};
 
 mod path;
 use path::Convexity;
@@ -848,9 +848,9 @@ where
         path_cache.bounds
     }
 
-    /// Fills the provided Path with the specified Paint.
-    pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
-        self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
+    /// Fills the provided Path with the specified Paint and fill rule.
+    pub fn fill_path(&mut self, path: &Path, paint: &Paint, fill_rule: FillRule) {
+        self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, fill_rule);
     }
 
     fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
@@ -1013,9 +1013,9 @@ where
         self.append_cmd(cmd);
     }
 
-    /// Strokes the provided Path with the specified Paint.
-    pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
-        self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
+    /// Strokes the provided Path with the specified Paint and stroke settings.
+    pub fn stroke_path(&mut self, path: &Path, paint: &Paint, stroke: &StrokeSettings) {
+        self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, stroke);
     }
 
     fn stroke_path_internal(
@@ -1222,74 +1222,71 @@ where
         self.text_context.borrow_mut().add_font_dir(dir_path)
     }
 
-    /// Returns information on how the provided text will be drawn with the specified paint.
+    /// Returns information on how the provided text will be drawn with the specified text settings.
     #[cfg(feature = "textlayout")]
     pub fn measure_text<S: AsRef<str>>(
         &self,
         x: f32,
         y: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<TextMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
-        let text_settings = paint.text.scaled(scale);
+        let scaled = text_settings.scaled(scale);
 
         self.text_context
             .borrow_mut()
-            .measure_text(x * scale, y * scale, text, &text_settings)
+            .measure_text(x * scale, y * scale, text, &scaled)
             .map(|mut metrics| {
                 metrics.scale(invscale);
                 metrics
             })
     }
 
-    /// Returns font metrics for a particular Paint.
+    /// Returns font metrics for the specified text settings.
     #[cfg(feature = "textlayout")]
-    pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
+    pub fn measure_font(&self, text_settings: &TextSettings) -> Result<FontMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
         self.text_context
             .borrow_mut()
-            .measure_font(paint.text.font_size * scale, &paint.text.font_ids)
+            .measure_font(text_settings.font_size * scale, &text_settings.font_ids)
     }
 
     /// Returns the maximum index-th byte of text that will fit inside `max_width`.
     ///
     /// The retuned index will always lie at the start and/or end of a UTF-8 code point sequence or at the start or end of the text
     #[cfg(feature = "textlayout")]
-    pub fn break_text<S: AsRef<str>>(&self, max_width: f32, text: S, paint: &Paint) -> Result<usize, ErrorKind> {
+    pub fn break_text<S: AsRef<str>>(
+        &self,
+        max_width: f32,
+        text: S,
+        text_settings: &TextSettings,
+    ) -> Result<usize, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
-
-        let text_settings = paint.text.scaled(scale);
-
+        let scaled = text_settings.scaled(scale);
         let max_width = max_width * scale;
 
-        self.text_context
-            .borrow_mut()
-            .break_text(max_width, text, &text_settings)
+        self.text_context.borrow_mut().break_text(max_width, text, &scaled)
     }
 
-    /// Returnes a list of ranges representing each line of text that will fit inside `max_width`
+    /// Returns a list of ranges representing each line of text that will fit inside `max_width`
     #[cfg(feature = "textlayout")]
     pub fn break_text_vec<S: AsRef<str>>(
         &self,
         max_width: f32,
         text: S,
-        paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<Vec<Range<usize>>, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
-
-        let text_settings = paint.text.scaled(scale);
-
+        let scaled = text_settings.scaled(scale);
         let max_width = max_width * scale;
 
-        self.text_context
-            .borrow_mut()
-            .break_text_vec(max_width, text, &text_settings)
+        self.text_context.borrow_mut().break_text_vec(max_width, text, &scaled)
     }
 
-    /// Fills the provided string with the specified Paint.
+    /// Fills the provided string with the specified paint and text settings.
     #[cfg(feature = "textlayout")]
     pub fn fill_text<S: AsRef<str>>(
         &mut self,
@@ -1297,11 +1294,20 @@ where
         y: f32,
         text: S,
         paint: &Paint,
+        text_settings: &TextSettings,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Fill)
+        self.draw_text(
+            x,
+            y,
+            text.as_ref(),
+            paint,
+            text_settings,
+            &StrokeSettings::default(),
+            RenderMode::Fill,
+        )
     }
 
-    /// Strokes the provided string with the specified Paint.
+    /// Strokes the provided string with the specified paint, text settings, and stroke settings.
     #[cfg(feature = "textlayout")]
     pub fn stroke_text<S: AsRef<str>>(
         &mut self,
@@ -1309,28 +1315,40 @@ where
         y: f32,
         text: S,
         paint: &Paint,
+        text_settings: &TextSettings,
+        stroke: &StrokeSettings,
     ) -> Result<TextMetrics, ErrorKind> {
-        self.draw_text(x, y, text.as_ref(), paint, RenderMode::Stroke)
+        self.draw_text(x, y, text.as_ref(), paint, text_settings, stroke, RenderMode::Stroke)
     }
 
     /// Fills the provided glyphs with the specified Paint.
     pub fn fill_glyph_run(
         &mut self,
         font_id: FontId,
+        font_size: f32,
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Fill)
+        self.draw_glyph_run(
+            glyphs,
+            paint,
+            font_id,
+            font_size,
+            &StrokeSettings::default(),
+            RenderMode::Fill,
+        )
     }
 
-    /// Strokes the provided glyphs with the specified Paint.
+    /// Strokes the provided glyphs with the specified Paint and stroke settings.
     pub fn stroke_glyph_run(
         &mut self,
         font_id: FontId,
+        font_size: f32,
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
+        stroke: &StrokeSettings,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Stroke)
+        self.draw_glyph_run(glyphs, paint, font_id, font_size, stroke, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
@@ -1392,12 +1410,14 @@ where
         y: f32,
         text: &str,
         paint: &Paint,
+        text_settings: &TextSettings,
+        stroke: &StrokeSettings,
         render_mode: RenderMode,
     ) -> Result<TextMetrics, ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
         let invscale = 1.0 / scale;
 
-        let text_settings = paint.text.scaled(scale);
+        let text_settings = text_settings.scaled(scale);
 
         let mut layout = text::shape(
             x * scale,
@@ -1420,6 +1440,8 @@ where
                 }),
                 paint,
                 font_id,
+                text_settings.font_size / scale,
+                stroke,
                 render_mode,
             )?;
         }
@@ -1434,19 +1456,19 @@ where
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
         font_id: FontId,
+        font_size: f32,
+        stroke: &StrokeSettings,
         render_mode: RenderMode,
     ) -> Result<(), ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
 
-        let mut stroke = paint.stroke.clone();
+        let mut stroke = stroke.clone();
         stroke.line_width *= scale;
-
-        // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let text_context = self.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        let need_direct_rendering = paint.text.font_size > 92.0;
+        let need_direct_rendering = font_size > 92.0;
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
@@ -1482,7 +1504,7 @@ where
                 &paint.flavor,
                 paint.shape_anti_alias,
                 &stroke,
-                paint.text.font_size,
+                font_size,
                 render_mode,
             )?;
             GlyphDrawCommands::default()
@@ -1493,8 +1515,8 @@ where
                 font,
                 &font_face,
                 non_color_glyphs.into_iter(),
-                paint.text.font_size,
-                paint.stroke.line_width,
+                font_size,
+                stroke.line_width,
                 render_mode,
             )?
         };
@@ -1515,8 +1537,8 @@ where
                     font,
                     &font_face,
                     color_glyphs.into_iter(),
-                    paint.text.font_size,
-                    paint.stroke.line_width,
+                    font_size,
+                    stroke.line_width,
                     render_mode,
                 )?
             };
@@ -1604,7 +1626,11 @@ where
             let height = size.1 as f32;
             let mut path = Path::new();
             path.rect([0f32, 0f32], [width, height]);
-            self.fill_path(&path, &Paint::image(id, [0f32, 0f32], [width, height], 0f32, 1f32));
+            self.fill_path(
+                &path,
+                &Paint::image(id, [0f32, 0f32], [width, height], 0f32, 1f32),
+                FillRule::default(),
+            );
         }
     }
 }
@@ -1741,7 +1767,7 @@ fn test_image_blit_fast_path() {
         .create_image_empty(30, 30, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
     let paint = Paint::image(image, [0., 0.], [30., 30.], 0., 0.).with_anti_alias(false);
-    canvas.fill_path(&path, &paint);
+    canvas.fill_path(&path, &paint, FillRule::default());
     canvas.flush_to_surface(&());
 
     let commands = recorded_commands.borrow();

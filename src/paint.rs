@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use crate::{Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin, geometry::Position};
+use crate::{Align, Baseline, Color, FontId, ImageId, LineCap, LineJoin, geometry::Position};
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -238,6 +238,7 @@ impl GlyphTexture {
     }
 }
 
+/// Settings controlling how strokes are rendered.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StrokeSettings {
@@ -247,6 +248,102 @@ pub struct StrokeSettings {
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
+}
+
+impl StrokeSettings {
+    /// Creates new stroke settings with the specified line width.
+    pub fn new(line_width: f32) -> Self {
+        Self {
+            line_width,
+            ..Default::default()
+        }
+    }
+
+    /// Returns whether higher quality stencil strokes are used.
+    #[inline]
+    pub fn stencil_strokes(&self) -> bool {
+        self.stencil_strokes
+    }
+
+    /// Returns the settings with stencil strokes set to the specified value.
+    #[inline]
+    pub fn with_stencil_strokes(mut self, value: bool) -> Self {
+        self.stencil_strokes = value;
+        self
+    }
+
+    /// Returns the current line width.
+    #[inline]
+    pub fn line_width(&self) -> f32 {
+        self.line_width
+    }
+
+    /// Returns the settings with line width set to the specified value.
+    #[inline]
+    pub fn with_line_width(mut self, width: f32) -> Self {
+        self.line_width = width;
+        self
+    }
+
+    /// Returns the current miter limit.
+    #[inline]
+    pub fn miter_limit(&self) -> f32 {
+        self.miter_limit
+    }
+
+    /// Returns the settings with the miter limit set to the specified value.
+    #[inline]
+    pub fn with_miter_limit(mut self, limit: f32) -> Self {
+        self.miter_limit = limit;
+        self
+    }
+
+    /// Returns the current start line cap.
+    #[inline]
+    pub fn line_cap_start(&self) -> LineCap {
+        self.line_cap_start
+    }
+
+    /// Returns the current end line cap.
+    #[inline]
+    pub fn line_cap_end(&self) -> LineCap {
+        self.line_cap_end
+    }
+
+    /// Returns the settings with the line cap set for both start and end.
+    #[inline]
+    pub fn with_line_cap(mut self, cap: LineCap) -> Self {
+        self.line_cap_start = cap;
+        self.line_cap_end = cap;
+        self
+    }
+
+    /// Returns the settings with the start line cap set to the specified value.
+    #[inline]
+    pub fn with_line_cap_start(mut self, cap: LineCap) -> Self {
+        self.line_cap_start = cap;
+        self
+    }
+
+    /// Returns the settings with the end line cap set to the specified value.
+    #[inline]
+    pub fn with_line_cap_end(mut self, cap: LineCap) -> Self {
+        self.line_cap_end = cap;
+        self
+    }
+
+    /// Returns the current line join.
+    #[inline]
+    pub fn line_join(&self) -> LineJoin {
+        self.line_join
+    }
+
+    /// Returns the settings with the line join set to the specified value.
+    #[inline]
+    pub fn with_line_join(mut self, join: LineJoin) -> Self {
+        self.line_join = join;
+        self
+    }
 }
 
 impl Default for StrokeSettings {
@@ -262,18 +359,54 @@ impl Default for StrokeSettings {
     }
 }
 
+/// Settings controlling text rendering, such as font, size, spacing, and alignment.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TextSettings {
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) font_ids: [Option<FontId>; 8],
-    pub(crate) font_size: f32,
-    pub(crate) letter_spacing: f32,
-    pub(crate) text_baseline: Baseline,
-    pub(crate) text_align: Align,
+    /// Font size in pixels.
+    pub font_size: f32,
+    /// Additional horizontal spacing between characters.
+    pub letter_spacing: f32,
+    /// Vertical baseline alignment.
+    pub baseline: Baseline,
+    /// Horizontal text alignment.
+    pub align: Align,
 }
 
 impl TextSettings {
+    /// Creates new text settings with the given fonts and font size.
+    pub fn new(font_ids: &[FontId], font_size: f32) -> Self {
+        let mut ids: [Option<FontId>; 8] = Default::default();
+        for (i, id) in font_ids.iter().take(8).enumerate() {
+            ids[i] = Some(*id);
+        }
+        Self {
+            font_ids: ids,
+            font_size,
+            ..Default::default()
+        }
+    }
+
+    /// Returns the settings with letter spacing set to the specified value.
+    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
+        self.letter_spacing = spacing;
+        self
+    }
+
+    /// Returns the settings with the baseline set to the specified value.
+    pub fn with_baseline(mut self, baseline: Baseline) -> Self {
+        self.baseline = baseline;
+        self
+    }
+
+    /// Returns the settings with horizontal alignment set to the specified value.
+    pub fn with_align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
     #[inline]
     pub(crate) fn scaled(&self, scale: f32) -> Self {
         Self {
@@ -290,8 +423,8 @@ impl Default for TextSettings {
             font_ids: Default::default(),
             font_size: 16.0,
             letter_spacing: 0.0,
-            text_baseline: Baseline::default(),
-            text_align: Align::default(),
+            baseline: Baseline::default(),
+            align: Align::default(),
         }
     }
 }
@@ -308,26 +441,24 @@ impl Default for TextSettings {
 ///
 /// # Example
 /// ```
-/// use femtovg::{Paint, Path, Color, Canvas, renderer::Void};
+/// use femtovg::{Paint, Path, Color, FillRule, Canvas, renderer::Void, StrokeSettings};
 ///
 /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
 ///
 /// let fill_paint = Paint::color(Color::hex("454545"));
-/// let stroke_paint = Paint::color(Color::hex("bababa")).with_line_width(4.0);
+/// let stroke_paint = Paint::color(Color::hex("bababa"));
+/// let stroke = StrokeSettings::new(4.0);
 ///
 /// let mut path = Path::new();
 /// path.rounded_rect([10.0, 10.0], [100.0, 100.0], 20.0);
-/// canvas.fill_path(&path, &fill_paint);
-/// canvas.stroke_path(&path, &stroke_paint);
+/// canvas.fill_path(&path, &fill_paint, FillRule::default());
+/// canvas.stroke_path(&path, &stroke_paint, &stroke);
 /// ```
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Paint {
     pub(crate) flavor: PaintFlavor,
     pub(crate) shape_anti_alias: bool,
-    pub(crate) stroke: StrokeSettings,
-    pub(crate) text: TextSettings,
-    pub(crate) fill_rule: FillRule,
 }
 
 impl Default for Paint {
@@ -335,9 +466,6 @@ impl Default for Paint {
         Self {
             flavor: PaintFlavor::Color(Color::white()),
             shape_anti_alias: true,
-            stroke: StrokeSettings::default(),
-            text: TextSettings::default(),
-            fill_rule: FillRule::default(),
         }
     }
 }
@@ -365,7 +493,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
@@ -374,7 +502,7 @@ impl Paint {
     ///
     /// let mut path = Path::new();
     /// path.rect([10.0, 10.0], [85.0, 85.0]);
-    /// canvas.fill_path(&path, &fill_paint);
+    /// canvas.fill_path(&path, &fill_paint, FillRule::default());
     /// ```
     pub fn image(id: ImageId, pos: impl Into<[f32; 2]>, size: impl Into<[f32; 2]>, angle: f32, alpha: f32) -> Self {
         let [x, y] = pos.into();
@@ -416,14 +544,14 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
     /// let bg = Paint::linear_gradient([0.0, 0.0], [0.0, 100.0], Color::rgba(255, 255, 255, 16), Color::rgba(0, 0, 0, 16));
     /// let mut path = Path::new();
     /// path.rounded_rect([0.0, 0.0], [100.0, 100.0], 5.0);
-    /// canvas.fill_path(&path, &bg);
+    /// canvas.fill_path(&path, &bg, FillRule::default());
     /// ```
     pub fn linear_gradient(
         start: impl Into<[f32; 2]>,
@@ -445,7 +573,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
@@ -459,7 +587,7 @@ impl Paint {
     ///    ]);
     /// let mut path = Path::new();
     /// path.rounded_rect([0.0, 0.0], [100.0, 100.0], 5.0);
-    /// canvas.fill_path(&path, &bg);
+    /// canvas.fill_path(&path, &bg, FillRule::default());
     /// ```
     pub fn linear_gradient_stops(
         start: impl Into<[f32; 2]>,
@@ -485,7 +613,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
@@ -500,7 +628,7 @@ impl Paint {
     ///
     /// let mut path = Path::new();
     /// path.rounded_rect([0.0, 0.0], [100.0, 100.0], 5.0);
-    /// canvas.fill_path(&path, &bg);
+    /// canvas.fill_path(&path, &bg, FillRule::default());
     /// ```
     pub fn box_gradient(
         pos: impl Into<[f32; 2]>,
@@ -533,7 +661,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
@@ -547,7 +675,7 @@ impl Paint {
     ///
     /// let mut path = Path::new();
     /// path.circle([50.0, 50.0], 20.0);
-    /// canvas.fill_path(&path, &bg);
+    /// canvas.fill_path(&path, &bg, FillRule::default());
     /// ```
     pub fn radial_gradient(
         center: impl Into<[f32; 2]>,
@@ -577,7 +705,7 @@ impl Paint {
     ///
     /// # Example
     /// ```
-    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    /// use femtovg::{Paint, Path, Color, FillRule, Canvas, ImageFlags, renderer::Void};
     ///
     /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
     ///
@@ -594,7 +722,7 @@ impl Paint {
     ///
     /// let mut path = Path::new();
     /// path.circle([50.0, 50.0], 20.0);
-    /// canvas.fill_path(&path, &bg);
+    /// canvas.fill_path(&path, &bg, FillRule::default());
     /// ```
     pub fn radial_gradient_stops(
         center: impl Into<[f32; 2]>,
@@ -650,246 +778,6 @@ impl Paint {
     #[inline]
     pub fn with_anti_alias(mut self, value: bool) -> Self {
         self.set_anti_alias(value);
-        self
-    }
-
-    /// Returns whether higher quality stencil strokes are used.
-    #[inline]
-    pub fn stencil_strokes(&self) -> bool {
-        self.stroke.stencil_strokes
-    }
-
-    /// Sets whether to use higher quality stencil strokes.
-    #[inline]
-    pub fn set_stencil_strokes(&mut self, value: bool) {
-        self.stroke.stencil_strokes = value;
-    }
-
-    /// Returns the paint with stencil strokes set to the specified value.
-    #[inline]
-    pub fn with_stencil_strokes(mut self, value: bool) -> Self {
-        self.set_stencil_strokes(value);
-        self
-    }
-
-    /// Returns the current line width.
-    #[inline]
-    pub fn line_width(&self) -> f32 {
-        self.stroke.line_width
-    }
-
-    /// Sets the line width.
-    #[inline]
-    pub fn set_line_width(&mut self, width: f32) {
-        self.stroke.line_width = width;
-    }
-
-    /// Returns the paint with line width set to the specified value.
-    #[inline]
-    pub fn with_line_width(mut self, width: f32) -> Self {
-        self.set_line_width(width);
-        self
-    }
-
-    /// Returns the current miter limit.
-    #[inline]
-    pub fn miter_limit(&self) -> f32 {
-        self.stroke.miter_limit
-    }
-
-    /// Sets the limit at which a sharp corner is drawn beveled.
-    ///
-    /// If the miter at a corner exceeds this limit, `LineJoin` is replaced with `LineJoin::Bevel`.
-    #[inline]
-    pub fn set_miter_limit(&mut self, limit: f32) {
-        self.stroke.miter_limit = limit;
-    }
-
-    /// Returns the paint with the miter limit set to the specified value.
-    #[inline]
-    pub fn with_miter_limit(mut self, limit: f32) -> Self {
-        self.set_miter_limit(limit);
-        self
-    }
-
-    /// Returns the current start line cap.
-    #[inline]
-    pub fn line_cap_start(&self) -> LineCap {
-        self.stroke.line_cap_start
-    }
-
-    /// Returns the current end line cap.
-    #[inline]
-    pub fn line_cap_end(&self) -> LineCap {
-        self.stroke.line_cap_end
-    }
-
-    /// Sets the line cap for both start and end of the line.
-    pub fn set_line_cap(&mut self, cap: LineCap) {
-        self.stroke.line_cap_start = cap;
-        self.stroke.line_cap_end = cap;
-    }
-
-    /// Returns the paint with the line cap set to the specified value.
-    #[inline]
-    pub fn with_line_cap(mut self, cap: LineCap) -> Self {
-        self.set_line_cap(cap);
-        self
-    }
-
-    /// Sets the line cap for the start of the line.
-    #[inline]
-    pub fn set_line_cap_start(&mut self, cap: LineCap) {
-        self.stroke.line_cap_start = cap;
-    }
-
-    /// Returns the paint with the start line cap set to the specified value.
-    #[inline]
-    pub fn with_line_cap_start(mut self, cap: LineCap) -> Self {
-        self.set_line_cap_start(cap);
-        self
-    }
-
-    /// Sets the line cap for the end of the line.
-    #[inline]
-    pub fn set_line_cap_end(&mut self, cap: LineCap) {
-        self.stroke.line_cap_end = cap;
-    }
-
-    /// Returns the paint with the end line cap set to the specified value.
-    #[inline]
-    pub fn with_line_cap_end(mut self, cap: LineCap) -> Self {
-        self.set_line_cap_end(cap);
-        self
-    }
-
-    /// Returns the current line join.
-    #[inline]
-    pub fn line_join(&self) -> LineJoin {
-        self.stroke.line_join
-    }
-
-    /// Sets the line join.
-    #[inline]
-    pub fn set_line_join(&mut self, join: LineJoin) {
-        self.stroke.line_join = join;
-    }
-
-    /// Returns the paint with the line join set to the specified value.
-    #[inline]
-    pub fn with_line_join(mut self, join: LineJoin) -> Self {
-        self.set_line_join(join);
-        self
-    }
-
-    /// Sets the font.
-    pub fn set_font(&mut self, font_ids: &[FontId]) {
-        self.text.font_ids = Default::default();
-
-        for (i, id) in font_ids.iter().take(8).enumerate() {
-            self.text.font_ids[i] = Some(*id);
-        }
-    }
-
-    /// Returns the paint with the font set to the specified value.
-    #[inline]
-    pub fn with_font(mut self, font_ids: &[FontId]) -> Self {
-        self.set_font(font_ids);
-        self
-    }
-
-    /// Returns the current font size for text operations.
-    #[inline]
-    pub fn font_size(&self) -> f32 {
-        self.text.font_size
-    }
-
-    /// Sets the font size for text operations.
-    #[inline]
-    pub fn set_font_size(&mut self, size: f32) {
-        self.text.font_size = size;
-    }
-
-    /// Returns the paint with the font size set to the specified value.
-    #[inline]
-    pub fn with_font_size(mut self, size: f32) -> Self {
-        self.set_font_size(size);
-        self
-    }
-
-    /// Returns the current letter spacing for text operations.
-    #[inline]
-    pub fn letter_spacing(&self) -> f32 {
-        self.text.letter_spacing
-    }
-
-    /// Sets the letter spacing for text operations.
-    #[inline]
-    pub fn set_letter_spacing(&mut self, spacing: f32) {
-        self.text.letter_spacing = spacing;
-    }
-
-    /// Returns the paint with the letter spacing set to the specified value.
-    #[inline]
-    pub fn with_letter_spacing(mut self, spacing: f32) -> Self {
-        self.set_letter_spacing(spacing);
-        self
-    }
-
-    /// Returns the current text baseline for text operations.
-    #[inline]
-    pub fn text_baseline(&self) -> Baseline {
-        self.text.text_baseline
-    }
-
-    /// Sets the text baseline for text operations.
-    #[inline]
-    pub fn set_text_baseline(&mut self, align: Baseline) {
-        self.text.text_baseline = align;
-    }
-
-    /// Returns the paint with the text baseline set to the specified value.
-    #[inline]
-    pub fn with_text_baseline(mut self, align: Baseline) -> Self {
-        self.set_text_baseline(align);
-        self
-    }
-
-    /// Returns the current text alignment for text operations.
-    #[inline]
-    pub fn text_align(&self) -> Align {
-        self.text.text_align
-    }
-
-    /// Sets the text alignment for text operations.
-    #[inline]
-    pub fn set_text_align(&mut self, align: Align) {
-        self.text.text_align = align;
-    }
-
-    /// Returns the paint with the text alignment set to the specified value.
-    #[inline]
-    pub fn with_text_align(mut self, align: Align) -> Self {
-        self.set_text_align(align);
-        self
-    }
-
-    /// Returns the current fill rule for filling paths.
-    #[inline]
-    pub fn fill_rule(&self) -> FillRule {
-        self.fill_rule
-    }
-
-    /// Sets the fill rule for filling paths.
-    #[inline]
-    pub fn set_fill_rule(&mut self, rule: FillRule) {
-        self.fill_rule = rule;
-    }
-
-    /// Returns the paint with the fill rule set to the specified value.
-    #[inline]
-    pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
-        self.set_fill_rule(rule);
         self
     }
 }

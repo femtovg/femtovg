@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use femtovg::{Align, Baseline, Canvas, Color, Paint, Path, Renderer};
+use femtovg::{Align, Baseline, Canvas, Color, FillRule, Paint, Path, Renderer, TextSettings};
 
 pub struct PerfGraph {
     history_count: usize,
@@ -34,7 +34,7 @@ impl PerfGraph {
 
         let mut path = Path::new();
         path.rect([x, y], [w, h]);
-        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 128)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 128)), FillRule::default());
 
         let mut path = Path::new();
         path.move_to([x, y + h]);
@@ -50,21 +50,27 @@ impl PerfGraph {
         }
 
         path.line_to([x + w, y + h]);
-        canvas.fill_path(&path, &Paint::color(Color::rgba(255, 192, 0, 128)));
+        canvas.fill_path(&path, &Paint::color(Color::rgba(255, 192, 0, 128)), FillRule::default());
 
-        let text_paint = Paint::color(Color::rgba(240, 240, 240, 255)).with_font_size(12.0);
-        let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", &text_paint);
+        let paint = Paint::color(Color::rgba(240, 240, 240, 255));
+        let text = TextSettings::new(&[], 12.0);
+        let _ = canvas.fill_text(x + 5.0, y + 13.0, "Frame time", &paint, &text);
 
-        let text_paint = Paint::color(Color::rgba(240, 240, 240, 255))
-            .with_font_size(14.0)
-            .with_text_align(Align::Right)
-            .with_text_baseline(Baseline::Top);
-        let _ = canvas.fill_text(x + w - 5.0, y, format!("{:.2} FPS", 1.0 / avg), &text_paint);
+        let text = TextSettings::new(&[], 14.0)
+            .with_align(Align::Right)
+            .with_baseline(Baseline::Top);
+        let _ = canvas.fill_text(x + w - 5.0, y, format!("{:.2} FPS", 1.0 / avg), &paint, &text);
 
-        let text_paint = Paint::color(Color::rgba(240, 240, 240, 200))
-            .with_font_size(12.0)
-            .with_text_align(Align::Right)
-            .with_text_baseline(Baseline::Alphabetic);
-        let _ = canvas.fill_text(x + w - 5.0, y + h - 5.0, format!("{:.2} ms", avg * 1000.0), &text_paint);
+        let paint = Paint::color(Color::rgba(240, 240, 240, 200));
+        let text = TextSettings::new(&[], 12.0)
+            .with_align(Align::Right)
+            .with_baseline(Baseline::Alphabetic);
+        let _ = canvas.fill_text(
+            x + w - 5.0,
+            y + h - 5.0,
+            format!("{:.2} ms", avg * 1000.0),
+            &paint,
+            &text,
+        );
     }
 }

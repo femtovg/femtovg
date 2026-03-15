@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use femtovg::{Canvas, Color, FillRule, ImageFlags, Paint, Path};
+use femtovg::{Canvas, Color, FillRule, ImageFlags, Paint, Path, StrokeSettings};
 use instant::Instant;
 use resource::resource;
 use winit::{
@@ -50,8 +50,8 @@ fn run<W: WindowSurface + 'static>(
     // print memory usage
     let mut total_sisze_bytes = 0;
 
-    for path in &paths {
-        total_sisze_bytes += path.0.size();
+    for (path, _, _, _) in &paths {
+        total_sisze_bytes += path.size();
     }
 
     log::info!("Path mem usage: {}kb", total_sisze_bytes / 1024);
@@ -130,18 +130,22 @@ fn run<W: WindowSurface + 'static>(
                 canvas.save();
                 canvas.translate([200.0, 200.0]);
 
-                for (path, fill, stroke) in &paths {
+                for (path, fill, stroke, stroke_settings) in &paths {
                     if let Some(fill) = fill {
-                        canvas.fill_path(path, fill);
+                        canvas.fill_path(path, fill, FillRule::default());
                     }
 
                     if let Some(stroke) = stroke {
-                        canvas.stroke_path(path, stroke);
+                        canvas.stroke_path(
+                            path,
+                            stroke,
+                            stroke_settings.as_ref().unwrap_or(&StrokeSettings::default()),
+                        );
                     }
 
                     if canvas.contains_point(path, [mousex, mousey], FillRule::NonZero) {
-                        let paint = Paint::color(Color::rgb(32, 240, 32)).with_line_width(1.0);
-                        canvas.stroke_path(path, &paint);
+                        let paint = Paint::color(Color::rgb(32, 240, 32));
+                        canvas.stroke_path(path, &paint, &StrokeSettings::new(1.0));
                     }
                 }
 
@@ -160,10 +164,13 @@ fn run<W: WindowSurface + 'static>(
     }
 }
 
-fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
+fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>, Option<StrokeSettings>)> {
     let mut paths = Vec::new();
 
-    fn collect_paths(children: &[usvg::Node], paths: &mut Vec<(Path, Option<Paint>, Option<Paint>)>) {
+    fn collect_paths(
+        children: &[usvg::Node],
+        paths: &mut Vec<(Path, Option<Paint>, Option<Paint>, Option<StrokeSettings>)>,
+    ) {
         use usvg::Node;
         use usvg::tiny_skia_path::PathSegment;
 
@@ -197,15 +204,17 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
                         .and_then(|fill| to_femto_color(&fill.paint()))
                         .map(|col| Paint::color(col).with_anti_alias(true));
 
-                    let stroke = svg_path.stroke().and_then(|stroke| {
-                        to_femto_color(&stroke.paint()).map(|paint| {
-                            Paint::color(paint)
-                                .with_line_width(stroke.width().get())
-                                .with_anti_alias(true)
-                        })
-                    });
+                    let (stroke, stroke_settings) = match svg_path.stroke() {
+                        Some(stroke) => {
+                            let paint =
+                                to_femto_color(&stroke.paint()).map(|paint| Paint::color(paint).with_anti_alias(true));
+                            let settings = StrokeSettings::new(stroke.width().get());
+                            (paint, Some(settings))
+                        }
+                        None => (None, None),
+                    };
 
-                    paths.push((path, fill, stroke))
+                    paths.push((path, fill, stroke, stroke_settings))
                 }
                 _ => {}
             }

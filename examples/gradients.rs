@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use femtovg::{Canvas, Color, Paint, Path, Renderer};
+use femtovg::{Canvas, Color, FillRule, Paint, Path, Renderer, TextSettings};
 use instant::Instant;
 use resource::resource;
 use winit::{event::WindowEvent, window::Window};
@@ -67,14 +67,15 @@ fn run<W: WindowSurface + 'static>(
 }
 
 fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
+    let text_paint = Paint::color(Color::black());
+    let text_settings = TextSettings::new(&[], 14.0);
     let mut r = |x, y, name, paint| {
         let mut p = Path::new();
         p.rect([0.0, 0.0], [100.0, 100.0]);
         canvas.translate([x, y]);
-        canvas.fill_path(&p, &paint);
+        canvas.fill_path(&p, &paint, FillRule::default());
         canvas.translate([-x, -y]);
-        let text_paint = Paint::color(Color::black()).with_font_size(14.0);
-        let _ = canvas.fill_text(x, y + 114.0, name, &text_paint);
+        let _ = canvas.fill_text(x, y + 114.0, name, &text_paint, &text_settings);
     };
     // Various two stop gradients
     let mut x = 10.0;

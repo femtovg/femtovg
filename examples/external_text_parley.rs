@@ -11,7 +11,8 @@
 mod helpers;
 
 use femtovg::{
-    Atlas, Canvas, Color, DrawCommand, GlyphDrawCommands, ImageFlags, ImageId, ImageSource, Paint, Path, Quad, Renderer,
+    Atlas, Canvas, Color, DrawCommand, FillRule, GlyphDrawCommands, ImageFlags, ImageId, ImageSource, Paint, Path,
+    Quad, Renderer,
 };
 use helpers::WindowSurface;
 use imgref::{Img, ImgRef};
@@ -149,7 +150,11 @@ fn run<W: WindowSurface + 'static>(
                                 PositionedLayoutItem::InlineBox(inline_box) => {
                                     let mut path = Path::new();
                                     path.rect([inline_box.x, inline_box.y], [inline_box.width, inline_box.height]);
-                                    canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 255)));
+                                    canvas.fill_path(
+                                        &path,
+                                        &Paint::color(Color::rgba(0, 0, 0, 255)),
+                                        FillRule::default(),
+                                    );
                                 }
                             }
                         }

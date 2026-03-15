@@ -6,9 +6,9 @@ use rustybuzz::ttf_parser;
 use slotmap::{DefaultKey, SlotMap};
 
 use crate::{
-    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, PositionedGlyph,
-    RenderTarget, Renderer,
-    paint::{PaintFlavor, StrokeSettings},
+    Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, PixelFormat, PositionedGlyph, RenderTarget,
+    Renderer,
+    paint::{PaintFlavor, StrokeSettings, TextSettings},
 };
 
 mod atlas;
@@ -182,11 +182,11 @@ impl TextContext {
         self.0.borrow_mut().add_shared_font_with_index(data, face_index)
     }
 
-    /// Returns font metrics for a particular Paint.
-    pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
+    /// Returns font metrics for the specified text settings.
+    pub fn measure_font(&self, text_settings: &TextSettings) -> Result<FontMetrics, ErrorKind> {
         self.0
             .borrow_mut()
-            .measure_font(paint.text.font_size, &paint.text.font_ids)
+            .measure_font(text_settings.font_size, &text_settings.font_ids)
     }
 }
 
