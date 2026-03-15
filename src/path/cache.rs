@@ -138,23 +138,22 @@ impl PathCache {
     pub fn new(verbs: impl Iterator<Item = Verb>, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = Self::default();
 
-        // Convert path verbs to a set of contours
         for verb in verbs {
             match verb {
-                Verb::MoveTo(x, y) => {
+                Verb::MoveTo(pos) => {
                     cache.add_contour();
-                    let [x, y] = transform.transform_point([x, y]);
+                    let [x, y] = transform.transform_point(pos);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::LineTo(x, y) => {
-                    let [x, y] = transform.transform_point([x, y]);
+                Verb::LineTo(pos) => {
+                    let [x, y] = transform.transform_point(pos);
                     cache.add_point(x, y, PointFlags::CORNER, dist_tol);
                 }
-                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                Verb::BezierTo(c1, c2, pos) => {
                     if let Some(last) = cache.points.last().copied() {
-                        let [c1x, c1y] = transform.transform_point([c1x, c1y]);
-                        let [c2x, c2y] = transform.transform_point([c2x, c2y]);
-                        let [x, y] = transform.transform_point([x, y]);
+                        let [c1x, c1y] = transform.transform_point(c1);
+                        let [c2x, c2y] = transform.transform_point(c2);
+                        let [x, y] = transform.transform_point(pos);
 
                         cache.tesselate_bezier(
                             last.pos.x,

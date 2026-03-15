@@ -12,6 +12,18 @@ pub struct Position {
     pub y: f32,
 }
 
+impl From<[f32; 2]> for Position {
+    fn from([x, y]: [f32; 2]) -> Self {
+        Self { x, y }
+    }
+}
+
+impl From<Position> for [f32; 2] {
+    fn from(p: Position) -> Self {
+        [p.x, p.y]
+    }
+}
+
 impl Add<Vector> for Position {
     type Output = Self;
 
