@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.20.5] - 2026-03-23
+
+- Fix text rendering with wgpu and mesa versions that have difficulties
+  with pipeline override constants.
+- Make the ttf-parser dependency optional.
+
 ## [0.20.4] - 2026-02-23
 
 - Fix occasional fringes around swash rendered glyphs caused by uninitialized
@@ -329,3 +335,4 @@ All notable changes to this project will be documented in this file.
 [0.20.2]: https://github.com/femtovg/femtovg/releases/tag/v0.20.2
 [0.20.3]: https://github.com/femtovg/femtovg/releases/tag/v0.20.3
 [0.20.4]: https://github.com/femtovg/femtovg/releases/tag/v0.20.4
+[0.20.5]: https://github.com/femtovg/femtovg/releases/tag/v0.20.5
