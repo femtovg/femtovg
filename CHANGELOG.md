@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.21.0] - 2026-03-23
+
+- Re-release 0.20.5 as 0.21 as the glow dependency upgrade is a public
+  dependency that came with a new major version.
+
 ## [0.20.5] - 2026-03-23
 
 - Fix text rendering with wgpu and mesa versions that have difficulties
@@ -336,3 +341,4 @@ All notable changes to this project will be documented in this file.
 [0.20.3]: https://github.com/femtovg/femtovg/releases/tag/v0.20.3
 [0.20.4]: https://github.com/femtovg/femtovg/releases/tag/v0.20.4
 [0.20.5]: https://github.com/femtovg/femtovg/releases/tag/v0.20.5
+[0.21.0]: https://github.com/femtovg/femtovg/releases/tag/v0.21.0
