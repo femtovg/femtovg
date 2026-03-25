@@ -19,6 +19,33 @@ use super::Renderer;
 
 pub use wgpu;
 
+/// Describes the render surface for the WGPU renderer.
+///
+/// Bundles a [`wgpu::TextureView`] with the metadata needed for rendering.
+/// Using a view instead of a texture allows rendering into specific mip levels
+/// or array layers, and reinterpreting the texture format (e.g. linear vs sRGB).
+#[derive(Clone)]
+pub struct WGPUSurface {
+    /// The texture view to render into.
+    pub view: wgpu::TextureView,
+    /// Width of the render target in pixels.
+    pub width: u32,
+    /// Height of the render target in pixels.
+    pub height: u32,
+    /// Texture format of the render target.
+    pub format: wgpu::TextureFormat,
+}
+
+impl std::fmt::Debug for WGPUSurface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WGPUSurface")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("format", &self.format)
+            .finish_non_exhaustive()
+    }
+}
+
 use super::Params;
 use super::Vertex;
 
@@ -292,22 +319,22 @@ impl WGPURenderer {
 impl Renderer for WGPURenderer {
     type Image = Image;
     type NativeTexture = wgpu::Texture;
-    type Surface = wgpu::Texture;
+    type Surface = WGPUSurface;
     type CommandBuffer = wgpu::CommandBuffer;
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
 
     fn render(
         &mut self,
-        surface_texture: &Self::Surface,
+        surface: &Self::Surface,
         images: &mut crate::image::ImageStore<Self::Image>,
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
     ) -> Self::CommandBuffer {
-        self.screen_view[0] = surface_texture.width() as f32;
-        self.screen_view[1] = surface_texture.height() as f32;
+        self.screen_view[0] = surface.width as f32;
+        self.screen_view[1] = surface.height as f32;
 
-        let texture_view = surface_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture_view = surface.view.clone();
 
         let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Main Vertex Buffer"),
@@ -316,7 +343,7 @@ impl Renderer for WGPURenderer {
         });
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
-            if stencil_buffer.size() != surface_texture.size() {
+            if stencil_buffer.width() != surface.width || stencil_buffer.height() != surface.height {
                 self.stencil_buffer = None;
             }
         }
@@ -327,8 +354,8 @@ impl Renderer for WGPURenderer {
                 self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("Stencil buffer"),
                     size: wgpu::Extent3d {
-                        width: surface_texture.width(),
-                        height: surface_texture.height(),
+                        width: surface.width,
+                        height: surface.height,
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -348,7 +375,7 @@ impl Renderer for WGPURenderer {
         let mut render_pass_builder = RenderPassBuilder::new(
             self.device.clone(),
             &mut encoder,
-            surface_texture.format(),
+            surface.format,
             self.screen_view,
             self.viewport_bind_group_layout.clone(),
             &mut self.stencil_buffer_for_textures,

@@ -14,7 +14,7 @@ pub use opengl::OpenGl;
 #[cfg(feature = "wgpu")]
 mod wgpu;
 #[cfg(feature = "wgpu")]
-pub use wgpu::WGPURenderer;
+pub use wgpu::{WGPURenderer, WGPUSurface};
 
 mod void;
 pub use void::Void;
