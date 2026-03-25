@@ -320,7 +320,7 @@ impl Renderer for WGPURenderer {
     type Image = Image;
     type NativeTexture = wgpu::Texture;
     type RenderOutput = WGPURenderOutput;
-    type CommandBuffer = wgpu::CommandBuffer;
+    type CommandBuffer = Option<wgpu::CommandBuffer>;
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
 
@@ -331,6 +331,10 @@ impl Renderer for WGPURenderer {
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
     ) -> Self::CommandBuffer {
+        if commands.is_empty() {
+            return None;
+        }
+
         self.screen_view[0] = output.width as f32;
         self.screen_view[1] = output.height as f32;
 
@@ -494,7 +498,7 @@ impl Renderer for WGPURenderer {
             .borrow_mut()
             .retain(|_, cached_pipeline| std::mem::replace(&mut cached_pipeline.accessed, false));
 
-        command_buffer
+        Some(command_buffer)
     }
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, crate::ErrorKind> {

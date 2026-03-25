@@ -39,7 +39,7 @@ impl WindowSurface for DemoSurface {
 
         let commands = canvas.flush_to_output(&render_output);
 
-        self.queue.submit(Some(commands));
+        self.queue.submit(commands);
 
         frame.present();
     }
