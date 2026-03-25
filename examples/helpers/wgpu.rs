@@ -30,14 +30,14 @@ impl WindowSurface for DemoSurface {
             .get_current_texture()
             .expect("unable to get next texture from swapchain");
 
-        let surface = femtovg::renderer::WGPUSurface {
+        let render_output = femtovg::renderer::WGPURenderOutput {
             view: frame.texture.create_view(&wgpu::TextureViewDescriptor::default()),
             width: frame.texture.width(),
             height: frame.texture.height(),
             format: self.surface_config.format,
         };
 
-        let commands = canvas.flush_to_surface(&surface);
+        let commands = canvas.flush_to_output(&render_output);
 
         self.queue.submit(Some(commands));
 
