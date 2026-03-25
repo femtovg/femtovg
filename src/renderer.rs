@@ -14,7 +14,7 @@ pub use opengl::OpenGl;
 #[cfg(feature = "wgpu")]
 mod wgpu;
 #[cfg(feature = "wgpu")]
-pub use wgpu::{WGPURenderer, WGPUSurface};
+pub use wgpu::{WGPURenderOutput, WGPURenderer};
 
 mod void;
 pub use void::Void;
@@ -121,10 +121,10 @@ pub trait Renderer {
     /// Associated native texture type.
     type NativeTexture;
 
-    /// Associated surface type.
-    type Surface;
+    /// Associated render output type.
+    type RenderOutput;
 
-    /// Associated type to hold commands created via `flush_to_surface`.
+    /// Associated type to hold commands created via `flush_to_output`.
     type CommandBuffer;
 
     /// Set the size of the renderer.
@@ -133,7 +133,7 @@ pub trait Renderer {
     /// Render the specified commands.
     fn render(
         &mut self,
-        surface: &Self::Surface,
+        output: &Self::RenderOutput,
         images: &mut ImageStore<Self::Image>,
         verts: &[Vertex],
         commands: Vec<Command>,
