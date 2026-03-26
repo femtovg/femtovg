@@ -1,6 +1,14 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-03-26
+
+- WGPU: Changed API from `flush_to_surface()` to `flush_to_output()` and
+  accept a type that can be converted to a new WGPURenderOutput struct,
+  making it possible to render into texture views.
+- WGPU: Simplified CommandBuffer to be an Option<>, so that it can be
+  passed to queue's `submit()` without additional wrapping.
+
 ## [0.21.0] - 2026-03-23
 
 - Re-release 0.20.5 as 0.21 as the glow dependency upgrade is a public
@@ -342,3 +350,4 @@ All notable changes to this project will be documented in this file.
 [0.20.4]: https://github.com/femtovg/femtovg/releases/tag/v0.20.4
 [0.20.5]: https://github.com/femtovg/femtovg/releases/tag/v0.20.5
 [0.21.0]: https://github.com/femtovg/femtovg/releases/tag/v0.21.0
+[0.22.0]: https://github.com/femtovg/femtovg/releases/tag/v0.22.0
