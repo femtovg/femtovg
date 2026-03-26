@@ -21,7 +21,7 @@ impl Renderer for Void {
 
     fn render(
         &mut self,
-        _output: &Self::RenderOutput,
+        _output: impl Into<Self::RenderOutput>,
         images: &mut ImageStore<VoidImage>,
         verts: &[Vertex],
         commands: Vec<Command>,

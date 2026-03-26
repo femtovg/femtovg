@@ -36,6 +36,18 @@ pub struct WGPURenderOutput {
     pub format: wgpu::TextureFormat,
 }
 
+impl From<&wgpu::Texture> for WGPURenderOutput {
+    fn from(texture: &wgpu::Texture) -> Self {
+        let size = texture.size();
+        Self {
+            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            width: size.width,
+            height: size.height,
+            format: texture.format(),
+        }
+    }
+}
+
 impl std::fmt::Debug for WGPURenderOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WGPURenderOutput")
@@ -326,7 +338,7 @@ impl Renderer for WGPURenderer {
 
     fn render(
         &mut self,
-        output: &Self::RenderOutput,
+        output: impl Into<Self::RenderOutput>,
         images: &mut crate::image::ImageStore<Self::Image>,
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
@@ -334,6 +346,8 @@ impl Renderer for WGPURenderer {
         if commands.is_empty() {
             return None;
         }
+
+        let output = output.into();
 
         self.screen_view[0] = output.width as f32;
         self.screen_view[1] = output.height as f32;

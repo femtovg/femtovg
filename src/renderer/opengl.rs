@@ -719,7 +719,7 @@ impl Renderer for OpenGl {
 
     fn render(
         &mut self,
-        _output: &Self::RenderOutput,
+        _output: impl Into<Self::RenderOutput>,
         images: &mut ImageStore<Self::Image>,
         verts: &[Vertex],
         commands: Vec<Command>,
@@ -888,7 +888,7 @@ impl Renderer for OpenGl {
 
 impl SurfacelessRenderer for OpenGl {
     fn render_surfaceless(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
-        self.render(&(), images, verts, commands)
+        self.render((), images, verts, commands)
     }
 }
 

@@ -40,7 +40,7 @@ impl WindowSurface for DemoSurface {
         }
     }
     fn present(&self, canvas: &mut femtovg::Canvas<Self::Renderer>) {
-        canvas.flush_to_output(&());
+        canvas.flush_to_output(());
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.surface.swap_buffers(&self.context).unwrap();

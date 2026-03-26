@@ -133,7 +133,7 @@ pub trait Renderer {
     /// Render the specified commands.
     fn render(
         &mut self,
-        output: &Self::RenderOutput,
+        output: impl Into<Self::RenderOutput>,
         images: &mut ImageStore<Self::Image>,
         verts: &[Vertex],
         commands: Vec<Command>,
