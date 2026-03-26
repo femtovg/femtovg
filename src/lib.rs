@@ -426,7 +426,7 @@ where
     /// Tells the renderer to execute all drawing commands and clears the current internal state
     ///
     /// Call this at the end of each frame.
-    pub fn flush_to_output(&mut self, output: &T::RenderOutput) -> T::CommandBuffer {
+    pub fn flush_to_output(&mut self, output: impl Into<T::RenderOutput>) -> T::CommandBuffer {
         let command_buffer = self.renderer.render(
             output,
             &mut self.images,
@@ -1682,7 +1682,7 @@ impl Renderer for RecordingRenderer {
 
     fn render(
         &mut self,
-        _output: &Self::RenderOutput,
+        _output: impl Into<Self::RenderOutput>,
         _images: &mut ImageStore<Self::Image>,
         _verts: &[renderer::Vertex],
         commands: Vec<renderer::Command>,
@@ -1751,7 +1751,7 @@ fn test_image_blit_fast_path() {
         .unwrap();
     let paint = Paint::image(image, 0., 0., 30., 30., 0., 0.).with_anti_alias(false);
     canvas.fill_path(&path, &paint);
-    canvas.flush_to_output(&());
+    canvas.flush_to_output(());
 
     let commands = recorded_commands.borrow();
     let mut commands = commands.iter();
