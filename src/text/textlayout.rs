@@ -430,6 +430,7 @@ fn shape_word(
     // until a font capable of shaping the word is found
     context.find_font(font_ids, |(font_id, font)| {
         let font_face = font.face_ref_with_variations(variations);
+        let normalized_coords = font.normalize_variations(variations);
         let face = rustybuzz::Face::from_face(font_face.0.clone());
         // Call harfbuzz
         let output = {
@@ -475,7 +476,7 @@ fn shape_word(
                 offset_y: position.y_offset as f32 * scale,
             };
 
-            if let Some(glyph) = font.glyph(&font_face, g.glyph_id, variations) {
+            if let Some(glyph) = font.glyph(&font_face, g.glyph_id, &normalized_coords) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
             }

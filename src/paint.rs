@@ -101,6 +101,7 @@ impl FontVariations {
     }
 
     /// Computes a hash of the variation settings for use in cache keys.
+    #[allow(dead_code)]
     pub(crate) fn hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         Hash::hash(self, &mut hasher);

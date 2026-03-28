@@ -1222,6 +1222,11 @@ where
     ///
     /// For variable fonts, this returns information about each axis (e.g. weight, width).
     /// For static fonts, this returns an empty vector.
+    ///
+    /// Axes are returned in the order they appear in the font's OpenType
+    /// `fvar` table. This is the same order that [`Canvas::fill_glyph_run`]
+    /// and [`Canvas::stroke_glyph_run`] expect for their normalized
+    /// coordinate slices: the i-th coordinate corresponds to the i-th axis.
     pub fn font_variation_axes(&self, font_id: FontId) -> Result<Vec<VariationAxisInfo>, ErrorKind> {
         let ctx = self.text_context.borrow();
         let font = ctx.font(font_id).ok_or(ErrorKind::NoFontFound)?;
@@ -1331,23 +1336,41 @@ where
     }
 
     /// Fills the provided glyphs with the specified Paint.
+    ///
+    /// `normalized_coords` specifies variation axis positions for variable
+    /// fonts as `i16` values in F2DOT14 format (the OpenType normalized
+    /// coordinate representation, range \[-1.0, 1.0\] mapped to
+    /// \[-16384, 16384\]), one per axis in `fvar` order. Pass an empty slice
+    /// for the font's default instance. These coordinates are typically
+    /// obtained from a text shaper (e.g. rustybuzz, harfbuzz, parley).
+    /// See [`Canvas::font_variation_axes`] to query the available axes.
     pub fn fill_glyph_run(
         &mut self,
         font_id: FontId,
+        normalized_coords: &[i16],
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Fill)
+        self.draw_glyph_run(glyphs, paint, font_id, normalized_coords, RenderMode::Fill)
     }
 
     /// Strokes the provided glyphs with the specified Paint.
+    ///
+    /// `normalized_coords` specifies variation axis positions for variable
+    /// fonts as `i16` values in F2DOT14 format (the OpenType normalized
+    /// coordinate representation, range \[-1.0, 1.0\] mapped to
+    /// \[-16384, 16384\]), one per axis in `fvar` order. Pass an empty slice
+    /// for the font's default instance. These coordinates are typically
+    /// obtained from a text shaper (e.g. rustybuzz, harfbuzz, parley).
+    /// See [`Canvas::font_variation_axes`] to query the available axes.
     pub fn stroke_glyph_run(
         &mut self,
         font_id: FontId,
+        normalized_coords: &[i16],
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
     ) -> Result<(), ErrorKind> {
-        self.draw_glyph_run(glyphs, paint, font_id, RenderMode::Stroke)
+        self.draw_glyph_run(glyphs, paint, font_id, normalized_coords, RenderMode::Stroke)
     }
 
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
@@ -1429,6 +1452,11 @@ where
             None,
         )?;
 
+        let normalized_coords = {
+            let text_context = self.text_context.borrow();
+            text::normalize_variations(&text_context, &paint.text.font_ids, &paint.text.font_variations)
+        };
+
         for (font_id, glyph_run) in &layout
             .glyphs
             .iter()
@@ -1443,6 +1471,7 @@ where
                 }),
                 paint,
                 font_id,
+                &normalized_coords,
                 render_mode,
             )?;
         }
@@ -1457,6 +1486,7 @@ where
         glyphs: impl IntoIterator<Item = PositionedGlyph>,
         paint: &Paint,
         font_id: FontId,
+        normalized_coords: &[i16],
         render_mode: RenderMode,
     ) -> Result<(), ErrorKind> {
         let scale = self.font_scale() * self.device_px_ratio;
@@ -1471,13 +1501,11 @@ where
 
         let need_direct_rendering = paint.text.font_size > 92.0;
 
-        let variations = &paint.text.font_variations;
-
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
         };
 
-        let font_face = font.face_ref_with_variations(variations);
+        let font_face = font.face_ref_with_normalized_coords(normalized_coords);
 
         // TODO: create on demand
 
@@ -1487,7 +1515,7 @@ where
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
                 if font
-                    .glyph(&font_face, glyph.glyph_id, variations)
+                    .glyph(&font_face, glyph.glyph_id, normalized_coords)
                     .is_some_and(|glyph| glyph.path.is_none())
                 {
                     color_glyphs.push(glyph.clone());
@@ -1509,7 +1537,7 @@ where
                 &stroke,
                 paint.text.font_size,
                 render_mode,
-                variations,
+                normalized_coords,
             )?;
             GlyphDrawCommands::default()
         } else {
@@ -1522,7 +1550,7 @@ where
                 paint.text.font_size,
                 paint.stroke.line_width,
                 render_mode,
-                variations,
+                normalized_coords,
             )?
         };
 
@@ -1545,7 +1573,7 @@ where
                     paint.text.font_size,
                     paint.stroke.line_width,
                     render_mode,
-                    variations,
+                    normalized_coords,
                 )?
             };
 
