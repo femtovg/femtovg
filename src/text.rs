@@ -103,8 +103,11 @@ impl RenderedGlyphId {
         line_width: f32,
         mode: RenderMode,
         subpixel_location: u8,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Self {
+        use std::hash::Hasher;
+        let mut hasher = fnv::FnvHasher::default();
+        normalized_coords.hash(&mut hasher);
         Self {
             glyph_index,
             font_id,
@@ -112,7 +115,7 @@ impl RenderedGlyphId {
             line_width: (line_width * 10.0).trunc() as u32,
             render_mode: mode,
             subpixel_location,
-            variation_hash: variations.hash(),
+            variation_hash: hasher.finish(),
         }
     }
 }
@@ -196,6 +199,13 @@ impl TextContext {
     ///
     /// For variable fonts, this returns information about each axis (e.g. weight, width).
     /// For static fonts, this returns an empty vector.
+    ///
+    /// Axes are returned in the order they appear in the font's OpenType
+    /// `fvar` table. This is the same order that
+    /// [`Canvas::fill_glyph_run`](crate::Canvas::fill_glyph_run) and
+    /// [`Canvas::stroke_glyph_run`](crate::Canvas::stroke_glyph_run) expect
+    /// for their normalized coordinate (`i16` F2DOT14) slices: the i-th
+    /// coordinate corresponds to the i-th axis.
     pub fn font_variation_axes(&self, font_id: FontId) -> Result<Vec<VariationAxisInfo>, ErrorKind> {
         let ctx = RefCell::borrow(&self.0);
         let font = ctx.font(font_id).ok_or(ErrorKind::NoFontFound)?;
@@ -463,7 +473,7 @@ impl GlyphAtlas {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
@@ -486,7 +496,7 @@ impl GlyphAtlas {
                 line_width,
                 mode,
                 subpixel_location as u8,
-                variations,
+                normalized_coords,
             );
 
             let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
@@ -503,7 +513,7 @@ impl GlyphAtlas {
                         font_face,
                         glyph.glyph_id,
                         subpixel_location / 10.0,
-                        variations,
+                        normalized_coords,
                     )?;
                     glyph_cache_entry.insert_entry(result)
                 }
@@ -569,11 +579,13 @@ impl GlyphAtlas {
         font_face: &font::FontFaceRef<'_>,
         glyph_id: u16,
         _subpixel_x: f32,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         #[cfg(feature = "swash")]
         if mode == RenderMode::Fill {
-            if let Some(result) = self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, variations)? {
+            if let Some(result) =
+                self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, normalized_coords)?
+            {
                 return Ok(Some(result));
             }
         }
@@ -582,10 +594,12 @@ impl GlyphAtlas {
 
         let (mut glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font.glyph(font_face, glyph_id, variations).map(|g| g.metrics.clone());
+            let maybe_glyph_metrics = font
+                .glyph(font_face, glyph_id, normalized_coords)
+                .map(|g| g.metrics.clone());
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, variations),
+                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, normalized_coords),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -728,7 +742,7 @@ impl GlyphAtlas {
         font_size: f32,
         glyph_id: u16,
         subpixel_x: f32,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         use swash::scale::{Render, Source, StrikeWith};
         use swash::zeno::Format;
@@ -741,9 +755,8 @@ impl GlyphAtlas {
         let image = {
             let mut scale_context = self.swash_scale_context.borrow_mut();
             let mut scaler_builder = scale_context.builder(font_ref).size(font_size).hint(true);
-            let vars: Vec<([u8; 4], f32)> = variations.iter().map(|(tag, val)| (tag.to_be_bytes(), val)).collect();
-            if !vars.is_empty() {
-                scaler_builder = scaler_builder.variations(&vars);
+            if !normalized_coords.is_empty() {
+                scaler_builder = scaler_builder.normalized_coords(normalized_coords);
             }
             let mut scaler = scaler_builder.build();
 
@@ -921,6 +934,27 @@ impl GlyphAtlas {
     }
 }
 
+/// Converts design-space font variation settings (tag/value pairs from Paint)
+/// into normalized coordinates for the first font in the font list.
+/// Used by the high-level `fill_text`/`stroke_text` path, which stores
+/// variations on Paint but needs normalized coords for `draw_glyph_run`.
+#[cfg(feature = "textlayout")]
+pub(crate) fn normalize_variations(
+    text_context: &TextContextImpl,
+    font_ids: &[Option<FontId>; 8],
+    variations: &FontVariations,
+) -> Vec<i16> {
+    if variations.is_empty() {
+        return Vec::new();
+    }
+    if let Some(Some(id)) = font_ids.first() {
+        if let Some(font) = text_context.font(*id) {
+            return font.normalize_variations(variations);
+        }
+    }
+    Vec::new()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_direct<T: Renderer>(
     canvas: &mut Canvas<T>,
@@ -931,16 +965,16 @@ pub fn render_direct<T: Renderer>(
     stroke: &StrokeSettings,
     font_size: f32,
     mode: RenderMode,
-    variations: &FontVariations,
+    normalized_coords: &[i16],
 ) -> Result<(), ErrorKind> {
-    let face = font.face_ref_with_variations(variations);
+    let face = font.face_ref_with_normalized_coords(normalized_coords);
 
     for glyph in glyphs {
         let (glyph_rendering, scale) = {
             let scale = font.scale(font_size);
 
             let Some(glyph_rendering) =
-                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16, variations)
+                font.glyph_rendering_representation(&face, glyph.glyph_id, font_size as u16, normalized_coords)
             else {
                 continue;
             };

@@ -19,6 +19,13 @@ pub(crate) struct FontFaceRef<'a>(pub(crate) ttf_parser::Face<'a>);
 pub(crate) struct FontFaceRef<'a>(std::marker::PhantomData<&'a ()>);
 
 /// Information about a font variation axis (e.g. weight, width, optical size).
+///
+/// Returned by [`Canvas::font_variation_axes`](crate::Canvas::font_variation_axes)
+/// in the order they appear in the font's OpenType `fvar` table. The position
+/// of each axis in that vector determines the index of the corresponding
+/// normalized coordinate (`i16` in F2DOT14 format) when calling
+/// [`Canvas::fill_glyph_run`](crate::Canvas::fill_glyph_run) or
+/// [`Canvas::stroke_glyph_run`](crate::Canvas::stroke_glyph_run).
 #[derive(Clone, Debug)]
 pub struct VariationAxisInfo {
     /// Four-byte axis tag (e.g. `*b"wght"` for weight).
@@ -187,8 +194,8 @@ impl fmt::Debug for Font {
     }
 }
 
-/// Key for the glyph cache: (glyph_id, variation_hash).
-/// `variation_hash` is a hash of all font variation settings, or 0 for defaults.
+/// Key for the glyph cache: (glyph_id, normalized_coords_hash).
+/// The hash covers all normalized variation coordinates, or 0 for defaults.
 type GlyphCacheKey = (u16, u64);
 
 pub struct Font {
@@ -346,9 +353,33 @@ impl Font {
     }
 
     #[cfg(not(feature = "textlayout"))]
+    #[allow(dead_code)]
     pub(crate) fn face_ref_with_variations(&self, _variations: &FontVariations) -> FontFaceRef<'_> {
         // Without ttf-parser, face is a phantom type. Variations are applied
         // through the swash scaler in the glyph() method instead.
+        self.face_ref()
+    }
+
+    #[cfg(feature = "textlayout")]
+    pub(crate) fn face_ref_with_normalized_coords(&self, coords: &[i16]) -> FontFaceRef<'_> {
+        let mut face = self.face_ref();
+        // Round-trip: convert normalized coords back to design-space values
+        // so ttf-parser can re-normalize them (including avar remapping).
+        // Coords are zipped with axes in order — the i-th coord maps to the i-th axis.
+        for (axis, coord) in face.0.variation_axes().into_iter().zip(coords.iter()) {
+            let value = *coord as f32 / 16384.0;
+            let design_value = if value >= 0.0 {
+                axis.def_value + value * (axis.max_value - axis.def_value)
+            } else {
+                axis.def_value + value * (axis.def_value - axis.min_value)
+            };
+            face.0.set_variation(axis.tag, design_value);
+        }
+        face
+    }
+
+    #[cfg(not(feature = "textlayout"))]
+    pub(crate) fn face_ref_with_normalized_coords(&self, _coords: &[i16]) -> FontFaceRef<'_> {
         self.face_ref()
     }
 
@@ -462,13 +493,27 @@ impl Font {
     }
 
     #[cfg(feature = "textlayout")]
+    pub(crate) fn normalize_variations(&self, variations: &FontVariations) -> Vec<i16> {
+        let face = self.face_ref_with_variations(variations);
+        face.0.variation_coordinates().iter().map(|c| c.get()).collect()
+    }
+
+    #[allow(dead_code)]
+    fn hash_normalized_coords(coords: &[i16]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = fnv::FnvHasher::default();
+        coords.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[cfg(feature = "textlayout")]
     pub(crate) fn glyph(
         &self,
         face: &FontFaceRef<'_>,
         codepoint: u16,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Option<Ref<'_, Glyph>> {
-        let cache_key: GlyphCacheKey = (codepoint, variations.hash());
+        let cache_key: GlyphCacheKey = (codepoint, Self::hash_normalized_coords(normalized_coords));
 
         if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(cache_key) {
             let mut path = Path::new();
@@ -519,7 +564,7 @@ impl Font {
         &self,
         _face: &FontFaceRef<'_>,
         _codepoint: u16,
-        _variations: &FontVariations,
+        _normalized_coords: &[i16],
     ) -> Option<Ref<'_, Glyph>> {
         None
     }
@@ -529,9 +574,9 @@ impl Font {
         &self,
         _face: &FontFaceRef<'_>,
         codepoint: u16,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Option<Ref<'_, Glyph>> {
-        let cache_key: GlyphCacheKey = (codepoint, variations.hash());
+        let cache_key: GlyphCacheKey = (codepoint, Self::hash_normalized_coords(normalized_coords));
         if let Entry::Vacant(entry) = self.glyphs.borrow_mut().entry(cache_key) {
             let font_ref = self.swash_font_ref()?;
 
@@ -540,9 +585,8 @@ impl Font {
                 .builder(font_ref)
                 .size(self.units_per_em as f32)
                 .hint(false);
-            let vars: Vec<([u8; 4], f32)> = variations.iter().map(|(tag, val)| (tag.to_be_bytes(), val)).collect();
-            if !vars.is_empty() {
-                scaler_builder = scaler_builder.variations(&vars);
+            if !normalized_coords.is_empty() {
+                scaler_builder = scaler_builder.normalized_coords(normalized_coords);
             }
             let mut scaler = scaler_builder.build();
 
@@ -586,7 +630,7 @@ impl Font {
         face: &FontFaceRef<'_>,
         codepoint: u16,
         #[allow(unused_variables)] pixels_per_em: u16,
-        variations: &FontVariations,
+        normalized_coords: &[i16],
     ) -> Option<GlyphRendering<'_>> {
         #[cfg(feature = "image-loading")]
         if let Some(image) =
@@ -599,7 +643,7 @@ impl Font {
             return Some(GlyphRendering::RenderAsImage(image));
         }
 
-        self.glyph(face, codepoint, variations).and_then(|glyph| {
+        self.glyph(face, codepoint, normalized_coords).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
                 .ok()
                 .map(GlyphRendering::RenderAsPath)
@@ -611,10 +655,10 @@ impl Font {
         &self,
         _face: &FontFaceRef<'_>,
         codepoint: u16,
-        #[allow(unused_variables)] pixels_per_em: u16,
-        variations: &FontVariations,
+        #[allow(unused_variables)] _pixels_per_em: u16,
+        normalized_coords: &[i16],
     ) -> Option<GlyphRendering<'_>> {
-        self.glyph(_face, codepoint, variations).and_then(|glyph| {
+        self.glyph(_face, codepoint, normalized_coords).and_then(|glyph| {
             Ref::filter_map(glyph, |glyph| glyph.path.as_ref())
                 .ok()
                 .map(GlyphRendering::RenderAsPath)
