@@ -653,7 +653,7 @@ fn draw_window<T: Renderer>(canvas: &mut Canvas<T>, fonts: &Fonts, title: &str, 
     let text_paint = Paint::color(Color::rgba(0, 0, 0, 32))
         .with_font_size(16.0)
         .with_font(&[fonts.regular])
-        .with_font_weight(300.0)
+        .with_font_weight(Paint::FONT_WEIGHT_LIGHT)
         .with_text_align(Align::Center)
         .with_color(Color::rgba(220, 220, 220, 160));
 
@@ -982,7 +982,7 @@ fn draw_button<T: Renderer>(
     let mut paint = Paint::color(Color::rgba(255, 255, 255, 96))
         .with_font_size(15.0)
         .with_font(&[fonts.regular])
-        .with_font_weight(300.0)
+        .with_font_weight(Paint::FONT_WEIGHT_LIGHT)
         .with_text_align(Align::Left)
         .with_text_baseline(Baseline::Middle);
 
@@ -1008,7 +1008,7 @@ fn draw_button<T: Renderer>(
     let paint = Paint::color(Color::rgba(0, 0, 0, 160))
         .with_font_size(15.0)
         .with_font(&[fonts.regular])
-        .with_font_weight(400.0)
+        .with_font_weight(Paint::FONT_WEIGHT_REGULAR)
         .with_text_align(Align::Left)
         .with_text_baseline(Baseline::Middle);
     let _ = canvas.fill_text(x + w * 0.5 - tw * 0.5 + iw * 0.25, y + h * 0.5 - 1.0, text, &paint);

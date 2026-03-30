@@ -79,7 +79,7 @@ fn draw_demo<T: Renderer>(canvas: &mut Canvas<T>, font_id: femtovg::FontId, weig
     let title_paint = Paint::color(Color::rgbf(0.2, 0.2, 0.2))
         .with_font(&[font_id])
         .with_font_size(28.0)
-        .with_font_weight(700.0);
+        .with_font_weight(Paint::FONT_WEIGHT_BOLD);
     let _ = canvas.fill_text(x, y, "Font Variations Demo", &title_paint);
     y += 40.0;
 
@@ -113,7 +113,7 @@ fn draw_demo<T: Renderer>(canvas: &mut Canvas<T>, font_id: femtovg::FontId, weig
     let section_paint = Paint::color(Color::rgbf(0.3, 0.3, 0.3))
         .with_font(&[font_id])
         .with_font_size(18.0)
-        .with_font_weight(600.0);
+        .with_font_weight(Paint::FONT_WEIGHT_SEMI_BOLD);
     let _ = canvas.fill_text(x, y, "Weight axis (wght)", &section_paint);
     y += 30.0;
 

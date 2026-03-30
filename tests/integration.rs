@@ -237,12 +237,12 @@ fn variable_font_weight_affects_measurement() {
     let light_paint = femtovg::Paint::default()
         .with_font(&[font_id])
         .with_font_size(16.)
-        .with_font_weight(300.0);
+        .with_font_weight(femtovg::Paint::FONT_WEIGHT_LIGHT);
 
     let bold_paint = femtovg::Paint::default()
         .with_font(&[font_id])
         .with_font_size(16.)
-        .with_font_weight(700.0);
+        .with_font_weight(femtovg::Paint::FONT_WEIGHT_BOLD);
 
     let light_metrics = text_context
         .measure_text(0., 0., "Hello World", &light_paint)
@@ -274,7 +274,7 @@ fn font_variation_generic_api_matches_named_weight() {
     let named_paint = femtovg::Paint::default()
         .with_font(&[font_id])
         .with_font_size(16.)
-        .with_font_weight(700.0);
+        .with_font_weight(femtovg::Paint::FONT_WEIGHT_BOLD);
 
     let generic_paint = femtovg::Paint::default()
         .with_font(&[font_id])
@@ -336,7 +336,7 @@ fn font_variation_italic_and_slant_api() {
     assert!(paint.font_slant().is_none());
 
     // Multiple variations at once
-    paint.set_font_weight(700.0);
+    paint.set_font_weight(femtovg::Paint::FONT_WEIGHT_BOLD);
     paint.set_font_italic(true);
 
     assert_eq!(paint.font_weight(), Some(700.0));
@@ -354,12 +354,12 @@ fn font_variation_italic_and_slant_api() {
 fn font_variation_hash_stability() {
     // Setting the same variations in different order should produce the same hash
     let mut paint_a = femtovg::Paint::default();
-    paint_a.set_font_weight(700.0);
+    paint_a.set_font_weight(femtovg::Paint::FONT_WEIGHT_BOLD);
     paint_a.set_font_italic(true);
 
     let mut paint_b = femtovg::Paint::default();
     paint_b.set_font_italic(true);
-    paint_b.set_font_weight(700.0);
+    paint_b.set_font_weight(femtovg::Paint::FONT_WEIGHT_BOLD);
 
     // Both paints should have the same variation hash (verified via the generic API)
     assert_eq!(paint_a.font_weight(), paint_b.font_weight());

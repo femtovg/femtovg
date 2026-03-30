@@ -532,7 +532,7 @@ impl Game {
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
             .with_font(&[self.font])
-            .with_font_weight(700.0)
+            .with_font_weight(Paint::FONT_WEIGHT_BOLD)
             .with_font_size(80.0)
             .with_line_width(4.0);
         let _ = canvas.stroke_text(self.size.width / 2.0, self.size.height / 2.0, "rsBREAKOUT", &paint);
@@ -641,14 +641,14 @@ impl Game {
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Right)
             .with_font(&[self.font])
-            .with_font_weight(700.0)
+            .with_font_weight(Paint::FONT_WEIGHT_BOLD)
             .with_font_size(22.0);
         let _ = canvas.fill_text(self.size.width - 20.0, 25.0, format!("Lives: {}", self.lives), &paint);
 
         // score
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_font(&[self.font])
-            .with_font_weight(700.0)
+            .with_font_weight(Paint::FONT_WEIGHT_BOLD)
             .with_font_size(22.0);
         let _ = canvas.fill_text(20.0, 25.0, format!("Score: {}", self.score), &paint);
     }
@@ -698,7 +698,7 @@ impl Game {
         let paint = Paint::color(Color::rgb(240, 240, 240))
             .with_text_align(Align::Center)
             .with_font(&[self.font])
-            .with_font_weight(700.0)
+            .with_font_weight(Paint::FONT_WEIGHT_BOLD)
             .with_font_size(80.0)
             .with_line_width(4.0);
 
@@ -779,7 +779,7 @@ impl Powerup {
             .with_text_align(Align::Center)
             .with_text_baseline(Baseline::Middle)
             .with_font(&[font])
-            .with_font_weight(300.0)
+            .with_font_weight(Paint::FONT_WEIGHT_LIGHT)
             .with_font_size(16.0);
         let _ = canvas.fill_text(
             self.rect.center().x,
