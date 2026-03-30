@@ -1,6 +1,21 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-03-30
+
+- Added variable font support. New methods on `Paint`: `set_font_weight()`,
+  `set_font_italic()`, `set_font_slant()`, and generic `set_font_variation()`
+  with corresponding getters, `with_` builders, and `clear_` methods.
+- Added named font weight constants on `Paint` (`FONT_WEIGHT_THIN` through
+  `FONT_WEIGHT_BLACK`).
+- Added `Canvas::font_variation_axes()` to query available variation axes
+  for variable fonts, and new `VariationAxisInfo` public type.
+- **Breaking:** `Canvas::fill_glyph_run()` and `Canvas::stroke_glyph_run()`
+  now take an additional `normalized_coords: &[i16]` parameter for variable
+  font axis positions. Pass `&[]` for default behavior.
+- Replaced bundled Roboto with Roboto Flex for examples and added slant
+  support with italic fallback.
+
 ## [0.22.0] - 2026-03-26
 
 - WGPU: Changed API from `flush_to_surface()` to `flush_to_output()` and
@@ -351,3 +366,4 @@ All notable changes to this project will be documented in this file.
 [0.20.5]: https://github.com/femtovg/femtovg/releases/tag/v0.20.5
 [0.21.0]: https://github.com/femtovg/femtovg/releases/tag/v0.21.0
 [0.22.0]: https://github.com/femtovg/femtovg/releases/tag/v0.22.0
+[0.23.0]: https://github.com/femtovg/femtovg/releases/tag/v0.23.0
