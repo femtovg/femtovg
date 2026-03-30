@@ -145,7 +145,7 @@ fn run<W: WindowSurface + 'static>(
 
                 let paint = Paint::color(Color::hex("B7410E"))
                     .with_font(&[font])
-                    .with_font_weight(700.0)
+                    .with_font_weight(Paint::FONT_WEIGHT_BOLD)
                     .with_text_baseline(Baseline::Top)
                     .with_text_align(Align::Right);
                 let _ = canvas.fill_text(
@@ -251,7 +251,7 @@ fn draw_alignments<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y:
 fn draw_paragraph<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f32, font_size: f32, text: &str) {
     let paint = Paint::color(Color::black())
         .with_font(&[font])
-        .with_font_weight(300.0)
+        .with_font_weight(Paint::FONT_WEIGHT_LIGHT)
         //.with_text_align(Align::Right)
         .with_font_size(font_size);
 
@@ -304,7 +304,7 @@ fn draw_inc_size<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f
 fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f32) {
     let paint = Paint::color(Color::rgba(0, 0, 0, 128))
         .with_font(&[font])
-        .with_font_weight(700.0)
+        .with_font_weight(Paint::FONT_WEIGHT_BOLD)
         .with_line_width(12.0)
         .with_font_size(72.0);
     let _ = canvas.stroke_text(x + 5.0, y + 5.0, "RUST", &paint);
@@ -322,7 +322,7 @@ fn draw_stroked<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f3
 fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y: f32) {
     let paint = Paint::color(Color::rgba(0, 0, 0, 255))
         .with_font(&[font])
-        .with_font_weight(700.0)
+        .with_font_weight(Paint::FONT_WEIGHT_BOLD)
         .with_line_width(6.0)
         .with_font_size(72.0);
     let _ = canvas.stroke_text(x, y, "RUST", &paint);
@@ -336,7 +336,7 @@ fn draw_gradient_fill<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32,
         Color::rgba(93, 55, 70, 255),
     )
     .with_font(&[font])
-    .with_font_weight(700.0)
+    .with_font_weight(Paint::FONT_WEIGHT_BOLD)
     .with_font_size(72.0);
     let _ = canvas.fill_text(x, y, "RUST", &paint);
 }
@@ -352,7 +352,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y:
 
     let paint = Paint::color(Color::rgba(0, 0, 0, 128))
         .with_font(&[font])
-        .with_font_weight(700.0)
+        .with_font_weight(Paint::FONT_WEIGHT_BOLD)
         .with_line_width(4.0)
         .with_font_size(72.0);
     let _ = canvas.stroke_text(x, y, text, &paint);
@@ -360,7 +360,7 @@ fn draw_image_fill<T: Renderer>(canvas: &mut Canvas<T>, font: FontId, x: f32, y:
     //let mut paint = Paint::image(image_id, x + 50.0, y - t*10.0, 120.0, 120.0, t.sin() / 10.0, 0.70);
     let paint = Paint::image(image_id, x, y - t * 10.0, 120.0, 120.0, 0.0, 0.50)
         .with_font(&[font])
-        .with_font_weight(700.0)
+        .with_font_weight(Paint::FONT_WEIGHT_BOLD)
         .with_font_size(72.0);
     let _ = canvas.fill_text(x, y, text, &paint);
 }

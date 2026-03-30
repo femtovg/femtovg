@@ -449,6 +449,27 @@ impl Default for Paint {
 }
 
 impl Paint {
+    // Standard OpenType usWeightClass values for use with `set_font_weight`.
+
+    /// Thin (Hairline) font weight.
+    pub const FONT_WEIGHT_THIN: f32 = 100.0;
+    /// Extra Light (Ultra Light) font weight.
+    pub const FONT_WEIGHT_EXTRA_LIGHT: f32 = 200.0;
+    /// Light font weight.
+    pub const FONT_WEIGHT_LIGHT: f32 = 300.0;
+    /// Regular (Normal) font weight.
+    pub const FONT_WEIGHT_REGULAR: f32 = 400.0;
+    /// Medium font weight.
+    pub const FONT_WEIGHT_MEDIUM: f32 = 500.0;
+    /// Semi Bold (Demi Bold) font weight.
+    pub const FONT_WEIGHT_SEMI_BOLD: f32 = 600.0;
+    /// Bold font weight.
+    pub const FONT_WEIGHT_BOLD: f32 = 700.0;
+    /// Extra Bold (Ultra Bold) font weight.
+    pub const FONT_WEIGHT_EXTRA_BOLD: f32 = 800.0;
+    /// Black (Heavy) font weight.
+    pub const FONT_WEIGHT_BLACK: f32 = 900.0;
+
     /// Creates a new solid color paint
     pub fn color(color: Color) -> Self {
         Self::with_flavor(PaintFlavor::Color(color))
