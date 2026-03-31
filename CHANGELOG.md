@@ -1,6 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.23.1] - 2026-03-31
+
+- Fix variable font glyph caching returning wrong variation instance when
+  using swash. Stale normalized coordinates in swash's ScaleContext could
+  cause glyphs from a previous variation (e.g. bold) to appear for
+  subsequent default-instance renders.
+
 ## [0.23.0] - 2026-03-30
 
 - Added variable font support. New methods on `Paint`: `set_font_weight()`,
