@@ -374,3 +374,4 @@ All notable changes to this project will be documented in this file.
 [0.21.0]: https://github.com/femtovg/femtovg/releases/tag/v0.21.0
 [0.22.0]: https://github.com/femtovg/femtovg/releases/tag/v0.22.0
 [0.23.0]: https://github.com/femtovg/femtovg/releases/tag/v0.23.0
+[0.23.1]: https://github.com/femtovg/femtovg/releases/tag/v0.23.1
