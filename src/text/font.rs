@@ -581,13 +581,11 @@ impl Font {
             let font_ref = self.swash_font_ref()?;
 
             let mut scale_context = self.swash_scale_context().borrow_mut();
-            let mut scaler_builder = scale_context
+            let scaler_builder = scale_context
                 .builder(font_ref)
                 .size(self.units_per_em as f32)
-                .hint(false);
-            if !normalized_coords.is_empty() {
-                scaler_builder = scaler_builder.normalized_coords(normalized_coords);
-            }
+                .hint(false)
+                .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
             let maybe_glyph = if let Some(outline) = scaler.scale_outline(codepoint) {

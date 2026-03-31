@@ -754,10 +754,11 @@ impl GlyphAtlas {
 
         let image = {
             let mut scale_context = self.swash_scale_context.borrow_mut();
-            let mut scaler_builder = scale_context.builder(font_ref).size(font_size).hint(true);
-            if !normalized_coords.is_empty() {
-                scaler_builder = scaler_builder.normalized_coords(normalized_coords);
-            }
+            let scaler_builder = scale_context
+                .builder(font_ref)
+                .size(font_size)
+                .hint(true)
+                .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
             Render::new(&[
