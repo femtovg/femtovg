@@ -3,7 +3,7 @@
 
 //! Original example by Parley Authors, modified for femtovg.
 //! You can find the original example source code at
-//! https://github.com/linebender/parley/blob/v0.7.0/examples/swash_render/src/main.rs
+//! https://github.com/linebender/parley/blob/v0.8.0/examples/swash_render/src/main.rs
 
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::shadow_unrelated)]
@@ -17,7 +17,7 @@ use helpers::WindowSurface;
 use imgref::{Img, ImgRef};
 use parley::{
     layout::{Alignment, Glyph, GlyphRun, Layout, PositionedLayoutItem},
-    style::{FontStack, StyleProperty},
+    style::{FontFamily, StyleProperty},
     AlignmentOptions, FontContext, LayoutContext, LineHeight,
 };
 use rgb::RGBA8;
@@ -99,7 +99,7 @@ fn run<W: WindowSurface + 'static>(
 
     // Setup some Parley text styles
     let brush_style = StyleProperty::Brush(text_color);
-    let font_stack = FontStack::from("system-ui");
+    let font_family = FontFamily::from("system-ui");
 
     // Creatse a RangedBuilder
     let mut builder = layout_cx.ranged_builder(&mut font_cx, &text, display_scale, false);
@@ -108,7 +108,7 @@ fn run<W: WindowSurface + 'static>(
     builder.push_default(brush_style);
 
     // Set default font family
-    builder.push_default(font_stack);
+    builder.push_default(font_family);
     builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(1.3)));
     builder.push_default(StyleProperty::FontSize(16.0));
 
@@ -208,7 +208,7 @@ fn render_glyph_run<T: Renderer>(
     // Iterates over the glyphs in the GlyphRun
     for glyph in glyph_run.glyphs() {
         let glyph_x = run_x + glyph.x;
-        let glyph_y = run_y - glyph.y;
+        let glyph_y = run_y + glyph.y;
         run_x += glyph.advance;
 
         // Compute the fractional offset
