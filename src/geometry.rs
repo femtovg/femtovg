@@ -338,6 +338,13 @@ impl Transform2D {
         (sx + sy) * 0.5
     }
 
+    /// Returns true if this transform is approximately a pure translation,
+    /// i.e. no rotation, scaling, or skew.
+    pub(crate) fn is_pure_translation(&self, epsilon: f32) -> bool {
+        let &Self([a, b, c, d, ..]) = self;
+        (a - 1.0).abs() < epsilon && b.abs() < epsilon && c.abs() < epsilon && (d - 1.0).abs() < epsilon
+    }
+
     /// Converts the current transformation matrix to a 3×4 matrix format.
     pub fn to_mat3x4(self) -> [f32; 12] {
         let Self([a, b, c, d, x, y]) = self;
