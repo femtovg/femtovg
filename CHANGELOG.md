@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.23.2] - 2026-04-13
+
+- Fall back to path rendering for glyphs under non-translation transforms.
+
 ## [0.23.1] - 2026-03-31
 
 - Fix variable font glyph caching returning wrong variation instance when
@@ -375,3 +379,4 @@ All notable changes to this project will be documented in this file.
 [0.22.0]: https://github.com/femtovg/femtovg/releases/tag/v0.22.0
 [0.23.0]: https://github.com/femtovg/femtovg/releases/tag/v0.23.0
 [0.23.1]: https://github.com/femtovg/femtovg/releases/tag/v0.23.1
+[0.23.2]: https://github.com/femtovg/femtovg/releases/tag/v0.23.2
