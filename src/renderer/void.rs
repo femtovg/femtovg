@@ -14,6 +14,7 @@ pub struct Void;
 impl Renderer for Void {
     type Image = VoidImage;
     type NativeTexture = ();
+    type ExternalTexture = ();
     type RenderOutput = ();
     type CommandBuffer = ();
 
@@ -35,6 +36,14 @@ impl Renderer for Void {
     fn create_image_from_native_texture(
         &mut self,
         _native_texture: Self::NativeTexture,
+        _info: ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Err(ErrorKind::UnsupportedImageFormat)
+    }
+
+    fn create_image_from_external_texture(
+        &mut self,
+        _native_texture: Self::ExternalTexture,
         _info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
         Err(ErrorKind::UnsupportedImageFormat)
