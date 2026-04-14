@@ -699,6 +699,7 @@ impl OpenGl {
 impl Renderer for OpenGl {
     type Image = GlTexture;
     type NativeTexture = <glow::Context as glow::HasContext>::Texture;
+    type ExternalTexture = <glow::Context as glow::HasContext>::Texture;
     type RenderOutput = ();
     type CommandBuffer = ();
 
@@ -825,6 +826,14 @@ impl Renderer for OpenGl {
     fn create_image_from_native_texture(
         &mut self,
         native_texture: Self::NativeTexture,
+        info: ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Ok(Self::Image::new_from_native_texture(native_texture, info))
+    }
+
+    fn create_image_from_external_texture(
+        &mut self,
+        native_texture: Self::ExternalTexture,
         info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
         Ok(Self::Image::new_from_native_texture(native_texture, info))

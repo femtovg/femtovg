@@ -177,8 +177,14 @@ impl From<&Params> for UniformArray {
 }
 
 #[derive(Debug)]
+enum Texture {
+    Internal(wgpu::Texture),
+    External(wgpu::ExternalTexture),
+}
+
+#[derive(Debug)]
 pub struct Image {
-    texture: wgpu::Texture,
+    texture: Texture,
     info: ImageInfo,
 }
 
@@ -331,6 +337,7 @@ impl WGPURenderer {
 impl Renderer for WGPURenderer {
     type Image = Image;
     type NativeTexture = wgpu::Texture;
+    type ExternalTexture = wgpu::ExternalTexture;
     type RenderOutput = WGPURenderOutput;
     type CommandBuffer = Option<wgpu::CommandBuffer>;
 
@@ -517,7 +524,7 @@ impl Renderer for WGPURenderer {
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, crate::ErrorKind> {
         Ok(Image {
-            texture: self.device.create_texture(&wgpu::TextureDescriptor {
+            texture: Texture::Internal(self.device.create_texture(&wgpu::TextureDescriptor {
                 label: None,
                 size: wgpu::Extent3d {
                     width: info.width() as u32,
@@ -536,7 +543,7 @@ impl Renderer for WGPURenderer {
                     | wgpu::TextureUsages::COPY_DST
                     | wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
-            }),
+            })),
             info,
         })
     }
@@ -547,7 +554,18 @@ impl Renderer for WGPURenderer {
         info: crate::ImageInfo,
     ) -> Result<Self::Image, crate::ErrorKind> {
         Ok(Image {
-            texture: native_texture,
+            texture: Texture::Internal(native_texture),
+            info,
+        })
+    }
+
+    fn create_image_from_external_texture(
+        &mut self,
+        external_texture: Self::ExternalTexture,
+        info: crate::ImageInfo,
+    ) -> Result<Self::Image, crate::ErrorKind> {
+        Ok(Image {
+            texture: Texture::External(external_texture),
             info,
         })
     }
@@ -607,29 +625,33 @@ impl Renderer for WGPURenderer {
             }
         };
 
-        let mut target = image.texture.as_image_copy();
-        target.origin.x = x as _;
-        target.origin.y = y as _;
+        if let Texture::Internal(texture) = &image.texture {
+            let mut target = texture.as_image_copy();
+            target.origin.x = x as _;
+            target.origin.y = y as _;
 
-        self.queue.write_texture(
-            target,
-            bytes,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(bpp * data.dimensions().width as u32),
-                rows_per_image: None,
-            },
-            wgpu::Extent3d {
-                width: data.dimensions().width as _,
-                height: data.dimensions().height as _,
-                depth_or_array_layers: 1,
-            },
-        );
+            self.queue.write_texture(
+                target,
+                bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpp * data.dimensions().width as u32),
+                    rows_per_image: None,
+                },
+                wgpu::Extent3d {
+                    width: data.dimensions().width as _,
+                    height: data.dimensions().height as _,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         Ok(())
     }
 
     fn delete_image(&mut self, image: Self::Image, _image_id: crate::ImageId) {
-        self.stencil_buffer_for_textures.remove(&image.texture);
+        if let Texture::Internal(texture) = &image.texture {
+            self.stencil_buffer_for_textures.remove(texture);
+        }
         drop(image);
     }
 
@@ -658,8 +680,8 @@ fn gaussian_blur_filter(
         command.image.unwrap(),
         0.,
         0.,
-        source_image.texture.width() as _,
-        source_image.texture.height() as _,
+        source_image.info.width() as _,
+        source_image.info.height() as _,
         0.,
         1.,
     );
@@ -692,14 +714,18 @@ fn gaussian_blur_filter(
     let horizontal_blur_buffer = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("blur horizontal"),
         size: wgpu::Extent3d {
-            width: source_image.texture.width(),
-            height: source_image.texture.height(),
+            width: source_image.info.width() as _,
+            height: source_image.info.height() as _,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: source_image.texture.format(),
+        format: match source_image.info.format() {
+            crate::PixelFormat::Rgb8 => wgpu::TextureFormat::Rgba8Unorm,
+            crate::PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
+            crate::PixelFormat::Gray8 => wgpu::TextureFormat::R8Unorm,
+        },
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
@@ -1448,7 +1474,10 @@ impl<'a> RenderPassBuilder<'a> {
         empty_texture: &wgpu::Texture,
     ) -> (wgpu::TextureView, wgpu::Sampler) {
         let texture_and_flags = image.and_then(|image_or_texture| match image_or_texture {
-            ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| (img.texture.clone(), img.info.flags())),
+            ImageOrTexture::Image(image_id) => images.get(*image_id).and_then(|img| match &img.texture {
+                Texture::Internal(texture) => Some((texture.clone(), img.info.flags())),
+                _ => None,
+            }),
             ImageOrTexture::Texture(texture) => Some((texture.clone(), crate::ImageFlags::empty())),
         });
         let texture_view = texture_and_flags
@@ -1507,28 +1536,30 @@ impl<'a> RenderPassBuilder<'a> {
     ) {
         let image = images.get(image_id).unwrap();
 
-        let stencil_buffer = self
-            .stencil_buffer_for_textures
-            .entry(image.texture.clone())
-            .or_insert_with(|| {
-                self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Stencil buffer"),
-                    size: wgpu::Extent3d {
-                        width: image.texture.width(),
-                        height: image.texture.height(),
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Stencil8,
-                    view_formats: &[],
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        if let Texture::Internal(texture) = &image.texture {
+            let stencil_buffer = self
+                .stencil_buffer_for_textures
+                .entry(texture.clone())
+                .or_insert_with(|| {
+                    self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Stencil buffer"),
+                        size: wgpu::Extent3d {
+                            width: texture.width(),
+                            height: texture.height(),
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: wgpu::TextureFormat::Stencil8,
+                        view_formats: &[],
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    })
                 })
-            })
-            .clone();
+                .clone();
 
-        self.set_render_target_texture(&image.texture.clone(), Some(stencil_buffer), load);
+            self.set_render_target_texture(&texture.clone(), Some(stencil_buffer), load);
+        }
     }
 
     fn set_render_target_screen(&mut self) {
