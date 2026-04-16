@@ -176,6 +176,26 @@ impl From<&Params> for UniformArray {
     }
 }
 
+enum OwnedBindingResource {
+    TextureView(wgpu::TextureView),
+    ExternalTexture(wgpu::ExternalTexture),
+}
+
+impl OwnedBindingResource {
+    fn is_external(&self) -> bool {
+        matches!(self, Self::ExternalTexture(_))
+    }
+}
+
+impl<'a> From<&'a OwnedBindingResource> for wgpu::BindingResource<'a> {
+    fn from(owned: &'a OwnedBindingResource) -> Self {
+        match owned {
+            OwnedBindingResource::TextureView(texture_view) => Self::TextureView(texture_view),
+            OwnedBindingResource::ExternalTexture(texture_view) => Self::ExternalTexture(texture_view),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum Texture {
     Internal(wgpu::Texture),
@@ -1341,13 +1361,17 @@ impl BindGroupState {
         });
 
         let (main_texture_view, main_sampler) =
-            RenderPassBuilder::create_texture_view_and_sampler(device, images, self.image.as_ref(), empty_texture);
-        let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_texture_view_and_sampler(
+            RenderPassBuilder::create_binding_resource_and_sampler(device, images, self.image.as_ref(), empty_texture);
+        let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
             self.glyph_texture.image_id().map(ImageOrTexture::Image).as_ref(),
             empty_texture,
         );
+
+        if (main_texture_view.is_external() || glyph_texture_view.is_external()) {
+            unimplemented!("External texture shaders and bind groups are not implemented yet");
+        }
 
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: bind_group_layout,
@@ -1358,7 +1382,7 @@ impl BindGroupState {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&main_texture_view),
+                    resource: (&main_texture_view).into(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -1366,7 +1390,7 @@ impl BindGroupState {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&glyph_texture_view),
+                    resource: (&glyph_texture_view).into(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
@@ -1467,25 +1491,18 @@ impl<'a> RenderPassBuilder<'a> {
         viewport_bind_group
     }
 
-    fn create_texture_view_and_sampler(
+    fn create_binding_resource_and_sampler(
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         image: Option<&ImageOrTexture>,
         empty_texture: &wgpu::Texture,
-    ) -> (wgpu::TextureView, wgpu::Sampler) {
-        let texture_and_flags = image.and_then(|image_or_texture| match image_or_texture {
-            ImageOrTexture::Image(image_id) => images.get(*image_id).and_then(|img| match &img.texture {
-                Texture::Internal(texture) => Some((texture.clone(), img.info.flags())),
+    ) -> (OwnedBindingResource, wgpu::Sampler) {
+        let flags = image
+            .and_then(|image_or_texture| match image_or_texture {
+                ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| img.info.flags()),
                 _ => None,
-            }),
-            ImageOrTexture::Texture(texture) => Some((texture.clone(), crate::ImageFlags::empty())),
-        });
-        let texture_view = texture_and_flags
-            .as_ref()
-            .map_or_else(|| empty_texture, |(texture, _)| texture)
-            .create_view(&Default::default());
-
-        let flags = texture_and_flags.map_or(crate::ImageFlags::empty(), |(_, flags)| flags);
+            })
+            .unwrap_or_else(crate::ImageFlags::empty);
 
         let filter_mode = if flags.contains(crate::ImageFlags::NEAREST) {
             wgpu::FilterMode::Nearest
@@ -1493,7 +1510,6 @@ impl<'a> RenderPassBuilder<'a> {
             wgpu::FilterMode::Linear
         };
 
-        // ### Share
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
                 wgpu::AddressMode::Repeat
@@ -1510,7 +1526,22 @@ impl<'a> RenderPassBuilder<'a> {
             min_filter: filter_mode,
             ..Default::default()
         });
-        (texture_view, sampler)
+
+        let binding_resource = image
+            .and_then(|image_or_texture| match image_or_texture {
+                ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| match &img.texture {
+                    Texture::Internal(texture) => {
+                        OwnedBindingResource::TextureView(texture.create_view(&Default::default()))
+                    }
+                    Texture::External(texture) => OwnedBindingResource::ExternalTexture(texture.clone()),
+                }),
+                ImageOrTexture::Texture(texture) => Some(OwnedBindingResource::TextureView(
+                    texture.create_view(&Default::default()),
+                )),
+            })
+            .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture.create_view(&Default::default())));
+
+        (binding_resource, sampler)
     }
 
     fn set_render_target_texture(
