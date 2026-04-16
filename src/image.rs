@@ -225,6 +225,16 @@ impl<T> ImageStore<T> {
         Ok(ImageId(self.0.insert((info, image))))
     }
 
+    pub fn register_external_texture<R: Renderer<Image = T>>(
+        &mut self,
+        renderer: &mut R,
+        texture: R::ExternalTexture,
+        info: ImageInfo,
+    ) -> Result<ImageId, ErrorKind> {
+        let image = renderer.create_image_from_external_texture(texture, info)?;
+        Ok(ImageId(self.0.insert((info, image))))
+    }
+
     // Reallocates the image without changing the id.
     pub fn realloc<R: Renderer<Image = T>>(
         &mut self,
