@@ -1675,6 +1675,7 @@ pub struct RecordingRenderer {
 impl Renderer for RecordingRenderer {
     type Image = DummyImage;
     type NativeTexture = ();
+    type ExternalTexture = ();
     type RenderOutput = ();
     type CommandBuffer = ();
 
@@ -1697,6 +1698,14 @@ impl Renderer for RecordingRenderer {
     fn create_image_from_native_texture(
         &mut self,
         _native_texture: Self::NativeTexture,
+        _info: crate::ImageInfo,
+    ) -> Result<Self::Image, ErrorKind> {
+        Err(ErrorKind::UnsupportedImageFormat)
+    }
+    
+    fn create_image_from_external_texture(
+        &mut self,
+        _external_texture: Self::ExternalTexture,
         _info: crate::ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
         Err(ErrorKind::UnsupportedImageFormat)
