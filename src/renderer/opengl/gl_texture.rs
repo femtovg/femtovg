@@ -9,14 +9,20 @@ pub struct GlTexture {
     id: <glow::Context as glow::HasContext>::Texture,
     info: ImageInfo,
     owned: bool,
+    pub(super) external: bool,
 }
 
 impl GlTexture {
-    pub fn new_from_native_texture(texture: <glow::Context as glow::HasContext>::Texture, info: ImageInfo) -> Self {
+    pub fn new_from_native_texture(
+        texture: <glow::Context as glow::HasContext>::Texture,
+        info: ImageInfo,
+        external: bool,
+    ) -> Self {
         Self {
             id: texture,
             info,
             owned: false,
+            external,
         }
     }
     pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles_2_0: bool) -> Result<Self, ErrorKind> {
@@ -34,7 +40,12 @@ impl GlTexture {
             id
         };
 
-        let texture = Self { id, info, owned: true };
+        let texture = Self {
+            id,
+            info,
+            owned: true,
+            external: false,
+        };
 
         match info.format() {
             PixelFormat::Gray8 => unsafe {
