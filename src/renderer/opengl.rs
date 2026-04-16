@@ -477,10 +477,23 @@ impl OpenGl {
         self.check_error("set_uniforms uniforms");
 
         let tex = image_tex.and_then(|id| images.get(id)).map(GlTexture::id);
+        let is_external = image_tex
+            .and_then(|id| images.get(id))
+            .map(|t| t.external)
+            .unwrap_or(false);
+
+        const TEXTURE_EXTERNAL_OES: u32 = 0x8D65;
 
         unsafe {
             self.context.active_texture(glow::TEXTURE0);
-            self.context.bind_texture(glow::TEXTURE_2D, tex);
+            self.context.bind_texture(
+                if is_external {
+                    TEXTURE_EXTERNAL_OES
+                } else {
+                    glow::TEXTURE_2D
+                },
+                tex,
+            );
         }
 
         let glyphtex = glyph_tex.image_id().and_then(|id| images.get(id).map(GlTexture::id));
@@ -828,7 +841,7 @@ impl Renderer for OpenGl {
         native_texture: Self::NativeTexture,
         info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
-        Ok(Self::Image::new_from_native_texture(native_texture, info))
+        Ok(Self::Image::new_from_native_texture(native_texture, info, false))
     }
 
     fn create_image_from_external_texture(
@@ -836,7 +849,7 @@ impl Renderer for OpenGl {
         native_texture: Self::ExternalTexture,
         info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
-        Ok(Self::Image::new_from_native_texture(native_texture, info))
+        Ok(Self::Image::new_from_native_texture(native_texture, info, true))
     }
 
     fn update_image(
