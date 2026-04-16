@@ -1702,7 +1702,7 @@ impl Renderer for RecordingRenderer {
     ) -> Result<Self::Image, ErrorKind> {
         Err(ErrorKind::UnsupportedImageFormat)
     }
-    
+
     fn create_image_from_external_texture(
         &mut self,
         _external_texture: Self::ExternalTexture,
