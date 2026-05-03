@@ -599,6 +599,9 @@ impl Renderer for WGPURenderer {
     ) -> Result<(), crate::ErrorKind> {
         #[cfg(target_arch = "wasm32")]
         if let crate::ImageSource::HtmlImageElement(htmlimage) = data {
+            let Texture::Internal(texture) = &image.texture else {
+                return Err(crate::ErrorKind::UnsupportedOperation);
+            };
             self.queue.copy_external_image_to_texture(
                 &wgpu::CopyExternalImageSourceInfo {
                     source: wgpu::ExternalImageSource::HTMLImageElement(htmlimage.clone()),
@@ -606,9 +609,13 @@ impl Renderer for WGPURenderer {
                     flip_y: false,
                 },
                 wgpu::CopyExternalImageDestInfo {
-                    texture: &image.texture,
+                    texture,
                     mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
+                    origin: wgpu::Origin3d {
+                        x: x as u32,
+                        y: y as u32,
+                        z: 0,
+                    },
                     aspect: wgpu::TextureAspect::All,
                     color_space: wgpu::PredefinedColorSpace::Srgb,
                     premultiplied_alpha: true,
@@ -619,6 +626,7 @@ impl Renderer for WGPURenderer {
                     depth_or_array_layers: 1,
                 },
             );
+            return Ok(());
         }
 
         use rgb::ComponentBytes;

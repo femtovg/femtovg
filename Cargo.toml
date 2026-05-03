@@ -48,6 +48,7 @@ web_sys = { version = "0.3", package = "web-sys", features = [
     "WebGl2RenderingContext",
 ] }
 wasm-bindgen = "0.2"
+wgpu = { version = "28", optional = true, default-features = false, features = ["web"] }
 
 [features]
 default = ["image-loading", "textlayout"]
