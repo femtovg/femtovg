@@ -198,7 +198,7 @@ fn run<W: WindowSurface + 'static>(
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 25.0));
     let mut cache = RenderCache::new();
 
-    buffer.set_text(&mut font_system, LOREM_TEXT, &Attrs::new(), Shaping::Advanced, None);
+    buffer.set_text(LOREM_TEXT, &Attrs::new(), Shaping::Advanced, None);
 
     helpers::Callbacks {
         window_event: Box::new(move |event, event_loop| match event {
@@ -213,8 +213,8 @@ fn run<W: WindowSurface + 'static>(
                 canvas.set_size(size.width, size.height, 1.0);
                 canvas.clear_rect(0, 0, size.width, size.height, Color::rgbf(0.9, 0.9, 0.9));
 
-                buffer.set_metrics(&mut font_system, Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
-                buffer.set_size(&mut font_system, Some(size.width as f32), Some(size.height as f32));
+                buffer.set_metrics(Metrics::new(20.0 * dpi_factor, 25.0 * dpi_factor));
+                buffer.set_size(Some(size.width as f32), Some(size.height as f32));
                 let cmds = cache.fill_to_cmds(&mut font_system, &mut canvas, &buffer, (0.0, 0.0));
                 canvas.draw_glyph_commands(cmds, &Paint::color(Color::black()));
 
