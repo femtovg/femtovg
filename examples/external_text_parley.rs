@@ -135,7 +135,7 @@ fn run<W: WindowSurface + 'static>(
 
                     // Perform layout (including bidi resolution and shaping) with start alignment
                     layout.break_all_lines(max_advance);
-                    layout.align(max_advance, Alignment::Start, AlignmentOptions::default());
+                    layout.align(Alignment::Start, AlignmentOptions::default());
 
                     // Iterate over laid out lines
                     for line in layout.lines() {
