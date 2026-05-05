@@ -1,6 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-05-05
+
+- WGPU: Fixed `HtmlImageElement` upload path.
+- Added external texture support. New `Canvas::create_image_from_external_texture()`
+  for importing platform-specific external textures (e.g. EGL/OES external
+  textures in OpenGL, external texture views in WGPU).
+
 ## [0.23.2] - 2026-04-13
 
 - Fall back to path rendering for glyphs under non-translation transforms.
@@ -380,3 +387,4 @@ All notable changes to this project will be documented in this file.
 [0.23.0]: https://github.com/femtovg/femtovg/releases/tag/v0.23.0
 [0.23.1]: https://github.com/femtovg/femtovg/releases/tag/v0.23.1
 [0.23.2]: https://github.com/femtovg/femtovg/releases/tag/v0.23.2
+[0.24.0]: https://github.com/femtovg/femtovg/releases/tag/v0.24.0
