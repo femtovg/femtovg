@@ -331,7 +331,7 @@ impl WGPURenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&viewport_bind_group_layout, &bind_group_layout],
+            bind_group_layouts: &[Some(&viewport_bind_group_layout), Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -1329,8 +1329,8 @@ impl PipelineState {
                 .as_ref()
                 .map(|stencil_state| wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Stencil8,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::Always,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
                     stencil: stencil_state.clone(),
                     bias: Default::default(),
                 }),
@@ -1377,7 +1377,7 @@ impl BindGroupState {
             empty_texture,
         );
 
-        if (main_texture_view.is_external() || glyph_texture_view.is_external()) {
+        if main_texture_view.is_external() || glyph_texture_view.is_external() {
             unimplemented!("External texture shaders and bind groups are not implemented yet");
         }
 
