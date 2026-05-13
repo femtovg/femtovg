@@ -25,10 +25,11 @@ impl WindowSurface for DemoSurface {
     }
 
     fn present(&self, canvas: &mut femtovg::Canvas<Self::Renderer>) {
-        let frame = self
-            .surface
-            .get_current_texture()
-            .expect("unable to get next texture from swapchain");
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+            status => panic!("unable to get next texture from swapchain: {status:?}"),
+        };
 
         let commands = canvas.flush_to_output(&frame.texture);
 
@@ -72,7 +73,7 @@ impl ApplicationHandler for WgpuApp {
         let gles_minor_version = wgpu::Gles3MinorVersion::from_env().unwrap_or_default();
 
         let instance = pollster::block_on(wgpu::util::new_instance_with_webgpu_detection(
-            &wgpu::InstanceDescriptor {
+            wgpu::InstanceDescriptor {
                 backends,
                 flags: wgpu::InstanceFlags::from_build_config().with_env(),
                 backend_options: wgpu::BackendOptions {
@@ -80,14 +81,17 @@ impl ApplicationHandler for WgpuApp {
                         shader_compiler: dx12_shader_compiler,
                         presentation_system: dx12_presentation_system,
                         latency_waitable_object: dx12_latency_waitable_object,
+                        ..Default::default()
                     },
                     gl: wgpu::GlBackendOptions {
                         gles_minor_version,
                         fence_behavior: wgpu::GlFenceBehavior::default(),
+                        ..Default::default()
                     },
                     noop: wgpu::NoopBackendOptions::default(),
                 },
                 memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+                display: None,
             },
         ));
 
@@ -265,11 +269,12 @@ pub async fn start_wgpu_wasm() {
     #[cfg(debug_assertions)]
     console_error_panic_hook::set_once();
 
-    let instance = wgpu::util::new_instance_with_webgpu_detection(&wgpu::InstanceDescriptor {
+    let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::from_env().unwrap_or_default(),
         flags: wgpu::InstanceFlags::from_build_config().with_env(),
         backend_options: wgpu::BackendOptions::default(),
         memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+        display: None,
     })
     .await;
 
