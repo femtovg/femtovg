@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-05-13
+
+- Bumped WGPU renderer to use WGPU 29.x. Thanks @matthargett
+
 ## [0.24.0] - 2026-05-05
 
 - WGPU: Fixed `HtmlImageElement` upload path.
@@ -388,3 +392,4 @@ All notable changes to this project will be documented in this file.
 [0.23.1]: https://github.com/femtovg/femtovg/releases/tag/v0.23.1
 [0.23.2]: https://github.com/femtovg/femtovg/releases/tag/v0.23.2
 [0.24.0]: https://github.com/femtovg/femtovg/releases/tag/v0.24.0
+[0.25.0]: https://github.com/femtovg/femtovg/releases/tag/v0.25.0
