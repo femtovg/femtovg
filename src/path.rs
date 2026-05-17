@@ -158,6 +158,98 @@ impl Path {
         RefMut::map(self.cache.borrow_mut(), |cache| &mut cache.as_mut().unwrap().1)
     }
 
+    /// Returns a path containing only the visible segments of this path when
+    /// stroked with the given dash pattern and offset.
+    ///
+    /// Empty patterns, patterns whose entries sum to zero, and patterns with
+    /// non-finite or negative entries return this path unchanged. Odd-length
+    /// patterns are repeated once, matching SVG and Canvas 2D behavior.
+    pub fn dashed(&self, dash: &[f32], offset: f32) -> Self {
+        self.dashed_with_tolerance(dash, offset, self.dist_tol)
+    }
+
+    pub(crate) fn dashed_with_tolerance(&self, dash: &[f32], offset: f32, tess_tol: f32) -> Self {
+        let dash = normalize_dash_pattern(dash);
+        if dash.is_empty() {
+            return self.clone();
+        }
+
+        let contours = self.flattened_contours(tess_tol, self.dist_tol);
+        let mut dashed = Self::new();
+        dashed.dist_tol = self.dist_tol;
+
+        for contour in contours {
+            if contour.points.len() < 2 {
+                continue;
+            }
+
+            let mut cursor = DashCursor::new(&dash, offset);
+            for segment in contour.points.windows(2) {
+                dash_line_segment(&mut dashed, segment[0], segment[1], &mut cursor, self.dist_tol);
+            }
+
+            if contour.closed {
+                dash_line_segment(
+                    &mut dashed,
+                    *contour.points.last().unwrap(),
+                    contour.points[0],
+                    &mut cursor,
+                    self.dist_tol,
+                );
+            }
+        }
+
+        dashed
+    }
+
+    fn flattened_contours(&self, tess_tol: f32, dist_tol: f32) -> Vec<FlattenedContour> {
+        let mut contours = Vec::new();
+        let mut current = FlattenedContour::default();
+        let mut current_pos = Position::default();
+        let mut first_pos = None;
+
+        let finish_current = |contours: &mut Vec<FlattenedContour>, current: &mut FlattenedContour| {
+            if current.points.len() >= 2 {
+                contours.push(std::mem::take(current));
+            } else {
+                current.points.clear();
+                current.closed = false;
+            }
+        };
+
+        for verb in self.verbs() {
+            match verb {
+                Verb::MoveTo(x, y) => {
+                    finish_current(&mut contours, &mut current);
+                    current_pos = Position { x, y };
+                    first_pos = Some(current_pos);
+                    current.points.push(current_pos);
+                }
+                Verb::LineTo(x, y) => {
+                    current_pos = Position { x, y };
+                    push_flattened_point(&mut current.points, current_pos, dist_tol);
+                }
+                Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                    let c1 = Position { x: c1x, y: c1y };
+                    let c2 = Position { x: c2x, y: c2y };
+                    let end = Position { x, y };
+                    flatten_bezier(&mut current.points, current_pos, c1, c2, end, 0, tess_tol, dist_tol);
+                    current_pos = end;
+                }
+                Verb::Close => {
+                    if let Some(first) = first_pos {
+                        current.closed = true;
+                        current_pos = first;
+                    }
+                }
+                Verb::Solid | Verb::Hole => {}
+            }
+        }
+
+        finish_current(&mut contours, &mut current);
+        contours
+    }
+
     // Path funcs
 
     /// Starts a new sub-path with the specified point as the first point.
@@ -504,6 +596,179 @@ impl Path {
     }
 }
 
+#[derive(Default)]
+struct FlattenedContour {
+    points: Vec<Position>,
+    closed: bool,
+}
+
+struct DashCursor<'a> {
+    dash: &'a [f32],
+    index: usize,
+    remaining: f32,
+    drawing: bool,
+}
+
+impl<'a> DashCursor<'a> {
+    fn new(dash: &'a [f32], offset: f32) -> Self {
+        let total = dash.iter().sum::<f32>();
+        let mut normalized_offset = if offset.is_finite() { offset % total } else { 0.0 };
+        if normalized_offset < 0.0 {
+            normalized_offset += total;
+        }
+
+        let mut index = 0;
+        for (dash_index, interval) in dash.iter().copied().enumerate() {
+            if normalized_offset > interval || (normalized_offset == interval && interval > 0.0) {
+                normalized_offset -= interval;
+                index = (dash_index + 1) % dash.len();
+            } else {
+                index = dash_index;
+                break;
+            }
+        }
+
+        let mut cursor = Self {
+            dash,
+            index,
+            remaining: (dash[index] - normalized_offset).max(0.0),
+            drawing: index % 2 == 0,
+        };
+        cursor.skip_empty_entries();
+        cursor
+    }
+
+    fn advance(&mut self) {
+        self.index = (self.index + 1) % self.dash.len();
+        self.remaining = self.dash[self.index];
+        self.drawing = self.index % 2 == 0;
+        self.skip_empty_entries();
+    }
+
+    fn skip_empty_entries(&mut self) {
+        for _ in 0..self.dash.len() {
+            if self.remaining > f32::EPSILON {
+                break;
+            }
+            self.index = (self.index + 1) % self.dash.len();
+            self.remaining = self.dash[self.index];
+            self.drawing = self.index % 2 == 0;
+        }
+    }
+}
+
+fn normalize_dash_pattern(dash: &[f32]) -> Vec<f32> {
+    if dash.is_empty() || dash.iter().any(|value| !value.is_finite() || *value < 0.0) {
+        return Vec::new();
+    }
+
+    let sum = dash.iter().sum::<f32>();
+    if sum <= f32::EPSILON {
+        return Vec::new();
+    }
+
+    let mut normalized = dash.to_vec();
+    if normalized.len() % 2 == 1 {
+        normalized.extend_from_slice(dash);
+    }
+
+    normalized
+}
+
+fn push_flattened_point(points: &mut Vec<Position>, point: Position, dist_tol: f32) {
+    if points
+        .last()
+        .is_some_and(|last| Position::equals(*last, point, dist_tol))
+    {
+        return;
+    }
+
+    points.push(point);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flatten_bezier(
+    points: &mut Vec<Position>,
+    p0: Position,
+    p1: Position,
+    p2: Position,
+    p3: Position,
+    level: usize,
+    tess_tol: f32,
+    dist_tol: f32,
+) {
+    if level > 10 {
+        push_flattened_point(points, p3, dist_tol);
+        return;
+    }
+
+    let p01 = Position {
+        x: (p0.x + p1.x) * 0.5,
+        y: (p0.y + p1.y) * 0.5,
+    };
+    let p12 = Position {
+        x: (p1.x + p2.x) * 0.5,
+        y: (p1.y + p2.y) * 0.5,
+    };
+    let p23 = Position {
+        x: (p2.x + p3.x) * 0.5,
+        y: (p2.y + p3.y) * 0.5,
+    };
+    let p012 = Position {
+        x: (p01.x + p12.x) * 0.5,
+        y: (p01.y + p12.y) * 0.5,
+    };
+    let p123 = Position {
+        x: (p12.x + p23.x) * 0.5,
+        y: (p12.y + p23.y) * 0.5,
+    };
+    let p0123 = Position {
+        x: (p012.x + p123.x) * 0.5,
+        y: (p012.y + p123.y) * 0.5,
+    };
+
+    let dx = p3.x - p0.x;
+    let dy = p3.y - p0.y;
+    let d1 = ((p1.x - p3.x) * dy - (p1.y - p3.y) * dx).abs();
+    let d2 = ((p2.x - p3.x) * dy - (p2.y - p3.y) * dx).abs();
+
+    if (d1 + d2) * (d1 + d2) < tess_tol * (dx * dx + dy * dy) {
+        push_flattened_point(points, p3, dist_tol);
+        return;
+    }
+
+    flatten_bezier(points, p0, p01, p012, p0123, level + 1, tess_tol, dist_tol);
+    flatten_bezier(points, p0123, p123, p23, p3, level + 1, tess_tol, dist_tol);
+}
+
+fn dash_line_segment(path: &mut Path, start: Position, end: Position, cursor: &mut DashCursor<'_>, dist_tol: f32) {
+    let delta = end - start;
+    let length = delta.mag2().sqrt();
+    if length <= dist_tol {
+        return;
+    }
+
+    let direction = delta * (1.0 / length);
+    let mut travelled = 0.0;
+    while travelled < length {
+        if cursor.remaining <= f32::EPSILON {
+            cursor.advance();
+            continue;
+        }
+
+        let step = cursor.remaining.min(length - travelled);
+        if cursor.drawing && step > dist_tol {
+            let dash_start = start + direction * travelled;
+            let dash_end = start + direction * (travelled + step);
+            path.move_to(dash_start.x, dash_start.y);
+            path.line_to(dash_end.x, dash_end.y);
+        }
+
+        travelled += step;
+        cursor.remaining -= step;
+    }
+}
+
 /// An iterator over the verbs and coordinates of a path.
 #[derive(Debug)]
 pub struct PathIter<'a> {
@@ -546,5 +811,90 @@ impl ttf_parser::OutlineBuilder for Path {
 
     fn close(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Path, Verb};
+
+    fn line_path(length: f32) -> Path {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(length, 0.0);
+        path
+    }
+
+    fn dashed_line_segments(path: &Path) -> Vec<((f32, f32), (f32, f32))> {
+        let mut segments = Vec::new();
+        let mut current = None;
+
+        for verb in path.verbs() {
+            match verb {
+                Verb::MoveTo(x, y) => current = Some((x, y)),
+                Verb::LineTo(x, y) => {
+                    let start = current.expect("line segment should start with move_to");
+                    let end = (x, y);
+                    segments.push((start, end));
+                    current = Some(end);
+                }
+                other => panic!("unexpected dashed path verb: {other:?}"),
+            }
+        }
+
+        segments
+    }
+
+    fn assert_segment(segment: ((f32, f32), (f32, f32)), expected: ((f32, f32), (f32, f32))) {
+        let epsilon = 0.001;
+        assert!((segment.0 .0 - expected.0 .0).abs() < epsilon);
+        assert!((segment.0 .1 - expected.0 .1).abs() < epsilon);
+        assert!((segment.1 .0 - expected.1 .0).abs() < epsilon);
+        assert!((segment.1 .1 - expected.1 .1).abs() < epsilon);
+    }
+
+    #[test]
+    fn dashed_line_splits_visible_intervals() {
+        let dashed = line_path(10.0).dashed(&[2.0, 1.0], 0.0);
+        let segments = dashed_line_segments(&dashed);
+
+        assert_eq!(segments.len(), 4);
+        assert_segment(segments[0], ((0.0, 0.0), (2.0, 0.0)));
+        assert_segment(segments[1], ((3.0, 0.0), (5.0, 0.0)));
+        assert_segment(segments[2], ((6.0, 0.0), (8.0, 0.0)));
+        assert_segment(segments[3], ((9.0, 0.0), (10.0, 0.0)));
+    }
+
+    #[test]
+    fn dashed_line_applies_offset() {
+        let dashed = line_path(8.0).dashed(&[2.0, 2.0], 1.0);
+        let segments = dashed_line_segments(&dashed);
+
+        assert_eq!(segments.len(), 3);
+        assert_segment(segments[0], ((0.0, 0.0), (1.0, 0.0)));
+        assert_segment(segments[1], ((3.0, 0.0), (5.0, 0.0)));
+        assert_segment(segments[2], ((7.0, 0.0), (8.0, 0.0)));
+    }
+
+    #[test]
+    fn odd_dash_pattern_repeats() {
+        let dashed = line_path(12.0).dashed(&[2.0, 1.0, 3.0], 0.0);
+        let segments = dashed_line_segments(&dashed);
+
+        assert_eq!(segments.len(), 3);
+        assert_segment(segments[0], ((0.0, 0.0), (2.0, 0.0)));
+        assert_segment(segments[1], ((3.0, 0.0), (6.0, 0.0)));
+        assert_segment(segments[2], ((8.0, 0.0), (9.0, 0.0)));
+    }
+
+    #[test]
+    fn invalid_dash_pattern_keeps_path_solid() {
+        let path = line_path(10.0);
+        let dashed = path.dashed(&[0.0, 0.0], 0.0);
+
+        assert_eq!(
+            format!("{:?}", path.verbs().collect::<Vec<_>>()),
+            format!("{:?}", dashed.verbs().collect::<Vec<_>>())
+        );
     }
 }
