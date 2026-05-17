@@ -1039,6 +1039,19 @@ where
         let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
+        if !stroke.line_dash.is_empty() {
+            let dashed_path = path.dashed_with_tolerance(&stroke.line_dash, stroke.line_dash_offset, self.tess_tol);
+            if dashed_path.is_empty() {
+                return;
+            }
+
+            let mut solid_stroke = stroke.clone();
+            solid_stroke.line_dash.clear();
+            solid_stroke.line_dash_offset = 0.0;
+            self.stroke_path_internal(&dashed_path, &paint_flavor, anti_alias, &solid_stroke);
+            return;
+        }
+
         // The path cache saves a flattened and transformed version of the path.
         let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
