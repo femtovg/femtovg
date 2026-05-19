@@ -43,6 +43,10 @@ impl UniformArray {
         self.0[34..36].copy_from_slice(&scale);
     }
 
+    pub fn set_scissor_radius(&mut self, radius: f32) {
+        self.0[51] = radius;
+    }
+
     pub fn set_extent(&mut self, ext: [f32; 2]) {
         self.0[36..38].copy_from_slice(&ext);
     }
@@ -98,6 +102,7 @@ impl From<&Params> for UniformArray {
         arr.set_outer_col(params.outer_col);
         arr.set_scissor_ext(params.scissor_ext);
         arr.set_scissor_scale(params.scissor_scale);
+        arr.set_scissor_radius(params.scissor_radius);
         arr.set_extent(params.extent);
         arr.set_radius(params.radius);
         arr.set_feather(params.feather);

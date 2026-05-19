@@ -16,6 +16,7 @@ struct Params {
     image_blur_filter_sigma: f32,
     image_blur_filter_direction: vec2<f32>,
     image_blur_filter_coeff: vec3<f32>,
+    scissor_radius: f32,
 }
 
 const SHADER_TYPE_FillGradient: i32 = 0;
@@ -191,6 +192,13 @@ fn sdroundrect(pt: vec2<f32>, ext: vec2<f32>, rad: f32) -> f32 {
 
 // Scissoring
 fn scissorMask(p: vec2<f32>, params: Params) -> f32 {
+    if (params.scissor_radius > 0.0) {
+        let pt = (params.scissor_mat * vec3<f32>(p, 1.0)).xy;
+        let distance = sdroundrect(pt, params.scissor_ext, params.scissor_radius);
+        let edge = select(0.5, 0.375, params.glyph_texture_type != 0.0);
+        return clamp(edge - distance * min(params.scissor_scale.x, params.scissor_scale.y), 0.0, 1.0);
+    }
+
     var sc: vec2<f32> = (abs((params.scissor_mat * vec3<f32>(p,1.0)).xy) - params.scissor_ext);
     sc = vec2(0.5,0.5) - sc * params.scissor_scale;
     return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);

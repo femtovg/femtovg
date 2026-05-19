@@ -24,6 +24,7 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define imageBlurFilterDirection frag[11].yz
 #define imageBlurFilterSigma frag[11].w
 #define imageBlurFilterCoeff frag[12].xyz
+#define scissorRadius frag[12].w
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -50,6 +51,13 @@ float sdroundrect(vec2 pt, vec2 ext, float rad) {
 
 // Scissoring
 float scissorMask(vec2 p) {
+    if (scissorRadius > 0.0) {
+        vec2 pt = (scissorMat * vec3(p,1.0)).xy;
+        float distance = sdroundrect(pt, scissorExt, scissorRadius);
+        float edge = glyphTextureType != 0.0 ? 0.375 : 0.5;
+        return clamp(edge - distance * min(scissorScale.x, scissorScale.y), 0.0, 1.0);
+    }
+
     vec2 sc = (abs((scissorMat * vec3(p,1.0)).xy) - scissorExt);
     sc = vec2(0.5,0.5) - sc * scissorScale;
     return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
