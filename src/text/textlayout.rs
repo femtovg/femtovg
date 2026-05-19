@@ -542,7 +542,7 @@ fn layout(
 
     for glyph in &mut res.glyphs {
         glyph.x = cursor_x + glyph.offset_x;
-        glyph.y = (cursor_y + alignment_offset_y).round() + glyph.offset_y;
+        glyph.y = cursor_y + alignment_offset_y + glyph.offset_y;
 
         min_y = min_y.min(glyph.y);
         max_y = max_y.max(glyph.y + glyph.height);

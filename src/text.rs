@@ -544,8 +544,12 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
+                let transformed_text = !canvas.state().transform.is_pure_translation(1e-3);
+                let glyph_x = if transformed_text { glyph.x } else { glyph.x.trunc() };
+                let glyph_y = if transformed_text { glyph.y } else { glyph.y.round() };
+
+                q.x0 = glyph_x + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
+                q.y0 = glyph_y - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
                 q.x1 = q.x0 + rendered.width as f32;
                 q.y1 = q.y0 + rendered.height as f32;
 

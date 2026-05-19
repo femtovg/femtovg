@@ -1514,13 +1514,13 @@ where
         let text_context = self.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        // When the canvas transform includes scale, rotation, or skew, fall back to
-        // path-based rendering instead of using atlas bitmaps. Atlas glyphs are rasterized
-        // at a fixed size, so applying a non-translation transform to the textured quad
-        // produces blurry or aliased results.
+        // Very large glyphs need path rendering, and large transformed glyphs avoid
+        // magnifying atlas bitmaps. Smaller transformed text stays on the atlas so
+        // it keeps the browser-like hinted weight expected by canvas UI text.
         // Use 1e-3 as epsilon: tight enough to catch any intentional transform,
         // but generous enough to tolerate floating-point drift from matrix operations.
-        let need_direct_rendering = paint.text.font_size > 92.0 || !self.state().transform.is_pure_translation(1e-3);
+        let need_direct_rendering = paint.text.font_size > 92.0
+            || (paint.text.font_size > 64.0 && !self.state().transform.is_pure_translation(1e-3));
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
