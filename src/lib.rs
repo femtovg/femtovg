@@ -815,6 +815,7 @@ where
     /// scissor or when the previous clip is a containing rectangle with the same
     /// transform. Other intersections fall back to rectangular scissoring.
     pub fn intersect_rounded_scissor(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        let tolerance = self.dist_tol;
         let state = self.state_mut();
 
         // If no previous scissor has been set, set the scissor as current scissor.
@@ -840,7 +841,6 @@ where
         let res = rect.intersect(Rect::new(x, y, w, h));
 
         let requested = Rect::new(x, y, w, h);
-        let tolerance = 1e-3;
         let requested_contains_existing = requested.x <= rect.x + tolerance
             && requested.y <= rect.y + tolerance
             && rect.x + rect.w <= requested.x + requested.w + tolerance
@@ -870,7 +870,7 @@ where
                 } else {
                     0.0
                 };
-                dx * dx + dy * dy <= radius * radius + tolerance
+                dx * dx + dy * dy <= (radius + tolerance) * (radius + tolerance)
             };
             let rounded_contains_requested = contains_point(requested.x, requested.y)
                 && contains_point(requested.x + requested.w, requested.y)
@@ -1598,13 +1598,13 @@ where
         let text_context = self.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        // Very large glyphs need path rendering, and large transformed glyphs avoid
-        // magnifying atlas bitmaps. Smaller transformed text stays on the atlas so
-        // it keeps the browser-like hinted weight expected by canvas UI text.
+        // When the canvas transform includes scale, rotation, or skew, fall back to
+        // path-based rendering instead of using atlas bitmaps. Atlas glyphs are rasterized
+        // at a fixed size, so applying a non-translation transform to the textured quad
+        // produces blurry or aliased results.
         // Use 1e-3 as epsilon: tight enough to catch any intentional transform,
         // but generous enough to tolerate floating-point drift from matrix operations.
-        let need_direct_rendering = paint.text.font_size > 92.0
-            || (paint.text.font_size > 64.0 && !self.state().transform.is_pure_translation(1e-3));
+        let need_direct_rendering = paint.text.font_size > 92.0 || !self.state().transform.is_pure_translation(1e-3);
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
