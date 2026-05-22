@@ -434,6 +434,12 @@ pub struct GlyphDrawCommands {
     pub color_glyphs: Vec<DrawCommand>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AtlasGlyphPositioning {
+    PixelAligned,
+    Subpixel,
+}
+
 pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, Option<RenderedGlyph>>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
@@ -474,6 +480,7 @@ impl GlyphAtlas {
         line_width: f32,
         mode: RenderMode,
         normalized_coords: &[i16],
+        positioning: AtlasGlyphPositioning,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
@@ -544,9 +551,13 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                let transformed_text = !canvas.state().transform.is_pure_translation(1e-3);
-                let glyph_x = if transformed_text { glyph.x } else { glyph.x.trunc() };
-                let glyph_y = if transformed_text { glyph.y } else { glyph.y.round() };
+                // Layout preserves fractional baselines. Pixel-align atlas quads only
+                // when the canvas transform is still a pure translation; otherwise
+                // local-space rounding becomes visible after transform application.
+                let (glyph_x, glyph_y) = match positioning {
+                    AtlasGlyphPositioning::PixelAligned => (glyph.x.trunc(), glyph.y.round()),
+                    AtlasGlyphPositioning::Subpixel => (glyph.x, glyph.y),
+                };
 
                 q.x0 = glyph_x + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
                 q.y0 = glyph_y - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;

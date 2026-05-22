@@ -1514,13 +1514,20 @@ where
         let text_context = self.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
+        let transform_is_pure_translation = self.state().transform.is_pure_translation(1e-3);
+        let atlas_positioning = if transform_is_pure_translation {
+            text::AtlasGlyphPositioning::PixelAligned
+        } else {
+            text::AtlasGlyphPositioning::Subpixel
+        };
+
         // Very large glyphs need path rendering, and large transformed glyphs avoid
         // magnifying atlas bitmaps. Smaller transformed text stays on the atlas so
         // it keeps the browser-like hinted weight expected by canvas UI text.
         // Use 1e-3 as epsilon: tight enough to catch any intentional transform,
         // but generous enough to tolerate floating-point drift from matrix operations.
-        let need_direct_rendering = paint.text.font_size > 92.0
-            || (paint.text.font_size > 64.0 && !self.state().transform.is_pure_translation(1e-3));
+        let need_direct_rendering =
+            paint.text.font_size > 92.0 || (paint.text.font_size > 64.0 && !transform_is_pure_translation);
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
@@ -1572,6 +1579,7 @@ where
                 paint.stroke.line_width,
                 render_mode,
                 normalized_coords,
+                atlas_positioning,
             )?
         };
 
@@ -1595,6 +1603,7 @@ where
                     paint.stroke.line_width,
                     render_mode,
                     normalized_coords,
+                    atlas_positioning,
                 )?
             };
 
