@@ -918,19 +918,17 @@ impl Paint {
 
     /// Sets the dash pattern used for stroked paths.
     ///
-    /// Passing an empty slice, a pattern whose values sum to zero, or a pattern
-    /// containing non-finite or negative values resets strokes to solid. If the
-    /// supplied pattern has an odd number of entries, it is repeated once to
-    /// form an even pattern as required by SVG and Canvas 2D.
+    /// Passing an empty slice clears the dash pattern. Patterns containing
+    /// non-finite or negative values are ignored, leaving the current pattern
+    /// unchanged. If the supplied pattern has an odd number of entries, it is
+    /// repeated once to form an even pattern as required by SVG and Canvas 2D.
     pub fn set_line_dash(&mut self, dash: &[f32]) {
-        self.stroke.line_dash.clear();
-
-        if dash.is_empty() || dash.iter().any(|value| !value.is_finite() || *value < 0.0) {
+        if dash.iter().any(|value| !value.is_finite() || *value < 0.0) {
             return;
         }
 
-        let sum = dash.iter().sum::<f32>();
-        if sum <= f32::EPSILON {
+        self.stroke.line_dash.clear();
+        if dash.is_empty() {
             return;
         }
 
@@ -1246,5 +1244,47 @@ impl Paint {
     pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
         self.set_fill_rule(rule);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Paint;
+
+    #[test]
+    fn line_dash_empty_pattern_clears() {
+        let mut paint = Paint::default().with_line_dash(&[1.0, 2.0]);
+
+        paint.set_line_dash(&[]);
+
+        assert!(paint.line_dash().is_empty());
+    }
+
+    #[test]
+    fn line_dash_invalid_pattern_preserves_current_pattern() {
+        let mut paint = Paint::default().with_line_dash(&[1.0, 2.0]);
+
+        paint.set_line_dash(&[-1.0]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+
+        paint.set_line_dash(&[f32::NAN]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+
+        paint.set_line_dash(&[f32::INFINITY]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+    }
+
+    #[test]
+    fn line_dash_odd_pattern_repeats() {
+        let paint = Paint::default().with_line_dash(&[1.0, 2.0, 3.0]);
+
+        assert_eq!(paint.line_dash(), &[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn line_dash_all_zero_pattern_is_stored() {
+        let paint = Paint::default().with_line_dash(&[0.0, 0.0]);
+
+        assert_eq!(paint.line_dash(), &[0.0, 0.0]);
     }
 }
