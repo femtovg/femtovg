@@ -195,8 +195,7 @@ fn scissorMask(p: vec2<f32>, params: Params) -> f32 {
     if (params.scissor_radius > 0.0) {
         let pt = (params.scissor_mat * vec3<f32>(p, 1.0)).xy;
         let distance = sdroundrect(pt, params.scissor_ext, params.scissor_radius);
-        let edge = select(0.5, 0.375, params.glyph_texture_type != 0.0);
-        return clamp(edge - distance * min(params.scissor_scale.x, params.scissor_scale.y), 0.0, 1.0);
+        return clamp(0.5 - distance * min(params.scissor_scale.x, params.scissor_scale.y), 0.0, 1.0);
     }
 
     var sc: vec2<f32> = (abs((params.scissor_mat * vec3<f32>(p,1.0)).xy) - params.scissor_ext);

@@ -1955,6 +1955,14 @@ fn first_draw_params(commands: &[renderer::Command]) -> &Params {
 }
 
 #[cfg(test)]
+fn assert_approx_eq(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.001,
+        "expected {actual} to be approximately {expected}"
+    );
+}
+
+#[cfg(test)]
 fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
     let mut path = Path::new();
     path.rect(0.0, 0.0, 100.0, 100.0);
@@ -1974,7 +1982,8 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
-    assert!((params.scissor_radius - 10.0).abs() < 0.001);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 10.0);
 }
 
 #[test]
@@ -1990,7 +1999,68 @@ fn intersect_scissor_preserves_contained_rounded_clip() {
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
-    assert!((params.scissor_radius - 8.0).abs() < 0.001);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 8.0);
+}
+
+#[test]
+fn intersect_scissor_inside_rounded_clip_uses_rectangular_inner_clip() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 80.0, 80.0, 20.0);
+    canvas.intersect_scissor(35.0, 35.0, 20.0, 20.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 0.0);
+    assert_approx_eq(params.scissor_ext[0], 10.0);
+    assert_approx_eq(params.scissor_ext[1], 10.0);
+}
+
+#[test]
+fn intersect_rounded_scissor_partial_overlap_falls_back_to_rectangular_intersection() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 40.0, 40.0, 12.0);
+    canvas.intersect_rounded_scissor(35.0, 35.0, 40.0, 40.0, 12.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 0.0);
+    assert_approx_eq(params.scissor_ext[0], 7.5);
+    assert_approx_eq(params.scissor_ext[1], 7.5);
+}
+
+#[test]
+fn rounded_scissor_captures_transform_at_clip_time() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.scale(2.0, 3.0);
+    canvas.rounded_scissor(10.0, 10.0, 20.0, 10.0, 4.0);
+    canvas.reset_transform();
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 4.0);
+    assert_approx_eq(params.scissor_ext[0], 10.0);
+    assert_approx_eq(params.scissor_ext[1], 5.0);
+    assert_approx_eq(params.scissor_scale[0], 2.0);
+    assert_approx_eq(params.scissor_scale[1], 3.0);
 }
 
 #[test]
@@ -2006,5 +2076,6 @@ fn intersect_rounded_scissor_uses_inner_radius_when_contained() {
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
-    assert!((params.scissor_radius - 10.0).abs() < 0.001);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 10.0);
 }

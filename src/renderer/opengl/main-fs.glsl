@@ -54,8 +54,7 @@ float scissorMask(vec2 p) {
     if (scissorRadius > 0.0) {
         vec2 pt = (scissorMat * vec3(p,1.0)).xy;
         float distance = sdroundrect(pt, scissorExt, scissorRadius);
-        float edge = glyphTextureType != 0.0 ? 0.375 : 0.5;
-        return clamp(edge - distance * min(scissorScale.x, scissorScale.y), 0.0, 1.0);
+        return clamp(0.5 - distance * min(scissorScale.x, scissorScale.y), 0.0, 1.0);
     }
 
     vec2 sc = (abs((scissorMat * vec3(p,1.0)).xy) - scissorExt);
