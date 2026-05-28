@@ -1707,7 +1707,7 @@ where
             &glyph_texture,
             &scissor,
             1.0,
-            1.0,
+            self.fringe_width,
             -1.0,
         );
 
@@ -1954,6 +1954,19 @@ fn first_draw_params(commands: &[renderer::Command]) -> &Params {
         .expect("expected a draw command")
 }
 
+#[cfg(all(test, feature = "textlayout"))]
+fn first_glyph_draw_params(commands: &[renderer::Command]) -> &Params {
+    use renderer::CommandType;
+
+    commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::Triangles { params } if params.glyph_texture_type != 0 => Some(params),
+            _ => None,
+        })
+        .expect("expected a glyph draw command")
+}
+
 #[cfg(test)]
 fn assert_approx_eq(actual: f32, expected: f32) {
     assert!(
@@ -1984,6 +1997,37 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
     let params = first_draw_params(&commands);
     assert_eq!(params.glyph_texture_type, 0);
     assert_approx_eq(params.scissor_radius, 10.0);
+}
+
+#[cfg(feature = "textlayout")]
+#[test]
+fn glyph_scissor_ramp_matches_fill_at_high_dpi() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 2.0);
+
+    let font = canvas
+        .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+    let paint = Paint::color(Color::white()).with_font(&[font]).with_font_size(16.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 56.0, 28.0, 14.0);
+
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 100.0, 100.0);
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    canvas.fill_text(12.0, 30.0, "Click", &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let commands = recorded_commands.borrow();
+    let fill = first_draw_params(&commands);
+    let glyph = first_glyph_draw_params(&commands);
+
+    assert_approx_eq(glyph.scissor_scale[0], 2.0);
+    assert_approx_eq(glyph.scissor_scale[1], 2.0);
+    assert_approx_eq(glyph.scissor_scale[0], fill.scissor_scale[0]);
+    assert_approx_eq(glyph.scissor_scale[1], fill.scissor_scale[1]);
 }
 
 #[test]
