@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [0.25.1] - 2026-05-29
+
+- Added dashed stroke support. New `Paint` methods `set_line_dash()` /
+  `line_dash()` / `with_line_dash()` and `set_line_dash_offset()` /
+  `line_dash_offset()` / `with_line_dash_offset()`, plus `Path::dashed()` to
+  produce a dashed copy of a path.
+- Render text crisply under uniform-scale transforms: glyphs drawn with a
+  uniform scale combined with a translation are now rasterized into the atlas
+  at the on-screen size (for solid color fills) instead of falling back to
+  path rendering.
+
 ## [0.25.0] - 2026-05-13
 
 - Bumped WGPU renderer to use WGPU 29.x. Thanks @matthargett
@@ -393,3 +404,4 @@ All notable changes to this project will be documented in this file.
 [0.23.2]: https://github.com/femtovg/femtovg/releases/tag/v0.23.2
 [0.24.0]: https://github.com/femtovg/femtovg/releases/tag/v0.24.0
 [0.25.0]: https://github.com/femtovg/femtovg/releases/tag/v0.25.0
+[0.25.1]: https://github.com/femtovg/femtovg/releases/tag/v0.25.1
