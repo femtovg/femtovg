@@ -361,6 +361,8 @@ pub struct StrokeSettings {
     pub(crate) line_cap_start: LineCap,
     pub(crate) line_cap_end: LineCap,
     pub(crate) line_join: LineJoin,
+    pub(crate) line_dash: Vec<f32>,
+    pub(crate) line_dash_offset: f32,
 }
 
 impl Default for StrokeSettings {
@@ -372,6 +374,8 @@ impl Default for StrokeSettings {
             line_cap_start: LineCap::default(),
             line_cap_end: LineCap::default(),
             line_join: LineJoin::default(),
+            line_dash: Vec::new(),
+            line_dash_offset: 0.0,
         }
     }
 }
@@ -903,6 +907,65 @@ impl Paint {
         self
     }
 
+    /// Returns the current dash pattern used for stroked paths.
+    ///
+    /// An empty pattern draws a solid stroke. Odd-length patterns are stored as
+    /// the pattern repeated twice, matching SVG and Canvas 2D behavior.
+    #[inline]
+    pub fn line_dash(&self) -> &[f32] {
+        &self.stroke.line_dash
+    }
+
+    /// Sets the dash pattern used for stroked paths.
+    ///
+    /// Passing an empty slice clears the dash pattern. Patterns containing
+    /// non-finite or negative values are ignored, leaving the current pattern
+    /// unchanged. If the supplied pattern has an odd number of entries, it is
+    /// repeated once to form an even pattern as required by SVG and Canvas 2D.
+    pub fn set_line_dash(&mut self, dash: &[f32]) {
+        if dash.iter().any(|value| !value.is_finite() || *value < 0.0) {
+            return;
+        }
+
+        self.stroke.line_dash.clear();
+        if dash.is_empty() {
+            return;
+        }
+
+        self.stroke.line_dash.extend_from_slice(dash);
+        if dash.len() % 2 == 1 {
+            self.stroke.line_dash.extend_from_slice(dash);
+        }
+    }
+
+    /// Returns the paint with the dash pattern set to the specified value.
+    #[inline]
+    pub fn with_line_dash(mut self, dash: &[f32]) -> Self {
+        self.set_line_dash(dash);
+        self
+    }
+
+    /// Returns the current dash pattern offset used for stroked paths.
+    #[inline]
+    pub fn line_dash_offset(&self) -> f32 {
+        self.stroke.line_dash_offset
+    }
+
+    /// Sets the dash pattern offset used for stroked paths.
+    #[inline]
+    pub fn set_line_dash_offset(&mut self, offset: f32) {
+        if offset.is_finite() {
+            self.stroke.line_dash_offset = offset;
+        }
+    }
+
+    /// Returns the paint with the dash pattern offset set to the specified value.
+    #[inline]
+    pub fn with_line_dash_offset(mut self, offset: f32) -> Self {
+        self.set_line_dash_offset(offset);
+        self
+    }
+
     /// Sets the font.
     pub fn set_font(&mut self, font_ids: &[FontId]) {
         self.text.font_ids = Default::default();
@@ -1181,5 +1244,47 @@ impl Paint {
     pub fn with_fill_rule(mut self, rule: FillRule) -> Self {
         self.set_fill_rule(rule);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Paint;
+
+    #[test]
+    fn line_dash_empty_pattern_clears() {
+        let mut paint = Paint::default().with_line_dash(&[1.0, 2.0]);
+
+        paint.set_line_dash(&[]);
+
+        assert!(paint.line_dash().is_empty());
+    }
+
+    #[test]
+    fn line_dash_invalid_pattern_preserves_current_pattern() {
+        let mut paint = Paint::default().with_line_dash(&[1.0, 2.0]);
+
+        paint.set_line_dash(&[-1.0]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+
+        paint.set_line_dash(&[f32::NAN]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+
+        paint.set_line_dash(&[f32::INFINITY]);
+        assert_eq!(paint.line_dash(), &[1.0, 2.0]);
+    }
+
+    #[test]
+    fn line_dash_odd_pattern_repeats() {
+        let paint = Paint::default().with_line_dash(&[1.0, 2.0, 3.0]);
+
+        assert_eq!(paint.line_dash(), &[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn line_dash_all_zero_pattern_is_stored() {
+        let paint = Paint::default().with_line_dash(&[0.0, 0.0]);
+
+        assert_eq!(paint.line_dash(), &[0.0, 0.0]);
     }
 }

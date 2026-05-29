@@ -195,9 +195,16 @@ fn render_svg(svg: usvg::Tree) -> Vec<(Path, Option<Paint>, Option<Paint>)> {
 
                     let stroke = svg_path.stroke().and_then(|stroke| {
                         to_femto_color(&stroke.paint()).map(|paint| {
-                            Paint::color(paint)
+                            let mut paint = Paint::color(paint)
                                 .with_line_width(stroke.width().get())
-                                .with_anti_alias(true)
+                                .with_anti_alias(true);
+
+                            if let Some(dasharray) = stroke.dasharray() {
+                                paint.set_line_dash(dasharray);
+                                paint.set_line_dash_offset(stroke.dashoffset());
+                            }
+
+                            paint
                         })
                     });
 

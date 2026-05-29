@@ -338,11 +338,18 @@ impl Transform2D {
         (sx + sy) * 0.5
     }
 
-    /// Returns true if this transform is approximately a pure translation,
-    /// i.e. no rotation, scaling, or skew.
-    pub(crate) fn is_pure_translation(&self, epsilon: f32) -> bool {
-        let &Self([a, b, c, d, ..]) = self;
-        (a - 1.0).abs() < epsilon && b.abs() < epsilon && c.abs() < epsilon && (d - 1.0).abs() < epsilon
+    /// If this transform is a uniform scale combined with a translation (no
+    /// rotation, skew, reflection, or non-uniform scaling), returns
+    /// `(scale, tx, ty)`; otherwise returns `None`.
+    ///
+    /// `epsilon` is the tolerance for the off-diagonal terms being zero and for
+    /// the two diagonal terms being equal. A pure translation reports a scale of
+    /// `1.0`.
+    pub(crate) fn as_uniform_scale_translation(&self, epsilon: f32) -> Option<(f32, f32, f32)> {
+        let &Self([a, b, c, d, tx, ty]) = self;
+        let is_uniform =
+            b.abs() < epsilon && c.abs() < epsilon && (a - d).abs() < epsilon * a.abs().max(1.0) && a > 0.0;
+        is_uniform.then_some((a, tx, ty))
     }
 
     /// Converts the current transformation matrix to a 3×4 matrix format.
@@ -527,5 +534,78 @@ impl Default for Bounds {
 impl Bounds {
     pub(crate) fn contains(&self, x: f32, y: f32) -> bool {
         (self.minx..=self.maxx).contains(&x) && (self.miny..=self.maxy).contains(&y)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Transform2D;
+
+    const EPS: f32 = 1e-3;
+
+    #[test]
+    fn uniform_scale_translation() {
+        // (description, transform, expected (scale, tx, ty) or None)
+        #[allow(clippy::type_complexity)]
+        let cases: &[(&str, Transform2D, Option<(f32, f32, f32)>)] = &[
+            ("identity", Transform2D::identity(), Some((1.0, 0.0, 0.0))),
+            (
+                "pure translation",
+                Transform2D::translation(3.0, 4.0),
+                Some((1.0, 3.0, 4.0)),
+            ),
+            (
+                "uniform scale + translation",
+                Transform2D::new(2.0, 0.0, 0.0, 2.0, 5.0, 6.0),
+                Some((2.0, 5.0, 6.0)),
+            ),
+            ("pure scale", Transform2D::scaling(2.0, 2.0), Some((2.0, 0.0, 0.0))),
+            ("rotation", Transform2D::rotation(std::f32::consts::FRAC_PI_4), None),
+            // Non-zero off-diagonal term.
+            ("skew", Transform2D::new(1.0, 0.0, 0.5, 1.0, 0.0, 0.0), None),
+            // Different x and y scale.
+            (
+                "non-uniform scale",
+                Transform2D::new(2.0, 0.0, 0.0, 3.0, 0.0, 0.0),
+                None,
+            ),
+            // Negative uniform scale (180° reflection): a is not > 0.
+            ("negative scale", Transform2D::new(-2.0, 0.0, 0.0, -2.0, 0.0, 0.0), None),
+            // Y-flip: a and d differ in sign.
+            ("y-flip", Transform2D::new(1.0, 0.0, 0.0, -1.0, 0.0, 0.0), None),
+            // Off-diagonal terms just under epsilon are treated as zero...
+            (
+                "off-diagonal drift within epsilon",
+                Transform2D::new(2.0, 5e-4, 5e-4, 2.0, 0.0, 0.0),
+                Some((2.0, 0.0, 0.0)),
+            ),
+            // ... but just over epsilon is rejected.
+            (
+                "off-diagonal drift over epsilon",
+                Transform2D::new(2.0, 2e-3, 0.0, 2.0, 0.0, 0.0),
+                None,
+            ),
+            // Squareness (a vs d) uses a relative tolerance (eps * max(|a|, 1)), so
+            // a 0.05 difference at scale 100 (0.05 < 1e-3 * 100) is still uniform...
+            (
+                "squareness within relative tolerance",
+                Transform2D::new(100.0, 0.0, 0.0, 100.05, 0.0, 0.0),
+                Some((100.0, 0.0, 0.0)),
+            ),
+            // ... while a difference of 1.0 at the same scale is not.
+            (
+                "squareness over relative tolerance",
+                Transform2D::new(100.0, 0.0, 0.0, 101.0, 0.0, 0.0),
+                None,
+            ),
+        ];
+
+        for (description, transform, expected) in cases {
+            assert_eq!(
+                transform.as_uniform_scale_translation(EPS),
+                *expected,
+                "case: {description}"
+            );
+        }
     }
 }

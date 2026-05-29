@@ -1039,6 +1039,19 @@ where
         let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
+        if !stroke.line_dash.is_empty() {
+            let dashed_path = path.dashed_with_tolerance(&stroke.line_dash, stroke.line_dash_offset, self.tess_tol);
+            if dashed_path.is_empty() {
+                return;
+            }
+
+            let mut solid_stroke = stroke.clone();
+            solid_stroke.line_dash.clear();
+            solid_stroke.line_dash_offset = 0.0;
+            self.stroke_path_internal(&dashed_path, &paint_flavor, anti_alias, &solid_stroke);
+            return;
+        }
+
         // The path cache saves a flattened and transformed version of the path.
         let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
@@ -1514,20 +1527,49 @@ where
         let text_context = self.text_context.clone();
         let mut text_context = text_context.borrow_mut();
 
-        let transform_is_pure_translation = self.state().transform.is_pure_translation(1e-3);
-        let atlas_positioning = if transform_is_pure_translation {
-            text::AtlasGlyphPositioning::PixelAligned
-        } else {
-            text::AtlasGlyphPositioning::Subpixel
+        // How this glyph run is rasterized for the current canvas transform.
+        #[derive(Clone, Copy)]
+        enum Rasterization {
+            Path,
+            Atlas,
+            ScaledAtlas { scale: f32, translation: (f32, f32) },
+        }
+
+        // Classify the canvas transform. 1e-3 epsilon: tight enough to catch any
+        // intentional transform, loose enough to tolerate matrix-op drift.
+        let rasterization = match self.state().transform.as_uniform_scale_translation(1e-3) {
+            // Rotation / skew / non-uniform / negative scale: outline rendering.
+            None => Rasterization::Path,
+            Some((scale, tx, ty)) => {
+                // Quantize the baked scale so small animation steps don't churn the
+                // atlas; 1/16 steps (≈6%) are imperceptible at typical zoom levels.
+                let scale = geometry::quantize(scale, 1.0 / 16.0).max(1.0 / 16.0);
+                if paint.text.font_size * scale > 92.0 {
+                    // Cached bitmap would be too large.
+                    Rasterization::Path
+                } else if scale == 1.0 {
+                    // Pure translation (within a quantization step): nothing to bake.
+                    Rasterization::Atlas
+                } else if matches!(paint.flavor, PaintFlavor::Color(_)) {
+                    Rasterization::ScaledAtlas {
+                        scale,
+                        translation: (tx, ty),
+                    }
+                } else {
+                    // Gradients/images map their coordinates through the canvas
+                    // transform that the atlas path swaps out for a translation,
+                    // which would shift them; keep those direct.
+                    Rasterization::Path
+                }
+            }
         };
 
-        // Very large glyphs need path rendering, and large transformed glyphs avoid
-        // magnifying atlas bitmaps. Smaller transformed text stays on the atlas so
-        // it keeps the browser-like hinted weight expected by canvas UI text.
-        // Use 1e-3 as epsilon: tight enough to catch any intentional transform,
-        // but generous enough to tolerate floating-point drift from matrix operations.
-        let need_direct_rendering =
-            paint.text.font_size > 92.0 || (paint.text.font_size > 64.0 && !transform_is_pure_translation);
+        let need_direct_rendering = matches!(rasterization, Rasterization::Path);
+        let effective_scale = match rasterization {
+            Rasterization::ScaledAtlas { scale, .. } => scale,
+            _ => 1.0,
+        };
+        let effective_font_size = paint.text.font_size * effective_scale;
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
@@ -1555,6 +1597,15 @@ where
             })
             .collect::<Vec<_>>();
 
+        // When baking scale into the rasterization, pre-multiply glyph positions
+        // by `effective_scale` so that under a translation-only canvas transform
+        // they still land at the original screen position.
+        let scaled = |g: &PositionedGlyph| PositionedGlyph {
+            x: g.x * effective_scale,
+            y: g.y * effective_scale,
+            glyph_id: g.glyph_id,
+        };
+
         let mut draw_commands = if need_direct_rendering {
             text::render_direct(
                 self,
@@ -1574,12 +1625,11 @@ where
                 font_id,
                 font,
                 &font_face,
-                non_color_glyphs.into_iter(),
-                paint.text.font_size,
+                non_color_glyphs.iter().map(scaled),
+                effective_font_size,
                 paint.stroke.line_width,
                 render_mode,
                 normalized_coords,
-                atlas_positioning,
             )?
         };
 
@@ -1593,25 +1643,57 @@ where
                     self.glyph_atlas.clone()
                 };
 
-                atlas.render_atlas(
-                    self,
-                    font_id,
-                    font,
-                    &font_face,
-                    color_glyphs.into_iter(),
-                    paint.text.font_size,
-                    paint.stroke.line_width,
-                    render_mode,
-                    normalized_coords,
-                    atlas_positioning,
-                )?
+                // Color glyphs on the atlas path follow the same scale baking.
+                // On the direct path we leave them at the original font_size —
+                // that already matches today's behavior.
+                if need_direct_rendering {
+                    atlas.render_atlas(
+                        self,
+                        font_id,
+                        font,
+                        &font_face,
+                        color_glyphs.into_iter(),
+                        paint.text.font_size,
+                        paint.stroke.line_width,
+                        render_mode,
+                        normalized_coords,
+                    )?
+                } else {
+                    atlas.render_atlas(
+                        self,
+                        font_id,
+                        font,
+                        &font_face,
+                        color_glyphs.iter().map(scaled),
+                        effective_font_size,
+                        paint.stroke.line_width,
+                        render_mode,
+                        normalized_coords,
+                    )?
+                }
             };
 
             draw_commands.alpha_glyphs.extend(color_commands.alpha_glyphs);
             draw_commands.color_glyphs.extend(color_commands.color_glyphs);
         }
 
-        self.draw_glyph_commands(draw_commands, paint);
+        // For the scaled-atlas path, present the pre-scaled glyph quads with a
+        // translation-only transform so the bitmap shows at its on-screen pixel
+        // size. render_atlas already emitted quads in the scaled glyph space, so
+        // only draw_glyph_commands (which applies the canvas transform) needs the
+        // swap — and since it is infallible, the transform is always restored even
+        // though the fallible rendering above used `?`.
+        match rasterization {
+            Rasterization::ScaledAtlas {
+                translation: (tx, ty), ..
+            } => {
+                let saved = self.state().transform;
+                self.state_mut().transform = Transform2D::translation(tx, ty);
+                self.draw_glyph_commands(draw_commands, paint);
+                self.state_mut().transform = saved;
+            }
+            _ => self.draw_glyph_commands(draw_commands, paint),
+        }
 
         Ok(())
     }
@@ -1860,4 +1942,134 @@ fn test_image_blit_fast_path() {
             ..
         })
     ));
+}
+
+/// Text rendering picks one of two strategies depending on the canvas transform
+/// and paint: cached atlas bitmaps (emitting a `Triangles` command that samples a
+/// glyph texture) or direct outline rendering (emitting plain path fills with no
+/// glyph texture). Verify each canvas use is routed to the expected strategy.
+#[cfg(feature = "textlayout")]
+#[test]
+fn fill_text_selects_atlas_or_path_rendering() {
+    use crate::paint::GlyphTexture;
+    use renderer::CommandType;
+
+    #[derive(Clone, Copy)]
+    enum PaintKind {
+        Solid,
+        BigSolid,
+        Gradient,
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Expect {
+        Atlas,
+        Path,
+    }
+
+    // A fresh canvas per case so the persistent glyph atlas (or any other state)
+    // built by one case can't influence another. A large viewport plus a
+    // near-origin draw position keeps even the heavily scaled cases on-screen —
+    // off-screen geometry is culled, which would hide the commands we inspect.
+    let make_canvas = || {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(4000, 4000, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+            .expect("failed to load test font");
+        (canvas, recorded, font)
+    };
+
+    // (description, canvas transform, paint, expected strategy)
+    let cases = [
+        // Pure translation: cached atlas bitmaps, nothing baked.
+        (
+            "pure translation",
+            Transform2D::translation(10.0, 20.0),
+            PaintKind::Solid,
+            Expect::Atlas,
+        ),
+        // Uniform scale + solid color: the scale is baked into the atlas bitmap.
+        (
+            "uniform scale, solid",
+            Transform2D::scaling(2.0, 2.0),
+            PaintKind::Solid,
+            Expect::Atlas,
+        ),
+        // A scale that quantizes back to 1.0 still uses the atlas.
+        (
+            "near-unit scale, solid",
+            Transform2D::scaling(1.02, 1.02),
+            PaintKind::Solid,
+            Expect::Atlas,
+        ),
+        // Gradients can't bake scale (their coords map through the swapped-out
+        // transform), so a scaled gradient falls back to outlines.
+        (
+            "uniform scale, gradient",
+            Transform2D::scaling(2.0, 2.0),
+            PaintKind::Gradient,
+            Expect::Path,
+        ),
+        // Rotation isn't a uniform scale + translation: outlines.
+        (
+            "rotation",
+            Transform2D::rotation(std::f32::consts::FRAC_PI_4),
+            PaintKind::Solid,
+            Expect::Path,
+        ),
+        // Effective size over the 92px atlas cap: outlines.
+        (
+            "oversized scale",
+            Transform2D::scaling(20.0, 20.0),
+            PaintKind::Solid,
+            Expect::Path,
+        ),
+        (
+            "oversized font",
+            Transform2D::identity(),
+            PaintKind::BigSolid,
+            Expect::Path,
+        ),
+    ];
+
+    for (description, transform, paint_kind, expect) in cases {
+        let (mut canvas, recorded, font) = make_canvas();
+        let paint = match paint_kind {
+            PaintKind::Solid => Paint::color(Color::black()).with_font(&[font]),
+            PaintKind::BigSolid => Paint::color(Color::black()).with_font(&[font]).with_font_size(100.0),
+            PaintKind::Gradient => {
+                Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white()).with_font(&[font])
+            }
+        };
+
+        // A fresh canvas starts at the identity transform.
+        canvas.set_transform(&transform);
+        canvas.fill_text(10.0, 40.0, "Hello", &paint).unwrap();
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        // Atlas rendering blits glyphs from a glyph texture; outline rendering only
+        // ever emits plain path fills (note: atlas cache misses also emit path fills
+        // while rasterizing into the atlas, so the glyph texture is the reliable
+        // discriminator, not the absence of fills).
+        let used_atlas = commands.iter().any(|c| !matches!(c.glyph_texture, GlyphTexture::None));
+        let filled_outlines = commands.iter().any(|c| {
+            matches!(c.glyph_texture, GlyphTexture::None)
+                && matches!(
+                    c.cmd_type,
+                    CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+                )
+        });
+
+        match expect {
+            Expect::Atlas => assert!(used_atlas, "expected atlas rendering for case: {description}"),
+            Expect::Path => assert!(
+                filled_outlines && !used_atlas,
+                "expected outline rendering for case: {description} (used_atlas={used_atlas}, filled_outlines={filled_outlines})"
+            ),
+        }
+    }
 }
