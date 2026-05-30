@@ -194,6 +194,7 @@ impl Default for CompositeOperationState {
 struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
+    radius: f32,
 }
 
 impl Scissor {
@@ -777,6 +778,13 @@ where
     ///
     /// The scissor rectangle is transformed by the current transform.
     pub fn scissor(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.rounded_scissor(x, y, w, h, 0.0);
+    }
+
+    /// Sets the current rounded scissor rectangle.
+    ///
+    /// The scissor rectangle is transformed by the current transform.
+    pub fn rounded_scissor(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
         let state = self.state_mut();
 
         let w = w.max(0.0);
@@ -787,6 +795,7 @@ where
         state.scissor.transform = transform;
 
         state.scissor.extent = Some([w * 0.5, h * 0.5]);
+        state.scissor.radius = r.max(0.0).min(w * 0.5).min(h * 0.5);
     }
 
     /// Intersects current scissor rectangle with the specified rectangle.
@@ -797,11 +806,21 @@ where
     /// rectangle and the previous scissor rectangle transformed in the current
     /// transform space. The resulting shape is always rectangle.
     pub fn intersect_scissor(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.intersect_rounded_scissor(x, y, w, h, 0.0);
+    }
+
+    /// Intersects current scissor rectangle with the specified rounded rectangle.
+    ///
+    /// The resulting rounded corners are exact when this is the first active
+    /// scissor or when the previous clip is a containing rectangle with the same
+    /// transform. Other intersections fall back to rectangular scissoring.
+    pub fn intersect_rounded_scissor(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        let tolerance = self.dist_tol;
         let state = self.state_mut();
 
         // If no previous scissor has been set, set the scissor as current scissor.
         if state.scissor.extent.is_none() {
-            self.scissor(x, y, w, h);
+            self.rounded_scissor(x, y, w, h, r);
             return;
         }
 
@@ -821,7 +840,59 @@ where
         let rect = Rect::new(tx - tex, ty - tey, tex * 2.0, tey * 2.0);
         let res = rect.intersect(Rect::new(x, y, w, h));
 
-        self.scissor(res.x, res.y, res.w, res.h);
+        let requested = Rect::new(x, y, w, h);
+        let requested_contains_existing = requested.x <= rect.x + tolerance
+            && requested.y <= rect.y + tolerance
+            && rect.x + rect.w <= requested.x + requested.w + tolerance
+            && rect.y + rect.h <= requested.y + requested.h + tolerance;
+        if r <= 0.0 && state.scissor.radius > 0.0 && requested_contains_existing {
+            return;
+        }
+
+        if r <= 0.0 && state.scissor.radius > 0.0 {
+            let radius = state.scissor.radius;
+            let contains_point = |x: f32, y: f32| {
+                let left = rect.x + radius;
+                let right = rect.x + rect.w - radius;
+                let top = rect.y + radius;
+                let bottom = rect.y + rect.h - radius;
+                let dx = if x < left {
+                    left - x
+                } else if x > right {
+                    x - right
+                } else {
+                    0.0
+                };
+                let dy = if y < top {
+                    top - y
+                } else if y > bottom {
+                    y - bottom
+                } else {
+                    0.0
+                };
+                dx * dx + dy * dy <= (radius + tolerance) * (radius + tolerance)
+            };
+            let rounded_contains_requested = contains_point(requested.x, requested.y)
+                && contains_point(requested.x + requested.w, requested.y)
+                && contains_point(requested.x, requested.y + requested.h)
+                && contains_point(requested.x + requested.w, requested.y + requested.h);
+            if rounded_contains_requested {
+                self.scissor(res.x, res.y, res.w, res.h);
+            } else {
+                self.rounded_scissor(res.x, res.y, res.w, res.h, radius);
+            }
+            return;
+        }
+
+        let contains_requested = rect.x <= requested.x + tolerance
+            && rect.y <= requested.y + tolerance
+            && requested.x + requested.w <= rect.x + rect.w + tolerance
+            && requested.y + requested.h <= rect.y + rect.h + tolerance;
+        if contains_requested {
+            self.rounded_scissor(requested.x, requested.y, requested.w, requested.h, r);
+        } else {
+            self.scissor(res.x, res.y, res.w, res.h);
+        }
     }
 
     /// Reset and disables scissoring.
@@ -1714,7 +1785,7 @@ where
             &glyph_texture,
             &scissor,
             1.0,
-            1.0,
+            self.fringe_width,
             -1.0,
         );
 
@@ -1942,6 +2013,193 @@ fn test_image_blit_fast_path() {
             ..
         })
     ));
+}
+
+#[cfg(test)]
+fn first_draw_params(commands: &[renderer::Command]) -> &Params {
+    use renderer::CommandType;
+
+    commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::ConvexFill { params } | CommandType::Stroke { params } | CommandType::Triangles { params } => {
+                Some(params)
+            }
+            CommandType::ConcaveFill { fill_params, .. } => Some(fill_params),
+            CommandType::StencilStroke { params1, .. } => Some(params1),
+            _ => None,
+        })
+        .expect("expected a draw command")
+}
+
+#[cfg(all(test, feature = "textlayout"))]
+fn first_glyph_draw_params(commands: &[renderer::Command]) -> &Params {
+    use renderer::CommandType;
+
+    commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::Triangles { params } if params.glyph_texture_type != 0 => Some(params),
+            _ => None,
+        })
+        .expect("expected a glyph draw command")
+}
+
+#[cfg(test)]
+fn assert_approx_eq(actual: f32, expected: f32) {
+    assert!(
+        (actual - expected).abs() < 0.001,
+        "expected {actual} to be approximately {expected}"
+    );
+}
+
+#[cfg(test)]
+fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
+    let mut path = Path::new();
+    path.rect(0.0, 0.0, 100.0, 100.0);
+    canvas.fill_path(&path, &Paint::color(Color::white()));
+    canvas.flush_to_output(());
+}
+
+#[test]
+fn rounded_scissor_radius_is_clamped_into_render_params() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 10.0);
+}
+
+#[cfg(feature = "textlayout")]
+#[test]
+fn glyph_scissor_ramp_matches_fill_at_high_dpi() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 2.0);
+
+    let font = canvas
+        .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+    let paint = Paint::color(Color::white()).with_font(&[font]).with_font_size(16.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 56.0, 28.0, 14.0);
+
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 100.0, 100.0);
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    canvas.fill_text(12.0, 30.0, "Click", &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let commands = recorded_commands.borrow();
+    let fill = first_draw_params(&commands);
+    let glyph = first_glyph_draw_params(&commands);
+
+    assert_approx_eq(glyph.scissor_scale[0], 2.0);
+    assert_approx_eq(glyph.scissor_scale[1], 2.0);
+    assert_approx_eq(glyph.scissor_scale[0], fill.scissor_scale[0]);
+    assert_approx_eq(glyph.scissor_scale[1], fill.scissor_scale[1]);
+}
+
+#[test]
+fn intersect_scissor_preserves_contained_rounded_clip() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 8.0);
+    canvas.intersect_scissor(0.0, 0.0, 100.0, 100.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 8.0);
+}
+
+#[test]
+fn intersect_scissor_inside_rounded_clip_uses_rectangular_inner_clip() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 80.0, 80.0, 20.0);
+    canvas.intersect_scissor(35.0, 35.0, 20.0, 20.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 0.0);
+    assert_approx_eq(params.scissor_ext[0], 10.0);
+    assert_approx_eq(params.scissor_ext[1], 10.0);
+}
+
+#[test]
+fn intersect_rounded_scissor_partial_overlap_falls_back_to_rectangular_intersection() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 40.0, 40.0, 12.0);
+    canvas.intersect_rounded_scissor(35.0, 35.0, 40.0, 40.0, 12.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 0.0);
+    assert_approx_eq(params.scissor_ext[0], 7.5);
+    assert_approx_eq(params.scissor_ext[1], 7.5);
+}
+
+#[test]
+fn rounded_scissor_captures_transform_at_clip_time() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.scale(2.0, 3.0);
+    canvas.rounded_scissor(10.0, 10.0, 20.0, 10.0, 4.0);
+    canvas.reset_transform();
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 4.0);
+    assert_approx_eq(params.scissor_ext[0], 10.0);
+    assert_approx_eq(params.scissor_ext[1], 5.0);
+    assert_approx_eq(params.scissor_scale[0], 2.0);
+    assert_approx_eq(params.scissor_scale[1], 3.0);
+}
+
+#[test]
+fn intersect_rounded_scissor_uses_inner_radius_when_contained() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.scissor(0.0, 0.0, 100.0, 100.0);
+    canvas.intersect_rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
+    fill_rect_with_current_scissor(&mut canvas);
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.glyph_texture_type, 0);
+    assert_approx_eq(params.scissor_radius, 10.0);
 }
 
 /// Text rendering picks one of two strategies depending on the canvas transform

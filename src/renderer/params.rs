@@ -14,6 +14,7 @@ pub struct Params {
     pub(crate) outer_col: [f32; 4],
     pub(crate) scissor_ext: [f32; 2],
     pub(crate) scissor_scale: [f32; 2],
+    pub(crate) scissor_radius: f32,
     pub(crate) extent: [f32; 2],
     pub(crate) radius: f32,
     pub(crate) feather: f32,
@@ -58,6 +59,7 @@ impl Params {
 
         params.scissor_ext = scissor_ext;
         params.scissor_scale = scissor_scale;
+        params.scissor_radius = scissor.radius;
 
         params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
