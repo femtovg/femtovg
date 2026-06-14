@@ -1,0 +1,347 @@
+//! Headless GPU render tests for Canvas 2D drop shadows.
+//!
+//! These exercise the actual pixel behavior of the shadow pipeline on the wgpu
+//! backend: an opaque shadow color must paint shadow-colored pixels offset from
+//! the shape, a transparent shadow color must paint nothing, the shadow color's
+//! alpha must be respected, and blur must spread coverage past the shape edge.
+//!
+//! All tests gracefully skip (return early) when no GPU adapter is available so
+//! they don't fail on backend-less CI.
+#![cfg(feature = "wgpu")]
+
+use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path, RenderTarget};
+
+const W: u32 = 120;
+const H: u32 = 120;
+
+/// Lazily create a headless wgpu device/queue. Returns `None` when no adapter is
+/// available (e.g. backend-less CI), so the caller can skip the test.
+fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let instance = wgpu::Instance::default();
+
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::default(),
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    }))
+    .ok()?;
+
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("femtovg shadow test device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
+        trace: wgpu::Trace::default(),
+    }))
+    .ok()?;
+
+    Some((device, queue))
+}
+
+/// Render `draw` into an offscreen RGBA8 texture and read the pixels back.
+/// Returns a row-major buffer of `[r, g, b, a]` per pixel.
+fn render_to_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> Vec<u8> {
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow test target"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    let mut canvas = Canvas::new(renderer).expect("failed to create canvas");
+    canvas.set_size(W, H, 1.0);
+    canvas.clear_rect(0, 0, W, H, Color::rgba(0, 0, 0, 0));
+
+    draw(&mut canvas);
+
+    let commands = canvas.flush_to_output(&target);
+    queue.submit(commands);
+
+    // Copy the target texture into a readback buffer. bytes_per_row must be a
+    // multiple of 256.
+    let unpadded_bytes_per_row = W * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("shadow test readback"),
+        size: (padded_bytes_per_row * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_bytes_per_row),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+
+    let mapped = slice.get_mapped_range();
+    let mut pixels = vec![0u8; (unpadded_bytes_per_row * H) as usize];
+    for row in 0..H as usize {
+        let src = row * padded_bytes_per_row as usize;
+        let dst = row * unpadded_bytes_per_row as usize;
+        pixels[dst..dst + unpadded_bytes_per_row as usize]
+            .copy_from_slice(&mapped[src..src + unpadded_bytes_per_row as usize]);
+    }
+    drop(mapped);
+    readback.unmap();
+
+    pixels
+}
+
+fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * W + x) * 4) as usize;
+    [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+}
+
+/// A filled red rect with an opaque green shadow offset down-right must produce
+/// green pixels at the offset location, and the shadow must vanish when the
+/// shadow color is transparent.
+#[test]
+fn opaque_shadow_paints_offset_pixels() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // Rect at (20,20) size 30x30. Shadow offset by (+30, +30), no blur.
+    let mut rect = Path::new();
+    rect.rect(20.0, 20.0, 30.0, 30.0);
+
+    let with_shadow = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgb(0, 255, 0));
+        canvas.set_shadow_offset(30.0, 30.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+
+    // Sample inside the shadow region but outside the shape: the rect occupies
+    // x,y in [20,50); the shadow is shifted to [50,80). Point (65,65) is shadow
+    // only.
+    let shadow_px = pixel(&with_shadow, 65, 65);
+    assert!(
+        shadow_px[1] > 180 && shadow_px[0] < 80 && shadow_px[3] > 180,
+        "expected opaque green shadow at (65,65), got {shadow_px:?}"
+    );
+
+    // The shape itself is still red.
+    let shape_px = pixel(&with_shadow, 35, 35);
+    assert!(
+        shape_px[0] > 180 && shape_px[1] < 80,
+        "expected red shape at (35,35), got {shape_px:?}"
+    );
+
+    // With a transparent shadow color, the same offset paints nothing there.
+    let no_shadow = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgba(0, 255, 0, 0));
+        canvas.set_shadow_offset(30.0, 30.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+    let empty_px = pixel(&no_shadow, 65, 65);
+    assert!(
+        empty_px[3] < 16,
+        "transparent shadow color must leave (65,65) empty, got {empty_px:?}"
+    );
+}
+
+/// The shadow color's alpha must modulate the painted shadow: a half-alpha shadow
+/// produces a partially transparent shadow region.
+#[test]
+fn shadow_color_alpha_is_respected() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    let mut rect = Path::new();
+    rect.rect(20.0, 20.0, 30.0, 30.0);
+
+    let pixels = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgba(0, 0, 255, 128));
+        canvas.set_shadow_offset(30.0, 30.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+
+    // Onto a transparent background, a half-alpha shadow yields ~50% alpha.
+    let px = pixel(&pixels, 65, 65);
+    assert!(
+        px[3] > 90 && px[3] < 170,
+        "expected ~half alpha shadow at (65,65), got {px:?}"
+    );
+    assert!(px[2] > 100, "shadow should carry blue channel, got {px:?}");
+}
+
+/// Blur must spread the shadow's coverage beyond the shape's hard edge: with a
+/// zero offset and a blur, pixels just outside the shape rectangle pick up
+/// shadow coverage that a sharp (unblurred) shadow would not reach.
+#[test]
+fn blur_spreads_coverage_beyond_edge() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    let mut rect = Path::new();
+    rect.rect(40.0, 40.0, 40.0, 40.0); // occupies [40,80)
+
+    // Sample a point a few pixels outside the right edge of the rect.
+    let probe = (86u32, 60u32);
+
+    let sharp = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgb(0, 0, 0));
+        canvas.set_shadow_blur(0.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+    let sharp_px = pixel(&sharp, probe.0, probe.1);
+
+    let blurred = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgb(0, 0, 0));
+        canvas.set_shadow_blur(12.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+    let blurred_px = pixel(&blurred, probe.0, probe.1);
+
+    // The sharp shadow lands exactly under the shape, so 6px outside the edge it
+    // contributes nothing; the blurred shadow spreads coverage out there.
+    assert!(
+        sharp_px[3] < 16,
+        "unblurred zero-offset shadow must not reach outside the shape, got {sharp_px:?}"
+    );
+    assert!(
+        blurred_px[3] > sharp_px[3] + 16,
+        "blur must spread coverage past the edge (sharp a={}, blurred a={})",
+        sharp_px[3],
+        blurred_px[3]
+    );
+}
+
+/// Drop shadows must also render under offscreen image render targets, not just
+/// the screen. This also confirms shadows compose correctly when the current
+/// render target is an image.
+#[test]
+fn shadow_renders_into_image_target() {
+    use femtovg::{ImageFlags, PixelFormat};
+
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // We render into an image target inside the draw closure, then blit it to the
+    // screen so render_to_pixels can read it back.
+    let mut rect = Path::new();
+    rect.rect(20.0, 20.0, 30.0, 30.0);
+
+    let pixels = render_to_pixels(&device, &queue, |canvas| {
+        let img = canvas
+            .create_image_empty(W as usize, H as usize, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        canvas.set_render_target(RenderTarget::Image(img));
+        canvas.clear_rect(0, 0, W, H, Color::rgba(0, 0, 0, 0));
+        canvas.set_shadow_color(Color::rgb(0, 255, 0));
+        canvas.set_shadow_offset(30.0, 30.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+
+        canvas.set_render_target(RenderTarget::Screen);
+        let mut full = Path::new();
+        full.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&full, &Paint::image(img, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0));
+        // `img` is referenced by deferred commands until flush; the canvas frees it
+        // on drop.
+    });
+
+    let shadow_px = pixel(&pixels, 65, 65);
+    assert!(
+        shadow_px[1] > 150 && shadow_px[3] > 150,
+        "expected green shadow drawn via image target at (65,65), got {shadow_px:?}"
+    );
+}
+
+/// Filled text must also cast a drop shadow. Render a glyph-heavy string with a
+/// large offset and assert that shadow-colored pixels appear in the offset band
+/// (where the glyphs themselves are not), and that nothing appears there once the
+/// shadow color is made transparent.
+#[test]
+#[cfg(feature = "textlayout")]
+fn text_casts_drop_shadow() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    let font = include_bytes!("../examples/assets/amiri-regular.ttf");
+
+    // Count opaque, blue-tinted shadow pixels in a band offset from the text.
+    let count_blue = |with_shadow: bool| -> usize {
+        let pixels = render_to_pixels(&device, &queue, |canvas| {
+            let id = canvas.add_font_mem(font).expect("load font");
+            let mut paint = Paint::color(Color::rgb(255, 0, 0));
+            paint.set_font(&[id]);
+            paint.set_font_size(40.0);
+            canvas.set_shadow_color(if with_shadow {
+                Color::rgb(0, 0, 255)
+            } else {
+                Color::rgba(0, 0, 255, 0)
+            });
+            canvas.set_shadow_offset(20.0, 20.0);
+            let _ = canvas.fill_text(10.0, 50.0, "Ag", &paint);
+        });
+
+        let mut blue = 0;
+        for y in 0..H {
+            for x in 0..W {
+                let p = pixel(&pixels, x, y);
+                // Blue-dominant, reasonably opaque => a shadow pixel.
+                if p[2] > 120 && p[0] < 80 && p[3] > 120 {
+                    blue += 1;
+                }
+            }
+        }
+        blue
+    };
+
+    let with = count_blue(true);
+    let without = count_blue(false);
+
+    assert!(with > 30, "text shadow should paint blue pixels, got {with}");
+    assert_eq!(
+        without, 0,
+        "transparent shadow color must paint no blue pixels, got {without}"
+    );
+}
