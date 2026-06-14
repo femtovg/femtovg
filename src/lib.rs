@@ -329,6 +329,25 @@ pub struct Canvas<T: Renderer> {
     shadow_images: Vec<ImageId>,
 }
 
+/// Returns the shared baseline of a shaped horizontal run, in shaping space, or
+/// `None` if the run has no drawable glyph.
+///
+/// `layout` positions each glyph as
+/// `glyph.y = cursor_y + alignment_offset + glyph.offset_y`, so every glyph
+/// shares the same (possibly fractional) `cursor_y + alignment_offset` baseline
+/// and the per-glyph term is `glyph.offset_y` (the GPOS y-offset). Recovering the
+/// baseline as `glyph.y - glyph.offset_y` is what keeps text decorations anchored
+/// to the run baseline even when the first drawable glyph carries a non-zero
+/// offset (e.g. text starting with a combining mark), instead of riding that mark
+/// up or down.
+#[cfg(feature = "textlayout")]
+fn run_baseline(glyphs: &[text::ShapedGlyph]) -> Option<f32> {
+    glyphs
+        .iter()
+        .find(|shaped_glyph| !shaped_glyph.c.is_control())
+        .map(|shaped_glyph| shaped_glyph.y - shaped_glyph.offset_y)
+}
+
 impl<T> Canvas<T>
 where
     T: Renderer,
@@ -3447,6 +3466,83 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
         (center - expected).abs() <= 2.0,
         "scaled underline center {center} should be near {expected}"
     );
+}
+
+/// The decoration baseline must be the shared run baseline, independent of the
+/// first drawable glyph's GPOS y-offset. `layout` bakes that offset into
+/// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)
+/// would otherwise drag every decoration line up or down with the mark.
+///
+/// This unit-tests `run_baseline` — the exact policy `draw_text` uses to anchor
+/// decorations — with a synthetic run whose first glyph carries an `offset_y`.
+/// The captured baseline must match the run baseline computed without the offset
+/// (i.e. the second, zero-offset glyph's `y`), not the first glyph's shifted `y`.
+#[cfg(feature = "textlayout")]
+#[test]
+fn run_baseline_ignores_leading_glyph_offset() {
+    // A real FontId is needed to populate the synthetic glyphs; `run_baseline`
+    // never reads it, but ShapedGlyph requires one.
+    let text_context = TextContext::default();
+    let font_id = text_context
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+
+    // The shared run baseline both glyphs are positioned against.
+    let run_y = 200.0_f32;
+
+    let make_glyph = |c: char, offset_y: f32| text::ShapedGlyph {
+        // `layout` stores `glyph.y = run_baseline + glyph.offset_y`; mirror that.
+        x: 0.0,
+        y: run_y + offset_y,
+        c,
+        byte_index: 0,
+        font_id,
+        glyph_id: 0,
+        width: 0.0,
+        height: 0.0,
+        advance_x: 0.0,
+        advance_y: 0.0,
+        offset_x: 0.0,
+        offset_y,
+    };
+
+    // First drawable glyph carries a large positive y-offset (a combining mark
+    // pushed below the baseline); the second sits exactly on the baseline.
+    let offset = 15.0_f32;
+    let with_offset = [make_glyph('a', offset), make_glyph('b', 0.0)];
+    // Same run, but the leading glyph has no offset.
+    let without_offset = [make_glyph('a', 0.0), make_glyph('b', 0.0)];
+
+    let captured = run_baseline(&with_offset).expect("run has a drawable glyph");
+    let reference = run_baseline(&without_offset).expect("run has a drawable glyph");
+
+    // The capture must equal the true run baseline, not the shifted first glyph.
+    assert_eq!(
+        captured, run_y,
+        "captured baseline {captured} should equal the shared run baseline {run_y}"
+    );
+    assert_eq!(
+        captured, reference,
+        "leading glyph offset must not shift the captured baseline ({captured} vs {reference})"
+    );
+    assert!(
+        (captured - with_offset[0].y).abs() > offset - 1.0,
+        "captured baseline {captured} must not follow the offset glyph y {}",
+        with_offset[0].y
+    );
+
+    // A leading control glyph (skipped by the drawable filter) must not become
+    // the baseline source either.
+    let with_control = [make_glyph('\n', 99.0), make_glyph('b', 0.0)];
+    assert_eq!(
+        run_baseline(&with_control),
+        Some(run_y),
+        "control glyphs must be skipped when capturing the baseline"
+    );
+
+    // Empty / all-control runs have no baseline.
+    assert_eq!(run_baseline(&[]), None);
+    assert_eq!(run_baseline(&[make_glyph('\t', 0.0)]), None);
 }
 
 /// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables

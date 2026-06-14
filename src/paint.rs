@@ -416,6 +416,9 @@ pub struct TextSettings {
     pub(crate) text_align: Align,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) font_variations: FontVariations,
+    // Older serialized paints predate this field; default it so they keep
+    // deserializing. `TextDecoration::default()` is all-false, i.e. no decoration.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub(crate) text_decoration: TextDecoration,
 }
 
@@ -1352,5 +1355,90 @@ mod tests {
         let paint = Paint::default().with_line_dash(&[0.0, 0.0]);
 
         assert_eq!(paint.line_dash(), &[0.0, 0.0]);
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    /// A paint serialized before `text_decoration` existed omits that field. With
+    /// `#[serde(default)]` the field must fall back to `TextDecoration::default()`
+    /// (no decoration) instead of failing to deserialize. This guards back-compat
+    /// with older serialized paints / configs.
+    #[test]
+    fn text_settings_deserializes_without_text_decoration() {
+        // Representation of a pre-`text_decoration` TextSettings: every serialized
+        // field except `text_decoration`. (`font_ids` / `font_variations` are
+        // `serde(skip)`, so they never appear.)
+        let json = r#"{
+            "font_size": 16.0,
+            "letter_spacing": 0.0,
+            "text_baseline": "Alphabetic",
+            "text_align": "Left"
+        }"#;
+
+        let settings: TextSettings = serde_json::from_str(json).expect("must deserialize without text_decoration");
+        assert_eq!(
+            settings.text_decoration,
+            TextDecoration::default(),
+            "missing text_decoration must default to TextDecoration::default()"
+        );
+        assert!(
+            settings.text_decoration.is_none(),
+            "the default decoration must enable no lines"
+        );
+    }
+
+    /// Same guarantee through the full `Paint`: a paint whose `text` block omits
+    /// `text_decoration` round-trips to the default (no) decoration.
+    #[test]
+    fn paint_deserializes_without_text_decoration() {
+        let json = r#"{
+            "flavor": { "Color": { "r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0 } },
+            "shape_anti_alias": true,
+            "stroke": {
+                "stencil_strokes": true,
+                "miter_limit": 10.0,
+                "line_width": 1.0,
+                "line_cap_start": "Butt",
+                "line_cap_end": "Butt",
+                "line_join": "Miter",
+                "line_dash": [],
+                "line_dash_offset": 0.0
+            },
+            "text": {
+                "font_size": 16.0,
+                "letter_spacing": 0.0,
+                "text_baseline": "Alphabetic",
+                "text_align": "Left"
+            },
+            "fill_rule": "NonZero"
+        }"#;
+
+        let paint: Paint = serde_json::from_str(json).expect("Paint must deserialize without text_decoration");
+        assert_eq!(
+            paint.text.text_decoration,
+            TextDecoration::default(),
+            "missing text_decoration must default to TextDecoration::default()"
+        );
+    }
+
+    /// A present `text_decoration` still deserializes normally (the default does
+    /// not mask explicit values).
+    #[test]
+    fn text_settings_deserializes_with_text_decoration() {
+        let settings = TextSettings {
+            text_decoration: TextDecoration {
+                underline: true,
+                strikethrough: false,
+                overline: true,
+            },
+            ..TextSettings::default()
+        };
+
+        let json = serde_json::to_string(&settings).expect("serialize");
+        let restored: TextSettings = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(restored.text_decoration, settings.text_decoration);
     }
 }
