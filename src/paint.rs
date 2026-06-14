@@ -380,6 +380,31 @@ impl Default for StrokeSettings {
     }
 }
 
+/// Set of text decoration lines (underline, strikethrough, overline) to draw
+/// along a text run.
+///
+/// This is an extension toward SVG/CSS `text-decoration` parity; the HTML
+/// Canvas 2D API has no equivalent. Lines combine additively, so any subset can
+/// be enabled at once. The decoration is drawn in the text paint's color.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TextDecoration {
+    /// Draw an underline below the baseline (from the font's `post` metrics).
+    pub underline: bool,
+    /// Draw a line through the middle of the text (from the font's OS/2 metrics).
+    pub strikethrough: bool,
+    /// Draw a line above the text, near the ascent.
+    pub overline: bool,
+}
+
+impl TextDecoration {
+    /// Returns `true` if no decoration line is enabled.
+    #[inline]
+    pub fn is_none(&self) -> bool {
+        !self.underline && !self.strikethrough && !self.overline
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct TextSettings {
@@ -391,6 +416,7 @@ pub struct TextSettings {
     pub(crate) text_align: Align,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(crate) font_variations: FontVariations,
+    pub(crate) text_decoration: TextDecoration,
 }
 
 impl Default for TextSettings {
@@ -402,6 +428,7 @@ impl Default for TextSettings {
             text_baseline: Baseline::default(),
             text_align: Align::default(),
             font_variations: FontVariations::default(),
+            text_decoration: TextDecoration::default(),
         }
     }
 }
@@ -1055,6 +1082,45 @@ impl Paint {
     #[inline]
     pub fn with_text_align(mut self, align: Align) -> Self {
         self.set_text_align(align);
+        self
+    }
+
+    // --- Text decoration (underline / strikethrough / overline) ---
+
+    /// Returns the current set of text decoration lines for text operations.
+    #[inline]
+    pub fn text_decoration(&self) -> TextDecoration {
+        self.text.text_decoration
+    }
+
+    /// Sets the text decoration lines drawn along text runs.
+    ///
+    /// Decoration lines are drawn in the paint's color using the font's own
+    /// underline/strikeout metrics (overline is derived from the ascent). This
+    /// extends femtovg toward SVG/CSS `text-decoration`; Canvas 2D has no
+    /// equivalent.
+    #[inline]
+    pub fn set_text_decoration(&mut self, decoration: TextDecoration) {
+        self.text.text_decoration = decoration;
+    }
+
+    /// Returns the paint with the text decoration set to the specified value.
+    #[inline]
+    pub fn with_text_decoration(mut self, decoration: TextDecoration) -> Self {
+        self.set_text_decoration(decoration);
+        self
+    }
+
+    /// Returns the paint with underline/strikethrough/overline toggled.
+    ///
+    /// A convenience wrapper over [`with_text_decoration`](Self::with_text_decoration).
+    #[inline]
+    pub fn with_text_decoration_lines(mut self, underline: bool, strikethrough: bool, overline: bool) -> Self {
+        self.set_text_decoration(TextDecoration {
+            underline,
+            strikethrough,
+            overline,
+        });
         self
     }
 

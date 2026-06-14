@@ -65,7 +65,7 @@ pub enum GlyphRendering<'a> {
 #[derive(Copy, Clone, Default, Debug)]
 struct FontFlags(u8);
 
-// TODO: underline, strikeout, subscript, superscript metrics
+// TODO: subscript, superscript metrics
 impl FontFlags {
     fn new(regular: bool, italic: bool, bold: bool, oblique: bool, variable: bool) -> Self {
         let mut flags = 0;
@@ -119,6 +119,10 @@ pub struct FontMetrics {
     ascender: f32,
     descender: f32,
     height: f32,
+    underline_position: f32,
+    underline_thickness: f32,
+    strikeout_position: f32,
+    strikeout_thickness: f32,
     flags: FontFlags,
     weight: u16,
     width: u16,
@@ -129,6 +133,10 @@ impl FontMetrics {
         self.ascender *= scale;
         self.descender *= scale;
         self.height *= scale;
+        self.underline_position *= scale;
+        self.underline_thickness *= scale;
+        self.strikeout_position *= scale;
+        self.strikeout_thickness *= scale;
     }
 
     /// Returns the distance from the baseline to the top of the highest glyph.
@@ -144,6 +152,43 @@ impl FontMetrics {
     /// Returns the height of the font.
     pub fn height(&self) -> f32 {
         self.height.round()
+    }
+
+    /// Returns the position of the underline relative to the baseline.
+    ///
+    /// Follows the OpenType `post` table convention: the value is measured from
+    /// the baseline with the positive y-axis pointing up, so it is typically
+    /// negative (the underline sits below the baseline). Sourced from the font's
+    /// `post` table when present, otherwise derived from the descender.
+    pub fn underline_position(&self) -> f32 {
+        self.underline_position
+    }
+
+    /// Returns the thickness of the underline.
+    ///
+    /// Sourced from the font's `post` table when present, otherwise derived from
+    /// the font height.
+    pub fn underline_thickness(&self) -> f32 {
+        self.underline_thickness
+    }
+
+    /// Returns the position of the strikeout line relative to the baseline.
+    ///
+    /// Follows the OpenType OS/2 table convention: the value is measured from the
+    /// baseline with the positive y-axis pointing up, so it is typically positive
+    /// (the strikeout sits above the baseline, through the middle of the text).
+    /// Sourced from the font's OS/2 table when present, otherwise derived from the
+    /// ascender.
+    pub fn strikeout_position(&self) -> f32 {
+        self.strikeout_position
+    }
+
+    /// Returns the thickness of the strikeout line.
+    ///
+    /// Sourced from the font's OS/2 table when present, otherwise derived from the
+    /// font height.
+    pub fn strikeout_thickness(&self) -> f32 {
+        self.strikeout_thickness
     }
 
     /// Returns if the font is regular.
@@ -219,10 +264,26 @@ impl Font {
 
         let units_per_em = ttf_font.units_per_em();
 
+        let ascender = ttf_font.ascender() as f32;
+        let descender = ttf_font.descender() as f32;
+        // The `post`/OS-2 tables are optional. When absent, fall back to values
+        // derived from the ascender/descender so decorations still land sensibly:
+        //   * underline a little below the baseline (descender follows +y up, so
+        //     it is negative), at roughly 1/14 of the em as thickness.
+        //   * strikeout through the middle of the lowercase x-height region,
+        //     approximated as ~40% of the ascender above the baseline.
+        let default_thickness = units_per_em as f32 / 14.0;
+        let underline = ttf_font.underline_metrics();
+        let strikeout = ttf_font.strikeout_metrics();
+
         let metrics = FontMetrics {
-            ascender: ttf_font.ascender() as f32,
-            descender: ttf_font.descender() as f32,
+            ascender,
+            descender,
             height: ttf_font.height() as f32,
+            underline_position: underline.map_or(descender * 0.5, |m| m.position as f32),
+            underline_thickness: underline.map_or(default_thickness, |m| m.thickness as f32),
+            strikeout_position: strikeout.map_or(ascender * 0.4, |m| m.position as f32),
+            strikeout_thickness: strikeout.map_or(default_thickness, |m| m.thickness as f32),
             flags: FontFlags::new(
                 ttf_font.is_regular(),
                 ttf_font.is_italic(),
@@ -283,12 +344,35 @@ impl Font {
             _ => 5,
         };
 
+        // swash reports underline/strikeout offsets from the baseline with +y up
+        // (so underline_offset is typically negative), matching ttf-parser's
+        // post/OS-2 convention; stroke_size is shared by both decorations. Fall
+        // back to ascender/descender-derived values when the font omits them.
+        let default_thickness = units_per_em as f32 / 14.0;
+        let stroke_size = if swash_metrics.stroke_size > 0.0 {
+            swash_metrics.stroke_size
+        } else {
+            default_thickness
+        };
+
         let metrics = FontMetrics {
             ascender: swash_metrics.ascent,
             descender: -swash_metrics.descent,
             // swash ascent and descent are both positive (distance from baseline),
             // unlike ttf-parser where descent is negative, so this is a sum not a difference.
             height: swash_metrics.ascent + swash_metrics.descent + swash_metrics.leading,
+            underline_position: if swash_metrics.underline_offset != 0.0 {
+                swash_metrics.underline_offset
+            } else {
+                -swash_metrics.descent * 0.5
+            },
+            underline_thickness: stroke_size,
+            strikeout_position: if swash_metrics.strikeout_offset != 0.0 {
+                swash_metrics.strikeout_offset
+            } else {
+                swash_metrics.ascent * 0.4
+            },
+            strikeout_thickness: stroke_size,
             flags: FontFlags::new(is_regular, is_italic, is_bold, is_oblique, is_variable),
             weight,
             width,
