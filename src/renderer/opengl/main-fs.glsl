@@ -25,6 +25,7 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define imageBlurFilterSigma frag[11].w
 #define imageBlurFilterCoeff frag[12].xyz
 #define scissorRadius frag[12].w
+#define conicStartAngle frag[13].x
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -91,10 +92,12 @@ vec4 renderImageGradient() {
 
 float conicAngleFraction() {
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
-    // atan returns a value between -pi and pi.
-    // normally you'd use atan(pt.y,pt.x) but its switched
-    // around here to be clockwise and start from the top.
-    return (-atan(pt.x,pt.y) / TAU) + 0.5;
+    // Measure the angle clockwise from the positive x axis. In the gradient's
+    // local space (y points down on screen), atan(pt.y, pt.x) increases in the
+    // clockwise direction, so offset 0 sits at 3 o'clock and the ramp proceeds
+    // clockwise, matching Canvas 2D createConicGradient. fract() wraps the angle
+    // into [0, 1) for negative or large start angles.
+    return fract((atan(pt.y, pt.x) - conicStartAngle) / TAU);
 }
 
 vec4 renderGradientConic() {

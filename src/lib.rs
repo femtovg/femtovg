@@ -2649,6 +2649,71 @@ fn intersect_rounded_scissor_uses_inner_radius_when_contained() {
     assert_approx_eq(params.scissor_radius, 10.0);
 }
 
+/// The conic gradient `start_angle` must be plumbed all the way into the
+/// rendering `Params` so the shaders can apply it. This is a CI-friendly check
+/// that does not require a GPU: it records the commands emitted for a conic fill
+/// and inspects the resulting `Params`.
+#[test]
+fn conic_gradient_start_angle_is_plumbed_into_params() {
+    use renderer::{CommandType, ShaderType};
+
+    fn conic_params(paint: &Paint) -> Params {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(100, 100, 1.);
+
+        let mut path = Path::new();
+        path.circle(50., 50., 40.);
+        canvas.fill_path(&path, paint);
+        canvas.flush_to_output(());
+
+        let params = recorded
+            .borrow()
+            .iter()
+            .find_map(|cmd| match &cmd.cmd_type {
+                CommandType::ConvexFill { params } | CommandType::Stroke { params } => Some(*params),
+                CommandType::ConcaveFill { fill_params, .. } => Some(*fill_params),
+                _ => None,
+            })
+            .expect("expected a fill command for the conic gradient");
+        params
+    }
+
+    // Default (angle-less) constructor must keep start_angle at 0.
+    let stops = [(0.0, Color::rgb(255, 0, 0)), (0.5, Color::rgb(0, 0, 255))];
+    let params = conic_params(&Paint::conic_gradient_stops(50., 50., stops));
+    assert_eq!(params.shader_type, ShaderType::FillImageGradientConic);
+    assert_eq!(params.conic_start_angle, 0.0);
+
+    // Explicit-angle multi-stop constructor must carry the angle through.
+    let angle = std::f32::consts::FRAC_PI_2;
+    let params = conic_params(&Paint::conic_gradient_stops_with_angle(50., 50., angle, stops));
+    assert_eq!(params.shader_type, ShaderType::FillImageGradientConic);
+    assert_eq!(params.conic_start_angle, angle);
+
+    // Two-color constructor variants.
+    let params = conic_params(&Paint::conic_gradient(
+        50.,
+        50.,
+        Color::rgb(255, 0, 0),
+        Color::rgb(0, 0, 255),
+    ));
+    assert_eq!(params.shader_type, ShaderType::FillGradientConic);
+    assert_eq!(params.conic_start_angle, 0.0);
+
+    let angle = -std::f32::consts::PI;
+    let params = conic_params(&Paint::conic_gradient_with_angle(
+        50.,
+        50.,
+        angle,
+        Color::rgb(255, 0, 0),
+        Color::rgb(0, 0, 255),
+    ));
+    assert_eq!(params.shader_type, ShaderType::FillGradientConic);
+    assert_eq!(params.conic_start_angle, angle);
+}
+
 /// Text rendering picks one of two strategies depending on the canvas transform
 /// and paint: cached atlas bitmaps (emitting a `Triangles` command that samples a
 /// glyph texture) or direct outline rendering (emitting plain path fills with no
