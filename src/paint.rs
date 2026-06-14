@@ -290,6 +290,7 @@ pub enum PaintFlavor {
     },
     ConicGradient {
         center: Position,
+        start_angle: f32,
         colors: GradientColors,
     },
 }
@@ -737,12 +738,51 @@ impl Paint {
         })
     }
 
-    /// Creates and returns a multi-stop conic gradient.
+    /// Creates and returns a two-color conic gradient.
     ///
-    /// Parameters (`cx`,`cy`) specify the center.
-    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+    /// Parameters (`cx`,`cy`) specify the center. The gradient begins at the
+    /// positive x axis (the 3 o'clock direction) and proceeds clockwise, matching
+    /// the Canvas 2D `createConicGradient(0, cx, cy)` semantics.
+    pub fn conic_gradient(cx: f32, cy: f32, start_color: Color, end_color: Color) -> Self {
+        Self::conic_gradient_with_angle(cx, cy, 0.0, start_color, end_color)
+    }
+
+    /// Creates and returns a two-color conic gradient with a start angle.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
+    /// measured clockwise from the positive x axis, matching the Canvas 2D
+    /// `createConicGradient(start_angle, cx, cy)` semantics.
+    pub fn conic_gradient_with_angle(cx: f32, cy: f32, start_angle: f32, start_color: Color, end_color: Color) -> Self {
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
+            start_angle,
+            colors: GradientColors::TwoStop { start_color, end_color },
+        })
+    }
+
+    /// Creates and returns a multi-stop conic gradient.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. The gradient begins at the
+    /// positive x axis (the 3 o'clock direction) and proceeds clockwise, matching
+    /// the Canvas 2D `createConicGradient(0, cx, cy)` semantics.
+    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+        Self::conic_gradient_stops_with_angle(cx, cy, 0.0, stops)
+    }
+
+    /// Creates and returns a multi-stop conic gradient with a start angle.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
+    /// measured clockwise from the positive x axis, matching the Canvas 2D
+    /// `createConicGradient(start_angle, cx, cy)` semantics.
+    pub fn conic_gradient_stops_with_angle(
+        cx: f32,
+        cy: f32,
+        start_angle: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::ConicGradient {
+            center: Position { x: cx, y: cy },
+            start_angle,
             colors: GradientColors::from_stops(stops),
         })
     }

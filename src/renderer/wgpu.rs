@@ -152,6 +152,12 @@ impl UniformArray {
     pub fn set_image_blur_filter_coeff(&mut self, coeff: [f32; 3]) {
         self.0[48..51].copy_from_slice(&coeff);
     }
+
+    pub fn set_conic_start_angle(&mut self, angle: f32) {
+        // Byte offset 208 (`conic_start_angle` in the WGSL Params struct);
+        // float 51 (byte offset 204) holds the scissor radius.
+        self.0[52] = angle;
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -176,6 +182,7 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_direction(params.image_blur_filter_direction);
         arr.set_image_blur_filter_sigma(params.image_blur_filter_sigma);
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
+        arr.set_conic_start_angle(params.conic_start_angle);
 
         arr
     }

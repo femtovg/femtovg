@@ -16,7 +16,11 @@ struct Params {
     image_blur_filter_sigma: f32,
     image_blur_filter_direction: vec2<f32>,
     image_blur_filter_coeff: vec3<f32>,
+    // scissor_radius fills the padding after the vec3 (byte offset 204);
+    // conic_start_angle starts the next 16-byte row (byte offset 208), which
+    // is frag[13].x in the flat uniform array written from Rust.
     scissor_radius: f32,
+    conic_start_angle: f32,
 }
 
 const SHADER_TYPE_FillGradient: i32 = 0;
@@ -181,7 +185,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
-    return (-atan2(pt.x,pt.y) / TAU) + 0.5;
+    // Measure the angle clockwise from the positive x axis. In the gradient's
+    // local space (y points down on screen), atan2(pt.y, pt.x) increases in the
+    // clockwise direction, so offset 0 sits at 3 o'clock and the ramp proceeds
+    // clockwise, matching Canvas 2D createConicGradient. fract() wraps the angle
+    // into [0, 1) for negative or large start angles.
+    return fract((atan2(pt.y, pt.x) - params.conic_start_angle) / TAU);
 }
 
 fn sdroundrect(pt: vec2<f32>, ext: vec2<f32>, rad: f32) -> f32 {
