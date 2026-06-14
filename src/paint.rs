@@ -290,6 +290,11 @@ pub enum PaintFlavor {
     },
     ConicGradient {
         center: Position,
+        // Paints serialized before `start_angle` existed represented conic
+        // gradients as `{ center, colors }`. Defaulting the missing field to
+        // 0.0 keeps those payloads deserializable, matching the original
+        // (no-rotation) behavior.
+        #[cfg_attr(feature = "serde", serde(default))]
         start_angle: f32,
         colors: GradientColors,
     },
@@ -1290,6 +1295,10 @@ impl Paint {
 #[cfg(test)]
 mod tests {
     use super::Paint;
+    #[cfg(feature = "serde")]
+    use super::{GradientColors, PaintFlavor};
+    #[cfg(feature = "serde")]
+    use crate::{geometry::Position, Color};
 
     #[test]
     fn line_dash_empty_pattern_clears() {
@@ -1326,5 +1335,61 @@ mod tests {
         let paint = Paint::default().with_line_dash(&[0.0, 0.0]);
 
         assert_eq!(paint.line_dash(), &[0.0, 0.0]);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn conic_gradient_deserializes_without_start_angle() {
+        let flavor = PaintFlavor::ConicGradient {
+            center: Position { x: 1.0, y: 2.0 },
+            start_angle: 1.5,
+            colors: GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::white(),
+            },
+        };
+
+        // Learn the current serde representation, then strip `start_angle`
+        // to mirror the "old format" payload produced before that field
+        // existed (`ConicGradient { center, colors }`).
+        let mut value = serde_json::to_value(&flavor).expect("serialize ConicGradient");
+        let inner = value
+            .get_mut("ConicGradient")
+            .and_then(|v| v.as_object_mut())
+            .expect("externally tagged ConicGradient object");
+        assert!(inner.remove("start_angle").is_some(), "start_angle should be present");
+
+        // Deserializing the field-less payload must succeed and default to 0.0.
+        let restored: PaintFlavor = serde_json::from_value(value).expect("deserialize old format");
+        match restored {
+            PaintFlavor::ConicGradient {
+                center, start_angle, ..
+            } => {
+                assert_eq!(start_angle, 0.0);
+                assert_eq!(center.x, 1.0);
+                assert_eq!(center.y, 2.0);
+            }
+            other => panic!("expected ConicGradient, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn conic_gradient_round_trip_preserves_start_angle() {
+        let flavor = PaintFlavor::ConicGradient {
+            center: Position { x: 3.0, y: 4.0 },
+            start_angle: 2.75,
+            colors: GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::white(),
+            },
+        };
+
+        let json = serde_json::to_string(&flavor).expect("serialize ConicGradient");
+        let restored: PaintFlavor = serde_json::from_str(&json).expect("deserialize ConicGradient");
+        match restored {
+            PaintFlavor::ConicGradient { start_angle, .. } => assert_eq!(start_angle, 2.75),
+            other => panic!("expected ConicGradient, got {other:?}"),
+        }
     }
 }
