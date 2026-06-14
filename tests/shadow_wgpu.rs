@@ -472,3 +472,71 @@ fn shadow_strength_follows_source_alpha() {
         "a fully transparent source must cast no shadow, got alpha {transparent_shadow}"
     );
 }
+
+/// Regression test for the Gaussian blur falloff *width* (kernel reach).
+///
+/// The Canvas/SVG drawing model maps `shadowBlur` to a Gaussian with standard
+/// deviation `sigma = shadowBlur / 2`, whose edge response falls off over a
+/// 10%-90% width of about `2.563 * sigma`. The blur shader previously sampled
+/// only `+/-1.5*sigma` taps and renormalized by that partial sum, which shrank
+/// the effective sigma to ~0.79x and produced only a ~12px 10-90 width at
+/// `shadowBlur` 12 (sigma 6) -- i.e. shadows were ~21% too tight versus the spec
+/// and versus Chrome/Firefox. With the corrected `+/-3*sigma` reach the width is
+/// ~17px (effective sigma ~6.6, matching Chrome Canary). This test measures that
+/// width directly so a regression back to the truncated kernel fails here rather
+/// than only showing up in a screenshot diff.
+#[test]
+fn shadow_blur_falloff_width_matches_spec_sigma() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // Black shadow, offset far right so its right edge falls on the empty
+    // background (clear of the shape). Shape at x[10,40] -> shadow core x[70,100].
+    let pixels = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+        canvas.set_shadow_blur(12.0); // spec sigma = 6
+        canvas.set_shadow_offset(60.0, 0.0);
+        let mut p = Path::new();
+        p.rect(10.0, 30.0, 30.0, 60.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+
+    // Shadow alpha along the vertical-center row, across the shadow's right edge.
+    let row = 60;
+    let alpha = |x: u32| pixel(&pixels, x, row)[3] as f32;
+    let mut peak = 0.0f32;
+    let mut peak_x = 70u32;
+    for x in 70..=105 {
+        let a = alpha(x);
+        if a > peak {
+            peak = a;
+            peak_x = x;
+        }
+    }
+    assert!(peak > 200.0, "shadow core alpha too low ({peak}); test geometry is off");
+
+    // Sub-pixel x where the falloff (scanning right from the core peak) crosses a
+    // threshold, via linear interpolation between adjacent samples.
+    let cross = |thresh: f32| -> f32 {
+        for x in peak_x..(W - 1) {
+            let (a0, a1) = (alpha(x), alpha(x + 1));
+            if a0 >= thresh && a1 < thresh {
+                return x as f32 + (a0 - thresh) / (a0 - a1);
+            }
+        }
+        (W - 1) as f32
+    };
+    let width = cross(0.1 * peak) - cross(0.9 * peak);
+    let sigma_eff = width / 2.563;
+
+    // Corrected +/-3sigma kernel: ~17px (sigma_eff ~6.6). Truncated +/-1.5sigma
+    // kernel: ~12px (sigma_eff ~4.7). The lower bound rejects the truncated
+    // kernel; the upper bound guards against an over-wide regression.
+    assert!(
+        (14.0..=21.0).contains(&width),
+        "blur 10-90 falloff width {width:.1}px (effective sigma {sigma_eff:.2}) is out of the \
+         expected ~17px band: a value near 12px means the kernel reach regressed to ~1.5*sigma"
+    );
+}
