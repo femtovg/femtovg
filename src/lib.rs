@@ -533,10 +533,11 @@ where
     /// deviation is `shadowBlur / 2`, expressed in output (device) pixels. The
     /// default is `0` (no blur). Negative or non-finite values are ignored.
     ///
-    /// Known limitation: both renderer backends clamp the effective blur standard
-    /// deviation to 8.0 in their blur shader (a GLES 2.0 constraint on loop
-    /// bounds), so very large `shadowBlur` values (above ~16) stop spreading
-    /// further than a sigma of 8.0.
+    /// Known limitation: the blur shader caps its kernel reach at +/-24 px (a
+    /// GLES 2.0 constraint on loop bounds). This covers the full +/-3 sigma for
+    /// `shadowBlur` <= 16, which matches reference browsers exactly; larger values
+    /// render marginally tighter than spec (about 94% of the target sigma at
+    /// `shadowBlur` 24).
     pub fn set_shadow_blur(&mut self, blur: f32) {
         if blur.is_finite() && blur >= 0.0 {
             self.state_mut().shadow_blur = blur;
@@ -2960,14 +2961,15 @@ fn opaque_shadow_emits_offscreen_blur_pass() {
     );
 }
 
-/// Known limitation: both backends clamp the Gaussian standard deviation to 8.0
-/// in the blur shader (GLES 2.0 forbids non-constant loop bounds, so the sample
-/// count must have a fixed upper limit — see `render_gaussian_blur` in the
-/// OpenGL backend and `gaussian_blur_filter` in the wgpu backend). femtovg
-/// faithfully records the spec sigma (`shadowBlur / 2`) in the draw command, so
-/// the divergence lives entirely in the renderer: for `shadowBlur > 16` the
-/// effective blur saturates at sigma 8.0 rather than growing further. This test
-/// documents that the command still carries the un-clamped, spec-correct sigma.
+/// Known limitation: the blur shader uses the true (spec) Gaussian weights but
+/// caps the kernel *reach* (tap count) at +/-24 px, because GLES 2.0 forbids
+/// non-constant loop bounds (see `render_gaussian_blur` in the OpenGL backend and
+/// `gaussian_blur_filter` in the wgpu backend). The reach covers the full +/-3
+/// sigma for sigma <= 8 (`shadowBlur` <= 16), so those blurs match the reference
+/// renderers exactly. For larger `shadowBlur` the reach is below 3 sigma, so the
+/// blur renders marginally tighter than spec (about 94% of the target sigma at
+/// `shadowBlur` 24). femtovg still records the un-clamped, spec-correct sigma
+/// (`shadowBlur / 2`) in the draw command; this test documents that.
 #[test]
 fn large_shadow_blur_records_unclamped_spec_sigma() {
     use renderer::CommandType;

@@ -253,7 +253,7 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
 }
 
 fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    let sampleCount: f32 = ceil(1.5 * params.image_blur_filter_sigma);
+    let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
 
@@ -262,9 +262,10 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     gaussian_coeff.x *= gaussian_coeff.y;
     gaussian_coeff.y *= gaussian_coeff.z;
 
-    for (var i: f32 = 1.0; i <= 12.0; i += 1.) {
-        // Work around GLES 2.0 limitation of only allowing constant loop indices
-        // by breaking here. Sigma has an upper bound of 8, imposed on the Rust side.
+    for (var i: f32 = 1.0; i <= 24.0; i += 1.) {
+        // Work around GLES 2.0 limitation of only allowing constant loop indices by
+        // breaking here. Sigma is clamped to 8 on the Rust side and the kernel reaches
+        // +/-3*sigma, so the tap count never exceeds this 24-iteration bound.
         if (i >= sampleCount) {
             break;
         }
