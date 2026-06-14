@@ -543,14 +543,19 @@ where
         }
     }
 
-    /// Sets the drop shadow offset, in the current user coordinate space.
+    /// Sets the drop shadow offset, in output (device) pixels.
     ///
     /// This mirrors the Canvas 2D `shadowOffsetX`/`shadowOffsetY` attributes.
-    /// Positive `x` shifts the shadow right and positive `y` shifts it down. The
-    /// offset is transformed by the current transform, matching the spec. The
-    /// default is `(0, 0)`.
+    /// Positive `x` shifts the shadow right and positive `y` shifts it down. Per
+    /// the spec the offset is *not* affected by the current transformation
+    /// matrix: it keeps the same magnitude and direction relative to the shape
+    /// regardless of scale or rotation. Non-finite values are ignored (the
+    /// previous offset is preserved), matching the Canvas setter semantics used
+    /// by `set_shadow_blur`. The default is `(0, 0)`.
     pub fn set_shadow_offset(&mut self, x: f32, y: f32) {
-        self.state_mut().shadow_offset = [x, y];
+        if x.is_finite() && y.is_finite() {
+            self.state_mut().shadow_offset = [x, y];
+        }
     }
 
     /// Sets the composite operation.
@@ -1000,7 +1005,8 @@ where
         let canvas_height = self.height();
 
         // Draw the drop shadow (if any) under the fill. The closure re-enters
-        // fill_path_internal with the shadow tint; render_shadow temporarily
+        // fill_path_internal with the *real* paint so render_shadow can build the
+        // shadow from the source's true per-pixel alpha; render_shadow temporarily
         // disables shadows in the state so this does not recurse. This runs in its
         // own scope so the path cache's RefMut borrow is released before the path
         // is cloned (cloning a Path while its cache is borrowed would panic).
@@ -1009,10 +1015,15 @@ where
                 let cache = path.cache(&transform, self.tess_tol, self.dist_tol);
                 cache.bounds
             };
-            let path = path.clone();
-            self.render_shadow(bounds, move |canvas, tint| {
-                canvas.fill_path_internal(&path, &PaintFlavor::Color(tint), anti_alias, fill_rule);
-            });
+            // Only skip when even the offset+blurred shadow cannot reach the
+            // target; an off-screen shape may still cast an on-screen shadow.
+            if self.shadow_could_be_visible(bounds) {
+                let path = path.clone();
+                let shadow_flavor = paint_flavor.clone();
+                self.render_shadow(bounds, move |canvas| {
+                    canvas.fill_path_internal(&path, &shadow_flavor, anti_alias, fill_rule);
+                });
+            }
         }
 
         // The path cache saves a flattened and transformed version of the path.
@@ -1206,22 +1217,22 @@ where
                 let cache = path.cache(&transform, self.tess_tol, self.dist_tol);
                 cache.bounds
             };
-            // Skip fully off-screen shapes (matches the cull below).
-            let on_screen = centerline.maxx >= 0.0
-                && centerline.minx <= self.width() as f32
-                && centerline.maxy >= 0.0
-                && centerline.miny <= self.height() as f32;
-            if on_screen {
-                let half = (stroke.line_width * transform.average_scale()).max(self.fringe_width) * 0.5;
-                let mut bounds = centerline;
-                bounds.minx -= half;
-                bounds.miny -= half;
-                bounds.maxx += half;
-                bounds.maxy += half;
+            let half = (stroke.line_width * transform.average_scale()).max(self.fringe_width) * 0.5;
+            let mut bounds = centerline;
+            bounds.minx -= half;
+            bounds.miny -= half;
+            bounds.maxx += half;
+            bounds.maxy += half;
+            // Skip only when even the offset+blurred shadow cannot reach the
+            // render target. The offset and blur spread can pull a shadow back
+            // on-screen for a shape whose own bounds are off-screen, so we must
+            // not cull on the shape's bounds alone.
+            if self.shadow_could_be_visible(bounds) {
                 let path = path.clone();
                 let stroke = stroke.clone();
-                self.render_shadow(bounds, move |canvas, tint| {
-                    canvas.stroke_path_internal(&path, &PaintFlavor::Color(tint), anti_alias, &stroke);
+                let shadow_flavor = paint_flavor.clone();
+                self.render_shadow(bounds, move |canvas| {
+                    canvas.stroke_path_internal(&path, &shadow_flavor, anti_alias, &stroke);
                 });
             }
         }
@@ -1339,29 +1350,61 @@ where
 
     /// Returns `true` when the current state would paint a visible drop shadow.
     ///
-    /// Matching the Canvas spec, shadows are only drawn when the shadow color is
-    /// not fully transparent. When this returns `false` the drawing entry points
-    /// skip the whole offscreen shadow pass, so the common (no-shadow) case has
-    /// zero added cost.
+    /// Matching the Canvas spec, a shadow is only drawn when the shadow color is
+    /// not fully transparent *and* at least one of the blur or offset components
+    /// is non-zero. (An opaque shadow color with zero blur and zero offset would
+    /// land exactly under the shape and contribute nothing, so the spec treats it
+    /// as no shadow.) When this returns `false` the drawing entry points skip the
+    /// whole offscreen shadow pass, so the common (no-shadow) case has zero added
+    /// cost.
     fn shadow_enabled(&self) -> bool {
-        self.state().shadow_color.a > 0.0
+        let state = self.state();
+        state.shadow_color.a > 0.0
+            && (state.shadow_blur != 0.0 || state.shadow_offset[0] != 0.0 || state.shadow_offset[1] != 0.0)
+    }
+
+    /// Returns `true` when the drop shadow for a shape with the given device-space
+    /// `shape_bounds` could land on the render target once the (device-space)
+    /// shadow offset and blur spread are taken into account.
+    ///
+    /// Drawing entry points must not cull a shadow on the shape's own bounds
+    /// alone: a shape entirely off-screen can still cast a visible shadow when the
+    /// offset and/or blur pull the shadow back onto the target. The blur spread is
+    /// `ceil(3 * sigma)` (sigma = `shadowBlur / 2`), which covers >99.7% of the
+    /// Gaussian — the same reach `render_shadow` uses to pad its offscreen image.
+    fn shadow_could_be_visible(&self, shape_bounds: Bounds) -> bool {
+        let state = self.state();
+        let [ox, oy] = state.shadow_offset;
+        let spread = (state.shadow_blur / 2.0 * 3.0).ceil();
+        let minx = shape_bounds.minx + ox - spread;
+        let miny = shape_bounds.miny + oy - spread;
+        let maxx = shape_bounds.maxx + ox + spread;
+        let maxy = shape_bounds.maxy + oy + spread;
+        maxx >= 0.0 && minx <= self.width() as f32 && maxy >= 0.0 && miny <= self.height() as f32
     }
 
     /// Renders a drop shadow for a shape whose device-space bounding box is
     /// `shape_bounds`, using the supplied closure to draw the shape's coverage.
     ///
-    /// The shape is first rendered (tinted with the shadow color) into a transient
-    /// offscreen image sized to the padded bounding box, then Gaussian-blurred via
-    /// the existing `filter_image` path (standard deviation `shadowBlur / 2`), and
-    /// finally composited back into the current render target, translated by the
-    /// device-space shadow offset and drawn *under* the actual shape. The current
-    /// scissor, global alpha and composite operation are honored when compositing.
+    /// Per the Canvas drawing model the shadow is built from the *alpha of the
+    /// actually-rendered source*, not from a forced-opaque tint: a semi-transparent
+    /// fill, or a gradient/image with transparent texels, must cast a
+    /// correspondingly weaker shadow. To achieve this the closure draws the real
+    /// source (its actual paint and per-pixel alpha) into a transient offscreen
+    /// image, then a solid `shadowColor` is composited over it with
+    /// `CompositeOperation::SourceIn`, which masks the shadow color by the source's
+    /// alpha. The result carries `shadowColor.rgb` with alpha
+    /// `source.alpha * shadowColor.a` per pixel. That image is then
+    /// Gaussian-blurred via the existing `filter_image` path (standard deviation
+    /// `shadowBlur / 2`) and finally composited back into the current render
+    /// target, translated by the device-space shadow offset and drawn *under* the
+    /// actual shape. The current scissor, global alpha and composite operation are
+    /// honored when compositing.
     ///
-    /// `draw_coverage` is invoked with the shadow color (premultiplied by global
-    /// alpha) and is expected to issue the shape's normal draw command(s); the
-    /// canvas transform in effect during the call already maps the shape's
-    /// device-space coordinates into the offscreen image.
-    fn render_shadow(&mut self, shape_bounds: Bounds, draw_coverage: impl FnOnce(&mut Self, Color)) {
+    /// `draw_coverage` is expected to issue the shape's normal draw command(s) with
+    /// its real paint; the canvas transform in effect during the call already maps
+    /// the shape's device-space coordinates into the offscreen image.
+    fn render_shadow(&mut self, shape_bounds: Bounds, draw_coverage: impl FnOnce(&mut Self)) {
         // Degenerate / off-screen bounds: nothing to cast a shadow from.
         if shape_bounds.maxx <= shape_bounds.minx || shape_bounds.maxy <= shape_bounds.miny {
             return;
@@ -1373,13 +1416,14 @@ where
         // Standard deviation in device pixels (HTML drawing model: sigma = blur/2).
         let sigma = state.shadow_blur / 2.0;
 
-        // Device-space shadow offset (the user-space offset transformed by the CTM,
-        // ignoring translation since an offset is a vector).
-        let [ox, oy] = state.shadow_offset;
-        let (txx, txy) = {
-            let Transform2D([a, b, c, d, _, _]) = state.transform;
-            (a * ox + c * oy, b * ox + d * oy)
-        };
+        // The shadow offset is expressed in output (device) pixels and, per the
+        // Canvas spec, is NOT affected by the current transformation matrix: it
+        // keeps the same magnitude and direction relative to the shape under any
+        // scale or rotation. Apply the raw components directly when positioning
+        // the blurred shadow (matching WebKit: "canvas shadows must not be
+        // affected by any transformation and keep the same offset relative to the
+        // shape").
+        let [txx, txy] = state.shadow_offset;
 
         // Pad the offscreen image for the blur kernel reach (~3 sigma covers
         // >99.7% of the Gaussian) plus a fringe pixel for antialiased edges.
@@ -1400,18 +1444,27 @@ where
             return;
         }
 
-        let Ok(coverage_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::empty()) else {
+        // Offscreen render targets store premultiplied-alpha results, so flag the
+        // images as PREMULTIPLIED. Otherwise the image-sampling shader would
+        // re-premultiply on composite (multiplying rgb by alpha a second time),
+        // darkening partially-transparent shadow texels — which the source-alpha
+        // shadow now produces wherever the source is semi-transparent or
+        // antialiased.
+        let Ok(coverage_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
+        else {
             return;
         };
-        let Ok(blurred_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::empty()) else {
+        let Ok(blurred_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
+        else {
             self.delete_image(coverage_image);
             return;
         };
 
         let previous_target = self.current_render_target;
 
-        // Draw the shape's coverage, tinted with the shadow color, into the
-        // offscreen image. The image space is the device space translated so the
+        // Draw the *real* source (its actual paint and per-pixel alpha) into the
+        // offscreen image, then recolor it by the shadow color while preserving the
+        // source alpha. The image space is the device space translated so the
         // padded bbox origin maps to (0, 0): pre-translate the CTM by (-minx, -miny).
         self.save();
         self.set_render_target(RenderTarget::Image(coverage_image));
@@ -1422,15 +1475,32 @@ where
         let mut coverage_transform = Transform2D::translation(-minx, -miny);
         coverage_transform.premultiply(&state.transform);
         self.state_mut().transform = coverage_transform;
-        // Shadows are rasterized at full coverage and tinted opaque; the shadow
-        // color's alpha and the global alpha are applied when compositing.
+        // Render the source at full strength: the shadow color's alpha and the
+        // global alpha are applied later (the former via the SourceIn mask below,
+        // the latter when compositing the finished shadow under the shape).
         self.state_mut().alpha = 1.0;
         self.state_mut().scissor = Scissor::default();
         self.state_mut().composite_operation = CompositeOperationState::default();
         self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
 
-        let opaque_shadow_tint = Color::rgbaf(shadow_color.r, shadow_color.g, shadow_color.b, 1.0);
-        draw_coverage(self, opaque_shadow_tint);
+        // 1. Rasterize the source with its real paint so the offscreen holds the
+        //    source's true per-pixel alpha (semi-transparent fills, gradient/image
+        //    transparency, antialiased edges, ...).
+        draw_coverage(self);
+
+        // 2. Recolor by the shadow color, masked by the source alpha. SourceIn
+        //    keeps `shadowColor * dst.alpha`, so the offscreen ends up carrying
+        //    shadowColor.rgb with per-pixel alpha = source.alpha * shadowColor.a.
+        //    Where the source was transparent the shadow stays transparent, so a
+        //    fully transparent source casts no shadow and a 50%-alpha source casts
+        //    a half-strength shadow. The mask must cover the whole offscreen in its
+        //    own pixel space, so draw it with the identity transform (not the
+        //    shape's coverage transform, which is scaled/translated).
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
+        let mut mask_rect = Path::new();
+        mask_rect.rect(0.0, 0.0, width as f32, height as f32);
+        self.fill_path_internal(&mask_rect, &PaintFlavor::Color(shadow_color), false, FillRule::NonZero);
 
         self.restore();
 
@@ -1446,15 +1516,17 @@ where
 
         // Composite the shadow back into the original target, offset by the
         // device-space shadow offset and drawn under the shape. The shadow color's
-        // alpha and the global alpha are folded into the image tint here.
+        // alpha is already baked into the image (via the SourceIn mask); only the
+        // global alpha is folded into the image tint here.
         self.set_render_target(previous_target);
 
         let dst_x = minx + txx;
         let dst_y = miny + txy;
 
-        // The shadow image already carries shadow_color.rgb; modulate its alpha by
-        // the shadow color alpha and the current global alpha.
-        let tint = Color::rgbaf(1.0, 1.0, 1.0, shadow_color.a * state.alpha);
+        // The shadow image already carries shadowColor.rgb and per-pixel alpha
+        // `source.alpha * shadowColor.a` (baked in by the SourceIn mask above), so
+        // here we only fold in the current global alpha.
+        let tint = Color::rgbaf(1.0, 1.0, 1.0, state.alpha);
         let mut shadow_paint = Paint::image_tint(source_image, dst_x, dst_y, width as f32, height as f32, 0.0, tint);
         shadow_paint.set_anti_alias(false);
 
@@ -1834,12 +1906,18 @@ where
                 device.maxy = device.maxy.max(dy);
             }
 
-            let text = text.to_owned();
-            let mut shadow_paint = paint.clone();
-            self.render_shadow(device, move |canvas, tint| {
-                shadow_paint.set_color(tint);
-                let _ = canvas.draw_text(x, y, &text, &shadow_paint, render_mode);
-            });
+            // Skip only when the offset+blurred shadow cannot reach the target;
+            // text just off-screen may still cast an on-screen shadow.
+            if self.shadow_could_be_visible(device) {
+                let text = text.to_owned();
+                // Draw the text with its *real* paint so the shadow is built from
+                // the glyphs' true coverage/alpha; render_shadow recolors it by the
+                // shadow color while preserving that alpha.
+                let shadow_paint = paint.clone();
+                self.render_shadow(device, move |canvas| {
+                    let _ = canvas.draw_text(x, y, &text, &shadow_paint, render_mode);
+                });
+            }
         }
 
         for (font_id, glyph_run) in &layout
@@ -2631,6 +2709,20 @@ fn shadow_attribute_defaults_match_spec() {
     assert_eq!(state.shadow_offset, [0.0, 0.0]);
     // Transparent shadow color disables shadows entirely.
     assert!(!canvas.shadow_enabled());
+
+    // Per the enable rule, even an opaque shadow color stays disabled while blur
+    // and offset are both zero (the shadow would land exactly under the shape).
+    let mut canvas = canvas;
+    canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+    assert!(
+        !canvas.shadow_enabled(),
+        "opaque color alone (zero blur, zero offset) must not enable a shadow"
+    );
+    canvas.set_shadow_offset(1.0, 0.0);
+    assert!(
+        canvas.shadow_enabled(),
+        "a non-zero offset with an opaque color must enable the shadow"
+    );
 }
 
 /// `set_shadow_blur` ignores negative and non-finite values, matching the Canvas
@@ -2651,6 +2743,117 @@ fn shadow_blur_rejects_invalid_values() {
 
     canvas.set_shadow_blur(f32::INFINITY);
     assert_eq!(canvas.state().shadow_blur, 4.0, "infinite blur must be ignored");
+}
+
+/// `set_shadow_offset` ignores non-finite values, preserving the previous offset.
+/// This matches the Canvas setter semantics already used by `set_shadow_blur` and
+/// keeps NaN/inf out of the offscreen geometry.
+#[test]
+fn shadow_offset_rejects_non_finite_values() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+
+    canvas.set_shadow_offset(10.0, -5.0);
+    assert_eq!(canvas.state().shadow_offset, [10.0, -5.0]);
+
+    canvas.set_shadow_offset(f32::NAN, 7.0);
+    assert_eq!(
+        canvas.state().shadow_offset,
+        [10.0, -5.0],
+        "NaN x must be ignored, previous offset preserved"
+    );
+
+    canvas.set_shadow_offset(3.0, f32::INFINITY);
+    assert_eq!(
+        canvas.state().shadow_offset,
+        [10.0, -5.0],
+        "infinite y must be ignored, previous offset preserved"
+    );
+
+    canvas.set_shadow_offset(f32::NEG_INFINITY, f32::NAN);
+    assert_eq!(
+        canvas.state().shadow_offset,
+        [10.0, -5.0],
+        "non-finite components must be ignored, previous offset preserved"
+    );
+
+    // A subsequent finite update still applies.
+    canvas.set_shadow_offset(2.0, 4.0);
+    assert_eq!(canvas.state().shadow_offset, [2.0, 4.0]);
+}
+
+/// Per the Canvas spec a shadow is painted only when the shadow color is
+/// non-transparent AND at least one of blur, offsetX or offsetY is non-zero. An
+/// opaque shadow color with zero blur and zero offset must therefore emit no
+/// offscreen shadow pass; flipping on a non-zero offset *or* a non-zero blur must
+/// re-enable it.
+#[test]
+fn shadow_enable_rule_requires_blur_or_offset() {
+    use renderer::CommandType;
+
+    let run = |configure: &dyn Fn(&mut Canvas<RecordingRenderer>)| -> bool {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(100, 100, 1.0);
+        configure(&mut canvas);
+
+        let mut path = Path::new();
+        path.rect(10.0, 10.0, 30.0, 30.0);
+        canvas.fill_path(&path, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        commands
+            .iter()
+            .any(|c| matches!(c.cmd_type, CommandType::SetRenderTarget(RenderTarget::Image(_))))
+    };
+
+    // Opaque color, zero blur, zero offset: no shadow.
+    assert!(
+        !run(&|canvas| {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_blur(0.0);
+            canvas.set_shadow_offset(0.0, 0.0);
+        }),
+        "opaque color with zero blur and zero offset must not emit a shadow pass"
+    );
+
+    // A non-zero offsetX re-enables the shadow.
+    assert!(
+        run(&|canvas| {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_offset(5.0, 0.0);
+        }),
+        "a non-zero offset must re-enable the shadow"
+    );
+
+    // A non-zero offsetY re-enables the shadow.
+    assert!(
+        run(&|canvas| {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_offset(0.0, 5.0);
+        }),
+        "a non-zero offsetY must re-enable the shadow"
+    );
+
+    // A non-zero blur re-enables the shadow.
+    assert!(
+        run(&|canvas| {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_blur(4.0);
+        }),
+        "a non-zero blur must re-enable the shadow"
+    );
+
+    // Non-zero blur/offset but transparent color stays disabled.
+    assert!(
+        !run(&|canvas| {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 0));
+            canvas.set_shadow_blur(4.0);
+            canvas.set_shadow_offset(5.0, 5.0);
+        }),
+        "transparent shadow color must keep the shadow disabled"
+    );
 }
 
 /// Shadow attributes are part of the drawing state and must be stacked by

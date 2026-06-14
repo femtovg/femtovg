@@ -345,3 +345,130 @@ fn text_casts_drop_shadow() {
         "transparent shadow color must paint no blue pixels, got {without}"
     );
 }
+
+/// The shadow offset must NOT be scaled by the current transform: per the Canvas
+/// spec (and WebKit's rule that "canvas shadows must not be affected by any
+/// transformation") `shadowOffsetX/Y` are in output pixels. Under `scale(2, 2)`
+/// with offset `(10, 0)` the shadow must land ~10 device px from the shape, not
+/// 20.
+#[test]
+fn shadow_offset_is_not_scaled_by_transform() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // User rect (5,5) size 10x10. Under scale(2,2) it occupies device x,y in
+    // [10,30). Opaque green shadow, offset (10,0) in *user* units passed to the
+    // setter, no blur.
+    let pixels = render_to_pixels(&device, &queue, |canvas| {
+        canvas.scale(2.0, 2.0);
+        canvas.set_shadow_color(Color::rgb(0, 255, 0));
+        canvas.set_shadow_offset(10.0, 0.0);
+        let mut rect = Path::new();
+        rect.rect(5.0, 5.0, 10.0, 10.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+
+    // Raw (correct) offset of 10 device px puts the shadow at device x in [20,40).
+    // x=37,y=20 is inside that band but outside the shape ([10,30)).
+    let inside = pixel(&pixels, 37, 20);
+    assert!(
+        inside[1] > 150 && inside[0] < 90 && inside[3] > 150,
+        "expected green shadow ~10px from the shape at (37,20), got {inside:?}"
+    );
+
+    // x=45 lies past the raw-offset shadow (40) but *inside* a wrongly CTM-scaled
+    // shadow (offset 20 => band [30,50)). It must be empty.
+    let beyond = pixel(&pixels, 45, 20);
+    assert!(
+        beyond[3] < 32,
+        "shadow must not extend to 20px (a CTM-scaled offset); (45,20) should be empty, got {beyond:?}"
+    );
+}
+
+/// A shape whose own bounds are off-screen must still cast a shadow when the
+/// offset (and/or blur) pulls the shadow back onto the render target. The
+/// off-screen cull must therefore not be based on the shape's own bounds alone.
+#[test]
+fn offscreen_shape_with_offset_still_casts_shadow() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // Rect placed fully to the LEFT of the canvas (x in [-40,-10)), so its own
+    // bounds never touch the target. A +50 px shadow offset moves the shadow to
+    // x in [10,40), squarely on-screen.
+    let mut rect = Path::new();
+    rect.rect(-40.0, 40.0, 30.0, 30.0);
+
+    let pixels = render_to_pixels(&device, &queue, |canvas| {
+        canvas.set_shadow_color(Color::rgb(0, 255, 0));
+        canvas.set_shadow_offset(50.0, 0.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    });
+
+    // Sample inside the shifted shadow band.
+    let shadow_px = pixel(&pixels, 25, 55);
+    assert!(
+        shadow_px[1] > 150 && shadow_px[0] < 90 && shadow_px[3] > 150,
+        "off-screen shape's offset shadow must paint on-screen at (25,55), got {shadow_px:?}"
+    );
+
+    // The shape itself stays off-screen: nothing red is painted.
+    let shape_band = pixel(&pixels, 5, 55);
+    assert!(
+        shape_band[0] < 90,
+        "the shape must remain off-screen (no red on the target), got {shape_band:?}"
+    );
+}
+
+/// The shadow must be built from the *alpha of the actually-rendered source*. A
+/// 50%-alpha fill must cast a visibly weaker shadow than a 100%-alpha fill, and a
+/// fully transparent source must cast no shadow at all.
+#[test]
+fn shadow_strength_follows_source_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    let mut rect = Path::new();
+    rect.rect(20.0, 20.0, 30.0, 30.0);
+
+    // Opaque black shadow, offset clear of the shape, no blur. Vary only the
+    // *source* fill alpha.
+    let shadow_alpha_for_source = |src_alpha: u8| -> u8 {
+        let pixels = render_to_pixels(&device, &queue, |canvas| {
+            canvas.set_shadow_color(Color::rgb(0, 0, 0));
+            canvas.set_shadow_offset(30.0, 30.0);
+            canvas.fill_path(&rect, &Paint::color(Color::rgba(255, 0, 0, src_alpha)));
+        });
+        // (65,65) is in the shadow band ([50,80)) but outside the shape ([20,50)).
+        pixel(&pixels, 65, 65)[3]
+    };
+
+    let opaque_shadow = shadow_alpha_for_source(255);
+    let half_shadow = shadow_alpha_for_source(128);
+    let transparent_shadow = shadow_alpha_for_source(0);
+
+    assert!(
+        opaque_shadow > 180,
+        "a fully opaque source must cast a strong shadow, got alpha {opaque_shadow}"
+    );
+    // The half-alpha source's shadow must be clearly weaker (~half) and not just
+    // marginally so.
+    assert!(
+        half_shadow + 40 < opaque_shadow,
+        "a 50%-alpha source must cast a visibly weaker shadow (half={half_shadow}, opaque={opaque_shadow})"
+    );
+    assert!(
+        half_shadow > 40,
+        "a 50%-alpha source must still cast some shadow, got alpha {half_shadow}"
+    );
+    assert!(
+        transparent_shadow < 16,
+        "a fully transparent source must cast no shadow, got alpha {transparent_shadow}"
+    );
+}
