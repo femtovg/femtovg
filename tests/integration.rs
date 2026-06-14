@@ -204,6 +204,46 @@ fn text_layout_preserves_fractional_baseline_y() {
 }
 
 #[test]
+fn font_metrics_report_underline_and_strikeout() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+
+    let test_paint = femtovg::Paint::default().with_font(&[font_id]).with_font_size(32.);
+
+    let metrics = text_context
+        .measure_font(&test_paint)
+        .expect("font measuring failed unexpectedly");
+
+    // Roboto Flex ships post + OS/2 tables, so these are read straight from the
+    // font rather than from a fallback.
+    assert!(
+        metrics.underline_thickness() > 0.0,
+        "underline thickness should be positive, got {}",
+        metrics.underline_thickness()
+    );
+    assert!(
+        metrics.strikeout_thickness() > 0.0,
+        "strikeout thickness should be positive, got {}",
+        metrics.strikeout_thickness()
+    );
+    // OpenType convention: +y up from the baseline. The underline sits below the
+    // baseline (negative) and the strikeout above it (positive, through the text).
+    assert!(
+        metrics.underline_position() < 0.0,
+        "underline should sit below the baseline, got {}",
+        metrics.underline_position()
+    );
+    assert!(
+        metrics.strikeout_position() > 0.0,
+        "strikeout should sit above the baseline, got {}",
+        metrics.strikeout_position()
+    );
+}
+
+#[test]
 fn font_measure_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
