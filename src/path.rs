@@ -795,13 +795,23 @@ impl<'a> DashCursor<'a> {
 
 /// Signed angle between vectors `(ux, uy)` and `(vx, vy)` as defined by the W3C
 /// SVG implementation notes F.6.5.4: `±arccos((u·v)/(|u||v|))` where the sign is
-/// that of `ux*vy − uy*vx`.
+/// `+` when `ux*vy − uy*vx ≥ 0` and `−` otherwise.
+///
+/// The cross product is treated as a strict two-way sign so that a zero cross
+/// product takes the positive branch. For collinear-opposite vectors the cross
+/// product is zero and F.6.5.4 requires `+π` (not 0). `f32::signum` is unsuitable
+/// here: it never returns 0 but returns `-1.0` for a `-0.0` input, and the cross
+/// product of e.g. `(-1, 0)` and `(1, 0)` evaluates to `-0.0`, which would give
+/// `-π` and violate the spec for that semicircle. The `< 0.0 → -1 else +1` rule
+/// treats both `+0.0` and `-0.0` as positive, yielding `+π`; the F.6.5.6
+/// sweep-modulo rule downstream then flips `+π` to `−π` when the sweep flag is
+/// unset, so both semicircle directions render correctly.
 fn svg_arc_angle(ux: f32, uy: f32, vx: f32, vy: f32) -> f32 {
     let dot = ux * vx + uy * vy;
     let len = (ux * ux + uy * uy).sqrt() * (vx * vx + vy * vy).sqrt();
     let mut cos = if len == 0.0 { 0.0 } else { dot / len };
     cos = cos.clamp(-1.0, 1.0);
-    let sign = (ux * vy - uy * vx).signum();
+    let sign = if (ux * vy - uy * vx) < 0.0 { -1.0 } else { 1.0 };
     sign * cos.acos()
 }
 
@@ -964,7 +974,7 @@ impl ttf_parser::OutlineBuilder for Path {
 
 #[cfg(test)]
 mod tests {
-    use super::{Path, Verb};
+    use super::{svg_arc_angle, Path, Verb, PI};
 
     fn line_path(length: f32) -> Path {
         let mut path = Path::new();
@@ -1371,5 +1381,142 @@ mod tests {
         let (_, endpoint) = sample_path(&path);
         assert!((endpoint.0 - 100.0).abs() < 1e-3);
         assert!((endpoint.1).abs() < 1e-3);
+    }
+
+    #[test]
+    fn svg_arc_angle_collinear_opposite_is_positive_pi() {
+        // F.6.5.4 boundary: for collinear-opposite vectors the cross product
+        // ux*vy - uy*vx is zero and the spec mandates the POSITIVE branch, i.e.
+        // +PI. This is exactly the start->end radius-vector pair of the standard
+        // `move_to(0,0); svg_arc_to(50,50,0,_,_,100,0)` semicircle, where the
+        // start vector is (-1, 0) and the end vector is (1, 0).
+        //
+        // The product `(-1)*0 - 0*1` evaluates to floating-point -0.0, so a
+        // `signum()`-based sign returns -1.0 and yields -PI here, violating the
+        // spec. The corrected `< 0.0 -> -1 else +1` rule treats -0.0 as the
+        // positive branch and returns +PI. (The reciprocal pair (1,0)->(-1,0)
+        // has a +0.0 cross product and is +PI under both rules.)
+        let angle = svg_arc_angle(-1.0, 0.0, 1.0, 0.0);
+        assert!(
+            (angle - PI).abs() < 1e-6,
+            "collinear-opposite angle should be +PI, got {angle}"
+        );
+
+        let reciprocal = svg_arc_angle(1.0, 0.0, -1.0, 0.0);
+        assert!(
+            (reciprocal - PI).abs() < 1e-6,
+            "reciprocal collinear-opposite angle should be +PI, got {reciprocal}"
+        );
+    }
+
+    #[test]
+    fn svg_arc_small_semicircle_reaches_apex_both_directions() {
+        // A 180-degree arc is the boundary case where the start and end radius
+        // vectors are collinear and opposite, so the F.6.5.4 cross product is
+        // zero (see svg_arc_angle_collinear_opposite_is_positive_pi). Both sweep
+        // directions of `move_to(0,0); svg_arc_to(50,50,0,false,_,100,0)` must
+        // trace a genuine semicircle of radius 50 centered at (50, 0) rather than
+        // collapsing onto the chord.
+        let start = (0.0, 0.0);
+        let end = (100.0, 0.0);
+        let r = 50.0;
+        let center = (50.0, 0.0);
+
+        let semicircle = |sweep: bool| -> (Vec<(f32, f32)>, (f32, f32), (f32, f32)) {
+            let mut path = Path::new();
+            path.move_to(start.0, start.1);
+            path.svg_arc_to(r, r, 0.0, false, sweep, end.0, end.1);
+            let (points, endpoint) = sample_path(&path);
+            let mid = points[points.len() / 2];
+            (points, mid, endpoint)
+        };
+
+        let (sweep_pts, sweep_mid, sweep_end) = semicircle(true);
+        let (nsweep_pts, nsweep_mid, nsweep_end) = semicircle(false);
+
+        // Both directions must actually reach the requested endpoint.
+        assert!((sweep_end.0 - end.0).abs() < 1e-3 && (sweep_end.1 - end.1).abs() < 1e-3);
+        assert!((nsweep_end.0 - end.0).abs() < 1e-3 && (nsweep_end.1 - end.1).abs() < 1e-3);
+
+        // The apex of a true semicircle is the chord midpoint offset by the
+        // radius perpendicular to the chord: (50, +-50). A collapsed (chord)
+        // arc would instead leave the midpoint at (50, 0), so the apex distance
+        // from the chord guards against any future regression to a degenerate
+        // 180-degree arc. The sweep flag picks the half-plane: sweep=true bulges
+        // to -y, sweep=false to +y.
+        assert!(
+            (sweep_mid.0 - center.0).abs() < 0.5 && (sweep_mid.1 + r).abs() < 0.5,
+            "sweep=true semicircle midpoint {sweep_mid:?} should reach apex (50, -50)"
+        );
+        assert!(
+            (nsweep_mid.0 - center.0).abs() < 0.5 && (nsweep_mid.1 - r).abs() < 0.5,
+            "sweep=false semicircle midpoint {nsweep_mid:?} should reach apex (50, 50)"
+        );
+
+        // The two sweep directions must bulge into opposite half-planes.
+        let sweep_side = chord_bulge_side(start, end, sweep_mid);
+        let nsweep_side = chord_bulge_side(start, end, nsweep_mid);
+        assert!(
+            sweep_side * nsweep_side < 0.0,
+            "semicircles must bulge to opposite sides: {sweep_side} vs {nsweep_side}"
+        );
+
+        // Every sampled point of both arcs lies on the radius-50 circle.
+        for (px, py) in sweep_pts.into_iter().chain(nsweep_pts.into_iter()) {
+            let resid = ellipse_residual(px, py, center.0, center.1, r, r, 0.0);
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "semicircle point ({px}, {py}) off radius-50 circle, residual {resid}"
+            );
+        }
+    }
+
+    #[test]
+    fn svg_arc_large_semicircle_sweeps_the_long_way() {
+        // The SVG path `A 50 50 0 1 1 100 0` from (0,0): rx=ry=50 exactly spans
+        // the 100-unit chord, so the large-arc flag still yields a 180-degree
+        // semicircle, with the large+sweep flags forcing the long way around.
+        // This exercises the same collinear-opposite F.6.5.4 boundary as the
+        // small form. The apex must reach (50, -50) and the endpoint (100, 0).
+        let start = (0.0, 0.0);
+        let end = (100.0, 0.0);
+        let r = 50.0;
+        let center = (50.0, 0.0);
+
+        let mut path = Path::new();
+        path.move_to(start.0, start.1);
+        path.svg_arc_to(r, r, 0.0, true, true, end.0, end.1);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(
+            (endpoint.0 - end.0).abs() < 1e-3 && (endpoint.1 - end.1).abs() < 1e-3,
+            "large-arc semicircle endpoint {endpoint:?} should reach (100, 0)"
+        );
+
+        let mid = points[points.len() / 2];
+        assert!(
+            (mid.0 - center.0).abs() < 0.5 && (mid.1 + r).abs() < 0.5,
+            "large-arc semicircle midpoint {mid:?} should reach apex (50, -50)"
+        );
+
+        // Total polyline length must be close to a half-circumference (pi*r),
+        // confirming it swept ~180 degrees rather than collapsing to the chord.
+        let length: f32 = points
+            .windows(2)
+            .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+            .sum();
+        let half_circumference = PI * r;
+        assert!(
+            (length - half_circumference).abs() < 1.0,
+            "swept length {length} should be ~pi*r ({half_circumference})"
+        );
+
+        for (px, py) in points {
+            let resid = ellipse_residual(px, py, center.0, center.1, r, r, 0.0);
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "large semicircle point ({px}, {py}) off radius-50 circle, residual {resid}"
+            );
+        }
     }
 }
