@@ -35,7 +35,7 @@ impl WindowSurface for DemoSurface {
 
         self.queue.submit(commands);
 
-        frame.present();
+        self.queue.present(frame);
     }
 }
 
