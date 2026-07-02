@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Bumped WGPU renderer to use WGPU 30.x
+
 ## [0.25.1] - 2026-05-29
 
 - Added dashed stroke support. New `Paint` methods `set_line_dash()` /
