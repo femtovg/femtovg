@@ -180,6 +180,30 @@ fn text_measure_without_canvas() {
 }
 
 #[test]
+fn text_layout_preserves_fractional_baseline_y() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+
+    let test_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(16.)
+        .with_text_baseline(Baseline::Alphabetic);
+
+    let first = text_context
+        .measure_text(0., 10.125, "Hello", &test_paint)
+        .expect("text shaping failed unexpectedly");
+    let second = text_context
+        .measure_text(0., 10.375, "Hello", &test_paint)
+        .expect("text shaping failed unexpectedly");
+
+    let delta = second.glyphs[0].y - first.glyphs[0].y;
+    assert!((delta - 0.25).abs() < 0.001);
+}
+
+#[test]
 fn font_measure_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
