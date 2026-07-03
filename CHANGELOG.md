@@ -1,7 +1,7 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.26.0]
 
 - Bumped WGPU renderer to use WGPU 30.x
 
