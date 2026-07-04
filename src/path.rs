@@ -429,6 +429,14 @@ impl Path {
     /// arc, a zero radius degrades to a straight line, negative radii use their
     /// absolute value, and radii too small to span the endpoints are scaled up.
     pub fn svg_arc_to(&mut self, rx: f32, ry: f32, x_axis_rotation: f32, large_arc: bool, sweep: bool, x: f32, y: f32) {
+        // The HTML Canvas path primitives (`ellipse()`, `arc()`, `arcTo()`)
+        // return early without changing the path "if any of the arguments are
+        // infinite or NaN"; apply the same rule here so a single bad value
+        // cannot poison every later coordinate derived from the current point.
+        if !rx.is_finite() || !ry.is_finite() || !x_axis_rotation.is_finite() || !x.is_finite() || !y.is_finite() {
+            return;
+        }
+
         let start = if self.verbs.is_empty() {
             let origin = Position { x: 0.0, y: 0.0 };
             self.move_to(origin.x, origin.y);
@@ -1468,6 +1476,47 @@ mod tests {
                 resid.abs() < ELLIPSE_RESIDUAL_TOL,
                 "semicircle point ({px}, {py}) off radius-50 circle, residual {resid}"
             );
+        }
+    }
+
+    #[test]
+    fn svg_arc_non_finite_arguments_leave_path_unchanged() {
+        // Canvas-spec rule: path methods return early, adding nothing, when any
+        // argument is infinite or NaN. Exercise every float argument position
+        // with every non-finite value.
+        let bad_values = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+
+        for arg_index in 0..5 {
+            for &bad in &bad_values {
+                let mut args = [50.0, 40.0, 0.3, 90.0, 60.0];
+                args[arg_index] = bad;
+
+                let mut path = Path::new();
+                path.move_to(10.0, 20.0);
+                let before = path.verbs().count();
+                path.svg_arc_to(args[0], args[1], args[2], true, false, args[3], args[4]);
+                assert_eq!(
+                    before,
+                    path.verbs().count(),
+                    "non-finite arg {arg_index} ({bad}) must add no verbs"
+                );
+
+                // The path must remain fully usable afterwards: a follow-up
+                // line_to continues from the pre-arc current point.
+                path.line_to(70.0, 80.0);
+                let verbs: Vec<_> = path.verbs().collect();
+                assert_eq!(verbs.len(), before + 1);
+                assert!(matches!(verbs.last(), Some(Verb::LineTo(70.0, 80.0))));
+
+                // On an empty path the guard must also fire before the
+                // implicit move_to(0, 0) is inserted.
+                let mut empty = Path::new();
+                empty.svg_arc_to(args[0], args[1], args[2], true, false, args[3], args[4]);
+                assert!(
+                    empty.is_empty(),
+                    "non-finite arg {arg_index} ({bad}) must not add an implicit move_to"
+                );
+            }
         }
     }
 
