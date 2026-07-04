@@ -522,6 +522,19 @@ where
     /// shadow color is fully transparent no offscreen shadow pass is performed and
     /// drawing adds zero overhead. The shadow color's own alpha multiplies the
     /// shadow's coverage.
+    ///
+    /// # Performance
+    ///
+    /// Shadows are not cheap: every shadowed fill, stroke or text draw renders the
+    /// shape's coverage into a transient offscreen image sized to its padded
+    /// bounds, runs a two-pass Gaussian blur over it (when `shadowBlur` is
+    /// non-zero), and composites the result — per draw, every frame. Prefer
+    /// shadowing a few composed shapes over many small primitives, and if the
+    /// same shadowed shape is drawn every frame, consider rendering it once into
+    /// an [image](Self::create_image_empty) via
+    /// [`set_render_target`](Self::set_render_target) and re-drawing that cached
+    /// image instead. Setting a fully transparent shadow color restores the
+    /// zero-overhead path.
     pub fn set_shadow_color(&mut self, color: Color) {
         self.state_mut().shadow_color = color;
     }
@@ -1455,10 +1468,18 @@ where
         else {
             return;
         };
-        let Ok(blurred_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
-        else {
-            self.delete_image(coverage_image);
-            return;
+        // The blur kernel divides by sigma, so a zero (or sub-pixel) blur skips
+        // the filter pass entirely — and with it the second offscreen image.
+        let blurred_image = if sigma >= 0.01 {
+            match self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED) {
+                Ok(image) => Some(image),
+                Err(_) => {
+                    self.delete_image(coverage_image);
+                    return;
+                }
+            }
+        } else {
+            None
         };
 
         let previous_target = self.current_render_target;
@@ -1505,10 +1526,9 @@ where
 
         self.restore();
 
-        // Blur the coverage into the second offscreen image. The blur kernel
-        // divides by sigma, so for a zero (or sub-pixel) blur we skip the filter
-        // entirely and composite the sharp coverage directly.
-        let source_image = if sigma >= 0.01 {
+        // Blur the coverage into the second offscreen image; a sharp shadow (no
+        // blur image allocated) composites the coverage directly.
+        let source_image = if let Some(blurred_image) = blurred_image {
             self.filter_image(blurred_image, ImageFilter::GaussianBlur { sigma }, coverage_image);
             blurred_image
         } else {
@@ -1550,7 +1570,9 @@ where
         // The transient images are referenced by deferred draw commands, so they
         // can only be freed after the next flush. Queue them for later cleanup.
         self.shadow_images.push(coverage_image);
-        self.shadow_images.push(blurred_image);
+        if let Some(blurred_image) = blurred_image {
+            self.shadow_images.push(blurred_image);
+        }
     }
 
     /// Frees offscreen images allocated by drop-shadow passes during the frame.
@@ -1921,13 +1943,22 @@ where
             }
         }
 
+        // The run-level shadow above is the only shadow this text should cast.
+        // Glyph runs that fall back to outline rendering are drawn through
+        // fill/stroke_path_internal, whose own shadow hooks would otherwise add a
+        // second shadow per glyph on top of it — so suppress shadows while the
+        // actual glyphs are drawn, restoring afterwards (also on error).
+        let saved_shadow_color = self.state().shadow_color;
+        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+
+        let mut glyph_run_result = Ok(());
         for (font_id, glyph_run) in &layout
             .glyphs
             .iter()
             .filter(|shaped_glyph| !shaped_glyph.c.is_control())
             .chunk_by(|g| g.font_id)
         {
-            self.draw_glyph_run(
+            glyph_run_result = self.draw_glyph_run(
                 glyph_run.map(|shaped_glyph| PositionedGlyph {
                     x: shaped_glyph.x * invscale,
                     y: shaped_glyph.y * invscale,
@@ -1937,8 +1968,14 @@ where
                 font_id,
                 &normalized_coords,
                 render_mode,
-            )?;
+            );
+            if glyph_run_result.is_err() {
+                break;
+            }
         }
+
+        self.state_mut().shadow_color = saved_shadow_color;
+        glyph_run_result?;
 
         layout.scale(invscale);
 
@@ -3000,5 +3037,52 @@ fn large_shadow_blur_records_unclamped_spec_sigma() {
         sigma,
         Some(20.0),
         "the command must carry the unclamped spec sigma (blur/2); the 8.0 clamp is a renderer-side limitation"
+    );
+}
+
+/// A shadowed text run must perform exactly one run-level shadow pass, no matter
+/// how the glyphs are rasterized. Outline-rendered glyphs (large font sizes) are
+/// drawn through `fill_path_internal`, whose own shadow hook would otherwise add
+/// a per-glyph shadow on top of the run shadow — double-darkening the result and
+/// multiplying the offscreen cost by the glyph count. Compare the number of
+/// offscreen target switches for a 1-glyph and a many-glyph string: it must not
+/// scale with glyph count.
+#[cfg(feature = "textlayout")]
+#[test]
+fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
+    use renderer::CommandType;
+
+    let shadow_target_switches = |text: &str| -> usize {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(600, 300, 1.0);
+
+        let font = canvas
+            .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+            .expect("Font not found");
+        // Font size above the atlas cap forces the outline (path) rasterization.
+        let paint = Paint::color(Color::white()).with_font(&[font]).with_font_size(100.0);
+
+        canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+        canvas.set_shadow_offset(10.0, 10.0);
+        canvas.fill_text(20.0, 150.0, text, &paint).unwrap();
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        commands
+            .iter()
+            .filter(|c| matches!(c.cmd_type, CommandType::SetRenderTarget(RenderTarget::Image(_))))
+            .count()
+    };
+
+    let single = shadow_target_switches("I");
+    let many = shadow_target_switches("Illuminate");
+
+    assert!(single > 0, "shadowed text must run an offscreen shadow pass");
+    assert_eq!(
+        single, many,
+        "shadow passes must not scale with glyph count: outline glyphs would each cast \
+         their own shadow on top of the run-level one"
     );
 }
