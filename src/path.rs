@@ -92,6 +92,18 @@ impl Verb {
 
 /// A collection of verbs (`move_to()`, `line_to()`, `bezier_to()`, etc.)
 /// describing one or more contours.
+///
+/// A `Path` is `Send` but intentionally not `Sync`: the interior tessellation
+/// cache uses a [`RefCell`], so sharing a `&Path` between threads is rejected
+/// at compile time. Move (or clone) a `Path` into each thread instead.
+///
+/// ```compile_fail
+/// let path = femtovg::Path::new();
+/// std::thread::scope(|scope| {
+///     // ERROR: `&Path` is not `Send` because `Path` is not `Sync`.
+///     scope.spawn(|| path.is_empty());
+/// });
+/// ```
 #[derive(Default, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Path {
