@@ -1262,6 +1262,72 @@ mod tests {
         cx * my - cy * mx
     }
 
+    /// Total angle swept by `points` about the ellipse (cx, cy, rx, ry, phi),
+    /// measured in the ellipse's parametric angle and unwrapped increment by
+    /// increment. Consecutive samples along the emitted beziers are at most a
+    /// few degrees apart — far from the +-pi wrap-around — so the sum recovers
+    /// the true swept angle including direction and extra revolutions, which
+    /// on-ellipse residual checks are blind to.
+    fn swept_parametric_angle(points: &[(f64, f64)], cx: f64, cy: f64, rx: f64, ry: f64, phi: f64) -> f64 {
+        let (sin_phi, cos_phi) = phi.sin_cos();
+        let angle = |p: (f64, f64)| -> f64 {
+            let dx = p.0 - cx;
+            let dy = p.1 - cy;
+            let u = (cos_phi * dx + sin_phi * dy) / rx;
+            let v = (-sin_phi * dx + cos_phi * dy) / ry;
+            v.atan2(u)
+        };
+        let mut total = 0.0;
+        for pair in points.windows(2) {
+            let mut increment = angle(pair[1]) - angle(pair[0]);
+            if increment > std::f64::consts::PI {
+                increment -= 2.0 * std::f64::consts::PI;
+            } else if increment < -std::f64::consts::PI {
+                increment += 2.0 * std::f64::consts::PI;
+            }
+            total += increment;
+        }
+        total
+    }
+
+    #[test]
+    fn svg_arc_flags_select_sweep_angle_and_direction() {
+        // On the radius-50 circle the chord from (150, 100) to (100, 150)
+        // subtends 90 degrees: large_arc=false must sweep exactly a quarter
+        // turn and large_arc=true exactly three quarters, while the sweep flag
+        // picks the direction (F.6.5.6: sweep=true is the positive-angle
+        // direction). This pins down the swept angle itself, which endpoint
+        // and on-ellipse checks cannot: an arc that takes an extra full
+        // revolution or runs the long way in the wrong direction (e.g. a
+        // broken F.6.5.6 modulo adjustment) still keeps every sample on the
+        // ellipse and still lands exactly on the endpoint.
+        let start = (150.0, 100.0);
+        let end = (100.0, 150.0);
+        let r = 50.0;
+
+        for (large_arc, sweep) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut path = Path::new();
+            path.move_to(start.0, start.1);
+            path.svg_arc_to(r, r, 0.0, large_arc, sweep, end.0, end.1);
+
+            let (points, _) = sample_path(&path);
+            let points: Vec<(f64, f64)> = points.iter().map(|p| (f64::from(p.0), f64::from(p.1))).collect();
+            let (cx, cy, srx, sry) = svg_arc_center_f64(start, end, r, r, 0.0, large_arc, sweep);
+            let total = swept_parametric_angle(&points, cx, cy, srx, sry, 0.0);
+
+            let magnitude = if large_arc {
+                1.5 * std::f64::consts::PI
+            } else {
+                0.5 * std::f64::consts::PI
+            };
+            let expected = if sweep { magnitude } else { -magnitude };
+            assert!(
+                (total - expected).abs() < 0.02,
+                "large_arc={large_arc} sweep={sweep}: swept {total} rad, expected {expected}"
+            );
+        }
+    }
+
     #[test]
     fn svg_arc_flag_combinations_are_distinct() {
         let start = (100.0, 100.0);
@@ -1734,6 +1800,7 @@ mod tests {
                     let point_scale = cx.abs() + cy.abs() + srx + sry;
                     let min_radius = srx.min(sry);
                     let tolerance = 5e-3 + 8.0 * f64::from(f32::EPSILON) * point_scale / min_radius;
+                    let mut sampled = Vec::new();
                     for (p0, c1, c2, p3) in &segments {
                         for step in 0..=4 {
                             let s = f64::from(step) / 4.0;
@@ -1745,7 +1812,37 @@ mod tests {
                                 "sampled point ({px}, {py}) at s={s} off ground-truth ellipse \
                                  (residual {residual}, tolerance {tolerance}) for {case}"
                             );
+                            sampled.push((px, py));
                         }
+                    }
+
+                    // (e) the swept angle obeys the flags. On-ellipse
+                    // residuals and the exact endpoint are blind to an arc
+                    // that circles the wrong way around or takes an extra
+                    // full revolution (both stay on the ellipse and reach the
+                    // endpoint), so measure the sweep itself: never more than
+                    // a full turn, direction matching the sweep flag, and
+                    // magnitude relative to pi matching the large_arc flag
+                    // (F.6.5.6). Sweeps close to the boundaries are skipped:
+                    // near-zero or near-pi magnitudes cannot discriminate.
+                    let total = swept_parametric_angle(&sampled, cx, cy, srx, sry, f64::from(phi));
+                    assert!(
+                        total.abs() < 2.0 * std::f64::consts::PI + 0.1,
+                        "swept more than a full turn ({total} rad) for {case}"
+                    );
+                    if total.abs() > 0.05 {
+                        assert_eq!(
+                            total > 0.0,
+                            sweep,
+                            "sweep direction violated (swept {total} rad) for {case}"
+                        );
+                    }
+                    if (total.abs() - std::f64::consts::PI).abs() > 0.05 {
+                        assert_eq!(
+                            total.abs() > std::f64::consts::PI,
+                            large_arc,
+                            "large_arc magnitude violated (swept {total} rad) for {case}"
+                        );
                     }
                 }
             }
