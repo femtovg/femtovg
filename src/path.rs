@@ -453,18 +453,26 @@ impl Path {
 
         // F.6.6 step 1 / F.6.2: a zero radius degrades to a straight line.
         // F.6.2: negative radii drop their sign.
-        let mut rx = rx.abs();
-        let mut ry = ry.abs();
+        //
+        // The endpoint-to-center conversion below runs in f64: the squared
+        // terms of F.6.6's lambda and the F.6.5.2 quotient overflow f32's
+        // exponent range long before the resulting arc geometry itself leaves
+        // f32 range (e.g. lambda for rx = 1e-30 radii that merely need to be
+        // scaled up, or (1e30)^2 midpoint terms for large translations).
+        // Reference SVG arc implementations (resvg via kurbo, Batik) perform
+        // this conversion in f64 for the same reason.
+        let mut rx = f64::from(rx).abs();
+        let mut ry = f64::from(ry).abs();
         if rx == 0.0 || ry == 0.0 {
             self.line_to(end.x, end.y);
             return;
         }
 
-        let (sin_phi, cos_phi) = x_axis_rotation.sin_cos();
+        let (sin_phi, cos_phi) = f64::from(x_axis_rotation).sin_cos();
 
         // F.6.5.1: midpoint translation followed by rotation by -phi.
-        let dx2 = (start.x - end.x) * 0.5;
-        let dy2 = (start.y - end.y) * 0.5;
+        let dx2 = (f64::from(start.x) - f64::from(end.x)) * 0.5;
+        let dy2 = (f64::from(start.y) - f64::from(end.y)) * 0.5;
         let x1p = cos_phi * dx2 + sin_phi * dy2;
         let y1p = -sin_phi * dx2 + cos_phi * dy2;
 
@@ -492,8 +500,8 @@ impl Path {
         let cyp = coef * -(ry * x1p / rx);
 
         // F.6.5.3: transform the center back to the original frame.
-        let cx = cos_phi * cxp - sin_phi * cyp + (start.x + end.x) * 0.5;
-        let cy = sin_phi * cxp + cos_phi * cyp + (start.y + end.y) * 0.5;
+        let cx = cos_phi * cxp - sin_phi * cyp + (f64::from(start.x) + f64::from(end.x)) * 0.5;
+        let cy = sin_phi * cxp + cos_phi * cyp + (f64::from(start.y) + f64::from(end.y)) * 0.5;
 
         // F.6.5.5 / F.6.5.6: starting angle and swept angle via the angle helper.
         let ux = (x1p - cxp) / rx;
@@ -506,14 +514,14 @@ impl Path {
 
         // Enforce the sweep flag direction (F.6.5.6 modulo rule).
         if !sweep && delta > 0.0 {
-            delta -= PI * 2.0;
+            delta -= std::f64::consts::PI * 2.0;
         } else if sweep && delta < 0.0 {
-            delta += PI * 2.0;
+            delta += std::f64::consts::PI * 2.0;
         }
 
         // Split into segments of at most 90 degrees and emit cubic beziers.
-        let ndivs = (delta.abs() / (PI * 0.5)).ceil().max(1.0) as i32;
-        let seg = delta / ndivs as f32;
+        let ndivs = (delta.abs() / (std::f64::consts::PI * 0.5)).ceil().max(1.0) as i32;
+        let seg = delta / f64::from(ndivs);
         // Maisonobe per-segment handle length matching the kappa technique used
         // by arc()/ellipse(): alpha = sin(seg) * (sqrt(4 + 3 tan(seg/2)^2) - 1) / 3.
         let half = seg * 0.5;
@@ -523,36 +531,57 @@ impl Path {
         let mut coords = Vec::with_capacity(ndivs as usize * 3);
 
         // Point and derivative of the rotated ellipse at parametric angle t.
-        let point = |t: f32| -> Position {
+        let point = |t: f64| -> (f64, f64) {
             let (sin_t, cos_t) = t.sin_cos();
-            Position {
-                x: cx + rx * cos_phi * cos_t - ry * sin_phi * sin_t,
-                y: cy + rx * sin_phi * cos_t + ry * cos_phi * sin_t,
-            }
+            (
+                cx + rx * cos_phi * cos_t - ry * sin_phi * sin_t,
+                cy + rx * sin_phi * cos_t + ry * cos_phi * sin_t,
+            )
         };
-        let derivative = |t: f32| -> Vector {
+        let derivative = |t: f64| -> (f64, f64) {
             let (sin_t, cos_t) = t.sin_cos();
-            Vector {
-                x: -rx * cos_phi * sin_t - ry * sin_phi * cos_t,
-                y: -rx * sin_phi * sin_t + ry * cos_phi * cos_t,
-            }
+            (
+                -rx * cos_phi * sin_t - ry * sin_phi * cos_t,
+                -rx * sin_phi * sin_t + ry * cos_phi * cos_t,
+            )
+        };
+        let to_position = |p: (f64, f64)| Position {
+            x: p.0 as f32,
+            y: p.1 as f32,
         };
 
         for i in 0..ndivs {
-            let t1 = theta1 + seg * i as f32;
+            let t1 = theta1 + seg * f64::from(i);
             let t2 = t1 + seg;
             let p1 = point(t1);
             let p2 = point(t2);
-            let c1 = p1 + derivative(t1) * alpha;
-            let c2 = p2 - derivative(t2) * alpha;
+            let d1 = derivative(t1);
+            let d2 = derivative(t2);
+            let c1 = (p1.0 + d1.0 * alpha, p1.1 + d1.1 * alpha);
+            let c2 = (p2.0 - d2.0 * alpha, p2.1 - d2.1 * alpha);
 
             commands.push(PackedVerb::BezierTo);
-            coords.extend_from_slice(&[c1, c2, p2]);
+            coords.extend_from_slice(&[to_position(c1), to_position(c2), to_position(p2)]);
         }
 
         // Guarantee the path endpoint lands exactly on the requested point.
         if let Some(last) = coords.last_mut() {
             *last = end;
+        }
+
+        // Extreme (but finite) inputs can describe arc geometry that exceeds
+        // f32 range even though both endpoints are representable (e.g. F.6.6
+        // scaling of wildly mismatched radii yields a control point beyond
+        // f32::MAX). Degrade to the chord rather than emit non-finite vertices
+        // that would poison downstream tessellation; this preserves the
+        // invariant that the path always continues to the requested endpoint
+        // with finite geometry.
+        if coords
+            .iter()
+            .any(|position| !position.x.is_finite() || !position.y.is_finite())
+        {
+            self.line_to(end.x, end.y);
+            return;
         }
 
         self.append(&commands, &coords);
@@ -807,14 +836,16 @@ impl<'a> DashCursor<'a> {
 ///
 /// The cross product is treated as a strict two-way sign so that a zero cross
 /// product takes the positive branch. For collinear-opposite vectors the cross
-/// product is zero and F.6.5.4 requires `+π` (not 0). `f32::signum` is unsuitable
+/// product is zero and F.6.5.4 requires `+π` (not 0). `signum()` is unsuitable
 /// here: it never returns 0 but returns `-1.0` for a `-0.0` input, and the cross
 /// product of e.g. `(-1, 0)` and `(1, 0)` evaluates to `-0.0`, which would give
 /// `-π` and violate the spec for that semicircle. The `< 0.0 → -1 else +1` rule
 /// treats both `+0.0` and `-0.0` as positive, yielding `+π`; the F.6.5.6
 /// sweep-modulo rule downstream then flips `+π` to `−π` when the sweep flag is
 /// unset, so both semicircle directions render correctly.
-fn svg_arc_angle(ux: f32, uy: f32, vx: f32, vy: f32) -> f32 {
+///
+/// Operates in f64 like the rest of the endpoint-to-center conversion.
+fn svg_arc_angle(ux: f64, uy: f64, vx: f64, vy: f64) -> f64 {
     let dot = ux * vx + uy * vy;
     let len = (ux * ux + uy * uy).sqrt() * (vx * vx + vy * vy).sqrt();
     let mut cos = if len == 0.0 { 0.0 } else { dot / len };
@@ -1406,13 +1437,13 @@ mod tests {
         // has a +0.0 cross product and is +PI under both rules.)
         let angle = svg_arc_angle(-1.0, 0.0, 1.0, 0.0);
         assert!(
-            (angle - PI).abs() < 1e-6,
+            (angle - std::f64::consts::PI).abs() < 1e-6,
             "collinear-opposite angle should be +PI, got {angle}"
         );
 
         let reciprocal = svg_arc_angle(1.0, 0.0, -1.0, 0.0);
         assert!(
-            (reciprocal - PI).abs() < 1e-6,
+            (reciprocal - std::f64::consts::PI).abs() < 1e-6,
             "reciprocal collinear-opposite angle should be +PI, got {reciprocal}"
         );
     }
@@ -1477,6 +1508,68 @@ mod tests {
                 "semicircle point ({px}, {py}) off radius-50 circle, residual {resid}"
             );
         }
+    }
+
+    #[test]
+    fn svg_arc_tiny_radii_scale_up_without_overflow() {
+        // Minimized from the deterministic fuzz (iteration 78 of seed
+        // 0x5eed_1e57_ab1e_f00d): radii far smaller than the chord must be
+        // scaled up per F.6.6, but computing lambda = (x1p/rx)^2 + (y1p/ry)^2
+        // in f32 overflows to infinity for rx = ry = 1e-30, which then poisons
+        // the center parametrization into NaN control points. The spec-correct
+        // result is a half-circle spanning the chord, exactly as if the radii
+        // had been given as chord/2.
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.svg_arc_to(1e-30, 1e-30, 0.0, false, true, 100.0, 0.0);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(!points.is_empty());
+        assert!((endpoint.0 - 100.0).abs() < 1e-3 && endpoint.1.abs() < 1e-3);
+        for (px, py) in points {
+            assert!(px.is_finite() && py.is_finite(), "non-finite point ({px}, {py})");
+            let residual = ellipse_residual(px, py, 50.0, 0.0, 50.0, 50.0, 0.0);
+            assert!(
+                residual.abs() < ELLIPSE_RESIDUAL_TOL,
+                "tiny-radii point ({px}, {py}) off scaled half-circle, residual {residual}"
+            );
+        }
+    }
+
+    #[test]
+    fn svg_arc_huge_coordinates_stay_finite() {
+        // Squaring f32-range coordinates in the F.6.5.1 midpoint terms
+        // overflows f32 ((1e30)^2 = 1e60 > f32::MAX) even though the resulting
+        // arc geometry itself is comfortably representable. The center math
+        // must not hand non-finite control points to the path.
+        let mut path = Path::new();
+        path.move_to(-1e30, 0.0);
+        path.svg_arc_to(2e30, 2e30, 0.0, false, true, 1e30, 0.0);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(!points.is_empty());
+        for (px, py) in &points {
+            assert!(px.is_finite() && py.is_finite(), "non-finite point ({px}, {py})");
+        }
+        let tolerance = 1e30 * 1e-2;
+        assert!((endpoint.0 - 1e30).abs() < tolerance && endpoint.1.abs() < tolerance);
+    }
+
+    #[test]
+    fn svg_arc_unrepresentable_geometry_degrades_to_chord() {
+        // F.6.6 scaling of wildly mismatched radii (rx = 1e30, ry = 1e-30 with
+        // a ~141-unit chord) yields an effective rx of ~5e61: the arc's control
+        // points exceed f32 range even though both endpoints are finite. The
+        // builder must degrade to the chord rather than emit non-finite
+        // vertices.
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.svg_arc_to(1e30, 1e-30, 0.0, true, true, 100.0, 100.0);
+
+        let verbs: Vec<_> = path.verbs().collect();
+        assert_eq!(verbs.len(), 2, "expected move_to + line_to, got {verbs:?}");
+        assert!(matches!(verbs[0], Verb::MoveTo(0.0, 0.0)));
+        assert!(matches!(verbs[1], Verb::LineTo(100.0, 100.0)));
     }
 
     #[test]
