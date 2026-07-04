@@ -532,15 +532,22 @@ impl Path {
         }
 
         // Split into segments of at most 90 degrees and emit cubic beziers.
-        let ndivs = (delta.abs() / (std::f64::consts::PI * 0.5)).ceil().max(1.0) as i32;
-        let seg = delta / f64::from(ndivs);
+        // The sweep never exceeds a full turn (|delta| <= 2*pi), so at most four
+        // 90-degree segments are ever emitted; the extra headroom only guards
+        // against floating-point spill past the exact quarter-turn boundaries.
+        const MAX_SEGMENTS: usize = 8;
+        let ndivs = ((delta.abs() / (std::f64::consts::PI * 0.5)).ceil() as usize).clamp(1, MAX_SEGMENTS);
+        let seg = delta / ndivs as f64;
         // Maisonobe per-segment handle length matching the kappa technique used
         // by arc()/ellipse(): alpha = sin(seg) * (sqrt(4 + 3 tan(seg/2)^2) - 1) / 3.
         let half = seg * 0.5;
         let alpha = seg.sin() * ((4.0 + 3.0 * half.tan() * half.tan()).sqrt() - 1.0) / 3.0;
 
-        let mut commands = Vec::with_capacity(ndivs as usize);
-        let mut coords = Vec::with_capacity(ndivs as usize * 3);
+        // The segment chain is staged on the stack: emission must stay
+        // transactional (the finite-output guard below inspects the whole chain
+        // before anything is appended to the path), and the bounded segment
+        // count makes that possible without a per-call heap allocation.
+        let mut coords = [Position { x: 0.0, y: 0.0 }; MAX_SEGMENTS * 3];
 
         // Point and derivative of the rotated ellipse at parametric angle t.
         let point = |t: f64| -> (f64, f64) {
@@ -563,7 +570,7 @@ impl Path {
         };
 
         for i in 0..ndivs {
-            let t1 = theta1 + seg * f64::from(i);
+            let t1 = theta1 + seg * i as f64;
             let t2 = t1 + seg;
             let p1 = point(t1);
             let p2 = point(t2);
@@ -572,14 +579,14 @@ impl Path {
             let c1 = (p1.0 + d1.0 * alpha, p1.1 + d1.1 * alpha);
             let c2 = (p2.0 - d2.0 * alpha, p2.1 - d2.1 * alpha);
 
-            commands.push(PackedVerb::BezierTo);
-            coords.extend_from_slice(&[to_position(c1), to_position(c2), to_position(p2)]);
+            coords[i * 3] = to_position(c1);
+            coords[i * 3 + 1] = to_position(c2);
+            coords[i * 3 + 2] = to_position(p2);
         }
+        let coords = &mut coords[..ndivs * 3];
 
         // Guarantee the path endpoint lands exactly on the requested point.
-        if let Some(last) = coords.last_mut() {
-            *last = end;
-        }
+        coords[ndivs * 3 - 1] = end;
 
         // Extreme (but finite) inputs can describe arc geometry that exceeds
         // f32 range even though both endpoints are representable (e.g. F.6.6
@@ -596,7 +603,7 @@ impl Path {
             return;
         }
 
-        self.append(&commands, &coords);
+        self.append(&[PackedVerb::BezierTo; MAX_SEGMENTS][..ndivs], coords);
     }
 
     /// Creates a new rectangle shaped sub-path.
