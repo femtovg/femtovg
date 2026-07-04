@@ -1464,14 +1464,24 @@ where
         // darkening partially-transparent shadow texels — which the source-alpha
         // shadow now produces wherever the source is semi-transparent or
         // antialiased.
-        let Ok(coverage_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
-        else {
+        //
+        // Image render targets store their content vertically flipped in texture
+        // space: both backends keep the GL FBO convention where canvas y = 0 lands
+        // on the *last* texture row (the wgpu backend's texture-target vertex
+        // stage reproduces it deliberately, and the glyph atlas pre-flips its
+        // rasterization coordinates to compensate). FLIP_Y declares that
+        // orientation so the composite below samples the coverage upright;
+        // without it the shadow is mirrored about its rect's horizontal midline.
+        // The Gaussian blur is unaffected: each of its two passes flips once, so
+        // the blurred image keeps the coverage image's orientation.
+        let image_flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
+        let Ok(coverage_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, image_flags) else {
             return;
         };
         // The blur kernel divides by sigma, so a zero (or sub-pixel) blur skips
         // the filter pass entirely — and with it the second offscreen image.
         let blurred_image = if sigma >= 0.01 {
-            match self.create_image_empty(width, height, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED) {
+            match self.create_image_empty(width, height, PixelFormat::Rgba8, image_flags) {
                 Ok(image) => Some(image),
                 Err(_) => {
                     self.delete_image(coverage_image);
@@ -1911,13 +1921,25 @@ where
         // (render_shadow disables shadows in the state so this does not recurse.)
         if self.shadow_enabled() {
             // Layout metrics are in the scaled shaping space; bring them back to
-            // user space. Expand vertically by the line height on both sides so
+            // user space. The horizontal extent is derived from the union of the
+            // glyph boxes rather than the advance-summed layout width: negative
+            // letter spacing can collapse the summed width to zero while ink is
+            // still painted, and the shadow must cover everything that is drawn.
+            // Expand by the line height on all sides so bearings, overhang,
             // ascenders, descenders and diacritics are fully covered.
-            let lx = layout.x * invscale;
+            let (mut gx0, mut gx1) = (f32::INFINITY, f32::NEG_INFINITY);
+            for glyph in &layout.glyphs {
+                gx0 = gx0.min(glyph.x);
+                gx1 = gx1.max(glyph.x + glyph.width);
+            }
             let ly = layout.y * invscale;
-            let lw = layout.width() * invscale;
             let lh = layout.height() * invscale;
-            let (ux0, uy0, ux1, uy1) = (lx, ly - lh, lx + lw, ly + lh + lh);
+            let (ux0, uy0, ux1, uy1) = if gx0 <= gx1 {
+                (gx0 * invscale - lh, ly - lh, gx1 * invscale + lh, ly + lh + lh)
+            } else {
+                // No drawable glyphs: nothing painted, nothing to shadow.
+                (0.0, 0.0, 0.0, 0.0)
+            };
 
             let transform = self.state().transform;
             let mut device = Bounds::default();
