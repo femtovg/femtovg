@@ -474,6 +474,71 @@ fn shadow_strength_follows_source_alpha() {
     );
 }
 
+/// Spec-derived text-shadow property (WHATWG canvas drawing model): the shadow
+/// is built once from the alpha channel of the *entire* painting operation's
+/// output, so its alpha can never exceed the shadow color's alpha — even where
+/// glyphs overlap. An implementation that shadows glyphs individually compounds
+/// alpha in overlap regions (`1 - (1-a)^2`, ~0.75 for a=0.5), which this test
+/// rejects. Checked for both rasterization strategies (atlas and outline), since
+/// the drawing model is defined on the painting operation, not the rasterizer.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_shadow_alpha_never_exceeds_shadow_color_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // Overlapping glyphs via strongly negative letter spacing; the shadow is
+    // offset to the side so shadow-only pixels can be isolated by comparing
+    // against a shadowless render of the same text.
+    let mut check = |font_size: f32, label: &str| {
+        let draw_text = |canvas: &mut Canvas<femtovg::renderer::WGPURenderer>, with_shadow: bool| {
+            let font = canvas
+                .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+                .expect("Font not found");
+            let paint = Paint::color(Color::white())
+                .with_font(&[font])
+                .with_font_size(font_size)
+                .with_letter_spacing(-0.25 * font_size);
+            if with_shadow {
+                canvas.set_shadow_color(Color::rgba(0, 0, 0, 128));
+                canvas.set_shadow_offset(20.0, 20.0);
+            }
+            canvas.fill_text(10.0, 50.0, "lll", &paint).unwrap();
+        };
+
+        let plain = render_to_pixels(&device, &queue, |canvas| draw_text(canvas, false));
+        let shadowed = render_to_pixels(&device, &queue, |canvas| draw_text(canvas, true));
+
+        // Max shadow alpha over pixels the text itself does not touch.
+        let mut max_shadow = 0u8;
+        for y in 0..H {
+            for x in 0..W {
+                if pixel(&plain, x, y)[3] == 0 {
+                    max_shadow = max_shadow.max(pixel(&shadowed, x, y)[3]);
+                }
+            }
+        }
+
+        assert!(
+            max_shadow >= 100,
+            "{label}: expected a visible shadow (~128 alpha), got max {max_shadow}"
+        );
+        // Union-alpha bound: 128 (= shadowColor.a) plus a little AA headroom.
+        // Per-glyph shadow compounding in the overlap region would reach ~191.
+        assert!(
+            max_shadow <= 140,
+            "{label}: shadow alpha {max_shadow} exceeds the shadow color's alpha; \
+             overlapping glyphs must not compound (shadow must derive from the \
+             painting operation's union alpha)"
+        );
+    };
+
+    check(40.0, "atlas rasterization");
+    check(100.0, "outline rasterization");
+}
+
 /// Regression test for the Gaussian blur falloff *width* (kernel reach).
 ///
 /// The Canvas/SVG drawing model maps `shadowBlur` to a Gaussian with standard
