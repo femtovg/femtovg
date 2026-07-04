@@ -23,6 +23,7 @@ fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
         power_preference: wgpu::PowerPreference::default(),
         force_fallback_adapter: false,
         compatible_surface: None,
+        ..Default::default()
     }))
     .ok()?;
 
@@ -112,7 +113,7 @@ fn render_to_pixels(
     slice.map_async(wgpu::MapMode::Read, |_| {});
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 
-    let mapped = slice.get_mapped_range();
+    let mapped = slice.get_mapped_range().expect("mapped readback range");
     let mut pixels = vec![0u8; (unpadded_bytes_per_row * H) as usize];
     for row in 0..H as usize {
         let src = row * padded_bytes_per_row as usize;
