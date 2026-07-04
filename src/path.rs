@@ -1510,6 +1510,236 @@ mod tests {
         }
     }
 
+    // ---- deterministic property fuzz ----
+
+    /// Minimal deterministic PRNG (Knuth's MMIX LCG constants, high 32 bits
+    /// used) so the fuzz below needs no external crates and replays
+    /// identically on every run.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_u32(&mut self) -> u32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 32) as u32
+        }
+
+        /// Uniform in [0, 1).
+        fn unit(&mut self) -> f32 {
+            (self.next_u32() >> 8) as f32 / (1u32 << 24) as f32
+        }
+
+        fn range(&mut self, lo: f32, hi: f32) -> f32 {
+            lo + (hi - lo) * self.unit()
+        }
+
+        fn flag(&mut self) -> bool {
+            self.next_u32() & 1 == 1
+        }
+
+        fn one_in(&mut self, n: u32) -> bool {
+            self.next_u32() % n == 0
+        }
+    }
+
+    fn fuzz_coord(rng: &mut Lcg, extreme: bool) -> f32 {
+        if extreme && rng.one_in(3) {
+            let magnitude = if rng.flag() { 1e30 } else { 1e-30 };
+            if rng.flag() {
+                magnitude
+            } else {
+                -magnitude
+            }
+        } else {
+            rng.range(-1e4, 1e4)
+        }
+    }
+
+    fn fuzz_radius(rng: &mut Lcg, extreme: bool) -> f32 {
+        if extreme && rng.one_in(3) {
+            if rng.flag() {
+                1e30
+            } else {
+                1e-30
+            }
+        } else if rng.one_in(40) {
+            0.0
+        } else {
+            rng.range(0.0, 2e3)
+        }
+    }
+
+    /// Independent f64 evaluation of the F.6.5/F.6.6 center parametrization,
+    /// used as ground truth by the fuzz test: returns the arc's center and the
+    /// (possibly F.6.6-scaled) radii.
+    #[allow(clippy::too_many_arguments)]
+    fn svg_arc_center_f64(
+        start: (f32, f32),
+        end: (f32, f32),
+        rx: f32,
+        ry: f32,
+        phi: f32,
+        large_arc: bool,
+        sweep: bool,
+    ) -> (f64, f64, f64, f64) {
+        let (x1, y1) = (f64::from(start.0), f64::from(start.1));
+        let (x2, y2) = (f64::from(end.0), f64::from(end.1));
+        let mut rx = f64::from(rx).abs();
+        let mut ry = f64::from(ry).abs();
+        let (sin_phi, cos_phi) = f64::from(phi).sin_cos();
+
+        let dx2 = (x1 - x2) * 0.5;
+        let dy2 = (y1 - y2) * 0.5;
+        let x1p = cos_phi * dx2 + sin_phi * dy2;
+        let y1p = -sin_phi * dx2 + cos_phi * dy2;
+
+        let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+        if lambda > 1.0 {
+            let s = lambda.sqrt();
+            rx *= s;
+            ry *= s;
+        }
+
+        let rx2 = rx * rx;
+        let ry2 = ry * ry;
+        let numerator = (rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p).max(0.0);
+        let denominator = rx2 * y1p * y1p + ry2 * x1p * x1p;
+        let mut coef = (numerator / denominator).sqrt();
+        if large_arc == sweep {
+            coef = -coef;
+        }
+        let cxp = coef * (rx * y1p / ry);
+        let cyp = coef * -(ry * x1p / rx);
+
+        let cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) * 0.5;
+        let cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) * 0.5;
+        (cx, cy, rx, ry)
+    }
+
+    /// f64 twin of `ellipse_residual` for the fuzz ground-truth comparison.
+    fn ellipse_residual_f64(px: f64, py: f64, cx: f64, cy: f64, rx: f64, ry: f64, phi: f64) -> f64 {
+        let (sin_phi, cos_phi) = phi.sin_cos();
+        let dx = px - cx;
+        let dy = py - cy;
+        let u = cos_phi * dx + sin_phi * dy;
+        let v = -sin_phi * dx + cos_phi * dy;
+        (u * u) / (rx * rx) + (v * v) / (ry * ry) - 1.0
+    }
+
+    fn bezier_point_f64(p0: (f64, f64), c1: (f64, f64), c2: (f64, f64), p3: (f64, f64), s: f64) -> (f64, f64) {
+        let u = 1.0 - s;
+        let w0 = u * u * u;
+        let w1 = 3.0 * u * u * s;
+        let w2 = 3.0 * u * s * s;
+        let w3 = s * s * s;
+        (
+            w0 * p0.0 + w1 * c1.0 + w2 * c2.0 + w3 * p3.0,
+            w0 * p0.1 + w1 * c1.1 + w2 * c2.1 + w3 * p3.1,
+        )
+    }
+
+    #[test]
+    fn svg_arc_deterministic_property_fuzz() {
+        const ITERATIONS: u32 = 20_000;
+
+        let mut rng = Lcg(0x5eed_1e57_ab1e_f00d);
+
+        for iteration in 0..ITERATIONS {
+            // ~1 in 50 iterations swap some inputs for extreme magnitudes.
+            let extreme = rng.one_in(50);
+
+            let start = (fuzz_coord(&mut rng, extreme), fuzz_coord(&mut rng, extreme));
+            let end = (fuzz_coord(&mut rng, extreme), fuzz_coord(&mut rng, extreme));
+            let rx = fuzz_radius(&mut rng, extreme);
+            let ry = fuzz_radius(&mut rng, extreme);
+            let phi = rng.range(-10.0, 10.0);
+            let large_arc = rng.flag();
+            let sweep = rng.flag();
+
+            let case = format!(
+                "iteration {iteration}: move_to({}, {}); \
+                 svg_arc_to({rx:e}, {ry:e}, {phi}, {large_arc}, {sweep}, {}, {})",
+                start.0, start.1, end.0, end.1
+            );
+
+            // (a) must not panic.
+            let mut path = Path::new();
+            path.move_to(start.0, start.1);
+            path.svg_arc_to(rx, ry, phi, large_arc, sweep, end.0, end.1);
+
+            // (b) every emitted coordinate is finite.
+            let mut last = start;
+            let mut segments = Vec::new();
+            for verb in path.verbs() {
+                let coords: Vec<f32> = match verb {
+                    Verb::MoveTo(x, y) | Verb::LineTo(x, y) => vec![x, y],
+                    Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => vec![c1x, c1y, c2x, c2y, x, y],
+                    Verb::Close | Verb::Solid | Verb::Hole => vec![],
+                };
+                assert!(
+                    coords.iter().all(|value| value.is_finite()),
+                    "non-finite coordinate in {verb:?} for {case}"
+                );
+                match verb {
+                    Verb::MoveTo(x, y) | Verb::LineTo(x, y) => last = (x, y),
+                    Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                        segments.push((last, (c1x, c1y), (c2x, c2y), (x, y)));
+                        last = (x, y);
+                    }
+                    _ => {}
+                }
+            }
+
+            // (c) for non-degenerate finite inputs the path must land on the
+            // requested endpoint within 1e-2 relative tolerance.
+            let degenerate = start == end || rx.abs() <= 1e-6 || ry.abs() <= 1e-6;
+            if !degenerate {
+                let tolerance = 1e-2 * (end.0.abs() + end.1.abs()).max(1.0);
+                assert!(
+                    (last.0 - end.0).abs() <= tolerance && (last.1 - end.1).abs() <= tolerance,
+                    "endpoint {last:?} != requested {end:?} for {case}"
+                );
+            }
+
+            // (d) well-conditioned cases: every sampled point of the emitted
+            // bezier chain lies on the ground-truth rotated ellipse.
+            let radii_in_range = |r: f64| (1.0..=2e3).contains(&r);
+            if !extreme && radii_in_range(f64::from(rx)) && radii_in_range(f64::from(ry)) && start != end {
+                let (cx, cy, srx, sry) = svg_arc_center_f64(start, end, rx, ry, phi, large_arc, sweep);
+                // F.6.6 scaling can push the effective radii outside the
+                // well-conditioned band; only check while they stay inside it.
+                if radii_in_range(srx) && radii_in_range(sry) {
+                    assert!(
+                        !segments.is_empty(),
+                        "well-conditioned arc must emit bezier segments for {case}"
+                    );
+                    // Base tolerance matches ELLIPSE_RESIDUAL_TOL (Maisonobe
+                    // segment error); the second term covers f32 quantization
+                    // of coordinates of magnitude ~point_scale amplified by
+                    // the implicit-form gradient (~1/min_radius).
+                    let point_scale = cx.abs() + cy.abs() + srx + sry;
+                    let min_radius = srx.min(sry);
+                    let tolerance = 5e-3 + 8.0 * f64::from(f32::EPSILON) * point_scale / min_radius;
+                    for (p0, c1, c2, p3) in &segments {
+                        for step in 0..=4 {
+                            let s = f64::from(step) / 4.0;
+                            let to_f64 = |p: (f32, f32)| (f64::from(p.0), f64::from(p.1));
+                            let (px, py) = bezier_point_f64(to_f64(*p0), to_f64(*c1), to_f64(*c2), to_f64(*p3), s);
+                            let residual = ellipse_residual_f64(px, py, cx, cy, srx, sry, f64::from(phi));
+                            assert!(
+                                residual.abs() < tolerance,
+                                "sampled point ({px}, {py}) at s={s} off ground-truth ellipse \
+                                 (residual {residual}, tolerance {tolerance}) for {case}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn svg_arc_tiny_radii_scale_up_without_overflow() {
         // Minimized from the deterministic fuzz (iteration 78 of seed
