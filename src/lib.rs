@@ -2714,6 +2714,35 @@ fn conic_gradient_start_angle_is_plumbed_into_params() {
     assert_eq!(params.conic_start_angle, angle);
 }
 
+/// The scissor radius (frag[12].w) and the conic start angle (frag[13].x) live
+/// in adjacent uniform slots. A draw that uses both a rounded scissor and a
+/// conic gradient with a start angle must carry each value independently in the
+/// same `Params`, so neither feature can clobber the other's slot.
+#[test]
+fn rounded_scissor_and_conic_start_angle_coexist_in_params() {
+    use renderer::ShaderType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    canvas.rounded_scissor(10.0, 10.0, 80.0, 80.0, 12.0);
+
+    let angle = std::f32::consts::FRAC_PI_2;
+    let paint = Paint::conic_gradient_with_angle(50.0, 50.0, angle, Color::rgb(255, 0, 0), Color::rgb(0, 0, 255));
+    let mut path = Path::new();
+    path.rect(0.0, 0.0, 100.0, 100.0);
+    canvas.fill_path(&path, &paint);
+    canvas.flush_to_output(());
+
+    let commands = recorded_commands.borrow();
+    let params = first_draw_params(&commands);
+    assert_eq!(params.shader_type, ShaderType::FillGradientConic);
+    assert_approx_eq(params.scissor_radius, 12.0);
+    assert_approx_eq(params.conic_start_angle, angle);
+}
+
 /// Text rendering picks one of two strategies depending on the canvas transform
 /// and paint: cached atlas bitmaps (emitting a `Triangles` command that samples a
 /// glyph texture) or direct outline rendering (emitting plain path fills with no
