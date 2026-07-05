@@ -2096,40 +2096,41 @@ where
             return;
         };
 
-        // The decoration takes the text paint's color, matching SVG where the
-        // decoration uses the text fill. The full paint flavor (gradient/image)
-        // is reused as-is so a gradient-filled run gets a gradient-filled line.
-        let line_paint = paint.clone();
-
-        let emit = |this: &mut Self, center_y: f32, thickness: f32| {
+        // All enabled lines share one path (a single verbs/coords allocation) and
+        // one fill_path call, so a run costs one draw no matter how many lines
+        // are on. The rects are disjoint horizontal bands, and the paint below
+        // forces NonZero filling, so any degenerate overlap (e.g. thickness
+        // clamping on tiny fonts) still paints solid.
+        let mut path = Path::new();
+        let mut add_line = |center_y: f32, thickness: f32| {
             let thickness = thickness.max(1.0);
-            let mut path = Path::new();
             path.rect(x, center_y - thickness / 2.0, width, thickness);
-            this.fill_path(&path, &line_paint);
         };
 
         // OpenType position values measure from the baseline with +y pointing up,
         // while canvas y grows downward, so a line's center is `baseline - pos`.
         if decoration.underline {
-            emit(
-                self,
-                baseline - metrics.underline_position(),
-                metrics.underline_thickness(),
-            );
+            add_line(baseline - metrics.underline_position(), metrics.underline_thickness());
         }
         if decoration.strikethrough {
-            emit(
-                self,
-                baseline - metrics.strikeout_position(),
-                metrics.strikeout_thickness(),
-            );
+            add_line(baseline - metrics.strikeout_position(), metrics.strikeout_thickness());
         }
         if decoration.overline {
             // No dedicated metric; sit the line at the ascent with the underline
             // thickness, nudged up by half its thickness so it clears the glyphs.
             let thickness = metrics.underline_thickness().max(1.0);
-            emit(self, baseline - metrics.ascender() - thickness / 2.0, thickness);
+            add_line(baseline - metrics.ascender() - thickness / 2.0, thickness);
         }
+
+        if path.is_empty() {
+            return;
+        }
+
+        // The decoration takes the text paint's color, matching SVG where the
+        // decoration uses the text fill. The full paint flavor (gradient/image)
+        // is reused as-is so a gradient-filled run gets a gradient-filled line.
+        let line_paint = paint.clone().with_fill_rule(FillRule::NonZero);
+        self.fill_path(&path, &line_paint);
     }
 
     fn draw_glyph_run(
@@ -3253,52 +3254,61 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
          their own shadow on top of the run-level one"
     );
 }
-/// Collects the screen-space filled rectangles that text decoration emits.
+/// Collects the screen-space filled rectangles that text decoration emits,
+/// grouped by fill command.
 ///
-/// A decoration line is a solid `ConvexFill` drawn to the screen with no glyph
-/// texture. (Atlas glyph rasterization also emits `ConvexFill`s, but those run
-/// while the render target is the atlas image, so tracking the active target
-/// discriminates them.) Returns the vertical `[min_y, max_y]` span of each such
-/// fill, in screen space.
+/// A run's decoration lines are batched into one solid path fill drawn to the
+/// screen with no glyph texture: a single enabled line arrives as a
+/// one-contour `ConvexFill`, several enabled lines as one multi-contour
+/// (concave) fill command. (Atlas glyph rasterization also emits
+/// `ConvexFill`s, but those run while the render target is the atlas image,
+/// so tracking the active target discriminates them.) Returns one entry per
+/// such fill command, listing the vertical `[min_y, max_y]` span of each
+/// contour in that command, in screen space.
 #[cfg(all(test, feature = "textlayout"))]
-fn recorded_decoration_spans(commands: &[renderer::Command], verts: &[renderer::Vertex]) -> Vec<(f32, f32)> {
+fn recorded_decoration_fills(commands: &[renderer::Command], verts: &[renderer::Vertex]) -> Vec<Vec<(f32, f32)>> {
     use crate::paint::GlyphTexture;
     use renderer::{CommandType, RenderTarget};
 
     let mut target = RenderTarget::Screen;
-    let mut spans = Vec::new();
+    let mut fills = Vec::new();
 
     for cmd in commands {
         match &cmd.cmd_type {
             CommandType::SetRenderTarget(new_target) => target = *new_target,
-            CommandType::ConvexFill { .. }
+            CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
                 if target == RenderTarget::Screen && matches!(cmd.glyph_texture, GlyphTexture::None) =>
             {
-                let mut min_y = f32::INFINITY;
-                let mut max_y = f32::NEG_INFINITY;
+                let mut spans = Vec::new();
                 for drawable in &cmd.drawables {
                     if let Some((offset, len)) = drawable.fill_verts {
+                        let mut min_y = f32::INFINITY;
+                        let mut max_y = f32::NEG_INFINITY;
                         for v in &verts[offset..offset + len] {
                             min_y = min_y.min(v.y);
                             max_y = max_y.max(v.y);
                         }
+                        if min_y.is_finite() {
+                            spans.push((min_y, max_y));
+                        }
                     }
                 }
-                if min_y.is_finite() {
-                    spans.push((min_y, max_y));
+                if !spans.is_empty() {
+                    fills.push(spans);
                 }
             }
             _ => {}
         }
     }
 
-    spans
+    fills
 }
 
-/// With a decoration enabled, `fill_text` emits exactly one extra solid rect per
-/// enabled line, positioned from the font's own metrics: underline below the
-/// baseline, strikethrough above it (through the text), overline near the ascent.
-/// With no decoration, no such rect is emitted.
+/// With any decoration enabled, `fill_text` emits exactly ONE extra solid fill
+/// command for the run, carrying one rect per enabled line positioned from the
+/// font's own metrics: underline below the baseline, strikethrough above it
+/// (through the text), overline near the ascent. With no decoration, no such
+/// fill is emitted.
 #[cfg(feature = "textlayout")]
 #[test]
 fn fill_text_emits_decoration_rects() {
@@ -3334,18 +3344,19 @@ fn fill_text_emits_decoration_rects() {
             .with_text_baseline(Baseline::Alphabetic)
     };
 
-    // No decoration: no screen-space solid rects at all.
+    // No decoration: no screen-space solid fills at all.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
         canvas
             .fill_text(50.0, baseline_y, "Hello", &base_paint().with_font(&[font]))
             .unwrap();
         canvas.flush_to_output(());
-        let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
-        assert!(spans.is_empty(), "expected no decoration rect, got {spans:?}");
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert!(fills.is_empty(), "expected no decoration fill, got {fills:?}");
     }
 
-    // Underline: one rect, centered below the baseline at -underline_position.
+    // Underline: one fill command with one rect, centered below the baseline at
+    // -underline_position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
         let paint = base_paint()
@@ -3353,9 +3364,10 @@ fn fill_text_emits_decoration_rects() {
             .with_text_decoration_lines(true, false, false);
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
-        let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
-        assert_eq!(spans.len(), 1, "expected exactly one underline rect, got {spans:?}");
-        let (min_y, max_y) = spans[0];
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
+        let (min_y, max_y) = fills[0][0];
         let center = (min_y + max_y) / 2.0;
         let expected = baseline_y - metrics.underline_position();
         assert!(center > baseline_y, "underline should sit below the baseline");
@@ -3371,7 +3383,8 @@ fn fill_text_emits_decoration_rects() {
         );
     }
 
-    // Strikethrough: one rect, above the baseline at -strikeout_position.
+    // Strikethrough: one fill command with one rect, above the baseline at
+    // -strikeout_position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
         let paint = base_paint()
@@ -3379,9 +3392,14 @@ fn fill_text_emits_decoration_rects() {
             .with_text_decoration_lines(false, true, false);
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
-        let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
-        assert_eq!(spans.len(), 1, "expected exactly one strikethrough rect, got {spans:?}");
-        let (min_y, max_y) = spans[0];
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(
+            fills[0].len(),
+            1,
+            "expected exactly one strikethrough rect, got {fills:?}"
+        );
+        let (min_y, max_y) = fills[0][0];
         let center = (min_y + max_y) / 2.0;
         let expected = baseline_y - metrics.strikeout_position();
         assert!(center < baseline_y, "strikethrough should sit above the baseline");
@@ -3391,7 +3409,7 @@ fn fill_text_emits_decoration_rects() {
         );
     }
 
-    // Overline: one rect, above the ascent.
+    // Overline: one fill command with one rect, above the ascent.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
         let paint = base_paint()
@@ -3399,9 +3417,10 @@ fn fill_text_emits_decoration_rects() {
             .with_text_decoration_lines(false, false, true);
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
-        let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
-        assert_eq!(spans.len(), 1, "expected exactly one overline rect, got {spans:?}");
-        let (_, max_y) = spans[0];
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(fills[0].len(), 1, "expected exactly one overline rect, got {fills:?}");
+        let (_, max_y) = fills[0][0];
         assert!(
             max_y <= baseline_y - metrics.ascender() + 1.0,
             "overline (bottom {max_y}) should sit at/above the ascent {}",
@@ -3409,7 +3428,9 @@ fn fill_text_emits_decoration_rects() {
         );
     }
 
-    // All three at once: three distinct rects.
+    // All three at once: still exactly ONE fill command — the lines are batched
+    // into a single path and draw — carrying three disjoint rects, one at each
+    // metric-derived position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
         let paint = base_paint()
@@ -3417,8 +3438,40 @@ fn fill_text_emits_decoration_rects() {
             .with_text_decoration_lines(true, true, true);
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
-        let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(
+            fills.len(),
+            1,
+            "all lines must share one decoration fill, got {fills:?}"
+        );
+        let mut spans = fills[0].clone();
         assert_eq!(spans.len(), 3, "expected three decoration rects, got {spans:?}");
+
+        // Top to bottom: overline above the ascent, strikethrough above the
+        // baseline, underline below it — three non-overlapping bands.
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(
+            spans[0].1 <= baseline_y - metrics.ascender() + 1.0,
+            "overline (bottom {}) should sit at/above the ascent {}",
+            spans[0].1,
+            baseline_y - metrics.ascender()
+        );
+        let strike_center = (spans[1].0 + spans[1].1) / 2.0;
+        let strike_expected = baseline_y - metrics.strikeout_position();
+        assert!(
+            (strike_center - strike_expected).abs() <= 1.0,
+            "strikethrough center {strike_center} should be near {strike_expected}"
+        );
+        let under_center = (spans[2].0 + spans[2].1) / 2.0;
+        let under_expected = baseline_y - metrics.underline_position();
+        assert!(
+            (under_center - under_expected).abs() <= 1.0,
+            "underline center {under_center} should be near {under_expected}"
+        );
+        assert!(
+            spans[0].1 <= spans[1].0 && spans[1].1 <= spans[2].0,
+            "decoration bands should not overlap: {spans:?}"
+        );
     }
 }
 
@@ -3455,9 +3508,10 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
     canvas.fill_text(40.0, baseline_y, "Scaled", &paint).unwrap();
     canvas.flush_to_output(());
 
-    let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
-    assert_eq!(spans.len(), 1, "expected one underline rect, got {spans:?}");
-    let (min_y, max_y) = spans[0];
+    let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+    assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+    assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
+    let (min_y, max_y) = fills[0][0];
     let center = (min_y + max_y) / 2.0;
     // User-space underline center is baseline - underline_position; on screen the
     // whole thing is multiplied by the canvas scale.
@@ -3652,7 +3706,8 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         metrics.underline_position()
     );
 
-    // Drawing with the fallback font must not panic and must still emit the rects.
+    // Drawing with the fallback font must not panic and must still emit both
+    // rects, batched into the run's single decoration fill.
     let renderer = RecordingRenderer::default();
     let commands = renderer.last_commands.clone();
     let verts = renderer.last_verts.clone();
@@ -3668,10 +3723,11 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         .with_text_decoration_lines(true, true, false);
     canvas.fill_text(20.0, 100.0, "fallback", &paint).unwrap();
     canvas.flush_to_output(());
-    let spans = recorded_decoration_spans(&commands.borrow(), &verts.borrow());
+    let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+    assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
     assert_eq!(
-        spans.len(),
+        fills[0].len(),
         2,
-        "expected underline + strikethrough rects, got {spans:?}"
+        "expected underline + strikethrough rects in one fill, got {fills:?}"
     );
 }
