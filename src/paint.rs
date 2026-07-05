@@ -757,10 +757,14 @@ impl Paint {
     /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
     /// measured clockwise from the positive x axis, matching the Canvas 2D
     /// `createConicGradient(start_angle, cx, cy)` semantics.
+    ///
+    /// Following the Canvas convention that non-finite values must not poison
+    /// rendering state, a non-finite `start_angle` (NaN or an infinity) is
+    /// ignored and treated as `0.0`.
     pub fn conic_gradient_with_angle(cx: f32, cy: f32, start_angle: f32, start_color: Color, end_color: Color) -> Self {
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
-            start_angle,
+            start_angle: Self::finite_start_angle_or_zero(start_angle),
             colors: GradientColors::TwoStop { start_color, end_color },
         })
     }
@@ -779,6 +783,10 @@ impl Paint {
     /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
     /// measured clockwise from the positive x axis, matching the Canvas 2D
     /// `createConicGradient(start_angle, cx, cy)` semantics.
+    ///
+    /// Following the Canvas convention that non-finite values must not poison
+    /// rendering state, a non-finite `start_angle` (NaN or an infinity) is
+    /// ignored and treated as `0.0`.
     pub fn conic_gradient_stops_with_angle(
         cx: f32,
         cy: f32,
@@ -787,9 +795,20 @@ impl Paint {
     ) -> Self {
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
-            start_angle,
+            start_angle: Self::finite_start_angle_or_zero(start_angle),
             colors: GradientColors::from_stops(stops),
         })
+    }
+
+    /// A NaN or infinite conic start angle would propagate through the shader's
+    /// `fract()` wrap and poison every covered pixel, so the constructors above
+    /// drop such values in favor of the no-rotation default.
+    fn finite_start_angle_or_zero(start_angle: f32) -> f32 {
+        if start_angle.is_finite() {
+            start_angle
+        } else {
+            0.0
+        }
     }
 
     /// Sets the color of the paint.
@@ -1294,11 +1313,10 @@ impl Paint {
 
 #[cfg(test)]
 mod tests {
-    use super::Paint;
     #[cfg(feature = "serde")]
-    use super::{GradientColors, PaintFlavor};
-    #[cfg(feature = "serde")]
-    use crate::{geometry::Position, Color};
+    use super::{GradientColors, Position};
+    use super::{Paint, PaintFlavor};
+    use crate::Color;
 
     #[test]
     fn line_dash_empty_pattern_clears() {
@@ -1391,5 +1409,30 @@ mod tests {
             PaintFlavor::ConicGradient { start_angle, .. } => assert_eq!(start_angle, 2.75),
             other => panic!("expected ConicGradient, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn conic_gradient_non_finite_start_angle_is_treated_as_zero() {
+        let start_angle_of = |paint: Paint| match paint.flavor {
+            PaintFlavor::ConicGradient { start_angle, .. } => start_angle,
+            other => panic!("expected ConicGradient, got {other:?}"),
+        };
+
+        for bad_angle in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let two_stop = Paint::conic_gradient_with_angle(10.0, 20.0, bad_angle, Color::black(), Color::white());
+            assert_eq!(start_angle_of(two_stop), 0.0);
+
+            let multi_stop = Paint::conic_gradient_stops_with_angle(
+                10.0,
+                20.0,
+                bad_angle,
+                [(0.0, Color::black()), (1.0, Color::white())],
+            );
+            assert_eq!(start_angle_of(multi_stop), 0.0);
+        }
+
+        // Finite angles must pass through untouched.
+        let finite = Paint::conic_gradient_with_angle(10.0, 20.0, -1.25, Color::black(), Color::white());
+        assert_eq!(start_angle_of(finite), -1.25);
     }
 }
