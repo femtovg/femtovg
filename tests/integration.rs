@@ -295,16 +295,35 @@ fn font_metrics_report_typographic_metrics() {
     }
 
     // Canvas convention: +y points down, so subscripts drop below the baseline
-    // (positive) and superscripts rise above it (negative).
+    // (positive) and superscripts rise above it (negative). Beyond the sign, the
+    // recommended offset places the raised/lowered glyph within the font's own
+    // vertical envelope: a superscript typeset at its recommended size lifts its
+    // cap above the base x-height (so it reads as raised) yet stays within the
+    // ascent, and a subscript drops within the descent depth. This guards the
+    // sign normalization (the superscript y is negated from the raw OS/2 value)
+    // against a regression that swapped or mis-scaled the offsets.
+    let ascent = metrics.ascender();
+    let descent = metrics.descender().abs();
+
+    let sup_rise = -metrics.superscript_offset().1;
+    // Cap-height scaled down to the recommended superscript size, matching the
+    // space the rendered superscript glyph occupies.
+    let sup_cap = metrics.cap_height() * metrics.superscript_size().1 / font_size;
     assert!(
-        metrics.subscript_offset().1 > 0.0,
-        "subscript offset should point down, got {}",
-        metrics.subscript_offset().1
+        sup_rise > 0.0 && sup_rise < ascent,
+        "superscript rise ({sup_rise}) should lift within the ascent (0, {ascent})"
     );
     assert!(
-        metrics.superscript_offset().1 < 0.0,
-        "superscript offset should point up, got {}",
-        metrics.superscript_offset().1
+        sup_rise + sup_cap > metrics.x_height(),
+        "superscript cap top ({}) should clear the base x-height ({})",
+        sup_rise + sup_cap,
+        metrics.x_height()
+    );
+
+    let sub_drop = metrics.subscript_offset().1;
+    assert!(
+        sub_drop > 0.0 && sub_drop <= descent,
+        "subscript drop ({sub_drop}) should fall within the descent (0, {descent}]"
     );
 
     // The hhea line gap is commonly zero, but never negative for this font.
