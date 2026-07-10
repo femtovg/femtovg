@@ -204,6 +204,14 @@ impl Scissor {
             return Some(Rect::new(0., 0., canvas_width, canvas_height));
         };
 
+        // Abort if the clip has rounded corners: only the fragment shader's
+        // scissor mask applies the corner radius, and fast paths that treat the
+        // scissor as this plain rect bypass that mask. Returning None routes
+        // those draws through the normal path, which clips them correctly.
+        if self.radius > 0.0 {
+            return None;
+        }
+
         let Transform2D([a, b, c, d, x, y]) = self.transform;
 
         // Abort if we're skewing (usually doesn't happen)
