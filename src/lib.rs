@@ -1603,7 +1603,11 @@ where
         enum Rasterization {
             Path,
             Atlas,
-            ScaledAtlas { scale: f32, translation: (f32, f32) },
+            ScaledAtlas {
+                scale: f32,
+                true_scale: f32,
+                translation: (f32, f32),
+            },
         }
 
         // Classify the canvas transform. 1e-3 epsilon: tight enough to catch any
@@ -1611,10 +1615,10 @@ where
         let rasterization = match self.state().transform.as_uniform_scale_translation(1e-3) {
             // Rotation / skew / non-uniform / negative scale: outline rendering.
             None => Rasterization::Path,
-            Some((scale, tx, ty)) => {
+            Some((true_scale, tx, ty)) => {
                 // Quantize the baked scale so small animation steps don't churn the
                 // atlas; 1/16 steps (≈6%) are imperceptible at typical zoom levels.
-                let scale = geometry::quantize(scale, 1.0 / 16.0).max(1.0 / 16.0);
+                let scale = geometry::quantize(true_scale, 1.0 / 16.0).max(1.0 / 16.0);
                 if paint.text.font_size * scale > 92.0 {
                     // Cached bitmap would be too large.
                     Rasterization::Path
@@ -1624,6 +1628,7 @@ where
                 } else if matches!(paint.flavor, PaintFlavor::Color(_)) {
                     Rasterization::ScaledAtlas {
                         scale,
+                        true_scale,
                         translation: (tx, ty),
                     }
                 } else {
@@ -1756,10 +1761,19 @@ where
         // though the fallible rendering above used `?`.
         match rasterization {
             Rasterization::ScaledAtlas {
-                translation: (tx, ty), ..
+                scale,
+                true_scale,
+                translation: (tx, ty),
             } => {
+                // Rasterize at the quantized scale (cache-stable) but position with
+                // the TRUE scale: present the pre-scaled quads under the residual
+                // scale true/quantized (within one 1/16 step of 1.0) plus the true
+                // translation. This keeps glyphs locked to the same on-screen point
+                // as vector geometry under any zoom, instead of snapping by the
+                // quantization error times the glyph's distance from the origin.
+                let residual = true_scale / scale;
                 let saved = self.state().transform;
-                self.state_mut().transform = Transform2D::translation(tx, ty);
+                self.state_mut().transform = Transform2D::new(residual, 0.0, 0.0, residual, tx, ty);
                 self.draw_glyph_commands(draw_commands, paint);
                 self.state_mut().transform = saved;
             }
