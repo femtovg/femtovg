@@ -3132,6 +3132,8 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
         "shadow passes must not scale with glyph count: outline glyphs would each cast \
          their own shadow on top of the run-level one"
     );
+}
+
 /// Fills `path` once on `canvas`, flushes, and returns the raw bytes of the
 /// vertex buffer handed to the renderer for that single fill.
 #[cfg(test)]
