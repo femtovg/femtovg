@@ -2083,6 +2083,14 @@ where
     /// run's left edge, and `width` its advance width.
     #[cfg(feature = "textlayout")]
     fn draw_text_decorations(&mut self, paint: &Paint, baseline: f32, x: f32, width: f32) {
+        // NOTE: this assumes a horizontal writing mode. The lines run along the
+        // advance direction (x) and are offset perpendicular to it (y), spanning
+        // `[x, x + width]` at a baseline-relative y. That is correct for both LTR
+        // and RTL runs, since a horizontal decoration is direction-independent.
+        // A vertical writing mode (top-to-bottom) would need the lines to run
+        // along y and offset along x, driven by vertical metrics; the geometry
+        // below would have to be generalized to the advance axis rather than
+        // hardcoding x as the run axis.
         let decoration = paint.text.text_decoration;
 
         // Metrics in user-space units (scaled for the unscaled font size) so the
