@@ -147,12 +147,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             return params.inner_col;
         }
         case SHADER_TYPE_FillGradientConic: {
+            // Set `result` and fall through to the scissor + stroke-AA multiply
+            // below (like the other gradient cases); returning here would skip
+            // the clip and antialiasing, so conic fills would ignore scissors.
             let d = conicAngleFraction(vertex, params);
-            return mix(params.inner_col,params.outer_col,d);
+            result = mix(params.inner_col,params.outer_col,d);
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
-            return textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));
+            result = textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
