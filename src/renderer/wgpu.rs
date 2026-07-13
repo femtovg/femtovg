@@ -686,6 +686,17 @@ impl Renderer for WGPURenderer {
                             target_image,
                         );
                     }
+                    crate::ImageFilter::ColorMatrix { matrix } => {
+                        color_matrix_filter(
+                            &mut current_render_target,
+                            images,
+                            command,
+                            matrix,
+                            &mut render_pass_builder,
+                            &mut pipeline_and_bindgroup_mapper,
+                            target_image,
+                        );
+                    }
                 },
             }
         }
@@ -946,6 +957,75 @@ fn gaussian_blur_filter(
             &blur_params,
             images,
             Some(ImageOrTexture::Texture(horizontal_blur_buffer)),
+            command.glyph_texture,
+        );
+        render_pass_builder.draw(start as u32..(start + count) as u32);
+    }
+
+    *current_render_target = previous_render_target;
+    match *current_render_target {
+        RenderTarget::Screen => {
+            render_pass_builder.set_render_target_screen();
+        }
+        RenderTarget::Image(image_id) => {
+            render_pass_builder.set_render_target_image(images, image_id, wgpu::LoadOp::Load);
+        }
+    }
+}
+
+/// Single-pass color-matrix filter: sample the source once and apply the 4x5
+/// matrix. Mirrors `gaussian_blur_filter` but without the intermediate texture.
+#[allow(clippy::too_many_arguments)]
+fn color_matrix_filter(
+    current_render_target: &mut RenderTarget,
+    images: &mut ImageStore<Image>,
+    command: super::Command,
+    matrix: [f32; 20],
+    render_pass_builder: &mut RenderPassBuilder<'_>,
+    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
+    target_image: ImageId,
+) {
+    let blend_state = blend_state(&command).into();
+    let previous_render_target = *current_render_target;
+
+    let source_image = images.get(command.image.unwrap()).unwrap();
+    let image_paint = crate::Paint::image(
+        command.image.unwrap(),
+        0.,
+        0.,
+        source_image.info.width() as _,
+        source_image.info.height() as _,
+        0.,
+        1.,
+    );
+    let mut params = Params::new(
+        images,
+        &Default::default(),
+        &image_paint.flavor,
+        &Default::default(),
+        &Scissor::default(),
+        0.,
+        0.,
+        0.,
+    );
+    params.shader_type = ShaderType::FilterImageColorMatrix;
+    // The 4x5 matrix rides the dead scissor/paint-mat slots during the filter
+    // pass (see `renderColorMatrix` in the shader) — no uniform-array growth.
+    params.scissor_mat.copy_from_slice(&matrix[..12]);
+    params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+
+    render_pass_builder.set_render_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
+
+    if let Some((start, count)) = command.triangles_verts {
+        pipeline_and_bindgroup_mapper.update_renderpass(
+            render_pass_builder,
+            blend_state,
+            wgpu::PrimitiveTopology::TriangleList,
+            StencilTest::Disabled,
+            Some(wgpu::Face::Back),
+            &params,
+            images,
+            command.image.map(ImageOrTexture::Image),
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);

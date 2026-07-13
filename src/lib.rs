@@ -3262,6 +3262,7 @@ fn opaque_shadow_emits_offscreen_blur_pass() {
                 "expected sigma 3.0 for blur 6.0, got {sigma}"
             );
         }
+        Some(other) => panic!("opaque shadow must run the Gaussian blur filter, got {other:?}"),
         None => panic!("opaque shadow must run the Gaussian blur filter"),
     }
 
