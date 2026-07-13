@@ -440,6 +440,10 @@ impl Path {
     /// implementation notes (section F.6): identical start/end points omit the
     /// arc, a zero radius degrades to a straight line, negative radii use their
     /// absolute value, and radii too small to span the endpoints are scaled up.
+    // The seven parameters mirror the SVG path arc command `A rx ry
+    // x-axis-rotation large-arc-flag sweep-flag x y` one-to-one, so the count is
+    // fixed by the spec rather than a design choice.
+    #[allow(clippy::too_many_arguments)]
     pub fn svg_arc_to(&mut self, rx: f32, ry: f32, x_axis_rotation: f32, large_arc: bool, sweep: bool, x: f32, y: f32) {
         // The HTML Canvas path primitives (`ellipse()`, `arc()`, `arcTo()`)
         // return early without changing the path "if any of the arguments are
