@@ -246,6 +246,8 @@ pub enum ShaderType {
     FillGradientConic,
     /// Fill image conic gradient shader.
     FillImageGradientConic,
+    /// Color-matrix image filter shader (`feColorMatrix` / CSS color functions).
+    FilterImageColorMatrix,
 }
 
 impl ShaderType {
@@ -262,6 +264,7 @@ impl ShaderType {
             Self::FillColorUnclipped => 7,
             Self::FillGradientConic => 8,
             Self::FillImageGradientConic => 9,
+            Self::FilterImageColorMatrix => 10,
         }
     }
 

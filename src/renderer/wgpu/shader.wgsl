@@ -33,6 +33,7 @@ const SHADER_TYPE_TextureCopyUnclipped: i32 = 6;
 const SHADER_TYPE_FillColorUnclipped: i32 = 7;
 const SHADER_TYPE_FillGradientConic: i32 = 8;
 const SHADER_TYPE_FillImageGradientConic: i32 = 9;
+const SHADER_TYPE_FilterImageColorMatrix: i32 = 10;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -157,6 +158,9 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             let d = conicAngleFraction(vertex, params);
             result = ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
         }
+        case SHADER_TYPE_FilterImageColorMatrix: {
+            return renderColorMatrix(vertex, params);
+        }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
         }
@@ -184,6 +188,29 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     return result;
+}
+
+fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    // The 4x5 color matrix is packed into the scissor/paint matrix slots (dead
+    // during a filter pass): scissor_mat columns 0..2 hold the first 12 values,
+    // paint_mat columns 0..1 the last 8. Apply in unpremultiplied sRGB space,
+    // clamp to [0,1], then re-premultiply — unpremultiplying avoids edge halos
+    // and the clamp keeps overflowing matrices from producing out-of-range/NaN.
+    var c: vec4<f32> = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent);
+    if (c.a > 0.0) {
+        c = vec4<f32>(c.rgb / c.a, c.a);
+    }
+    let m0 = params.scissor_mat[0];
+    let m1 = params.scissor_mat[1];
+    let m2 = params.scissor_mat[2];
+    let m3 = params.paint_mat[0];
+    let m4 = params.paint_mat[1];
+    let r = m0.x * c.r + m0.y * c.g + m0.z * c.b + m0.w * c.a + m1.x;
+    let g = m1.y * c.r + m1.z * c.g + m1.w * c.b + m2.x * c.a + m2.y;
+    let b = m2.z * c.r + m2.w * c.g + m3.x * c.b + m3.y * c.a + m3.z;
+    let a = m3.w * c.r + m4.x * c.g + m4.y * c.b + m4.z * c.a + m4.w;
+    let outc = clamp(vec4<f32>(r, g, b, a), vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(outc.rgb * outc.a, outc.a);
 }
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {

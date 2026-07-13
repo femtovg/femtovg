@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 10],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 11],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 10],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 11],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -183,6 +183,17 @@ impl OpenGl {
                     ShaderType::FillImageGradientConic,
                     with_glyph_texture,
                 )?),
+                if with_glyph_texture {
+                    // Image filter is unrelated to glyph rendering
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageColorMatrix,
+                        false,
+                    )?)
+                },
             ])
         };
 
@@ -582,7 +593,60 @@ impl OpenGl {
     ) {
         match filter {
             ImageFilter::GaussianBlur { sigma } => self.render_gaussian_blur(images, cmd, target_image, sigma),
+            ImageFilter::ColorMatrix { matrix } => self.render_color_matrix(images, cmd, target_image, matrix),
         }
+    }
+
+    fn render_color_matrix(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        matrix: [f32; 20],
+    ) {
+        let original_render_target = self.current_render_target;
+        let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
+
+        let image_paint = crate::Paint::image(
+            cmd.image.unwrap(),
+            0.,
+            0.,
+            source_image_info.width() as _,
+            source_image_info.height() as _,
+            0.,
+            1.,
+        );
+        let mut params = Params::new(
+            images,
+            &Transform2D::default(),
+            &image_paint.flavor,
+            &GlyphTexture::default(),
+            &Scissor::default(),
+            0.,
+            0.,
+            0.,
+        );
+        params.shader_type = ShaderType::FilterImageColorMatrix;
+        // The color matrix rides the scissor/paint-matrix uniform slots, which are
+        // dead during a filter pass (no scissor, no paint gradient): frag[0..2]
+        // hold the first 12 values, frag[3..4] the last 8, so no uniform-array
+        // growth is needed. The shader reads them back as a row-major 4x5 matrix.
+        params.scissor_mat.copy_from_slice(&matrix[..12]);
+        params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+
+        self.set_target(images, RenderTarget::Image(target_image));
+        self.main_program().set_view(self.view);
+        self.clear_rect(
+            0,
+            0,
+            source_image_info.width() as _,
+            source_image_info.height() as _,
+            Color::rgbaf(0., 0., 0., 0.),
+        );
+        self.triangles(images, &cmd, &params);
+
+        self.set_target(images, original_render_target);
+        self.main_program().set_view(self.view);
     }
 
     fn render_gaussian_blur(
