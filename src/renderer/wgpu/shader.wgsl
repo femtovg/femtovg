@@ -151,11 +151,11 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             // below (like the other gradient cases); returning here would skip
             // the clip and antialiasing, so conic fills would ignore scissors.
             let d = conicAngleFraction(vertex, params);
-            result = mix(params.inner_col,params.outer_col,d);
+            result = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
-            result = textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));
+            result = ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
@@ -223,12 +223,23 @@ fn strokeMask(vertex: VertexOutput, params: Params) -> f32 {
     //return smoothstep(0.0, 1.0, (1.0-abs(vertex.ftcoord.x*2.0-1.0))*params.stroke_mult) * smoothstep(0.0, 1.0, vertex.ftcoord.y);
 }
 
+// Interleaved gradient noise dither (see the GLSL shader / issue femtovg/femtovg#239):
+// a cheap, deterministic screen-space ordered dither. A sub-LSB colour offset
+// before the 8-bit write breaks up gradient banding between close colours.
+fn ditherNoise(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
+}
+fn ditherGradient(color: vec4<f32>, fragcoord: vec2<f32>) -> vec4<f32> {
+    let d = (ditherNoise(fragcoord) - 0.5) / 255.0;
+    return vec4<f32>(color.rgb + d, color.a);
+}
+
 fn renderGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate gradient color using box gradient
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return mix(params.inner_col,params.outer_col,d);
+    return ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.
@@ -237,7 +248,7 @@ fn renderImageGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));//mix(innerCol,outerCol,d);
+    return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
 }
 
 fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {

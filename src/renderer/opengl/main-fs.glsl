@@ -73,12 +73,26 @@ float strokeMask() {
 }
 #endif
 
+// Interleaved gradient noise (Jimenez 2014): a cheap, deterministic, screen-space
+// ordered dither. Offsetting the gradient colour by up to +/-0.5 of an 8-bit step
+// before the framebuffer quantizes it spreads the rounding spatially, breaking up
+// the banding that appears between close colours over a large gradient (issue
+// femtovg/femtovg#239). The offset is sub-LSB, so solid regions are unaffected and
+// the Unorm write clamps it away at the 0.0/1.0 extremes.
+float ditherNoise(vec2 p) {
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+vec4 ditherGradient(vec4 color) {
+    float d = (ditherNoise(gl_FragCoord.xy) - 0.5) / 255.0;
+    return vec4(color.rgb + d, color.a);
+}
+
 vec4 renderGradient() {
     // Calculate gradient color using box gradient
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    return mix(innerCol,outerCol,d);
+    return ditherGradient(mix(innerCol,outerCol,d));
 }
 
 // Image-based Gradient; sample a texture using the gradient position.
@@ -87,7 +101,7 @@ vec4 renderImageGradient() {
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    return texture2D(tex, vec2(d, 0.0));//mix(innerCol,outerCol,d);
+    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
 }
 
 float conicAngleFraction() {
@@ -102,12 +116,12 @@ float conicAngleFraction() {
 
 vec4 renderGradientConic() {
     float d = conicAngleFraction();
-    return mix(innerCol,outerCol,d);
+    return ditherGradient(mix(innerCol,outerCol,d));
 }
 
 vec4 renderImageGradientConic() {
     float d = conicAngleFraction();
-    return texture2D(tex, vec2(d, 0.0));
+    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
 }
 
 vec4 renderImage() {
