@@ -240,6 +240,46 @@ pub struct WGPURenderer {
 }
 
 impl WGPURenderer {
+    /// Uploads a browser-side image source straight into an image's texture.
+    #[cfg(target_arch = "wasm32")]
+    fn copy_external_image(
+        &self,
+        image: &Image,
+        source: wgpu::ExternalImageSource,
+        size: crate::image::Size,
+        x: usize,
+        y: usize,
+    ) -> Result<(), crate::ErrorKind> {
+        let Texture::Internal(texture) = &image.texture else {
+            return Err(crate::ErrorKind::UnsupportedOperation);
+        };
+        self.queue.copy_external_image_to_texture(
+            &wgpu::CopyExternalImageSourceInfo {
+                source,
+                origin: wgpu::Origin2d::ZERO,
+                flip_y: false,
+            },
+            wgpu::CopyExternalImageDestInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: x as u32,
+                    y: y as u32,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+                color_space: wgpu::PredefinedColorSpace::Srgb,
+                premultiplied_alpha: true,
+            },
+            wgpu::Extent3d {
+                width: size.width as _,
+                height: size.height as _,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
     /// Creates a new renderer for the device.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let module = wgpu::include_wgsl!("wgpu/shader.wgsl");
@@ -602,48 +642,6 @@ impl Renderer for WGPURenderer {
         x: usize,
         y: usize,
     ) -> Result<(), crate::ErrorKind> {
-        #[cfg(target_arch = "wasm32")]
-        let external_source = match data {
-            crate::ImageSource::HtmlImageElement(element) => {
-                Some(wgpu::ExternalImageSource::HTMLImageElement(element.clone()))
-            }
-            crate::ImageSource::HtmlCanvasElement(element) => {
-                Some(wgpu::ExternalImageSource::HTMLCanvasElement(element.clone()))
-            }
-            _ => None,
-        };
-        #[cfg(target_arch = "wasm32")]
-        if let Some(source) = external_source {
-            let Texture::Internal(texture) = &image.texture else {
-                return Err(crate::ErrorKind::UnsupportedOperation);
-            };
-            self.queue.copy_external_image_to_texture(
-                &wgpu::CopyExternalImageSourceInfo {
-                    source,
-                    origin: wgpu::Origin2d::ZERO,
-                    flip_y: false,
-                },
-                wgpu::CopyExternalImageDestInfo {
-                    texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: x as u32,
-                        y: y as u32,
-                        z: 0,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                    color_space: wgpu::PredefinedColorSpace::Srgb,
-                    premultiplied_alpha: true,
-                },
-                wgpu::Extent3d {
-                    width: data.dimensions().width as _,
-                    height: data.dimensions().height as _,
-                    depth_or_array_layers: 1,
-                },
-            );
-            return Ok(());
-        }
-
         use rgb::ComponentBytes;
 
         let converted_rgba;
@@ -663,8 +661,14 @@ impl Renderer for WGPURenderer {
             crate::ImageSource::Rgba(img) => (img.buf().as_bytes(), 4),
             crate::ImageSource::Gray(img) => (img.buf().as_bytes(), 1),
             #[cfg(target_arch = "wasm32")]
-            crate::ImageSource::HtmlImageElement(..) | crate::ImageSource::HtmlCanvasElement(..) => {
-                unreachable!()
+            crate::ImageSource::HtmlImageElement(element) => {
+                let source = wgpu::ExternalImageSource::HTMLImageElement(element.clone());
+                return self.copy_external_image(image, source, data.dimensions(), x, y);
+            }
+            #[cfg(target_arch = "wasm32")]
+            crate::ImageSource::HtmlCanvasElement(element) => {
+                let source = wgpu::ExternalImageSource::HTMLCanvasElement(element.clone());
+                return self.copy_external_image(image, source, data.dimensions(), x, y);
             }
         };
 
