@@ -603,13 +603,23 @@ impl Renderer for WGPURenderer {
         y: usize,
     ) -> Result<(), crate::ErrorKind> {
         #[cfg(target_arch = "wasm32")]
-        if let crate::ImageSource::HtmlImageElement(htmlimage) = data {
+        let external_source = match data {
+            crate::ImageSource::HtmlImageElement(element) => {
+                Some(wgpu::ExternalImageSource::HTMLImageElement(element.clone()))
+            }
+            crate::ImageSource::HtmlCanvasElement(element) => {
+                Some(wgpu::ExternalImageSource::HTMLCanvasElement(element.clone()))
+            }
+            _ => None,
+        };
+        #[cfg(target_arch = "wasm32")]
+        if let Some(source) = external_source {
             let Texture::Internal(texture) = &image.texture else {
                 return Err(crate::ErrorKind::UnsupportedOperation);
             };
             self.queue.copy_external_image_to_texture(
                 &wgpu::CopyExternalImageSourceInfo {
-                    source: wgpu::ExternalImageSource::HTMLImageElement(htmlimage.clone()),
+                    source,
                     origin: wgpu::Origin2d::ZERO,
                     flip_y: false,
                 },
@@ -653,7 +663,7 @@ impl Renderer for WGPURenderer {
             crate::ImageSource::Rgba(img) => (img.buf().as_bytes(), 4),
             crate::ImageSource::Gray(img) => (img.buf().as_bytes(), 1),
             #[cfg(target_arch = "wasm32")]
-            crate::ImageSource::HtmlImageElement(..) => {
+            crate::ImageSource::HtmlImageElement(..) | crate::ImageSource::HtmlCanvasElement(..) => {
                 unreachable!()
             }
         };

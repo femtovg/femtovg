@@ -59,6 +59,9 @@ pub enum ImageSource<'a> {
     /// Image source referencing a HTML image element (only available on `wasm32` target)
     #[cfg(target_arch = "wasm32")]
     HtmlImageElement(&'a web_sys::HtmlImageElement),
+    /// Image source referencing a HTML canvas element (only available on `wasm32` target)
+    #[cfg(target_arch = "wasm32")]
+    HtmlCanvasElement(&'a web_sys::HtmlCanvasElement),
 }
 
 impl ImageSource<'_> {
@@ -69,7 +72,7 @@ impl ImageSource<'_> {
             Self::Rgba(_) => PixelFormat::Rgba8,
             Self::Gray(_) => PixelFormat::Gray8,
             #[cfg(target_arch = "wasm32")]
-            Self::HtmlImageElement(_) => PixelFormat::Rgba8,
+            Self::HtmlImageElement(_) | Self::HtmlCanvasElement(_) => PixelFormat::Rgba8,
         }
     }
 
@@ -81,6 +84,8 @@ impl ImageSource<'_> {
             Self::Gray(imgref) => Size::new(imgref.width(), imgref.height()),
             #[cfg(target_arch = "wasm32")]
             Self::HtmlImageElement(element) => Size::new(element.width() as usize, element.height() as usize),
+            #[cfg(target_arch = "wasm32")]
+            Self::HtmlCanvasElement(element) => Size::new(element.width() as usize, element.height() as usize),
         }
     }
 }
@@ -107,6 +112,13 @@ impl<'a> From<ImgRef<'a, Gray<u8>>> for ImageSource<'a> {
 impl<'a> From<&'a web_sys::HtmlImageElement> for ImageSource<'a> {
     fn from(src: &'a web_sys::HtmlImageElement) -> Self {
         Self::HtmlImageElement(src)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<'a> From<&'a web_sys::HtmlCanvasElement> for ImageSource<'a> {
+    fn from(src: &'a web_sys::HtmlCanvasElement) -> Self {
+        Self::HtmlCanvasElement(src)
     }
 }
 
