@@ -256,6 +256,9 @@ pub struct WGPURenderer {
     uniform_buffer: Option<wgpu::Buffer>,
     uniform_stride: u64,
     uniform_slots: u64,
+    /// Resident vertex buffer, as opengl.rs keeps one. Rebuilding it per frame re-uploaded everything.
+    vertex_buffer: Option<wgpu::Buffer>,
+    vertex_capacity: u64,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
@@ -424,6 +427,8 @@ impl WGPURenderer {
             uniform_buffer: None,
             uniform_stride,
             uniform_slots: 0,
+            vertex_buffer: None,
+            vertex_capacity: 0,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             bind_group_layout,
@@ -477,11 +482,24 @@ impl Renderer for WGPURenderer {
 
         let texture_view = output.view.clone();
 
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Main Vertex Buffer"),
-            contents: bytemuck::cast_slice(verts),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let vertex_bytes: &[u8] = bytemuck::cast_slice(verts);
+        // write_buffer needs a length that is a multiple of 4.
+        let vertex_needed = (vertex_bytes.len() as u64).div_ceil(4) * 4;
+        if self.vertex_capacity < vertex_needed {
+            let capacity = vertex_needed.next_power_of_two().max(4096);
+            self.vertex_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Main Vertex Buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.vertex_capacity = capacity;
+        }
+        if !vertex_bytes.is_empty() {
+            self.queue
+                .write_buffer(self.vertex_buffer.as_ref().unwrap(), 0, vertex_bytes);
+        }
+        let vertex_buffer = self.vertex_buffer.clone().unwrap();
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
             if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
@@ -1516,6 +1534,8 @@ struct RenderPassBuilder<'a> {
     screen_surface_format: wgpu::TextureFormat,
     stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group: wgpu::BindGroup,
+    /// Bumped when the render pass is recreated, so state caches can tell they are stale.
+    pass_generation: u32,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -1548,6 +1568,7 @@ impl<'a> RenderPassBuilder<'a> {
             screen_view,
             screen_surface_format,
             stencil_buffer_for_textures,
+            pass_generation: 0,
             viewport_bind_group,
         }
     }
@@ -1707,6 +1728,7 @@ impl<'a> RenderPassBuilder<'a> {
     }
 
     fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
+        self.pass_generation += 1;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer
@@ -1765,6 +1787,12 @@ struct CommandToPipelineAndBindGroupMapper {
     /// Last uniforms and their offset, so a command's drawables upload once between them.
     current_uniforms: Option<UniformArray>,
     current_uniform_offset: u64,
+    /// State last set on the pass, so a set_* that would change nothing is skipped, as opengl.rs does.
+    current_pipeline_state: Option<PipelineState>,
+    current_stencil_reference: Option<u32>,
+    current_bound_offset: Option<u32>,
+    /// Which pass the caches above belong to. A new pass resets state, so stale ones draw wrong.
+    current_pass_generation: Option<u32>,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1797,6 +1825,10 @@ impl CommandToPipelineAndBindGroupMapper {
             uniform_staging: Vec::new(),
             current_uniforms: None,
             current_uniform_offset: 0,
+            current_pipeline_state: None,
+            current_stencil_reference: None,
+            current_bound_offset: None,
+            current_pass_generation: None,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1818,17 +1850,29 @@ impl CommandToPipelineAndBindGroupMapper {
         image: Option<ImageOrTexture>,
         glyph_texture: GlyphTexture,
     ) {
+        // A new render pass resets state, so nothing set on the previous one still counts.
+        if self.current_pass_generation != Some(render_pass_builder.pass_generation) {
+            self.current_pass_generation = Some(render_pass_builder.pass_generation);
+            self.current_pipeline_state = None;
+            self.current_stencil_reference = None;
+            self.current_bound_offset = None;
+        }
+
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();
 
-        if let StencilTest::Enabled { stencil_reference, .. } = &stencil_test {
-            render_pass.set_stencil_reference(*stencil_reference);
-        } else {
-            render_pass.set_stencil_reference(0);
+        let stencil_reference = match &stencil_test {
+            StencilTest::Enabled { stencil_reference, .. } => *stencil_reference,
+            _ => 0,
+        };
+        if self.current_stencil_reference != Some(stencil_reference) {
+            render_pass.set_stencil_reference(stencil_reference);
+            self.current_stencil_reference = Some(stencil_reference);
         }
 
         let bind_group_state = BindGroupState { image, glyph_texture };
 
-        if self.current_bind_group_state != Some(bind_group_state.clone()) {
+        let bind_group_changed = self.current_bind_group_state != Some(bind_group_state.clone());
+        if bind_group_changed {
             self.current_bind_group = bind_group_state
                 .materialize(
                     &self.device,
@@ -1853,11 +1897,12 @@ impl CommandToPipelineAndBindGroupMapper {
             self.current_uniforms = Some(uniforms);
             self.current_uniform_offset = offset;
         }
-        render_pass.set_bind_group(
-            1,
-            self.current_bind_group.as_ref().unwrap(),
-            &[self.current_uniform_offset as u32],
-        );
+        // Nothing to rebind while both the bind group and the offset hold, as within a command.
+        let offset = self.current_uniform_offset as u32;
+        if bind_group_changed || self.current_bound_offset != Some(offset) {
+            render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
+            self.current_bound_offset = Some(offset);
+        }
 
         let pipeline_state = PipelineState::new(
             color_blend,
@@ -1881,7 +1926,10 @@ impl CommandToPipelineAndBindGroupMapper {
         });
 
         render_pipeline.accessed = true;
-        render_pass.set_pipeline(&render_pipeline.pipeline);
+        if self.current_pipeline_state.as_ref() != Some(&pipeline_state) {
+            render_pass.set_pipeline(&render_pipeline.pipeline);
+            self.current_pipeline_state = Some(pipeline_state);
+        }
     }
 }
 
