@@ -633,6 +633,15 @@ impl Renderer for WGPURenderer {
 
         drop(render_pass_builder);
 
+        // One upload for the frame. write_buffer is ordered ahead of the caller's submit.
+        if !pipeline_and_bindgroup_mapper.uniform_staging.is_empty() {
+            self.queue.write_buffer(
+                self.uniform_buffer.as_ref().unwrap(),
+                0,
+                &pipeline_and_bindgroup_mapper.uniform_staging,
+            );
+        }
+
         let command_buffer = encoder.finish();
 
         self.pipeline_cache
@@ -1751,7 +1760,8 @@ struct CommandToPipelineAndBindGroupMapper {
     queue: wgpu::Queue,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    next_uniform_slot: u64,
+    /// The frame's uniform slots, padded to `uniform_stride`, uploaded once when recording ends.
+    uniform_staging: Vec<u8>,
     /// Last uniforms and their offset, so a command's drawables upload once between them.
     current_uniforms: Option<UniformArray>,
     current_uniform_offset: u64,
@@ -1784,7 +1794,7 @@ impl CommandToPipelineAndBindGroupMapper {
             queue,
             uniform_buffer,
             uniform_stride,
-            next_uniform_slot: 0,
+            uniform_staging: Vec::new(),
             current_uniforms: None,
             current_uniform_offset: 0,
             shader_module,
@@ -1835,10 +1845,11 @@ impl CommandToPipelineAndBindGroupMapper {
         // write_buffer is ordered ahead of the submit, so writing during recording is sound.
         let uniforms = UniformArray::from(params);
         if self.current_uniforms.as_ref() != Some(&uniforms) {
-            let offset = self.next_uniform_slot * self.uniform_stride;
-            self.next_uniform_slot += 1;
-            self.queue
-                .write_buffer(&self.uniform_buffer, offset, bytemuck::cast_slice(uniforms.as_slice()));
+            let offset = self.uniform_staging.len() as u64;
+            self.uniform_staging
+                .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
+            // Pad to a whole slot so the next offset stays aligned.
+            self.uniform_staging.resize((offset + self.uniform_stride) as usize, 0);
             self.current_uniforms = Some(uniforms);
             self.current_uniform_offset = offset;
         }
