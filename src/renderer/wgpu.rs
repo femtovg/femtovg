@@ -62,6 +62,8 @@ use super::Params;
 use super::Vertex;
 
 const UNIFORMARRAY_SIZE: usize = 14;
+/// Size of one `UniformArray`, which is the window a dynamic offset binding exposes.
+const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 
 #[derive(Clone, PartialEq)]
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
@@ -247,10 +249,13 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    empty_texture: wgpu::Texture,
     /// View of the 1x1 empty texture. Never varies, and rebuilding it per draw cost a wasm round trip.
     empty_texture_view: wgpu::TextureView,
     sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    /// One uniform buffer per frame, in slots aligned for dynamic offsets. Grows, never shrinks.
+    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_stride: u64,
+    uniform_slots: u64,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
@@ -316,6 +321,10 @@ impl WGPURenderer {
             label: None,
             view_formats: &[],
         };
+        // A dynamic offset must be a multiple of this, usually 256.
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(1);
+        let uniform_stride = UNIFORM_BYTES.div_ceil(alignment) * alignment;
+
         let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("empty"),
             view_formats: &[],
@@ -355,8 +364,9 @@ impl WGPURenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        // One buffer per frame, each draw reaching its slot by offset.
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
                     },
                     count: None,
                 },
@@ -410,8 +420,10 @@ impl WGPURenderer {
             screen_view: [0.0, 0.0],
 
             empty_texture_view: empty_texture.create_view(&Default::default()),
-            empty_texture,
             sampler_cache: Rc::new(RefCell::new(HashMap::new())),
+            uniform_buffer: None,
+            uniform_stride,
+            uniform_slots: 0,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             bind_group_layout,
@@ -438,6 +450,22 @@ impl Renderer for WGPURenderer {
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
     ) -> Self::CommandBuffer {
+        // Loose upper bound: growing mid-frame would invalidate bindings already recorded.
+        let needed_slots: u64 = commands
+            .iter()
+            .map(|command| command.drawables.len() as u64 * 4 + 8)
+            .sum();
+        if self.uniform_buffer.is_none() || self.uniform_slots < needed_slots {
+            let slots = needed_slots.next_power_of_two().max(64);
+            self.uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Fragment Uniform Buffer"),
+                size: slots * self.uniform_stride,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.uniform_slots = slots;
+        }
+
         if commands.is_empty() {
             return None;
         }
@@ -503,6 +531,9 @@ impl Renderer for WGPURenderer {
             self.device.clone(),
             self.empty_texture_view.clone(),
             self.sampler_cache.clone(),
+            self.queue.clone(),
+            self.uniform_buffer.clone().unwrap(),
+            self.uniform_stride,
             self.shader_module.clone(),
             self.bind_group_layout.clone(),
             self.pipeline_layout.clone(),
@@ -1394,7 +1425,6 @@ enum ImageOrTexture {
 struct BindGroupState {
     image: Option<ImageOrTexture>,
     glyph_texture: GlyphTexture,
-    uniforms: UniformArray,
 }
 
 impl BindGroupState {
@@ -1405,13 +1435,8 @@ impl BindGroupState {
         bind_group_layout: &wgpu::BindGroupLayout,
         empty_texture_view: &wgpu::TextureView,
         sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
+        uniform_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Fragment Uniform Buffer"),
-            contents: bytemuck::cast_slice(self.uniforms.as_slice()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
         let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
@@ -1436,7 +1461,11 @@ impl BindGroupState {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: uniform_buf.as_entire_binding(),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: uniform_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(UNIFORM_BYTES),
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1719,6 +1748,10 @@ struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
     empty_texture_view: wgpu::TextureView,
     sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    queue: wgpu::Queue,
+    uniform_buffer: wgpu::Buffer,
+    uniform_stride: u64,
+    next_uniform_slot: u64,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1733,6 +1766,9 @@ impl CommandToPipelineAndBindGroupMapper {
         device: wgpu::Device,
         empty_texture_view: wgpu::TextureView,
         sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+        queue: wgpu::Queue,
+        uniform_buffer: wgpu::Buffer,
+        uniform_stride: u64,
         shader_module: Rc<wgpu::ShaderModule>,
         bind_group_layout: wgpu::BindGroupLayout,
         pipeline_layout: wgpu::PipelineLayout,
@@ -1742,6 +1778,10 @@ impl CommandToPipelineAndBindGroupMapper {
             device: device.clone(),
             empty_texture_view,
             sampler_cache,
+            queue,
+            uniform_buffer,
+            uniform_stride,
+            next_uniform_slot: 0,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1771,11 +1811,7 @@ impl CommandToPipelineAndBindGroupMapper {
             render_pass.set_stencil_reference(0);
         }
 
-        let bind_group_state = BindGroupState {
-            image,
-            glyph_texture,
-            uniforms: UniformArray::from(params),
-        };
+        let bind_group_state = BindGroupState { image, glyph_texture };
 
         if self.current_bind_group_state != Some(bind_group_state.clone()) {
             self.current_bind_group = bind_group_state
@@ -1785,11 +1821,21 @@ impl CommandToPipelineAndBindGroupMapper {
                     &self.bind_group_layout,
                     &self.empty_texture_view,
                     &self.sampler_cache,
+                    &self.uniform_buffer,
                 )
                 .into();
             self.current_bind_group_state = Some(bind_group_state);
         }
-        render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[]);
+
+        // write_buffer is ordered ahead of the submit, so writing during recording is sound.
+        let offset = self.next_uniform_slot * self.uniform_stride;
+        self.next_uniform_slot += 1;
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            offset,
+            bytemuck::cast_slice(UniformArray::from(params).as_slice()),
+        );
+        render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset as u32]);
 
         let pipeline_state = PipelineState::new(
             color_blend,
