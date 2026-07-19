@@ -239,6 +239,35 @@ pub struct WGPURenderer {
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
 }
 
+/// Rasterizes an image element into an offscreen canvas at the given size.
+#[cfg(target_arch = "wasm32")]
+fn rasterize_to_canvas(
+    element: &web_sys::HtmlImageElement,
+    size: crate::image::Size,
+) -> Result<web_sys::HtmlCanvasElement, crate::ErrorKind> {
+    use wasm_bindgen::JsCast;
+
+    let canvas = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.create_element("canvas").ok())
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        .ok_or(crate::ErrorKind::UnsupportedOperation)?;
+    canvas.set_width(size.width as u32);
+    canvas.set_height(size.height as u32);
+
+    let context = canvas
+        .get_context("2d")
+        .ok()
+        .flatten()
+        .and_then(|context| context.dyn_into::<web_sys::CanvasRenderingContext2d>().ok())
+        .ok_or(crate::ErrorKind::UnsupportedOperation)?;
+    context
+        .draw_image_with_html_image_element_and_dw_and_dh(element, 0., 0., size.width as f64, size.height as f64)
+        .map_err(|_| crate::ErrorKind::UnsupportedOperation)?;
+
+    Ok(canvas)
+}
+
 impl WGPURenderer {
     /// Uploads a browser-side image source straight into an image's texture.
     #[cfg(target_arch = "wasm32")]
@@ -662,8 +691,16 @@ impl Renderer for WGPURenderer {
             crate::ImageSource::Gray(img) => (img.buf().as_bytes(), 1),
             #[cfg(target_arch = "wasm32")]
             crate::ImageSource::HtmlImageElement(element) => {
-                let source = wgpu::ExternalImageSource::HTMLImageElement(element.clone());
-                return self.copy_external_image(image, source, data.dimensions(), x, y);
+                let size = data.dimensions();
+                // WebGPU copies from the natural size, so attribute sizes would overflow or crop the rect.
+                let resized =
+                    element.width() != element.natural_width() || element.height() != element.natural_height();
+                let source = if resized {
+                    wgpu::ExternalImageSource::HTMLCanvasElement(rasterize_to_canvas(element, size)?)
+                } else {
+                    wgpu::ExternalImageSource::HTMLImageElement(element.clone())
+                };
+                return self.copy_external_image(image, source, size, x, y);
             }
             #[cfg(target_arch = "wasm32")]
             crate::ImageSource::HtmlCanvasElement(element) => {
