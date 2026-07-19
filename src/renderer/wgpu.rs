@@ -1752,6 +1752,9 @@ struct CommandToPipelineAndBindGroupMapper {
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
     next_uniform_slot: u64,
+    /// Last uniforms and their offset, so a command's drawables upload once between them.
+    current_uniforms: Option<UniformArray>,
+    current_uniform_offset: u64,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1782,6 +1785,8 @@ impl CommandToPipelineAndBindGroupMapper {
             uniform_buffer,
             uniform_stride,
             next_uniform_slot: 0,
+            current_uniforms: None,
+            current_uniform_offset: 0,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1828,14 +1833,20 @@ impl CommandToPipelineAndBindGroupMapper {
         }
 
         // write_buffer is ordered ahead of the submit, so writing during recording is sound.
-        let offset = self.next_uniform_slot * self.uniform_stride;
-        self.next_uniform_slot += 1;
-        self.queue.write_buffer(
-            &self.uniform_buffer,
-            offset,
-            bytemuck::cast_slice(UniformArray::from(params).as_slice()),
+        let uniforms = UniformArray::from(params);
+        if self.current_uniforms.as_ref() != Some(&uniforms) {
+            let offset = self.next_uniform_slot * self.uniform_stride;
+            self.next_uniform_slot += 1;
+            self.queue
+                .write_buffer(&self.uniform_buffer, offset, bytemuck::cast_slice(uniforms.as_slice()));
+            self.current_uniforms = Some(uniforms);
+            self.current_uniform_offset = offset;
+        }
+        render_pass.set_bind_group(
+            1,
+            self.current_bind_group.as_ref().unwrap(),
+            &[self.current_uniform_offset as u32],
         );
-        render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset as u32]);
 
         let pipeline_state = PipelineState::new(
             color_blend,
