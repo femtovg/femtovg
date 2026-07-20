@@ -2346,6 +2346,8 @@ pub use rgb;
 pub struct RecordingRenderer {
     /// Vector of the last commands submitted to the renderer.
     pub last_commands: Rc<RefCell<Vec<renderer::Command>>>,
+    /// Vertex buffer submitted with the last render call.
+    pub last_verts: Rc<RefCell<Vec<renderer::Vertex>>>,
 }
 
 #[cfg(test)]
@@ -2362,10 +2364,11 @@ impl Renderer for RecordingRenderer {
         &mut self,
         _output: impl Into<Self::RenderOutput>,
         _images: &mut ImageStore<Self::Image>,
-        _verts: &[renderer::Vertex],
+        verts: &[renderer::Vertex],
         commands: Vec<renderer::Command>,
     ) {
         *self.last_commands.borrow_mut() = commands;
+        *self.last_verts.borrow_mut() = verts.to_vec();
     }
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
@@ -3223,4 +3226,133 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
         "shadow passes must not scale with glyph count: outline glyphs would each cast \
          their own shadow on top of the run-level one"
     );
+}
+
+/// Fills `path` once on `canvas`, flushes, and returns the raw bytes of the
+/// vertex buffer handed to the renderer for that single fill.
+#[cfg(test)]
+fn record_fill_bytes(
+    canvas: &mut Canvas<RecordingRenderer>,
+    verts: &Rc<RefCell<Vec<renderer::Vertex>>>,
+    path: &Path,
+) -> Vec<u8> {
+    canvas.fill_path(path, &Paint::color(Color::white()));
+    canvas.flush_to_output(());
+    bytemuck::cast_slice(verts.borrow().as_slice()).to_vec()
+}
+
+/// `Path` keeps a single-slot interior-mutable tessellation cache keyed by the
+/// canvas transform, so a `Path` shared by two canvases with different
+/// transforms rebuilds that cache on every hand-off. Thrashing is a
+/// performance matter, but leakage would be a correctness bug: one canvas
+/// must never observe geometry flattened under the other canvas's transform.
+#[test]
+fn shared_arc_path_across_canvases_keeps_tessellation_isolated() {
+    let mut path = Path::new();
+    path.move_to(10.0, 10.0);
+    path.svg_arc_to(40.0, 25.0, 0.4, false, true, 120.0, 80.0);
+
+    let make_canvas = || {
+        let renderer = RecordingRenderer::default();
+        let verts = renderer.last_verts.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(800, 800, 1.0);
+        (canvas, verts)
+    };
+
+    // Canvas A stays at the identity; canvas B translates and scales.
+    let (mut canvas_a, verts_a) = make_canvas();
+    let (mut canvas_b, verts_b) = make_canvas();
+    canvas_b.translate(100.0, 0.0);
+    canvas_b.scale(2.0, 1.0);
+
+    let a1 = record_fill_bytes(&mut canvas_a, &verts_a, &path);
+    let b1 = record_fill_bytes(&mut canvas_b, &verts_b, &path);
+    let a2 = record_fill_bytes(&mut canvas_a, &verts_a, &path);
+    let b2 = record_fill_bytes(&mut canvas_b, &verts_b, &path);
+
+    assert!(!a1.is_empty() && !b1.is_empty());
+    assert_eq!(a1, a2, "canvas A geometry changed after canvas B used the shared path");
+    assert_eq!(b1, b2, "canvas B geometry changed after canvas A used the shared path");
+    assert_ne!(a1, b1, "the two transforms must produce different geometry");
+}
+
+/// Switching the render target between an image and the screen must not
+/// perturb the tessellation of a path filled on both: the emitted fill
+/// vertices are a function of the path and canvas transform only.
+#[test]
+fn arc_tessellation_is_stable_across_render_target_switches() {
+    let renderer = RecordingRenderer::default();
+    let verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let image = canvas
+        .create_image_empty(400, 400, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+
+    let mut path = Path::new();
+    path.move_to(20.0, 200.0);
+    path.svg_arc_to(90.0, 60.0, 0.3, true, false, 260.0, 210.0);
+
+    let targets = [
+        RenderTarget::Image(image),
+        RenderTarget::Screen,
+        RenderTarget::Image(image),
+        RenderTarget::Screen,
+    ];
+    let outputs: Vec<Vec<u8>> = targets
+        .into_iter()
+        .map(|target| {
+            canvas.set_render_target(target);
+            record_fill_bytes(&mut canvas, &verts, &path)
+        })
+        .collect();
+
+    assert!(!outputs[0].is_empty());
+    for (index, output) in outputs.iter().enumerate().skip(1) {
+        assert_eq!(
+            &outputs[0], output,
+            "render {index} diverged from the first despite identical path and transform"
+        );
+    }
+}
+
+/// `Path` and `Canvas` deliberately contain non-`Sync` interior state (the
+/// `RefCell` tessellation cache; `Rc` handles in the canvas), so sharing one
+/// `Path` or `Canvas` across threads is rejected at compile time — see the
+/// `compile_fail` doctest on [`Path`]. What must hold is that fully
+/// independent per-thread instances tessellate deterministically while other
+/// threads do the same concurrently.
+#[test]
+fn arc_tessellation_is_deterministic_across_threads() {
+    let workers: Vec<_> = (0..4)
+        .map(|index| {
+            std::thread::spawn(move || {
+                let renderer = RecordingRenderer::default();
+                let verts = renderer.last_verts.clone();
+                let mut canvas = Canvas::new(renderer).unwrap();
+                canvas.set_size(600, 600, 1.0);
+
+                // Give each thread its own arc so a cross-thread mix-up could
+                // not hide behind identical inputs.
+                let mut path = Path::new();
+                path.move_to(10.0 + index as f32, 20.0);
+                path.svg_arc_to(80.0 + index as f32, 50.0, 0.2, index % 2 == 0, true, 300.0, 240.0);
+
+                let baseline = record_fill_bytes(&mut canvas, &verts, &path);
+                assert!(!baseline.is_empty());
+                for iteration in 1..100 {
+                    let bytes = record_fill_bytes(&mut canvas, &verts, &path);
+                    assert_eq!(
+                        baseline, bytes,
+                        "thread {index} produced unstable geometry at iteration {iteration}"
+                    );
+                }
+            })
+        })
+        .collect();
+
+    for worker in workers {
+        worker.join().unwrap();
+    }
 }
