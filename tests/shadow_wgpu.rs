@@ -606,3 +606,86 @@ fn shadow_blur_falloff_width_matches_spec_sigma() {
          expected ~17px band: a value near 12px means the kernel reach regressed to ~1.5*sigma"
     );
 }
+
+/// Text decoration + drop shadow interaction. A decorated text run is a single
+/// painting operation, so its decoration lines are part of the same shadow as
+/// the glyphs: the run-level shadow pass renders glyphs *and* decorations into
+/// its coverage, and the decoration lines must NOT cast a second shadow of their
+/// own. This verifies both halves — that the underline contributes to the shadow
+/// (it is not missing) and that its shadow alpha never exceeds the shadow color's
+/// alpha (it is not doubled by a per-decoration shadow pass).
+#[cfg(feature = "textlayout")]
+#[test]
+fn decoration_shares_the_single_text_shadow() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    // (shadow, decoration lines u/s/o) -> rendered pixels. A far vertical offset
+    // keeps the shadow band clear of the ink so shadow-only pixels are isolable.
+    let render = |shadow: bool, lines: (bool, bool, bool)| -> Vec<u8> {
+        render_to_pixels(&device, &queue, |canvas| {
+            let font = canvas
+                .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+                .expect("Font not found");
+            let paint = Paint::color(Color::white())
+                .with_font(&[font])
+                .with_font_size(40.0)
+                .with_text_decoration_lines(lines.0, lines.1, lines.2);
+            if shadow {
+                canvas.set_shadow_color(Color::rgba(0, 0, 0, 128));
+                canvas.set_shadow_offset(0.0, 40.0); // straight down, well clear of the ink
+            }
+            canvas.fill_text(6.0, 50.0, "www", &paint).unwrap();
+        })
+    };
+
+    let plain_shadow_cover = {
+        let ink = render(false, (false, false, false));
+        let sh = render(true, (false, false, false));
+        (0..H * W)
+            .filter(|i| {
+                let (x, y) = (i % W, i / W);
+                pixel(&ink, x, y)[3] == 0 && pixel(&sh, x, y)[3] > 32
+            })
+            .count()
+    };
+
+    // Each decoration kind, on its own, must be covered by one shared shadow.
+    for (name, lines) in [
+        ("underline", (true, false, false)),
+        ("strikethrough", (false, true, false)),
+        ("overline", (false, false, true)),
+    ] {
+        let ink = render(false, lines); // decorated ink, no shadow (mask)
+        let shadowed = render(true, lines);
+
+        let mut max_shadow = 0u8;
+        let mut cover = 0usize;
+        for y in 0..H {
+            for x in 0..W {
+                if pixel(&ink, x, y)[3] == 0 {
+                    let a = pixel(&shadowed, x, y)[3];
+                    max_shadow = max_shadow.max(a);
+                    if a > 32 {
+                        cover += 1;
+                    }
+                }
+            }
+        }
+
+        // Not doubled: a per-decoration shadow would compound to ~1-(1-0.5)^2 ~= 191.
+        assert!(
+            max_shadow <= 140,
+            "{name}: decorated text shadow alpha {max_shadow} exceeds the shadow color's \
+             alpha; the line must not cast its own shadow on top of the run shadow"
+        );
+        // Not missing: the decoration adds a shadow band the plain run does not have.
+        assert!(
+            cover > plain_shadow_cover + 40,
+            "{name}: the decoration line must cast a shadow (coverage {cover} \
+             vs plain {plain_shadow_cover})"
+        );
+    }
+}

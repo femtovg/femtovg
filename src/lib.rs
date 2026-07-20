@@ -60,6 +60,7 @@ use geometry::*;
 
 mod paint;
 pub use paint::Paint;
+pub use paint::TextDecoration;
 use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
 
 mod path;
@@ -326,6 +327,25 @@ pub struct Canvas<T: Renderer> {
     // referenced by deferred draw commands, so they can only be freed once those
     // commands have been submitted to the renderer (i.e. after flush).
     shadow_images: Vec<ImageId>,
+}
+
+/// Returns the shared baseline of a shaped horizontal run, in shaping space, or
+/// `None` if the run has no drawable glyph.
+///
+/// `layout` positions each glyph as
+/// `glyph.y = cursor_y + alignment_offset + glyph.offset_y`, so every glyph
+/// shares the same (possibly fractional) `cursor_y + alignment_offset` baseline
+/// and the per-glyph term is `glyph.offset_y` (the GPOS y-offset). Recovering the
+/// baseline as `glyph.y - glyph.offset_y` is what keeps text decorations anchored
+/// to the run baseline even when the first drawable glyph carries a non-zero
+/// offset (e.g. text starting with a combining mark), instead of riding that mark
+/// up or down.
+#[cfg(feature = "textlayout")]
+fn run_baseline(glyphs: &[text::ShapedGlyph]) -> Option<f32> {
+    glyphs
+        .iter()
+        .find(|shaped_glyph| !shaped_glyph.c.is_control())
+        .map(|shaped_glyph| shaped_glyph.y - shaped_glyph.offset_y)
 }
 
 impl<T> Canvas<T>
@@ -1923,27 +1943,55 @@ where
             text::normalize_variations(&text_context, &paint.text.font_ids, &paint.text.font_variations)
         };
 
+        // Captured in scaled shaping space; decorations hang off it below.
+        let baseline_scaled = run_baseline(&layout.glyphs);
+
         // Draw the drop shadow (if any) under the text. The shaped layout gives a
         // user-space box; transform its corners by the CTM to obtain device-space
         // bounds and let render_shadow re-enter draw_text with the shadow tint.
-        // (render_shadow disables shadows in the state so this does not recurse.)
+        // The re-entered draw_text draws glyphs *and* decoration lines (with
+        // shadows suppressed), so a single shadow covers the whole painting
+        // operation, matching the drawing model — decorations are not shadowed
+        // separately. (render_shadow disables shadows in the state so this does
+        // not recurse.)
         if self.shadow_enabled() {
             // Layout metrics are in the scaled shaping space; bring them back to
-            // user space. The horizontal extent is derived from the union of the
-            // glyph boxes rather than the advance-summed layout width: negative
-            // letter spacing can collapse the summed width to zero while ink is
-            // still painted, and the shadow must cover everything that is drawn.
-            // Expand by the line height on all sides so bearings, overhang,
-            // ascenders, descenders and diacritics are fully covered.
+            // user space. The horizontal extent unions the glyph ink boxes with
+            // the run's advance box (layout.x .. layout.x + width): negative letter
+            // spacing can collapse the advance width while ink is still painted,
+            // yet the decoration lines are drawn across that advance box, so the
+            // shadow must cover both.
             let (mut gx0, mut gx1) = (f32::INFINITY, f32::NEG_INFINITY);
             for glyph in &layout.glyphs {
                 gx0 = gx0.min(glyph.x);
                 gx1 = gx1.max(glyph.x + glyph.width);
             }
-            let ly = layout.y * invscale;
-            let lh = layout.height() * invscale;
             let (ux0, uy0, ux1, uy1) = if gx0 <= gx1 {
-                (gx0 * invscale - lh, ly - lh, gx1 * invscale + lh, ly + lh + lh)
+                let rx0 = layout.x.min(layout.x + layout.width());
+                let rx1 = layout.x.max(layout.x + layout.width());
+                let x0 = (gx0 * invscale).min(rx0 * invscale);
+                let x1 = (gx1 * invscale).max(rx1 * invscale);
+                // The vertical extent is the font's line box (baseline - ascent ..
+                // baseline - descent), not the glyph ink box: the overline sits at
+                // the ascent and the underline below the baseline, so an ink-box
+                // extent clips the decoration shadows of short (x-height-only)
+                // runs like "www". Deriving it from the metrics covers glyphs,
+                // decorations, ascenders, descenders and diacritics alike.
+                let baseline = baseline_scaled.map_or(layout.y * invscale, |b| b * invscale);
+                let (ascent, descent) = {
+                    let text_context = self.text_context.borrow();
+                    text_context
+                        .measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
+                        .map_or((0.0, 0.0), |m| (m.ascender(), m.descender()))
+                };
+                // A little slack for the overline nudge and antialiased edges.
+                let margin = paint.text.font_size * 0.2;
+                (
+                    x0 - margin,
+                    baseline - ascent - margin,
+                    x1 + margin,
+                    baseline - descent + margin,
+                )
             } else {
                 // No drawable glyphs: nothing painted, nothing to shadow.
                 (0.0, 0.0, 0.0, 0.0)
@@ -2004,12 +2052,93 @@ where
             }
         }
 
+        layout.scale(invscale);
+
+        // Text decorations are an SVG/CSS extension (Canvas 2D has none). They are
+        // emitted as plain filled rectangles in user space — the same coordinate
+        // space as the `* invscale` glyph positions handed to `draw_glyph_run` —
+        // so `fill_path` runs them through the identical canvas transform the
+        // glyph runs use. That keeps the lines aligned with the glyphs across the
+        // direct-outline, atlas, and scale-baked-atlas paths alike.
+        //
+        // They are drawn while shadows are still suppressed: the run-level shadow
+        // pass above already rendered the decorations into its coverage (it
+        // re-enters draw_text, which draws them), so glyphs and decorations share
+        // a single shadow and the lines must not cast a second one.
+        if glyph_run_result.is_ok() && !paint.text.text_decoration.is_none() {
+            if let Some(baseline_scaled) = baseline_scaled {
+                self.draw_text_decorations(paint, baseline_scaled * invscale, layout.x, layout.width());
+            }
+        }
+
+        // Restore the shadow state on the success and error paths alike.
         self.state_mut().shadow_color = saved_shadow_color;
         glyph_run_result?;
 
-        layout.scale(invscale);
-
         Ok(layout)
+    }
+
+    /// Emits the enabled text-decoration lines for a run as filled rectangles in
+    /// user space. `baseline` is the run baseline (user space, +y down), `x` the
+    /// run's left edge, and `width` its advance width.
+    #[cfg(feature = "textlayout")]
+    fn draw_text_decorations(&mut self, paint: &Paint, baseline: f32, x: f32, width: f32) {
+        // NOTE: this assumes a horizontal writing mode. The lines run along the
+        // advance direction (x) and are offset perpendicular to it (y), spanning
+        // `[x, x + width]` at a baseline-relative y. That is correct for both LTR
+        // and RTL runs, since a horizontal decoration is direction-independent.
+        // A vertical writing mode (top-to-bottom) would need the lines to run
+        // along y and offset along x, driven by vertical metrics; the geometry
+        // below would have to be generalized to the advance axis rather than
+        // hardcoding x as the run axis.
+        let decoration = paint.text.text_decoration;
+
+        // Metrics in user-space units (scaled for the unscaled font size) so the
+        // offsets match the user-space baseline. `measure_font` reads the primary
+        // font with the same variations the run was shaped with.
+        let metrics = {
+            let text_context = self.text_context.borrow();
+            text_context.measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
+        };
+        let Ok(metrics) = metrics else {
+            return;
+        };
+
+        // All enabled lines share one path (a single verbs/coords allocation) and
+        // one fill_path call, so a run costs one draw no matter how many lines
+        // are on. The rects are disjoint horizontal bands, and the paint below
+        // forces NonZero filling, so any degenerate overlap (e.g. thickness
+        // clamping on tiny fonts) still paints solid.
+        let mut path = Path::new();
+        let mut add_line = |center_y: f32, thickness: f32| {
+            let thickness = thickness.max(1.0);
+            path.rect(x, center_y - thickness / 2.0, width, thickness);
+        };
+
+        // OpenType position values measure from the baseline with +y pointing up,
+        // while canvas y grows downward, so a line's center is `baseline - pos`.
+        if decoration.underline {
+            add_line(baseline - metrics.underline_position(), metrics.underline_thickness());
+        }
+        if decoration.strikethrough {
+            add_line(baseline - metrics.strikeout_position(), metrics.strikeout_thickness());
+        }
+        if decoration.overline {
+            // No dedicated metric; sit the line at the ascent with the underline
+            // thickness, nudged up by half its thickness so it clears the glyphs.
+            let thickness = metrics.underline_thickness().max(1.0);
+            add_line(baseline - metrics.ascender() - thickness / 2.0, thickness);
+        }
+
+        if path.is_empty() {
+            return;
+        }
+
+        // The decoration takes the text paint's color, matching SVG where the
+        // decoration uses the text fill. The full paint flavor (gradient/image)
+        // is reused as-is so a gradient-filled run gets a gradient-filled line.
+        let line_paint = paint.clone().with_fill_rule(FillRule::NonZero);
+        self.fill_path(&path, &line_paint);
     }
 
     fn draw_glyph_run(
@@ -2346,6 +2475,8 @@ pub use rgb;
 pub struct RecordingRenderer {
     /// Vector of the last commands submitted to the renderer.
     pub last_commands: Rc<RefCell<Vec<renderer::Command>>>,
+    /// Vertex buffer that accompanied the last submitted commands.
+    pub last_verts: Rc<RefCell<Vec<renderer::Vertex>>>,
 }
 
 #[cfg(test)]
@@ -2362,10 +2493,11 @@ impl Renderer for RecordingRenderer {
         &mut self,
         _output: impl Into<Self::RenderOutput>,
         _images: &mut ImageStore<Self::Image>,
-        _verts: &[renderer::Vertex],
+        verts: &[renderer::Vertex],
         commands: Vec<renderer::Command>,
     ) {
         *self.last_commands.borrow_mut() = commands;
+        *self.last_verts.borrow_mut() = verts.to_vec();
     }
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
@@ -3222,5 +3354,482 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
         single, many,
         "shadow passes must not scale with glyph count: outline glyphs would each cast \
          their own shadow on top of the run-level one"
+    );
+}
+/// Collects the screen-space filled rectangles that text decoration emits,
+/// grouped by fill command.
+///
+/// A run's decoration lines are batched into one solid path fill drawn to the
+/// screen with no glyph texture: a single enabled line arrives as a
+/// one-contour `ConvexFill`, several enabled lines as one multi-contour
+/// (concave) fill command. (Atlas glyph rasterization also emits
+/// `ConvexFill`s, but those run while the render target is the atlas image,
+/// so tracking the active target discriminates them.) Returns one entry per
+/// such fill command, listing the vertical `[min_y, max_y]` span of each
+/// contour in that command, in screen space.
+#[cfg(all(test, feature = "textlayout"))]
+fn recorded_decoration_fills(commands: &[renderer::Command], verts: &[renderer::Vertex]) -> Vec<Vec<(f32, f32)>> {
+    use crate::paint::GlyphTexture;
+    use renderer::{CommandType, RenderTarget};
+
+    let mut target = RenderTarget::Screen;
+    let mut fills = Vec::new();
+
+    for cmd in commands {
+        match &cmd.cmd_type {
+            CommandType::SetRenderTarget(new_target) => target = *new_target,
+            CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+                if target == RenderTarget::Screen && matches!(cmd.glyph_texture, GlyphTexture::None) =>
+            {
+                let mut spans = Vec::new();
+                for drawable in &cmd.drawables {
+                    if let Some((offset, len)) = drawable.fill_verts {
+                        let mut min_y = f32::INFINITY;
+                        let mut max_y = f32::NEG_INFINITY;
+                        for v in &verts[offset..offset + len] {
+                            min_y = min_y.min(v.y);
+                            max_y = max_y.max(v.y);
+                        }
+                        if min_y.is_finite() {
+                            spans.push((min_y, max_y));
+                        }
+                    }
+                }
+                if !spans.is_empty() {
+                    fills.push(spans);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fills
+}
+
+/// With any decoration enabled, `fill_text` emits exactly ONE extra solid fill
+/// command for the run, carrying one rect per enabled line positioned from the
+/// font's own metrics: underline below the baseline, strikethrough above it
+/// (through the text), overline near the ascent. With no decoration, no such
+/// fill is emitted.
+#[cfg(feature = "textlayout")]
+#[test]
+fn fill_text_emits_decoration_rects() {
+    let make_canvas = || {
+        let renderer = RecordingRenderer::default();
+        let commands = renderer.last_commands.clone();
+        let verts = renderer.last_verts.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(1000, 1000, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        (canvas, commands, verts, font)
+    };
+
+    // Baseline::Alphabetic places the baseline exactly at the draw y, so the
+    // metric offsets are easy to reason about. A pure-translation transform keeps
+    // text on the cached-atlas path.
+    let baseline_y = 200.0_f32;
+
+    // Reference metrics for this font/size, in user space.
+    let metrics = {
+        let (canvas, _, _, font) = make_canvas();
+        let paint = Paint::color(Color::black()).with_font(&[font]).with_font_size(40.0);
+        canvas.measure_font(&paint).expect("metrics")
+    };
+    assert!(metrics.underline_thickness() > 0.0);
+    assert!(metrics.strikeout_thickness() > 0.0);
+
+    let base_paint = || {
+        Paint::color(Color::black())
+            .with_font_size(40.0)
+            .with_text_baseline(Baseline::Alphabetic)
+    };
+
+    // No decoration: no screen-space solid fills at all.
+    {
+        let (mut canvas, commands, verts, font) = make_canvas();
+        canvas
+            .fill_text(50.0, baseline_y, "Hello", &base_paint().with_font(&[font]))
+            .unwrap();
+        canvas.flush_to_output(());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert!(fills.is_empty(), "expected no decoration fill, got {fills:?}");
+    }
+
+    // Underline: one fill command with one rect, centered below the baseline at
+    // -underline_position.
+    {
+        let (mut canvas, commands, verts, font) = make_canvas();
+        let paint = base_paint()
+            .with_font(&[font])
+            .with_text_decoration_lines(true, false, false);
+        canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
+        canvas.flush_to_output(());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
+        let (min_y, max_y) = fills[0][0];
+        let center = (min_y + max_y) / 2.0;
+        let expected = baseline_y - metrics.underline_position();
+        assert!(center > baseline_y, "underline should sit below the baseline");
+        assert!(
+            (center - expected).abs() <= 1.0,
+            "underline center {center} should be near {expected}"
+        );
+        assert!(
+            (max_y - min_y - metrics.underline_thickness()).abs() <= 1.0,
+            "underline thickness {} should be near {}",
+            max_y - min_y,
+            metrics.underline_thickness()
+        );
+    }
+
+    // Strikethrough: one fill command with one rect, above the baseline at
+    // -strikeout_position.
+    {
+        let (mut canvas, commands, verts, font) = make_canvas();
+        let paint = base_paint()
+            .with_font(&[font])
+            .with_text_decoration_lines(false, true, false);
+        canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
+        canvas.flush_to_output(());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(
+            fills[0].len(),
+            1,
+            "expected exactly one strikethrough rect, got {fills:?}"
+        );
+        let (min_y, max_y) = fills[0][0];
+        let center = (min_y + max_y) / 2.0;
+        let expected = baseline_y - metrics.strikeout_position();
+        assert!(center < baseline_y, "strikethrough should sit above the baseline");
+        assert!(
+            (center - expected).abs() <= 1.0,
+            "strikethrough center {center} should be near {expected}"
+        );
+    }
+
+    // Overline: one fill command with one rect, above the ascent.
+    {
+        let (mut canvas, commands, verts, font) = make_canvas();
+        let paint = base_paint()
+            .with_font(&[font])
+            .with_text_decoration_lines(false, false, true);
+        canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
+        canvas.flush_to_output(());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+        assert_eq!(fills[0].len(), 1, "expected exactly one overline rect, got {fills:?}");
+        let (_, max_y) = fills[0][0];
+        assert!(
+            max_y <= baseline_y - metrics.ascender() + 1.0,
+            "overline (bottom {max_y}) should sit at/above the ascent {}",
+            baseline_y - metrics.ascender()
+        );
+    }
+
+    // All three at once: still exactly ONE fill command — the lines are batched
+    // into a single path and draw — carrying three disjoint rects, one at each
+    // metric-derived position.
+    {
+        let (mut canvas, commands, verts, font) = make_canvas();
+        let paint = base_paint()
+            .with_font(&[font])
+            .with_text_decoration_lines(true, true, true);
+        canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
+        canvas.flush_to_output(());
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(
+            fills.len(),
+            1,
+            "all lines must share one decoration fill, got {fills:?}"
+        );
+        let mut spans = fills[0].clone();
+        assert_eq!(spans.len(), 3, "expected three decoration rects, got {spans:?}");
+
+        // Top to bottom: overline above the ascent, strikethrough above the
+        // baseline, underline below it — three non-overlapping bands.
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(
+            spans[0].1 <= baseline_y - metrics.ascender() + 1.0,
+            "overline (bottom {}) should sit at/above the ascent {}",
+            spans[0].1,
+            baseline_y - metrics.ascender()
+        );
+        let strike_center = (spans[1].0 + spans[1].1) / 2.0;
+        let strike_expected = baseline_y - metrics.strikeout_position();
+        assert!(
+            (strike_center - strike_expected).abs() <= 1.0,
+            "strikethrough center {strike_center} should be near {strike_expected}"
+        );
+        let under_center = (spans[2].0 + spans[2].1) / 2.0;
+        let under_expected = baseline_y - metrics.underline_position();
+        assert!(
+            (under_center - under_expected).abs() <= 1.0,
+            "underline center {under_center} should be near {under_expected}"
+        );
+        assert!(
+            spans[0].1 <= spans[1].0 && spans[1].1 <= spans[2].0,
+            "decoration bands should not overlap: {spans:?}"
+        );
+    }
+}
+
+/// Under a uniform-scale (scale-baked atlas) transform, the decoration rect must
+/// still line up with the glyphs: it is emitted in user space and run through the
+/// same canvas transform, so its screen-space center scales with the baseline.
+#[cfg(feature = "textlayout")]
+#[test]
+fn decoration_rect_tracks_scaled_atlas_transform() {
+    let renderer = RecordingRenderer::default();
+    let commands = renderer.last_commands.clone();
+    let verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(2000, 2000, 1.0);
+    let font = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+
+    let baseline_y = 150.0_f32;
+    let scale = 2.0_f32;
+
+    let metrics = {
+        let paint = Paint::color(Color::black()).with_font(&[font]).with_font_size(24.0);
+        canvas.measure_font(&paint).expect("metrics")
+    };
+
+    let paint = Paint::color(Color::black())
+        .with_font(&[font])
+        .with_font_size(24.0)
+        .with_text_baseline(Baseline::Alphabetic)
+        .with_text_decoration_lines(true, false, false);
+
+    canvas.scale(scale, scale);
+    canvas.fill_text(40.0, baseline_y, "Scaled", &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+    assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+    assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
+    let (min_y, max_y) = fills[0][0];
+    let center = (min_y + max_y) / 2.0;
+    // User-space underline center is baseline - underline_position; on screen the
+    // whole thing is multiplied by the canvas scale.
+    let expected = (baseline_y - metrics.underline_position()) * scale;
+    assert!(
+        (center - expected).abs() <= 2.0,
+        "scaled underline center {center} should be near {expected}"
+    );
+}
+
+/// The decoration baseline must be the shared run baseline, independent of the
+/// first drawable glyph's GPOS y-offset. `layout` bakes that offset into
+/// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)
+/// would otherwise drag every decoration line up or down with the mark.
+///
+/// This unit-tests `run_baseline` — the exact policy `draw_text` uses to anchor
+/// decorations — with a synthetic run whose first glyph carries an `offset_y`.
+/// The captured baseline must match the run baseline computed without the offset
+/// (i.e. the second, zero-offset glyph's `y`), not the first glyph's shifted `y`.
+#[cfg(feature = "textlayout")]
+#[test]
+fn run_baseline_ignores_leading_glyph_offset() {
+    // A real FontId is needed to populate the synthetic glyphs; `run_baseline`
+    // never reads it, but ShapedGlyph requires one.
+    let text_context = TextContext::default();
+    let font_id = text_context
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+
+    // The shared run baseline both glyphs are positioned against.
+    let run_y = 200.0_f32;
+
+    let make_glyph = |c: char, offset_y: f32| text::ShapedGlyph {
+        // `layout` stores `glyph.y = run_baseline + glyph.offset_y`; mirror that.
+        x: 0.0,
+        y: run_y + offset_y,
+        c,
+        byte_index: 0,
+        font_id,
+        glyph_id: 0,
+        width: 0.0,
+        height: 0.0,
+        advance_x: 0.0,
+        advance_y: 0.0,
+        offset_x: 0.0,
+        offset_y,
+    };
+
+    // First drawable glyph carries a large positive y-offset (a combining mark
+    // pushed below the baseline); the second sits exactly on the baseline.
+    let offset = 15.0_f32;
+    let with_offset = [make_glyph('a', offset), make_glyph('b', 0.0)];
+    // Same run, but the leading glyph has no offset.
+    let without_offset = [make_glyph('a', 0.0), make_glyph('b', 0.0)];
+
+    let captured = run_baseline(&with_offset).expect("run has a drawable glyph");
+    let reference = run_baseline(&without_offset).expect("run has a drawable glyph");
+
+    // The capture must equal the true run baseline, not the shifted first glyph.
+    assert_eq!(
+        captured, run_y,
+        "captured baseline {captured} should equal the shared run baseline {run_y}"
+    );
+    assert_eq!(
+        captured, reference,
+        "leading glyph offset must not shift the captured baseline ({captured} vs {reference})"
+    );
+    assert!(
+        (captured - with_offset[0].y).abs() > offset - 1.0,
+        "captured baseline {captured} must not follow the offset glyph y {}",
+        with_offset[0].y
+    );
+
+    // A leading control glyph (skipped by the drawable filter) must not become
+    // the baseline source either.
+    let with_control = [make_glyph('\n', 99.0), make_glyph('b', 0.0)];
+    assert_eq!(
+        run_baseline(&with_control),
+        Some(run_y),
+        "control glyphs must be skipped when capturing the baseline"
+    );
+
+    // Empty / all-control runs have no baseline.
+    assert_eq!(run_baseline(&[]), None);
+    assert_eq!(run_baseline(&[make_glyph('\t', 0.0)]), None);
+}
+
+/// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables
+/// removed, so the fallback metric paths can be exercised on real assets.
+#[cfg(all(test, feature = "textlayout"))]
+fn font_without_tables(data: &[u8], drop_tags: &[&[u8; 4]]) -> Vec<u8> {
+    let read_u16 = |buf: &[u8], at: usize| u16::from_be_bytes([buf[at], buf[at + 1]]);
+    let read_u32 =
+        |buf: &[u8], at: usize| u32::from_be_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]) as usize;
+
+    let num_tables = read_u16(data, 4) as usize;
+
+    // Collect (tag, offset, length) for the tables we keep, in directory order.
+    let mut kept: Vec<([u8; 4], usize, usize)> = Vec::new();
+    for i in 0..num_tables {
+        let rec = 12 + i * 16;
+        let tag = [data[rec], data[rec + 1], data[rec + 2], data[rec + 3]];
+        if drop_tags.iter().any(|d| **d == tag) {
+            continue;
+        }
+        let offset = read_u32(data, rec + 8);
+        let length = read_u32(data, rec + 12);
+        kept.push((tag, offset, length));
+    }
+
+    let new_num = kept.len();
+    let mut out = Vec::new();
+    // Offset table header: keep the original sfnt version, fix up the table count
+    // and the binary-search hint fields for the new count.
+    out.extend_from_slice(&data[0..4]);
+    out.extend_from_slice(&(new_num as u16).to_be_bytes());
+    let max_pow2: u16 = 1 << (15 - (new_num.max(1) as u16).leading_zeros());
+    out.extend_from_slice(&(max_pow2 * 16).to_be_bytes());
+    out.extend_from_slice(&(15 - max_pow2.leading_zeros() as u16).to_be_bytes());
+    out.extend_from_slice(&((new_num as u16 * 16).wrapping_sub(max_pow2 * 16)).to_be_bytes());
+
+    let mut data_offset = 12 + new_num * 16;
+    let mut records = Vec::new();
+    let mut blobs = Vec::new();
+    for (tag, offset, length) in kept {
+        let padded = (length + 3) & !3;
+        let mut blob = data[offset..offset + length].to_vec();
+        blob.resize(padded, 0);
+        let mut rec = Vec::new();
+        rec.extend_from_slice(&tag);
+        rec.extend_from_slice(&0u32.to_be_bytes()); // checksum (ignored by ttf-parser)
+        rec.extend_from_slice(&(data_offset as u32).to_be_bytes());
+        rec.extend_from_slice(&(length as u32).to_be_bytes());
+        records.push(rec);
+        blobs.push(blob);
+        data_offset += padded;
+    }
+    for rec in records {
+        out.extend_from_slice(&rec);
+    }
+    for blob in blobs {
+        out.extend_from_slice(&blob);
+    }
+    out
+}
+
+/// A font without an OS/2 table (so no strikeout metric) and without a post
+/// table (so no underline metric) must still yield sensible, finite, positive
+/// decoration metrics via the ascender/descender-derived fallbacks — and never
+/// panic when drawing.
+#[cfg(feature = "textlayout")]
+#[test]
+fn decoration_metrics_fall_back_without_os2_and_post() {
+    let original = include_bytes!("../examples/assets/amiri-regular.ttf");
+
+    // Sanity: ttf-parser sees no strikeout/underline once the tables are gone.
+    let stripped = font_without_tables(original, &[b"OS/2", b"post"]);
+    let face = ttf_parser::Face::parse(&stripped, 0).expect("stripped font should still parse");
+    assert!(
+        face.strikeout_metrics().is_none(),
+        "OS/2 strikeout should be absent after stripping"
+    );
+    assert!(
+        face.underline_metrics().is_none(),
+        "post underline should be absent after stripping"
+    );
+
+    let text_context = TextContext::default();
+    let font_id = text_context.add_font_mem(&stripped).expect("stripped font should load");
+    let paint = Paint::default().with_font(&[font_id]).with_font_size(20.0);
+
+    let metrics = text_context.measure_font(&paint).expect("metrics");
+
+    assert!(
+        metrics.strikeout_thickness() > 0.0 && metrics.strikeout_thickness().is_finite(),
+        "fallback strikeout thickness must be positive and finite, got {}",
+        metrics.strikeout_thickness()
+    );
+    assert!(
+        metrics.strikeout_position() > 0.0 && metrics.strikeout_position().is_finite(),
+        "fallback strikeout should sit above the baseline, got {}",
+        metrics.strikeout_position()
+    );
+    assert!(
+        metrics.underline_thickness() > 0.0 && metrics.underline_thickness().is_finite(),
+        "fallback underline thickness must be positive and finite, got {}",
+        metrics.underline_thickness()
+    );
+    assert!(
+        metrics.underline_position() < 0.0 && metrics.underline_position().is_finite(),
+        "fallback underline should sit below the baseline, got {}",
+        metrics.underline_position()
+    );
+
+    // Drawing with the fallback font must not panic and must still emit both
+    // rects, batched into the run's single decoration fill.
+    let renderer = RecordingRenderer::default();
+    let commands = renderer.last_commands.clone();
+    let verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 1000, 1.0);
+    let font = canvas
+        .add_font_mem(&font_without_tables(original, &[b"OS/2", b"post"]))
+        .expect("stripped font should load into canvas");
+    let paint = Paint::color(Color::black())
+        .with_font(&[font])
+        .with_font_size(20.0)
+        .with_text_baseline(Baseline::Alphabetic)
+        .with_text_decoration_lines(true, true, false);
+    canvas.fill_text(20.0, 100.0, "fallback", &paint).unwrap();
+    canvas.flush_to_output(());
+    let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+    assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
+    assert_eq!(
+        fills[0].len(),
+        2,
+        "expected underline + strikethrough rects in one fill, got {fills:?}"
     );
 }
