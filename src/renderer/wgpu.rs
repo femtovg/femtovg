@@ -62,6 +62,8 @@ use super::Params;
 use super::Vertex;
 
 const UNIFORMARRAY_SIZE: usize = 14;
+/// Size of one `UniformArray`, which is the window a dynamic offset binding exposes.
+const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 
 #[derive(Clone, PartialEq)]
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
@@ -213,6 +215,24 @@ pub struct Image {
     info: ImageInfo,
 }
 
+/// The only flags a sampler descriptor reads. Keying on all of `ImageFlags` would miss on the rest.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct SamplerKey {
+    repeat_x: bool,
+    repeat_y: bool,
+    nearest: bool,
+}
+
+impl From<crate::ImageFlags> for SamplerKey {
+    fn from(flags: crate::ImageFlags) -> Self {
+        Self {
+            repeat_x: flags.contains(crate::ImageFlags::REPEAT_X),
+            repeat_y: flags.contains(crate::ImageFlags::REPEAT_Y),
+            nearest: flags.contains(crate::ImageFlags::NEAREST),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CachedPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -229,7 +249,16 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    empty_texture: wgpu::Texture,
+    /// View of the 1x1 empty texture. Never varies, and rebuilding it per draw cost a wasm round trip.
+    empty_texture_view: wgpu::TextureView,
+    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    /// One uniform buffer per frame, in slots aligned for dynamic offsets. Grows, never shrinks.
+    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_stride: u64,
+    uniform_slots: u64,
+    /// Resident vertex buffer, as opengl.rs keeps one. Rebuilding it per frame re-uploaded everything.
+    vertex_buffer: Option<wgpu::Buffer>,
+    vertex_capacity: u64,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
@@ -324,6 +353,10 @@ impl WGPURenderer {
             label: None,
             view_formats: &[],
         };
+        // A dynamic offset must be a multiple of this, usually 256.
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(1);
+        let uniform_stride = UNIFORM_BYTES.div_ceil(alignment) * alignment;
+
         let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("empty"),
             view_formats: &[],
@@ -363,8 +396,9 @@ impl WGPURenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        // One buffer per frame, each draw reaching its slot by offset.
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
                     },
                     count: None,
                 },
@@ -417,7 +451,13 @@ impl WGPURenderer {
 
             screen_view: [0.0, 0.0],
 
-            empty_texture,
+            empty_texture_view: empty_texture.create_view(&Default::default()),
+            sampler_cache: Rc::new(RefCell::new(HashMap::new())),
+            uniform_buffer: None,
+            uniform_stride,
+            uniform_slots: 0,
+            vertex_buffer: None,
+            vertex_capacity: 0,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             bind_group_layout,
@@ -444,6 +484,22 @@ impl Renderer for WGPURenderer {
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
     ) -> Self::CommandBuffer {
+        // Loose upper bound: growing mid-frame would invalidate bindings already recorded.
+        let needed_slots: u64 = commands
+            .iter()
+            .map(|command| command.drawables.len() as u64 * 4 + 8)
+            .sum();
+        if self.uniform_buffer.is_none() || self.uniform_slots < needed_slots {
+            let slots = needed_slots.next_power_of_two().max(64);
+            self.uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Fragment Uniform Buffer"),
+                size: slots * self.uniform_stride,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.uniform_slots = slots;
+        }
+
         if commands.is_empty() {
             return None;
         }
@@ -455,11 +511,24 @@ impl Renderer for WGPURenderer {
 
         let texture_view = output.view.clone();
 
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Main Vertex Buffer"),
-            contents: bytemuck::cast_slice(verts),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let vertex_bytes: &[u8] = bytemuck::cast_slice(verts);
+        // write_buffer needs a length that is a multiple of 4.
+        let vertex_needed = (vertex_bytes.len() as u64).div_ceil(4) * 4;
+        if self.vertex_capacity < vertex_needed {
+            let capacity = vertex_needed.next_power_of_two().max(4096);
+            self.vertex_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Main Vertex Buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.vertex_capacity = capacity;
+        }
+        if !vertex_bytes.is_empty() {
+            self.queue
+                .write_buffer(self.vertex_buffer.as_ref().unwrap(), 0, vertex_bytes);
+        }
+        let vertex_buffer = self.vertex_buffer.clone().unwrap();
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
             if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
@@ -507,7 +576,11 @@ impl Renderer for WGPURenderer {
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
             self.device.clone(),
-            self.empty_texture.clone(),
+            self.empty_texture_view.clone(),
+            self.sampler_cache.clone(),
+            self.queue.clone(),
+            self.uniform_buffer.clone().unwrap(),
+            self.uniform_stride,
             self.shader_module.clone(),
             self.bind_group_layout.clone(),
             self.pipeline_layout.clone(),
@@ -606,6 +679,15 @@ impl Renderer for WGPURenderer {
         }
 
         drop(render_pass_builder);
+
+        // One upload for the frame. write_buffer is ordered ahead of the caller's submit.
+        if !pipeline_and_bindgroup_mapper.uniform_staging.is_empty() {
+            self.queue.write_buffer(
+                self.uniform_buffer.as_ref().unwrap(),
+                0,
+                &pipeline_and_bindgroup_mapper.uniform_staging,
+            );
+        }
 
         let command_buffer = encoder.finish();
 
@@ -1407,7 +1489,6 @@ enum ImageOrTexture {
 struct BindGroupState {
     image: Option<ImageOrTexture>,
     glyph_texture: GlyphTexture,
-    uniforms: UniformArray,
 }
 
 impl BindGroupState {
@@ -1416,21 +1497,23 @@ impl BindGroupState {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         bind_group_layout: &wgpu::BindGroupLayout,
-        empty_texture: &wgpu::Texture,
+        empty_texture_view: &wgpu::TextureView,
+        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
+        uniform_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Fragment Uniform Buffer"),
-            contents: bytemuck::cast_slice(self.uniforms.as_slice()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let (main_texture_view, main_sampler) =
-            RenderPassBuilder::create_binding_resource_and_sampler(device, images, self.image.as_ref(), empty_texture);
+        let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
+            device,
+            images,
+            self.image.as_ref(),
+            empty_texture_view,
+            sampler_cache,
+        );
         let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
             self.glyph_texture.image_id().map(ImageOrTexture::Image).as_ref(),
-            empty_texture,
+            empty_texture_view,
+            sampler_cache,
         );
 
         if main_texture_view.is_external() || glyph_texture_view.is_external() {
@@ -1442,7 +1525,11 @@ impl BindGroupState {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: uniform_buf.as_entire_binding(),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: uniform_buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(UNIFORM_BYTES),
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1484,6 +1571,8 @@ struct RenderPassBuilder<'a> {
     screen_surface_format: wgpu::TextureFormat,
     stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group: wgpu::BindGroup,
+    /// Bumped when the render pass is recreated, so state caches can tell they are stale.
+    pass_generation: u32,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -1516,6 +1605,7 @@ impl<'a> RenderPassBuilder<'a> {
             screen_view,
             screen_surface_format,
             stencil_buffer_for_textures,
+            pass_generation: 0,
             viewport_bind_group,
         }
     }
@@ -1559,7 +1649,8 @@ impl<'a> RenderPassBuilder<'a> {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         image: Option<&ImageOrTexture>,
-        empty_texture: &wgpu::Texture,
+        empty_texture_view: &wgpu::TextureView,
+        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
     ) -> (OwnedBindingResource, wgpu::Sampler) {
         let flags = image
             .and_then(|image_or_texture| match image_or_texture {
@@ -1574,22 +1665,28 @@ impl<'a> RenderPassBuilder<'a> {
             wgpu::FilterMode::Linear
         };
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
-                wgpu::AddressMode::Repeat
-            } else {
-                wgpu::AddressMode::ClampToEdge
-            },
-            address_mode_v: if flags.contains(crate::ImageFlags::REPEAT_Y) {
-                wgpu::AddressMode::Repeat
-            } else {
-                wgpu::AddressMode::ClampToEdge
-            },
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: filter_mode,
-            min_filter: filter_mode,
-            ..Default::default()
-        });
+        let sampler = sampler_cache
+            .borrow_mut()
+            .entry(SamplerKey::from(flags))
+            .or_insert_with(|| {
+                device.create_sampler(&wgpu::SamplerDescriptor {
+                    address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
+                        wgpu::AddressMode::Repeat
+                    } else {
+                        wgpu::AddressMode::ClampToEdge
+                    },
+                    address_mode_v: if flags.contains(crate::ImageFlags::REPEAT_Y) {
+                        wgpu::AddressMode::Repeat
+                    } else {
+                        wgpu::AddressMode::ClampToEdge
+                    },
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: filter_mode,
+                    min_filter: filter_mode,
+                    ..Default::default()
+                })
+            })
+            .clone();
 
         let binding_resource = image
             .and_then(|image_or_texture| match image_or_texture {
@@ -1603,7 +1700,7 @@ impl<'a> RenderPassBuilder<'a> {
                     texture.create_view(&Default::default()),
                 )),
             })
-            .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture.create_view(&Default::default())));
+            .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture_view.clone()));
 
         (binding_resource, sampler)
     }
@@ -1668,6 +1765,7 @@ impl<'a> RenderPassBuilder<'a> {
     }
 
     fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
+        self.pass_generation += 1;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer
@@ -1716,7 +1814,22 @@ impl<'a> RenderPassBuilder<'a> {
 
 struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
-    empty_texture: wgpu::Texture,
+    empty_texture_view: wgpu::TextureView,
+    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    queue: wgpu::Queue,
+    uniform_buffer: wgpu::Buffer,
+    uniform_stride: u64,
+    /// The frame's uniform slots, padded to `uniform_stride`, uploaded once when recording ends.
+    uniform_staging: Vec<u8>,
+    /// Last uniforms and their offset, so a command's drawables upload once between them.
+    current_uniforms: Option<UniformArray>,
+    current_uniform_offset: u64,
+    /// State last set on the pass, so a set_* that would change nothing is skipped, as opengl.rs does.
+    current_pipeline_state: Option<PipelineState>,
+    current_stencil_reference: Option<u32>,
+    current_bound_offset: Option<u32>,
+    /// Which pass the caches above belong to. A new pass resets state, so stale ones draw wrong.
+    current_pass_generation: Option<u32>,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1729,7 +1842,11 @@ struct CommandToPipelineAndBindGroupMapper {
 impl CommandToPipelineAndBindGroupMapper {
     fn new(
         device: wgpu::Device,
-        empty_texture: wgpu::Texture,
+        empty_texture_view: wgpu::TextureView,
+        sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+        queue: wgpu::Queue,
+        uniform_buffer: wgpu::Buffer,
+        uniform_stride: u64,
         shader_module: Rc<wgpu::ShaderModule>,
         bind_group_layout: wgpu::BindGroupLayout,
         pipeline_layout: wgpu::PipelineLayout,
@@ -1737,7 +1854,18 @@ impl CommandToPipelineAndBindGroupMapper {
     ) -> Self {
         Self {
             device: device.clone(),
-            empty_texture,
+            empty_texture_view,
+            sampler_cache,
+            queue,
+            uniform_buffer,
+            uniform_stride,
+            uniform_staging: Vec::new(),
+            current_uniforms: None,
+            current_uniform_offset: 0,
+            current_pipeline_state: None,
+            current_stencil_reference: None,
+            current_bound_offset: None,
+            current_pass_generation: None,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1759,27 +1887,59 @@ impl CommandToPipelineAndBindGroupMapper {
         image: Option<ImageOrTexture>,
         glyph_texture: GlyphTexture,
     ) {
-        let render_pass = render_pass_builder.rpass.as_mut().unwrap();
-
-        if let StencilTest::Enabled { stencil_reference, .. } = &stencil_test {
-            render_pass.set_stencil_reference(*stencil_reference);
-        } else {
-            render_pass.set_stencil_reference(0);
+        // A new render pass resets state, so nothing set on the previous one still counts.
+        if self.current_pass_generation != Some(render_pass_builder.pass_generation) {
+            self.current_pass_generation = Some(render_pass_builder.pass_generation);
+            self.current_pipeline_state = None;
+            self.current_stencil_reference = None;
+            self.current_bound_offset = None;
         }
 
-        let bind_group_state = BindGroupState {
-            image,
-            glyph_texture,
-            uniforms: UniformArray::from(params),
-        };
+        let render_pass = render_pass_builder.rpass.as_mut().unwrap();
 
-        if self.current_bind_group_state != Some(bind_group_state.clone()) {
+        let stencil_reference = match &stencil_test {
+            StencilTest::Enabled { stencil_reference, .. } => *stencil_reference,
+            _ => 0,
+        };
+        if self.current_stencil_reference != Some(stencil_reference) {
+            render_pass.set_stencil_reference(stencil_reference);
+            self.current_stencil_reference = Some(stencil_reference);
+        }
+
+        let bind_group_state = BindGroupState { image, glyph_texture };
+
+        let bind_group_changed = self.current_bind_group_state != Some(bind_group_state.clone());
+        if bind_group_changed {
             self.current_bind_group = bind_group_state
-                .materialize(&self.device, images, &self.bind_group_layout, &self.empty_texture)
+                .materialize(
+                    &self.device,
+                    images,
+                    &self.bind_group_layout,
+                    &self.empty_texture_view,
+                    &self.sampler_cache,
+                    &self.uniform_buffer,
+                )
                 .into();
             self.current_bind_group_state = Some(bind_group_state);
         }
-        render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[]);
+
+        // write_buffer is ordered ahead of the submit, so writing during recording is sound.
+        let uniforms = UniformArray::from(params);
+        if self.current_uniforms.as_ref() != Some(&uniforms) {
+            let offset = self.uniform_staging.len() as u64;
+            self.uniform_staging
+                .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
+            // Pad to a whole slot so the next offset stays aligned.
+            self.uniform_staging.resize((offset + self.uniform_stride) as usize, 0);
+            self.current_uniforms = Some(uniforms);
+            self.current_uniform_offset = offset;
+        }
+        // Nothing to rebind while both the bind group and the offset hold, as within a command.
+        let offset = self.current_uniform_offset as u32;
+        if bind_group_changed || self.current_bound_offset != Some(offset) {
+            render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
+            self.current_bound_offset = Some(offset);
+        }
 
         let pipeline_state = PipelineState::new(
             color_blend,
@@ -1803,7 +1963,10 @@ impl CommandToPipelineAndBindGroupMapper {
         });
 
         render_pipeline.accessed = true;
-        render_pass.set_pipeline(&render_pipeline.pipeline);
+        if self.current_pipeline_state.as_ref() != Some(&pipeline_state) {
+            render_pass.set_pipeline(&render_pipeline.pipeline);
+            self.current_pipeline_state = Some(pipeline_state);
+        }
     }
 }
 
