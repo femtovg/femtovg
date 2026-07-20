@@ -204,6 +204,199 @@ fn text_layout_preserves_fractional_baseline_y() {
 }
 
 #[test]
+fn font_metrics_report_underline_and_strikeout() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+
+    let test_paint = femtovg::Paint::default().with_font(&[font_id]).with_font_size(32.);
+
+    let metrics = text_context
+        .measure_font(&test_paint)
+        .expect("font measuring failed unexpectedly");
+
+    // Roboto Flex ships post + OS/2 tables, so these are read straight from the
+    // font rather than from a fallback.
+    assert!(
+        metrics.underline_thickness() > 0.0,
+        "underline thickness should be positive, got {}",
+        metrics.underline_thickness()
+    );
+    assert!(
+        metrics.strikeout_thickness() > 0.0,
+        "strikeout thickness should be positive, got {}",
+        metrics.strikeout_thickness()
+    );
+    // OpenType convention: +y up from the baseline. The underline sits below the
+    // baseline (negative) and the strikeout above it (positive, through the text).
+    assert!(
+        metrics.underline_position() < 0.0,
+        "underline should sit below the baseline, got {}",
+        metrics.underline_position()
+    );
+    assert!(
+        metrics.strikeout_position() > 0.0,
+        "strikeout should sit above the baseline, got {}",
+        metrics.strikeout_position()
+    );
+}
+
+#[test]
+fn font_metrics_report_typographic_metrics() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+
+    let font_size = 32.;
+    let test_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(font_size);
+
+    let metrics = text_context
+        .measure_font(&test_paint)
+        .expect("font measuring failed unexpectedly");
+
+    // The vertical extents are ordered: 0 < x-height < cap-height <= ascender.
+    assert!(
+        metrics.x_height() > 0.0,
+        "x-height should be positive, got {}",
+        metrics.x_height()
+    );
+    assert!(
+        metrics.x_height() < metrics.cap_height(),
+        "x-height ({}) should be below the cap-height ({})",
+        metrics.x_height(),
+        metrics.cap_height()
+    );
+    assert!(
+        metrics.cap_height() <= metrics.ascender(),
+        "cap-height ({}) should not exceed the ascender ({})",
+        metrics.cap_height(),
+        metrics.ascender()
+    );
+
+    // Sub/superscript glyphs are recommended at a readable fraction of the em.
+    for (label, (x_size, y_size)) in [
+        ("subscript", metrics.subscript_size()),
+        ("superscript", metrics.superscript_size()),
+    ] {
+        assert!(
+            x_size > 0.0 && x_size < font_size,
+            "{label} x size should be within (0, em), got {x_size}"
+        );
+        assert!(
+            y_size > 0.0 && y_size < font_size,
+            "{label} y size should be within (0, em), got {y_size}"
+        );
+    }
+
+    // Canvas convention: +y points down, so subscripts drop below the baseline
+    // (positive) and superscripts rise above it (negative). Beyond the sign, the
+    // recommended offset places the raised/lowered glyph within the font's own
+    // vertical envelope: a superscript typeset at its recommended size lifts its
+    // cap above the base x-height (so it reads as raised) yet stays within the
+    // ascent, and a subscript drops within the descent depth. This guards the
+    // sign normalization (the superscript y is negated from the raw OS/2 value)
+    // against a regression that swapped or mis-scaled the offsets.
+    let ascent = metrics.ascender();
+    let descent = metrics.descender().abs();
+
+    let sup_rise = -metrics.superscript_offset().1;
+    // Cap-height scaled down to the recommended superscript size, matching the
+    // space the rendered superscript glyph occupies.
+    let sup_cap = metrics.cap_height() * metrics.superscript_size().1 / font_size;
+    assert!(
+        sup_rise > 0.0 && sup_rise < ascent,
+        "superscript rise ({sup_rise}) should lift within the ascent (0, {ascent})"
+    );
+    assert!(
+        sup_rise + sup_cap > metrics.x_height(),
+        "superscript cap top ({}) should clear the base x-height ({})",
+        sup_rise + sup_cap,
+        metrics.x_height()
+    );
+
+    let sub_drop = metrics.subscript_offset().1;
+    assert!(
+        sub_drop > 0.0 && sub_drop <= descent,
+        "subscript drop ({sub_drop}) should fall within the descent (0, {descent}]"
+    );
+
+    // The hhea line gap is commonly zero, but never negative for this font.
+    assert!(
+        metrics.line_gap() >= 0.0,
+        "line gap should not be negative, got {}",
+        metrics.line_gap()
+    );
+}
+
+#[test]
+fn font_metrics_scale_linearly_with_font_size() {
+    let text_context = femtovg::TextContext::default();
+
+    let font_id = text_context
+        .add_font_file("examples/assets/RobotoFlex-VariableFont.ttf")
+        .expect("Font not found");
+
+    let paint = femtovg::Paint::default().with_font(&[font_id]);
+    let small = text_context
+        .measure_font(&paint.clone().with_font_size(20.))
+        .expect("font measuring failed unexpectedly");
+    let large = text_context
+        .measure_font(&paint.with_font_size(40.))
+        .expect("font measuring failed unexpectedly");
+
+    let halves = [
+        ("x-height", small.x_height(), large.x_height()),
+        ("cap-height", small.cap_height(), large.cap_height()),
+        ("line gap", small.line_gap(), large.line_gap()),
+        ("subscript x size", small.subscript_size().0, large.subscript_size().0),
+        ("subscript y size", small.subscript_size().1, large.subscript_size().1),
+        (
+            "subscript x offset",
+            small.subscript_offset().0,
+            large.subscript_offset().0,
+        ),
+        (
+            "subscript y offset",
+            small.subscript_offset().1,
+            large.subscript_offset().1,
+        ),
+        (
+            "superscript x size",
+            small.superscript_size().0,
+            large.superscript_size().0,
+        ),
+        (
+            "superscript y size",
+            small.superscript_size().1,
+            large.superscript_size().1,
+        ),
+        (
+            "superscript x offset",
+            small.superscript_offset().0,
+            large.superscript_offset().0,
+        ),
+        (
+            "superscript y offset",
+            small.superscript_offset().1,
+            large.superscript_offset().1,
+        ),
+    ];
+    for (label, at_20, at_40) in halves {
+        assert_eq!(
+            at_20 * 2.0,
+            at_40,
+            "{label} at font size 20 should be exactly half of its value at 40"
+        );
+    }
+}
+
+#[test]
 fn font_measure_without_canvas() {
     let text_context = femtovg::TextContext::default();
 
