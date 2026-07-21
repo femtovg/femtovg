@@ -220,6 +220,24 @@ pub struct Image {
     info: ImageInfo,
 }
 
+/// The only flags a sampler descriptor reads. Keying on all of `ImageFlags` would miss on the rest.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct SamplerKey {
+    repeat_x: bool,
+    repeat_y: bool,
+    nearest: bool,
+}
+
+impl From<crate::ImageFlags> for SamplerKey {
+    fn from(flags: crate::ImageFlags) -> Self {
+        Self {
+            repeat_x: flags.contains(crate::ImageFlags::REPEAT_X),
+            repeat_y: flags.contains(crate::ImageFlags::REPEAT_Y),
+            nearest: flags.contains(crate::ImageFlags::NEAREST),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CachedPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -237,6 +255,9 @@ pub struct WGPURenderer {
     screen_view: [f32; 2],
 
     empty_texture: wgpu::Texture,
+    /// View of the 1x1 empty texture. Never varies, and rebuilding it per draw cost a wasm round trip.
+    empty_texture_view: wgpu::TextureView,
+    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
@@ -424,7 +445,9 @@ impl WGPURenderer {
 
             screen_view: [0.0, 0.0],
 
+            empty_texture_view: empty_texture.create_view(&Default::default()),
             empty_texture,
+            sampler_cache: Rc::new(RefCell::new(HashMap::new())),
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             bind_group_layout,
@@ -514,7 +537,8 @@ impl Renderer for WGPURenderer {
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
             self.device.clone(),
-            self.empty_texture.clone(),
+            self.empty_texture_view.clone(),
+            self.sampler_cache.clone(),
             self.shader_module.clone(),
             self.bind_group_layout.clone(),
             self.pipeline_layout.clone(),
@@ -1423,7 +1447,8 @@ impl BindGroupState {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         bind_group_layout: &wgpu::BindGroupLayout,
-        empty_texture: &wgpu::Texture,
+        empty_texture_view: &wgpu::TextureView,
+        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
     ) -> wgpu::BindGroup {
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Fragment Uniform Buffer"),
@@ -1431,13 +1456,19 @@ impl BindGroupState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let (main_texture_view, main_sampler) =
-            RenderPassBuilder::create_binding_resource_and_sampler(device, images, self.image.as_ref(), empty_texture);
+        let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
+            device,
+            images,
+            self.image.as_ref(),
+            empty_texture_view,
+            sampler_cache,
+        );
         let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
             self.glyph_texture.image_id().map(ImageOrTexture::Image).as_ref(),
-            empty_texture,
+            empty_texture_view,
+            sampler_cache,
         );
 
         if main_texture_view.is_external() || glyph_texture_view.is_external() {
@@ -1566,7 +1597,8 @@ impl<'a> RenderPassBuilder<'a> {
         device: &wgpu::Device,
         images: &ImageStore<Image>,
         image: Option<&ImageOrTexture>,
-        empty_texture: &wgpu::Texture,
+        empty_texture_view: &wgpu::TextureView,
+        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
     ) -> (OwnedBindingResource, wgpu::Sampler) {
         let flags = image
             .and_then(|image_or_texture| match image_or_texture {
@@ -1581,22 +1613,28 @@ impl<'a> RenderPassBuilder<'a> {
             wgpu::FilterMode::Linear
         };
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
-                wgpu::AddressMode::Repeat
-            } else {
-                wgpu::AddressMode::ClampToEdge
-            },
-            address_mode_v: if flags.contains(crate::ImageFlags::REPEAT_Y) {
-                wgpu::AddressMode::Repeat
-            } else {
-                wgpu::AddressMode::ClampToEdge
-            },
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: filter_mode,
-            min_filter: filter_mode,
-            ..Default::default()
-        });
+        let sampler = sampler_cache
+            .borrow_mut()
+            .entry(SamplerKey::from(flags))
+            .or_insert_with(|| {
+                device.create_sampler(&wgpu::SamplerDescriptor {
+                    address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
+                        wgpu::AddressMode::Repeat
+                    } else {
+                        wgpu::AddressMode::ClampToEdge
+                    },
+                    address_mode_v: if flags.contains(crate::ImageFlags::REPEAT_Y) {
+                        wgpu::AddressMode::Repeat
+                    } else {
+                        wgpu::AddressMode::ClampToEdge
+                    },
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: filter_mode,
+                    min_filter: filter_mode,
+                    ..Default::default()
+                })
+            })
+            .clone();
 
         let binding_resource = image
             .and_then(|image_or_texture| match image_or_texture {
@@ -1610,7 +1648,7 @@ impl<'a> RenderPassBuilder<'a> {
                     texture.create_view(&Default::default()),
                 )),
             })
-            .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture.create_view(&Default::default())));
+            .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture_view.clone()));
 
         (binding_resource, sampler)
     }
@@ -1723,7 +1761,8 @@ impl<'a> RenderPassBuilder<'a> {
 
 struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
-    empty_texture: wgpu::Texture,
+    empty_texture_view: wgpu::TextureView,
+    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1736,7 +1775,8 @@ struct CommandToPipelineAndBindGroupMapper {
 impl CommandToPipelineAndBindGroupMapper {
     fn new(
         device: wgpu::Device,
-        empty_texture: wgpu::Texture,
+        empty_texture_view: wgpu::TextureView,
+        sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
         shader_module: Rc<wgpu::ShaderModule>,
         bind_group_layout: wgpu::BindGroupLayout,
         pipeline_layout: wgpu::PipelineLayout,
@@ -1744,7 +1784,8 @@ impl CommandToPipelineAndBindGroupMapper {
     ) -> Self {
         Self {
             device: device.clone(),
-            empty_texture,
+            empty_texture_view,
+            sampler_cache,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1782,7 +1823,13 @@ impl CommandToPipelineAndBindGroupMapper {
 
         if self.current_bind_group_state != Some(bind_group_state.clone()) {
             self.current_bind_group = bind_group_state
-                .materialize(&self.device, images, &self.bind_group_layout, &self.empty_texture)
+                .materialize(
+                    &self.device,
+                    images,
+                    &self.bind_group_layout,
+                    &self.empty_texture_view,
+                    &self.sampler_cache,
+                )
                 .into();
             self.current_bind_group_state = Some(bind_group_state);
         }
