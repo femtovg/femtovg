@@ -64,6 +64,10 @@ use super::Vertex;
 const UNIFORMARRAY_SIZE: usize = 14;
 /// Size of one `UniformArray`, which is the window a dynamic offset binding exposes.
 const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
+/// Most distinct uniform slots one command records. A concave fill uses its stencil params and its
+/// fill params, a stencil stroke its two params, and every other command a single set; the drawables
+/// within a command reuse those, so the slot count does not grow with them.
+const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 
 #[derive(Clone, PartialEq)]
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
@@ -444,12 +448,14 @@ impl Renderer for WGPURenderer {
         verts: &[super::Vertex],
         commands: Vec<super::Command>,
     ) -> Self::CommandBuffer {
-        // Loose upper bound: growing mid-frame would invalidate bindings already recorded.
-        let needed_slots: u64 = commands
-            .iter()
-            .map(|command| command.drawables.len() as u64 * 4 + 8)
-            .sum();
-        if self.uniform_buffer.is_none() || self.uniform_slots < needed_slots {
+        if commands.is_empty() {
+            return None;
+        }
+
+        // The buffer has to cover the whole frame up front: growing it mid-recording would
+        // invalidate the bind groups already recorded against it.
+        let needed_slots = commands.len() as u64 * UNIFORM_SLOTS_PER_COMMAND;
+        if self.uniform_slots < needed_slots {
             let slots = needed_slots.next_power_of_two().max(64);
             self.uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Fragment Uniform Buffer"),
@@ -458,10 +464,6 @@ impl Renderer for WGPURenderer {
                 mapped_at_creation: false,
             }));
             self.uniform_slots = slots;
-        }
-
-        if commands.is_empty() {
-            return None;
         }
 
         let output = output.into();
@@ -640,12 +642,14 @@ impl Renderer for WGPURenderer {
         drop(render_pass_builder);
 
         // One upload for the frame. write_buffer is ordered ahead of the caller's submit.
-        if !pipeline_and_bindgroup_mapper.uniform_staging.is_empty() {
-            self.queue.write_buffer(
-                self.uniform_buffer.as_ref().unwrap(),
-                0,
-                &pipeline_and_bindgroup_mapper.uniform_staging,
-            );
+        let uniform_staging = &pipeline_and_bindgroup_mapper.uniform_staging;
+        debug_assert!(
+            uniform_staging.len() as u64 <= self.uniform_slots * self.uniform_stride,
+            "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
+        );
+        if !uniform_staging.is_empty() {
+            self.queue
+                .write_buffer(self.uniform_buffer.as_ref().unwrap(), 0, uniform_staging);
         }
 
         let command_buffer = encoder.finish();
