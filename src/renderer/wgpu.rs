@@ -62,13 +62,9 @@ use super::Params;
 use super::Vertex;
 
 const UNIFORMARRAY_SIZE: usize = 14;
-/// Size of one `UniformArray`, which is the window a dynamic offset binding exposes.
 const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
-/// Most distinct uniform slots one command records. A concave fill uses its stencil params and its
-/// fill params, a stencil stroke its two params, and every other command a single set; the drawables
-/// within a command reuse those, so the slot count does not grow with them.
+// A concave fill and a stencil stroke record two sets of params, every other command one.
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
-/// Floors for the two resident buffers, so the common small frame never reallocates.
 const MIN_UNIFORM_SLOTS: u64 = 64;
 const MIN_VERTEX_BYTES: u64 = 4096;
 
@@ -77,8 +73,7 @@ const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.uni
 const VERTEX_BUFFER_LABEL: &str = "Main Vertex Buffer";
 const VERTEX_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
 
-/// Replaces `buffer` with a larger one when `needed` bytes no longer fit. Capacity rounds up to a
-/// power of two, so a frame that keeps growing stops reallocating.
+/// Replaces `buffer` with a larger one when `needed` bytes no longer fit.
 fn grow_buffer(device: &wgpu::Device, buffer: &mut wgpu::Buffer, needed: u64, label: &str, usage: wgpu::BufferUsages) {
     if buffer.size() >= needed {
         return;
@@ -249,7 +244,7 @@ pub struct Image {
     info: ImageInfo,
 }
 
-/// The only flags a sampler descriptor reads. Keying on all of `ImageFlags` would miss on the rest.
+// Only these flags change a sampler descriptor; the rest would split the cache for nothing.
 const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
     .union(crate::ImageFlags::REPEAT_Y)
     .union(crate::ImageFlags::NEAREST);
@@ -270,15 +265,10 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    /// View of the 1x1 empty texture, which keeps the texture alive. Never varies, and rebuilding it
-    /// per draw cost a wasm round trip.
     empty_texture_view: wgpu::TextureView,
-    /// One sampler per distinct `SAMPLER_FLAGS` combination, created on first use.
     sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
-    /// One uniform buffer per frame, in slots aligned for dynamic offsets. Grows, never shrinks.
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    /// Resident vertex buffer, as opengl.rs keeps one. Rebuilding it per frame re-uploaded everything.
     vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
@@ -430,7 +420,6 @@ impl WGPURenderer {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        // One buffer per frame, each draw reaching its slot by offset.
                         has_dynamic_offset: true,
                         min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
                     },
@@ -520,8 +509,7 @@ impl Renderer for WGPURenderer {
             return None;
         }
 
-        // The buffer has to cover the whole frame up front: growing it mid-recording would
-        // invalidate the bind groups already recorded against it.
+        // The bind groups recorded below hold this buffer, so it cannot grow mid-frame.
         let needed_slots = commands.len() as u64 * UNIFORM_SLOTS_PER_COMMAND;
         grow_buffer(
             &self.device,
@@ -539,7 +527,6 @@ impl Renderer for WGPURenderer {
         let texture_view = output.view.clone();
 
         let vertex_bytes: &[u8] = bytemuck::cast_slice(verts);
-        // write_buffer needs a length that is a multiple of the copy alignment.
         let vertex_needed =
             (vertex_bytes.len() as u64).div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT;
         grow_buffer(
@@ -703,7 +690,7 @@ impl Renderer for WGPURenderer {
 
         drop(render_pass_builder);
 
-        // One upload for the frame. write_buffer is ordered ahead of the caller's submit.
+        // write_buffer is ordered ahead of the caller's submit.
         let uniform_staging = &pipeline_and_bindgroup_mapper.uniform_staging;
         debug_assert!(
             uniform_staging.len() as u64 <= self.uniform_buffer.size(),
@@ -1597,7 +1584,6 @@ struct RenderPassBuilder<'a> {
     screen_surface_format: wgpu::TextureFormat,
     stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group: wgpu::BindGroup,
-    /// Bumped when the render pass is recreated, so state caches can tell they are stale.
     pass_generation: u32,
 }
 
@@ -1844,16 +1830,12 @@ struct CommandToPipelineAndBindGroupMapper {
     sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    /// The frame's uniform slots, padded to `uniform_stride`, uploaded once when recording ends.
     uniform_staging: Vec<u8>,
-    /// Last uniforms and their offset, so a command's drawables upload once between them.
     current_uniforms: Option<UniformArray>,
     current_uniform_offset: u64,
-    /// State last set on the pass, so a set_* that would change nothing is skipped, as opengl.rs does.
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
     current_bound_offset: Option<u32>,
-    /// Which pass the caches above belong to. A new pass resets state, so stale ones draw wrong.
     current_pass_generation: Option<u32>,
     shader_module: Rc<wgpu::ShaderModule>,
 
@@ -1946,18 +1928,15 @@ impl CommandToPipelineAndBindGroupMapper {
             self.current_bind_group_state = Some(bind_group_state);
         }
 
-        // write_buffer is ordered ahead of the submit, so writing during recording is sound.
         let uniforms = UniformArray::from(params);
         if self.current_uniforms.as_ref() != Some(&uniforms) {
             let offset = self.uniform_staging.len() as u64;
             self.uniform_staging
                 .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
-            // Pad to a whole slot so the next offset stays aligned.
             self.uniform_staging.resize((offset + self.uniform_stride) as usize, 0);
             self.current_uniforms = Some(uniforms);
             self.current_uniform_offset = offset;
         }
-        // Nothing to rebind while both the bind group and the offset hold, as within a command.
         let offset = self.current_uniform_offset as u32;
         if bind_group_changed || self.current_bound_offset != Some(offset) {
             render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
