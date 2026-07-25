@@ -216,22 +216,9 @@ pub struct Image {
 }
 
 /// The only flags a sampler descriptor reads. Keying on all of `ImageFlags` would miss on the rest.
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-struct SamplerKey {
-    repeat_x: bool,
-    repeat_y: bool,
-    nearest: bool,
-}
-
-impl From<crate::ImageFlags> for SamplerKey {
-    fn from(flags: crate::ImageFlags) -> Self {
-        Self {
-            repeat_x: flags.contains(crate::ImageFlags::REPEAT_X),
-            repeat_y: flags.contains(crate::ImageFlags::REPEAT_Y),
-            nearest: flags.contains(crate::ImageFlags::NEAREST),
-        }
-    }
-}
+const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
+    .union(crate::ImageFlags::REPEAT_Y)
+    .union(crate::ImageFlags::NEAREST);
 
 #[derive(Debug)]
 struct CachedPipeline {
@@ -249,9 +236,11 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    /// View of the 1x1 empty texture. Never varies, and rebuilding it per draw cost a wasm round trip.
+    /// View of the 1x1 empty texture, which keeps the texture alive. Never varies, and rebuilding it
+    /// per draw cost a wasm round trip.
     empty_texture_view: wgpu::TextureView,
-    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    /// One sampler per distinct `SAMPLER_FLAGS` combination, created on first use.
+    sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
     /// One uniform buffer per frame, in slots aligned for dynamic offsets. Grows, never shrinks.
     uniform_buffer: Option<wgpu::Buffer>,
     uniform_stride: u64,
@@ -1461,7 +1450,7 @@ impl BindGroupState {
         images: &ImageStore<Image>,
         bind_group_layout: &wgpu::BindGroupLayout,
         empty_texture_view: &wgpu::TextureView,
-        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
+        sampler_cache: &RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>,
         uniform_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
@@ -1613,7 +1602,7 @@ impl<'a> RenderPassBuilder<'a> {
         images: &ImageStore<Image>,
         image: Option<&ImageOrTexture>,
         empty_texture_view: &wgpu::TextureView,
-        sampler_cache: &RefCell<HashMap<SamplerKey, wgpu::Sampler>>,
+        sampler_cache: &RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>,
     ) -> (OwnedBindingResource, wgpu::Sampler) {
         let flags = image
             .and_then(|image_or_texture| match image_or_texture {
@@ -1630,7 +1619,7 @@ impl<'a> RenderPassBuilder<'a> {
 
         let sampler = sampler_cache
             .borrow_mut()
-            .entry(SamplerKey::from(flags))
+            .entry(flags & SAMPLER_FLAGS)
             .or_insert_with(|| {
                 device.create_sampler(&wgpu::SamplerDescriptor {
                     address_mode_u: if flags.contains(crate::ImageFlags::REPEAT_X) {
@@ -1778,7 +1767,7 @@ impl<'a> RenderPassBuilder<'a> {
 struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
     empty_texture_view: wgpu::TextureView,
-    sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+    sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
     queue: wgpu::Queue,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
@@ -1806,7 +1795,7 @@ impl CommandToPipelineAndBindGroupMapper {
     fn new(
         device: wgpu::Device,
         empty_texture_view: wgpu::TextureView,
-        sampler_cache: Rc<RefCell<HashMap<SamplerKey, wgpu::Sampler>>>,
+        sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
         queue: wgpu::Queue,
         uniform_buffer: wgpu::Buffer,
         uniform_stride: u64,
