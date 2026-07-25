@@ -68,6 +68,29 @@ const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 /// fill params, a stencil stroke its two params, and every other command a single set; the drawables
 /// within a command reuse those, so the slot count does not grow with them.
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
+/// Floors for the two resident buffers, so the common small frame never reallocates.
+const MIN_UNIFORM_SLOTS: u64 = 64;
+const MIN_VERTEX_BYTES: u64 = 4096;
+
+const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
+const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST);
+const VERTEX_BUFFER_LABEL: &str = "Main Vertex Buffer";
+const VERTEX_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
+
+/// Replaces `buffer` with a larger one when `needed` bytes no longer fit. Capacity rounds up to a
+/// power of two, so a frame that keeps growing stops reallocating.
+fn grow_buffer(device: &wgpu::Device, buffer: &mut wgpu::Buffer, needed: u64, label: &str, usage: wgpu::BufferUsages) {
+    if buffer.size() >= needed {
+        return;
+    }
+
+    *buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: needed.next_power_of_two(),
+        usage,
+        mapped_at_creation: false,
+    });
+}
 
 #[derive(Clone, PartialEq)]
 pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
@@ -246,12 +269,10 @@ pub struct WGPURenderer {
     /// One sampler per distinct `SAMPLER_FLAGS` combination, created on first use.
     sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
     /// One uniform buffer per frame, in slots aligned for dynamic offsets. Grows, never shrinks.
-    uniform_buffer: Option<wgpu::Buffer>,
+    uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    uniform_slots: u64,
     /// Resident vertex buffer, as opengl.rs keeps one. Rebuilding it per frame re-uploaded everything.
-    vertex_buffer: Option<wgpu::Buffer>,
-    vertex_capacity: u64,
+    vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
 
@@ -320,6 +341,19 @@ impl WGPURenderer {
         // A dynamic offset must be a multiple of this, usually 256.
         let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(1);
         let uniform_stride = UNIFORM_BYTES.div_ceil(alignment) * alignment;
+
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(UNIFORM_BUFFER_LABEL),
+            size: MIN_UNIFORM_SLOTS * uniform_stride,
+            usage: UNIFORM_BUFFER_USAGE,
+            mapped_at_creation: false,
+        });
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(VERTEX_BUFFER_LABEL),
+            size: MIN_VERTEX_BYTES,
+            usage: VERTEX_BUFFER_USAGE,
+            mapped_at_creation: false,
+        });
 
         let empty_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("empty"),
@@ -417,11 +451,9 @@ impl WGPURenderer {
 
             empty_texture_view: empty_texture.create_view(&Default::default()),
             sampler_cache: Rc::new(RefCell::new(HashMap::new())),
-            uniform_buffer: None,
+            uniform_buffer,
             uniform_stride,
-            uniform_slots: 0,
-            vertex_buffer: None,
-            vertex_capacity: 0,
+            vertex_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             bind_group_layout,
@@ -455,16 +487,13 @@ impl Renderer for WGPURenderer {
         // The buffer has to cover the whole frame up front: growing it mid-recording would
         // invalidate the bind groups already recorded against it.
         let needed_slots = commands.len() as u64 * UNIFORM_SLOTS_PER_COMMAND;
-        if self.uniform_slots < needed_slots {
-            let slots = needed_slots.next_power_of_two().max(64);
-            self.uniform_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Fragment Uniform Buffer"),
-                size: slots * self.uniform_stride,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            self.uniform_slots = slots;
-        }
+        grow_buffer(
+            &self.device,
+            &mut self.uniform_buffer,
+            needed_slots * self.uniform_stride,
+            UNIFORM_BUFFER_LABEL,
+            UNIFORM_BUFFER_USAGE,
+        );
 
         let output = output.into();
 
@@ -474,23 +503,20 @@ impl Renderer for WGPURenderer {
         let texture_view = output.view.clone();
 
         let vertex_bytes: &[u8] = bytemuck::cast_slice(verts);
-        // write_buffer needs a length that is a multiple of 4.
-        let vertex_needed = (vertex_bytes.len() as u64).div_ceil(4) * 4;
-        if self.vertex_capacity < vertex_needed {
-            let capacity = vertex_needed.next_power_of_two().max(4096);
-            self.vertex_buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Main Vertex Buffer"),
-                size: capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            self.vertex_capacity = capacity;
-        }
+        // write_buffer needs a length that is a multiple of the copy alignment.
+        let vertex_needed =
+            (vertex_bytes.len() as u64).div_ceil(wgpu::COPY_BUFFER_ALIGNMENT) * wgpu::COPY_BUFFER_ALIGNMENT;
+        grow_buffer(
+            &self.device,
+            &mut self.vertex_buffer,
+            vertex_needed,
+            VERTEX_BUFFER_LABEL,
+            VERTEX_BUFFER_USAGE,
+        );
         if !vertex_bytes.is_empty() {
-            self.queue
-                .write_buffer(self.vertex_buffer.as_ref().unwrap(), 0, vertex_bytes);
+            self.queue.write_buffer(&self.vertex_buffer, 0, vertex_bytes);
         }
-        let vertex_buffer = self.vertex_buffer.clone().unwrap();
+        let vertex_buffer = self.vertex_buffer.clone();
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
             if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
@@ -540,7 +566,7 @@ impl Renderer for WGPURenderer {
             self.device.clone(),
             self.empty_texture_view.clone(),
             self.sampler_cache.clone(),
-            self.uniform_buffer.clone().unwrap(),
+            self.uniform_buffer.clone(),
             self.uniform_stride,
             self.shader_module.clone(),
             self.bind_group_layout.clone(),
@@ -644,12 +670,11 @@ impl Renderer for WGPURenderer {
         // One upload for the frame. write_buffer is ordered ahead of the caller's submit.
         let uniform_staging = &pipeline_and_bindgroup_mapper.uniform_staging;
         debug_assert!(
-            uniform_staging.len() as u64 <= self.uniform_slots * self.uniform_stride,
+            uniform_staging.len() as u64 <= self.uniform_buffer.size(),
             "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
         );
         if !uniform_staging.is_empty() {
-            self.queue
-                .write_buffer(self.uniform_buffer.as_ref().unwrap(), 0, uniform_staging);
+            self.queue.write_buffer(&self.uniform_buffer, 0, uniform_staging);
         }
 
         let command_buffer = encoder.finish();
