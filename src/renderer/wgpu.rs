@@ -213,7 +213,7 @@ pub struct Image {
     info: ImageInfo,
 }
 
-/// The only flags a sampler descriptor reads. Keying on all of `ImageFlags` would miss on the rest.
+// Only these flags change a sampler descriptor; the rest would split the cache for nothing.
 const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
     .union(crate::ImageFlags::REPEAT_Y)
     .union(crate::ImageFlags::NEAREST);
@@ -234,10 +234,7 @@ pub struct WGPURenderer {
 
     screen_view: [f32; 2],
 
-    /// View of the 1x1 empty texture, which keeps the texture alive. Never varies, and rebuilding it
-    /// per draw cost a wasm round trip.
     empty_texture_view: wgpu::TextureView,
-    /// One sampler per distinct `SAMPLER_FLAGS` combination, created on first use.
     sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
