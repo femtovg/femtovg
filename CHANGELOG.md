@@ -1,9 +1,30 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.26.0]
+## [0.26.0] - 2026-07-20
 
+- Added Canvas 2D drop shadows for fills, strokes and text. New `Canvas` methods
+  `set_shadow_color()`, `set_shadow_blur()` and `set_shadow_offset()`. Shadows
+  cost a per-draw offscreen blur; a transparent shadow color restores the
+  zero-overhead path. Thanks @matthargett
+- Added rounded scissor support. New `Canvas` methods `rounded_scissor()` and
+  `intersect_rounded_scissor()` take a corner radius; intersections that can't
+  be represented exactly fall back to rectangular scissoring. Thanks
+  @matthargett
+- Added a start angle to conic gradients for Canvas conformance. New `Paint`
+  constructors `conic_gradient()`, `conic_gradient_with_angle()` and
+  `conic_gradient_stops_with_angle()`. Previously serialized paints still
+  deserialize, defaulting to the prior no-rotation behavior. Thanks
+  @matthargett
+- Added an `ImageSource::HtmlCanvasElement` variant, letting callers hand over a
+  source already rasterized at the wanted size. This avoids a wgpu panic when
+  enlarging an `HtmlImageElement` for hidpi output. Thanks @yebei199
+- Gradients are dithered to reduce banding. Thanks @matthargett
 - Bumped WGPU renderer to use WGPU 30.x
+- Fixed text layout to preserve the fractional baseline (#281). Thanks
+  @matthargett
+- Fixed scaled-atlas text positioning to use the true scale rather than the
+  quantized one. Thanks @matthargett
 
 ## [0.25.1] - 2026-05-29
 

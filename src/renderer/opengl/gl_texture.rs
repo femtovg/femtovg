@@ -265,6 +265,18 @@ impl GlTexture {
                     image_element,
                 )
             },
+            #[cfg(target_arch = "wasm32")]
+            ImageSource::HtmlCanvasElement(canvas_element) => unsafe {
+                context.tex_sub_image_2d_with_html_canvas(
+                    glow::TEXTURE_2D,
+                    0,
+                    x as i32,
+                    y as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    canvas_element,
+                )
+            },
         }
 
         if self.info.flags().contains(ImageFlags::GENERATE_MIPMAPS) {
