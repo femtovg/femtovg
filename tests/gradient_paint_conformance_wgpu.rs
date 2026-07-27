@@ -566,14 +566,15 @@ fn two_point_radial_leaves_uncovered_transparent() {
     );
 }
 
-/// Two circles that coincide exactly paint nothing. From the web platform test
-/// `2d.gradient.radial.equal`, whose nine sample points must all keep the colour
-/// underneath. The Canvas algorithm says so outright; note SVG disagrees, and
-/// its own test `svg/pservers/reftests/radialgradient-fully-overlapping.svg`
-/// was flipped in 2019 to expect a gradient instead, so this is a deliberate
-/// choice of the Canvas reading rather than a universal one.
+/// Two circles that coincide exactly take the far end of the ramp across the
+/// whole plane. The Canvas algorithm says to paint nothing for this geometry,
+/// but the SVG working group resolved the opposite in 2019 — pad takes the last
+/// stop, repeat and reflect take the average of the stops — and WPT's
+/// `svg/pservers/reftests/radialgradient-fully-overlapping.svg` was changed to
+/// assert the gradient is drawn. SVG 2's prose still says transparent black and
+/// was never updated to match its own resolution. This follows SVG.
 #[test]
-fn two_point_radial_identical_circles_paint_nothing() {
+fn two_point_radial_identical_circles_take_the_last_stop() {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;
@@ -593,10 +594,10 @@ fn two_point_radial_identical_circles_paint_nothing() {
         p.rect(0.0, 0.0, W as f32, H as f32);
         c.fill_path(&p, &g);
     });
-    for (x, y) in [(150usize, 60usize), (150, 30), (20, 20), (280, 100), (150, 100)] {
+    for (x, y) in [(150usize, 60usize), (150, 30), (20, 20), (280, 100)] {
         assert!(
-            near(px(&pixels, x, y), [255, 255, 255], 3),
-            "({x}, {y}) should be untouched, got {:?}",
+            near(px(&pixels, x, y), [0, 0, 255], 4),
+            "({x}, {y}) should take the last stop, got {:?}",
             px(&pixels, x, y)
         );
     }

@@ -261,7 +261,14 @@ fn radialTwoPointT(vertex: VertexOutput, params: Params) -> RadialT {
     // degenerate in another. Measure it against the terms it came from instead,
     // which also folds in the case where both are zero and the circles coincide.
     let a_scale = max(dot(cd, cd), dr * dr);
-    if (abs(a) <= 1e-4 * a_scale) {
+    if (a_scale == 0.0) {
+        // The two circles are the same circle. There is no sweep to walk, so
+        // the whole plane takes the far end of the ramp. The Canvas algorithm
+        // says to paint nothing here, but SVG resolved the opposite and its
+        // test suite asserts the gradient is drawn, so follow SVG.
+        result.t = 1.0;
+        result.covered = true;
+    } else if (abs(a) <= 1e-4 * a_scale) {
         // Degenerate cone (|cd| == |dr|): the quadratic collapses to the linear
         // equation -2b*t + c = 0. This is exactly the case where the end center
         // sits on the start circle, common in focal-style gradients.
