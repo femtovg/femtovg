@@ -444,6 +444,17 @@ impl Path {
     }
 
     /// Creates a new rounded rectangle shaped sub-path with varying radii for each corner.
+    ///
+    /// Radii that are too large for the rectangle are reduced: when the two radii
+    /// along a side add up to more than that side's length, every radius is
+    /// multiplied by the same factor until they all fit. Scaling them together
+    /// keeps each corner the shape it was asked for, so a radius larger than half
+    /// the height still yields a fully rounded end rather than a flattened one.
+    /// This is the "overlapping curves" rule shared by CSS backgrounds and
+    /// borders and by the Canvas `roundRect()` algorithm.
+    ///
+    /// A radius that is negative or not finite does not describe a corner and is
+    /// treated as zero, leaving that corner square.
     pub fn rounded_rect_varying(
         &mut self,
         x: f32,
@@ -455,23 +466,48 @@ impl Path {
         rad_bottom_right: f32,
         rad_bottom_left: f32,
     ) {
-        if rad_top_left < 0.1 && rad_top_right < 0.1 && rad_bottom_right < 0.1 && rad_bottom_left < 0.1 {
+        let usable = |r: f32| if r.is_finite() && r > 0.0 { r } else { 0.0 };
+
+        let mut tl = usable(rad_top_left);
+        let mut tr = usable(rad_top_right);
+        let mut br = usable(rad_bottom_right);
+        let mut bl = usable(rad_bottom_left);
+
+        if tl < 0.1 && tr < 0.1 && br < 0.1 && bl < 0.1 {
             self.rect(x, y, w, h);
         } else {
-            let halfw = w.abs() * 0.5;
-            let halfh = h.abs() * 0.5;
+            let (width, height) = (w.abs(), h.abs());
 
-            let rx_bl = rad_bottom_left.min(halfw) * w.signum();
-            let ry_bl = rad_bottom_left.min(halfh) * h.signum();
+            // One factor for every radius, taken from whichever side overflows
+            // the most. Clamping the axes separately instead would turn a corner
+            // into an ellipse. A side whose radii are both zero cannot overflow,
+            // so it is left out of the comparison.
+            let scale = [(width, tl + tr), (width, bl + br), (height, tl + bl), (height, tr + br)]
+                .into_iter()
+                .filter(|&(_, sum)| sum > 0.0)
+                .map(|(side, sum)| side / sum)
+                .fold(1.0f32, f32::min);
 
-            let rx_br = rad_bottom_right.min(halfw) * w.signum();
-            let ry_br = rad_bottom_right.min(halfh) * h.signum();
+            if scale < 1.0 {
+                tl *= scale;
+                tr *= scale;
+                br *= scale;
+                bl *= scale;
+            }
 
-            let rx_tr = rad_top_right.min(halfw) * w.signum();
-            let ry_tr = rad_top_right.min(halfh) * h.signum();
+            let (sign_x, sign_y) = (w.signum(), h.signum());
 
-            let rx_tl = rad_top_left.min(halfw) * w.signum();
-            let ry_tl = rad_top_left.min(halfh) * h.signum();
+            let rx_bl = bl * sign_x;
+            let ry_bl = bl * sign_y;
+
+            let rx_br = br * sign_x;
+            let ry_br = br * sign_y;
+
+            let rx_tr = tr * sign_x;
+            let ry_tr = tr * sign_y;
+
+            let rx_tl = tl * sign_x;
+            let ry_tl = tl * sign_y;
 
             self.append(
                 &[
