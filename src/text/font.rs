@@ -65,7 +65,6 @@ pub enum GlyphRendering<'a> {
 #[derive(Copy, Clone, Default, Debug)]
 struct FontFlags(u8);
 
-// TODO: underline, strikeout, subscript, superscript metrics
 impl FontFlags {
     fn new(regular: bool, italic: bool, bold: bool, oblique: bool, variable: bool) -> Self {
         let mut flags = 0;
@@ -113,12 +112,40 @@ impl FontFlags {
     }
 }
 
+/// Conventional typographic approximations used when a font does not provide
+/// the corresponding OS/2 value. Expressed as fractions of the em size and
+/// shared by both font-parsing backends so they agree on fallbacks.
+#[cfg(any(feature = "textlayout", feature = "swash"))]
+mod fallback {
+    /// Recommended sub/superscript glyph size: 65% of the em.
+    pub const SCRIPT_SIZE: f32 = 0.65;
+    /// Subscript baseline drop below the text baseline: 14% of the em.
+    pub const SUBSCRIPT_DROP: f32 = 0.14;
+    /// Superscript baseline rise above the text baseline: 48% of the em.
+    pub const SUPERSCRIPT_RISE: f32 = 0.48;
+    /// Height of a lowercase "x" above the baseline: half the em.
+    pub const X_HEIGHT: f32 = 0.5;
+    /// Height of an uppercase letter above the baseline: 70% of the em.
+    pub const CAP_HEIGHT: f32 = 0.7;
+}
+
 /// Information about a font.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct FontMetrics {
     ascender: f32,
     descender: f32,
     height: f32,
+    underline_position: f32,
+    underline_thickness: f32,
+    strikeout_position: f32,
+    strikeout_thickness: f32,
+    subscript_size: (f32, f32),
+    subscript_offset: (f32, f32),
+    superscript_size: (f32, f32),
+    superscript_offset: (f32, f32),
+    x_height: f32,
+    cap_height: f32,
+    line_gap: f32,
     flags: FontFlags,
     weight: u16,
     width: u16,
@@ -129,6 +156,21 @@ impl FontMetrics {
         self.ascender *= scale;
         self.descender *= scale;
         self.height *= scale;
+        self.underline_position *= scale;
+        self.underline_thickness *= scale;
+        self.strikeout_position *= scale;
+        self.strikeout_thickness *= scale;
+        self.subscript_size.0 *= scale;
+        self.subscript_size.1 *= scale;
+        self.subscript_offset.0 *= scale;
+        self.subscript_offset.1 *= scale;
+        self.superscript_size.0 *= scale;
+        self.superscript_size.1 *= scale;
+        self.superscript_offset.0 *= scale;
+        self.superscript_offset.1 *= scale;
+        self.x_height *= scale;
+        self.cap_height *= scale;
+        self.line_gap *= scale;
     }
 
     /// Returns the distance from the baseline to the top of the highest glyph.
@@ -144,6 +186,125 @@ impl FontMetrics {
     /// Returns the height of the font.
     pub fn height(&self) -> f32 {
         self.height.round()
+    }
+
+    /// Returns the position of the underline relative to the baseline.
+    ///
+    /// Follows the OpenType `post` table convention: the value is measured from
+    /// the baseline with the positive y-axis pointing up, so it is typically
+    /// negative (the underline sits below the baseline). Sourced from the font's
+    /// `post` table when present, otherwise derived from the descender.
+    pub fn underline_position(&self) -> f32 {
+        self.underline_position
+    }
+
+    /// Returns the thickness of the underline.
+    ///
+    /// Sourced from the font's `post` table when present, otherwise derived from
+    /// the font height.
+    pub fn underline_thickness(&self) -> f32 {
+        self.underline_thickness
+    }
+
+    /// Returns the position of the strikeout line relative to the baseline.
+    ///
+    /// Follows the OpenType OS/2 table convention: the value is measured from the
+    /// baseline with the positive y-axis pointing up, so it is typically positive
+    /// (the strikeout sits above the baseline, through the middle of the text).
+    /// Sourced from the font's OS/2 table when present, otherwise derived from the
+    /// ascender.
+    pub fn strikeout_position(&self) -> f32 {
+        self.strikeout_position
+    }
+
+    /// Returns the thickness of the strikeout line.
+    ///
+    /// Sourced from the font's OS/2 table when present, otherwise derived from the
+    /// font height.
+    pub fn strikeout_thickness(&self) -> f32 {
+        self.strikeout_thickness
+    }
+
+    /// Returns the recommended horizontal and vertical size for subscript text,
+    /// as an `(x, y)` pair.
+    ///
+    /// Sourced from the font's OS/2 table (`ySubscriptXSize`/`ySubscriptYSize`)
+    /// when present, otherwise both components fall back to 0.65 × the em size,
+    /// a conventional typographic approximation. Text layout engines can use
+    /// this as the font size for `vertical-align: sub` runs.
+    pub fn subscript_size(&self) -> (f32, f32) {
+        self.subscript_size
+    }
+
+    /// Returns the recommended offset from the text origin to the subscript
+    /// origin, as an `(x, y)` pair.
+    ///
+    /// Sourced from the font's OS/2 table (`ySubscriptXOffset`/`ySubscriptYOffset`)
+    /// when present, otherwise falls back to `(0, 0.14 × em)`, a conventional
+    /// typographic approximation. The y component follows the canvas convention
+    /// (+y points down): it is typically positive, dropping the subscript
+    /// baseline below the text baseline. This matches the raw OS/2 value, which
+    /// is also expressed positive-down, but note it differs from
+    /// [`Self::underline_position`], which keeps the +y-up `post` table
+    /// convention.
+    pub fn subscript_offset(&self) -> (f32, f32) {
+        self.subscript_offset
+    }
+
+    /// Returns the recommended horizontal and vertical size for superscript
+    /// text, as an `(x, y)` pair.
+    ///
+    /// Sourced from the font's OS/2 table (`ySuperscriptXSize`/`ySuperscriptYSize`)
+    /// when present, otherwise both components fall back to 0.65 × the em size,
+    /// a conventional typographic approximation. Text layout engines can use
+    /// this as the font size for `vertical-align: super` runs.
+    pub fn superscript_size(&self) -> (f32, f32) {
+        self.superscript_size
+    }
+
+    /// Returns the recommended offset from the text origin to the superscript
+    /// origin, as an `(x, y)` pair.
+    ///
+    /// Sourced from the font's OS/2 table (`ySuperscriptXOffset`/`ySuperscriptYOffset`)
+    /// when present, otherwise falls back to `(0, -0.48 × em)`, a conventional
+    /// typographic approximation. The y component follows the canvas convention
+    /// (+y points down): it is typically negative, raising the superscript
+    /// baseline above the text baseline. The raw OS/2 `ySuperscriptYOffset` is
+    /// expressed positive-up; it is negated here so both script offsets share
+    /// the same +y-down convention.
+    pub fn superscript_offset(&self) -> (f32, f32) {
+        self.superscript_offset
+    }
+
+    /// Returns the height of lowercase letters without ascenders or descenders
+    /// (the height of a lowercase "x") above the baseline.
+    ///
+    /// Sourced from the font's OS/2 table (`sxHeight`, version 2 and up) when
+    /// present, otherwise falls back to 0.5 × the em size, a conventional
+    /// typographic approximation. Useful for implementing the CSS `ex` unit.
+    pub fn x_height(&self) -> f32 {
+        self.x_height
+    }
+
+    /// Returns the height of uppercase letters (the height of a capital "H")
+    /// above the baseline.
+    ///
+    /// Sourced from the font's OS/2 table (`sCapHeight`, version 2 and up) when
+    /// present, otherwise falls back to 0.7 × the em size, a conventional
+    /// typographic approximation. Useful for implementing the CSS `cap` unit
+    /// and for small-caps synthesis.
+    pub fn cap_height(&self) -> f32 {
+        self.cap_height
+    }
+
+    /// Returns the recommended additional space between lines of text, beyond
+    /// ascender + descender.
+    ///
+    /// Sourced from the font's `hhea` table (or the OS/2 typographic line gap
+    /// when the font opts into typographic metrics via `USE_TYPO_METRICS`).
+    /// Many fonts legitimately report 0 here.
+    pub fn line_gap(&self) -> f32 {
+        self.line_gap
     }
 
     /// Returns if the font is regular.
@@ -219,10 +380,49 @@ impl Font {
 
         let units_per_em = ttf_font.units_per_em();
 
+        let ascender = ttf_font.ascender() as f32;
+        let descender = ttf_font.descender() as f32;
+        // The `post`/OS-2 tables are optional. When absent, fall back to values
+        // derived from the ascender/descender so decorations still land sensibly:
+        //   * underline a little below the baseline (descender follows +y up, so
+        //     it is negative), at roughly 1/14 of the em as thickness.
+        //   * strikeout through the middle of the lowercase x-height region,
+        //     approximated as ~40% of the ascender above the baseline.
+        // The typesetting metrics below fall back to the conventional fractions
+        // of the em size documented in the `fallback` module.
+        let em = units_per_em as f32;
+        let default_thickness = em / 14.0;
+        let underline = ttf_font.underline_metrics();
+        let strikeout = ttf_font.strikeout_metrics();
+        let subscript = ttf_font.subscript_metrics();
+        let superscript = ttf_font.superscript_metrics();
+        let fallback_script_size = (em * fallback::SCRIPT_SIZE, em * fallback::SCRIPT_SIZE);
+
         let metrics = FontMetrics {
-            ascender: ttf_font.ascender() as f32,
-            descender: ttf_font.descender() as f32,
+            ascender,
+            descender,
             height: ttf_font.height() as f32,
+            underline_position: underline.map_or(descender * 0.5, |m| m.position as f32),
+            underline_thickness: underline.map_or(default_thickness, |m| m.thickness as f32),
+            strikeout_position: strikeout.map_or(ascender * 0.4, |m| m.position as f32),
+            strikeout_thickness: strikeout.map_or(default_thickness, |m| m.thickness as f32),
+            // The OS/2 script offsets are normalized to canvas +y-down
+            // semantics: `ySubscriptYOffset` is defined positive-down and
+            // passes through unchanged, while `ySuperscriptYOffset` is defined
+            // positive-up and is negated.
+            subscript_size: subscript.map_or(fallback_script_size, |m| (m.x_size as f32, m.y_size as f32)),
+            subscript_offset: subscript.map_or((0.0, em * fallback::SUBSCRIPT_DROP), |m| {
+                (m.x_offset as f32, m.y_offset as f32)
+            }),
+            superscript_size: superscript.map_or(fallback_script_size, |m| (m.x_size as f32, m.y_size as f32)),
+            superscript_offset: superscript.map_or((0.0, -(em * fallback::SUPERSCRIPT_RISE)), |m| {
+                (m.x_offset as f32, -(m.y_offset as f32))
+            }),
+            x_height: ttf_font.x_height().map_or(em * fallback::X_HEIGHT, |v| v as f32),
+            cap_height: ttf_font
+                .capital_height()
+                .map_or(em * fallback::CAP_HEIGHT, |v| v as f32),
+            line_gap: ttf_font.line_gap() as f32,
             flags: FontFlags::new(
                 ttf_font.is_regular(),
                 ttf_font.is_italic(),
@@ -283,12 +483,61 @@ impl Font {
             _ => 5,
         };
 
+        // swash reports underline/strikeout offsets from the baseline with +y up
+        // (so underline_offset is typically negative), matching ttf-parser's
+        // post/OS-2 convention; stroke_size is shared by both decorations. Fall
+        // back to ascender/descender-derived values when the font omits them.
+        let em = units_per_em as f32;
+        let default_thickness = em / 14.0;
+        let stroke_size = if swash_metrics.stroke_size > 0.0 {
+            swash_metrics.stroke_size
+        } else {
+            default_thickness
+        };
+
+        // swash's `Metrics` does not surface the OS/2 sub/superscript metrics,
+        // so this backend always uses the conventional em-fraction fallbacks
+        // that the ttf-parser backend applies when a font omits them. x-height
+        // and cap-height are reported as 0 when the font lacks them, in which
+        // case the same fallbacks kick in, keeping both backends in agreement
+        // on availability.
+        let fallback_script_size = (em * fallback::SCRIPT_SIZE, em * fallback::SCRIPT_SIZE);
+
         let metrics = FontMetrics {
             ascender: swash_metrics.ascent,
             descender: -swash_metrics.descent,
             // swash ascent and descent are both positive (distance from baseline),
             // unlike ttf-parser where descent is negative, so this is a sum not a difference.
             height: swash_metrics.ascent + swash_metrics.descent + swash_metrics.leading,
+            underline_position: if swash_metrics.underline_offset != 0.0 {
+                swash_metrics.underline_offset
+            } else {
+                -swash_metrics.descent * 0.5
+            },
+            underline_thickness: stroke_size,
+            strikeout_position: if swash_metrics.strikeout_offset != 0.0 {
+                swash_metrics.strikeout_offset
+            } else {
+                swash_metrics.ascent * 0.4
+            },
+            strikeout_thickness: stroke_size,
+            subscript_size: fallback_script_size,
+            subscript_offset: (0.0, em * fallback::SUBSCRIPT_DROP),
+            superscript_size: fallback_script_size,
+            superscript_offset: (0.0, -(em * fallback::SUPERSCRIPT_RISE)),
+            x_height: if swash_metrics.x_height != 0.0 {
+                swash_metrics.x_height
+            } else {
+                em * fallback::X_HEIGHT
+            },
+            cap_height: if swash_metrics.cap_height != 0.0 {
+                swash_metrics.cap_height
+            } else {
+                em * fallback::CAP_HEIGHT
+            },
+            // swash's leading is the hhea line gap (or the OS/2 typographic
+            // line gap when the font opts into typographic metrics).
+            line_gap: swash_metrics.leading,
             flags: FontFlags::new(is_regular, is_italic, is_bold, is_oblique, is_variable),
             weight,
             width,
@@ -661,5 +910,167 @@ impl Font {
                 .ok()
                 .map(GlyphRendering::RenderAsPath)
         })
+    }
+}
+
+// These tests exercise whichever font-parsing backend the enabled features
+// select, so running them with `--features textlayout` and with
+// `--no-default-features --features swash` checks that both backends report
+// the same metrics availability.
+#[cfg(all(test, any(feature = "textlayout", feature = "swash")))]
+mod tests {
+    use super::Font;
+
+    fn parse_font(data: Vec<u8>) -> Font {
+        Font::new_with_data(data, 0, &super::super::TextContextImpl::default()).expect("font should parse")
+    }
+
+    /// Builds a minimal TrueType font containing only the tables required for
+    /// parsing (`head`, `hhea` and `maxp`), so every optional metric has to
+    /// take its documented fallback. Units per em is 1024 and the
+    /// ascender/descender are 800/-200 font units.
+    fn minimal_font_without_optional_tables() -> Vec<u8> {
+        fn push_u16(data: &mut Vec<u8>, value: u16) {
+            data.extend_from_slice(&value.to_be_bytes());
+        }
+        fn push_i16(data: &mut Vec<u8>, value: i16) {
+            data.extend_from_slice(&value.to_be_bytes());
+        }
+        fn push_u32(data: &mut Vec<u8>, value: u32) {
+            data.extend_from_slice(&value.to_be_bytes());
+        }
+
+        let mut head = Vec::new();
+        push_u16(&mut head, 1); // majorVersion
+        push_u16(&mut head, 0); // minorVersion
+        push_u32(&mut head, 0); // fontRevision
+        push_u32(&mut head, 0); // checkSumAdjustment
+        push_u32(&mut head, 0x5F0F_3CF5); // magicNumber
+        push_u16(&mut head, 0); // flags
+        push_u16(&mut head, 1024); // unitsPerEm
+        push_u32(&mut head, 0); // created (upper half)
+        push_u32(&mut head, 0); // created (lower half)
+        push_u32(&mut head, 0); // modified (upper half)
+        push_u32(&mut head, 0); // modified (lower half)
+        push_i16(&mut head, 0); // xMin
+        push_i16(&mut head, -200); // yMin
+        push_i16(&mut head, 500); // xMax
+        push_i16(&mut head, 800); // yMax
+        push_u16(&mut head, 0); // macStyle
+        push_u16(&mut head, 8); // lowestRecPPEM
+        push_i16(&mut head, 2); // fontDirectionHint
+        push_i16(&mut head, 0); // indexToLocFormat
+        push_i16(&mut head, 0); // glyphDataFormat
+
+        let mut hhea = Vec::new();
+        push_u16(&mut hhea, 1); // majorVersion
+        push_u16(&mut hhea, 0); // minorVersion
+        push_i16(&mut hhea, 800); // ascender
+        push_i16(&mut hhea, -200); // descender
+        push_i16(&mut hhea, 0); // lineGap
+        push_u16(&mut hhea, 500); // advanceWidthMax
+        push_i16(&mut hhea, 0); // minLeftSideBearing
+        push_i16(&mut hhea, 0); // minRightSideBearing
+        push_i16(&mut hhea, 500); // xMaxExtent
+        push_i16(&mut hhea, 1); // caretSlopeRise
+        push_i16(&mut hhea, 0); // caretSlopeRun
+        push_i16(&mut hhea, 0); // caretOffset
+        for _ in 0..4 {
+            push_i16(&mut hhea, 0); // reserved
+        }
+        push_i16(&mut hhea, 0); // metricDataFormat
+        push_u16(&mut hhea, 0); // numberOfHMetrics
+
+        let mut maxp = Vec::new();
+        push_u32(&mut maxp, 0x0000_5000); // version 0.5
+        push_u16(&mut maxp, 1); // numGlyphs
+
+        // Table records must be sorted by tag.
+        let tables: [(&[u8; 4], &Vec<u8>); 3] = [(b"head", &head), (b"hhea", &hhea), (b"maxp", &maxp)];
+
+        let mut font = Vec::new();
+        push_u32(&mut font, 0x0001_0000); // sfntVersion
+        push_u16(&mut font, tables.len() as u16); // numTables
+        push_u16(&mut font, 32); // searchRange
+        push_u16(&mut font, 1); // entrySelector
+        push_u16(&mut font, 16); // rangeShift
+
+        let header_len = 12 + 16 * tables.len();
+        let mut records = Vec::new();
+        let mut body: Vec<u8> = Vec::new();
+        for (tag, table) in tables {
+            records.extend_from_slice(&tag[..]);
+            push_u32(&mut records, 0); // checksum, not verified by the parsers
+            push_u32(&mut records, (header_len + body.len()) as u32);
+            push_u32(&mut records, table.len() as u32);
+            body.extend_from_slice(table);
+            while !body.len().is_multiple_of(4) {
+                body.push(0); // tables start on 4-byte boundaries
+            }
+        }
+        font.extend_from_slice(&records);
+        font.extend_from_slice(&body);
+        font
+    }
+
+    #[test]
+    fn missing_optional_tables_fall_back_to_documented_ratios() {
+        let font = parse_font(minimal_font_without_optional_tables());
+
+        // Half the 1024 units per em, so raw font units scale by exactly 0.5.
+        let em = 512.;
+        let metrics = font.metrics(em);
+
+        // Without an OS/2 table, every typesetting metric takes its documented
+        // fallback, expressed as a conventional fraction of the em size.
+        assert_eq!(metrics.x_height(), em * 0.5);
+        assert_eq!(metrics.cap_height(), em * 0.7);
+        assert_eq!(metrics.subscript_size(), (em * 0.65, em * 0.65));
+        assert_eq!(metrics.subscript_offset(), (0.0, em * 0.14));
+        assert_eq!(metrics.superscript_size(), (em * 0.65, em * 0.65));
+        assert_eq!(metrics.superscript_offset(), (0.0, -(em * 0.48)));
+        assert_eq!(metrics.line_gap(), 0.0);
+
+        // The underline/strikeout fallbacks engage as well, derived from the
+        // hhea ascender/descender of 800/-200 font units.
+        assert_eq!(metrics.underline_position(), -50.0); // half the descender
+        assert_eq!(metrics.strikeout_position(), 160.0); // 40% of the ascender
+        assert!(metrics.underline_thickness() > 0.0);
+        assert!(metrics.strikeout_thickness() > 0.0);
+    }
+
+    #[test]
+    fn real_font_typographic_metrics_are_plausible() {
+        let data = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/assets/RobotoFlex-VariableFont.ttf"
+        ))
+        .expect("Font not found");
+        let font = parse_font(data);
+
+        let em = 32.;
+        let metrics = font.metrics(em);
+
+        // The vertical extents are ordered: 0 < x-height < cap-height <= ascender.
+        assert!(metrics.x_height() > 0.0);
+        assert!(metrics.x_height() < metrics.cap_height());
+        assert!(metrics.cap_height() <= metrics.ascender());
+
+        // Sub/superscript glyphs are recommended at a readable fraction of the
+        // em, dropped below the baseline and raised above it respectively
+        // (canvas convention: +y points down).
+        for (size, offset) in [
+            (metrics.subscript_size(), metrics.subscript_offset()),
+            (metrics.superscript_size(), metrics.superscript_offset()),
+        ] {
+            assert!(size.0 > 0.0 && size.0 < em);
+            assert!(size.1 > 0.0 && size.1 < em);
+            assert!(offset.1 != 0.0);
+        }
+        assert!(metrics.subscript_offset().1 > 0.0);
+        assert!(metrics.superscript_offset().1 < 0.0);
+
+        // The hhea line gap is commonly zero, but never negative for this font.
+        assert!(metrics.line_gap() >= 0.0);
     }
 }
