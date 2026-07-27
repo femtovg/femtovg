@@ -542,10 +542,14 @@ impl Path {
         const MAX_SEGMENTS: usize = 8;
         let ndivs = ((delta.abs() / (std::f64::consts::PI * 0.5)).ceil() as usize).clamp(1, MAX_SEGMENTS);
         let seg = delta / ndivs as f64;
-        // Maisonobe per-segment handle length matching the kappa technique used
-        // by arc()/ellipse(): alpha = sin(seg) * (sqrt(4 + 3 tan(seg/2)^2) - 1) / 3.
-        let half = seg * 0.5;
-        let alpha = seg.sin() * ((4.0 + 3.0 * half.tan() * half.tan()).sqrt() - 1.0) / 3.0;
+        // Per-segment handle length: the same kappa `arc()` and `ellipse()` use,
+        // 4/3 * tan(seg/4), which puts the curve through the midpoint of its own
+        // segment. `arc()` spells it 4/3 * (1 - cos(seg/2)) / sin(seg/2), the
+        // same value by the half-angle identity; the tangent form is used here
+        // because it carries the sign of `seg`, so a negative sweep gets a handle
+        // pointing back along the derivative without a separate branch. At a
+        // quarter turn it is the KAPPA90 the other primitives are built from.
+        let alpha = 4.0 / 3.0 * (seg * 0.25).tan();
 
         // The segment chain is staged on the stack: emission must stay
         // transactional (the finite-output guard below inspects the whole chain
@@ -1235,12 +1239,13 @@ mod tests {
     /// Implicit-form residual of a rotated ellipse for the point (px, py): zero
     /// when the point lies exactly on the ellipse boundary.
     ///
-    /// Cubic beziers only approximate an elliptical arc; with the per-segment
-    /// (Maisonobe) handle length used here a full 90-degree segment deviates from
-    /// the true ellipse by at most ~4e-3 in this residual (≈0.12px on a 60px
-    /// radius), matching the accuracy of the existing `arc()`/`ellipse()`
-    /// builders. Tests allow a little headroom over that worst case.
-    const ELLIPSE_RESIDUAL_TOL: f32 = 5e-3;
+    /// Cubic beziers only approximate an elliptical arc; with the 4/3*tan(seg/4)
+    /// handle length shared with `arc()`/`ellipse()`, a full 90-degree segment
+    /// deviates from the true ellipse by at most ~5.5e-4 in this residual
+    /// (≈0.017px on a 60px radius). Tests allow a little headroom over that worst
+    /// case, but stay well inside the ~4e-3 a coarser handle length would give,
+    /// so the tolerance keeps pinning the handle length and not just the sweep.
+    const ELLIPSE_RESIDUAL_TOL: f32 = 1e-3;
 
     fn ellipse_residual(px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32, phi: f32) -> f32 {
         let (sin_phi, cos_phi) = phi.sin_cos();
@@ -1866,13 +1871,14 @@ mod tests {
                         !segments.is_empty(),
                         "well-conditioned arc must emit bezier segments for {case}"
                     );
-                    // Base tolerance matches ELLIPSE_RESIDUAL_TOL (Maisonobe
-                    // segment error); the second term covers f32 quantization
-                    // of coordinates of magnitude ~point_scale amplified by
-                    // the implicit-form gradient (~1/min_radius).
+                    // Base tolerance matches ELLIPSE_RESIDUAL_TOL (the worst-case
+                    // per-segment handle error); the second term covers f32
+                    // quantization of coordinates of magnitude ~point_scale
+                    // amplified by the implicit-form gradient (~1/min_radius).
                     let point_scale = cx.abs() + cy.abs() + srx + sry;
                     let min_radius = srx.min(sry);
-                    let tolerance = 5e-3 + 8.0 * f64::from(f32::EPSILON) * point_scale / min_radius;
+                    let tolerance =
+                        f64::from(ELLIPSE_RESIDUAL_TOL) + 8.0 * f64::from(f32::EPSILON) * point_scale / min_radius;
                     let mut sampled = Vec::new();
                     for (p0, c1, c2, p3) in &segments {
                         for step in 0..=4 {
