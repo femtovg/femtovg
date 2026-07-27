@@ -222,6 +222,40 @@ fn unusable_radii_leave_the_corner_square() {
     }
 }
 
+/// From WPT `2d.path.roundrect.negative`: with a negative width or height the
+/// rectangle is drawn back towards its origin, and the top left radius rounds the
+/// corner at (`x`, `y`) wherever that lands on screen. The reduction has to run
+/// on the side lengths rather than the signed extents, or a side summing to zero
+/// divides into a negative width and scales every radius by minus infinity.
+///
+/// Verified to match Chrome on the scene that test draws: the four quadrants each
+/// keep their outermost corner rounded.
+#[test]
+fn wpt_negative_extents_round_the_origin_corner() {
+    // Right to left: the origin (100, 0) is the top right corner on screen.
+    let mut path = Path::new();
+    path.rounded_rect_varying(100.0, 0.0, -50.0, 25.0, 10.0, 0.0, 0.0, 0.0);
+    let mut points = Vec::new();
+    for verb in path.verbs() {
+        match verb {
+            Verb::MoveTo(px, py) | Verb::LineTo(px, py) => points.push((px, py)),
+            Verb::BezierTo(_, _, _, _, px, py) => points.push((px, py)),
+            _ => {}
+        }
+    }
+    // The curve leaving the origin corner runs between (x - 10, y) and (x, y + 10).
+    assert_close(points[7].0, 90.0, "top left arc start x");
+    assert_close(points[7].1, 0.0, "top left arc start y");
+    assert_close(points[0].0, 100.0, "top left arc end x");
+    assert_close(points[0].1, 10.0, "top left arc end y");
+
+    // The other three corners stay square, so the shape keeps its full extent.
+    let c = corners_of(&path, 100.0, 0.0, -50.0, 25.0);
+    assert_close(c.top_right.rx, 0.0, "top right rx");
+    assert_close(c.bottom_right.rx, 0.0, "bottom right rx");
+    assert_close(c.bottom_left.rx, 0.0, "bottom left rx");
+}
+
 /// Rectangles given with a negative width or height are drawn from the opposite
 /// corner; the radii follow the sides rather than escaping the box.
 #[test]
