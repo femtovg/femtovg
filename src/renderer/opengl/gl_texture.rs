@@ -191,17 +191,7 @@ impl GlTexture {
     ) -> Result<(), ErrorKind> {
         let size = src.dimensions();
 
-        if x + size.width > self.info.width() {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        if y + size.height > self.info.height() {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        if self.info.format() != src.format() {
-            return Err(ErrorKind::ImageUpdateWithDifferentFormat);
-        }
+        src.check_update(&self.info, x, y)?;
 
         unsafe {
             context.bind_texture(glow::TEXTURE_2D, Some(self.id));
