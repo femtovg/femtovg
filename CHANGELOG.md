@@ -1,6 +1,19 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
+  into ellipses when a radius did not fit. Radii that overlap along a side are
+  now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
+  the Canvas `roundRect()` algorithm both specify, so corners keep their shape:
+  a radius larger than half the height now gives a fully rounded end rather than
+  a squashed one. A corner may also use a whole side when the corner next to it
+  is square, which the previous clamp cut in half. Negative and NaN radii leave
+  the corner square instead of bulging it outwards or emitting NaN coordinates,
+  and an infinite radius rounds as far as the box allows. This changes rendering
+  for shapes whose radii did not fit.
+
 ## [0.26.0] - 2026-07-20
 
 - Added Canvas 2D drop shadows for fills, strokes and text. New `Canvas` methods
