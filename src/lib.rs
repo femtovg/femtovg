@@ -2524,17 +2524,7 @@ impl Renderer for RecordingRenderer {
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        let size = data.dimensions();
-
-        if x + size.width > image.info.width() {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        if y + size.height > image.info.height() {
-            return Err(ErrorKind::ImageUpdateOutOfBounds);
-        }
-
-        Ok(())
+        data.check_update(&image.info, x, y)
     }
 
     fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {}
