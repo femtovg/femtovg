@@ -254,7 +254,14 @@ fn radialTwoPointT(vertex: VertexOutput, params: Params) -> RadialT {
     var result: RadialT;
     result.covered = false;
     result.t = 0.0;
-    if (abs(a) < 1e-4) {
+    // `a` is a squared length, so how close to zero it counts as depends on the
+    // size of the shape: the same geometry scaled up scales `a` with the square
+    // of the scale factor. Comparing it against a fixed constant would treat a
+    // focal point sitting on the end circle as a cone in one scene and as a
+    // degenerate in another. Measure it against the terms it came from instead,
+    // which also folds in the case where both are zero and the circles coincide.
+    let a_scale = max(dot(cd, cd), dr * dr);
+    if (abs(a) <= 1e-4 * a_scale) {
         // Degenerate cone (|cd| == |dr|): the quadratic collapses to the linear
         // equation -2b*t + c = 0. This is exactly the case where the end center
         // sits on the start circle, common in focal-style gradients.
@@ -264,7 +271,15 @@ fn radialTwoPointT(vertex: VertexOutput, params: Params) -> RadialT {
             result.covered = (r0 + t * dr >= 0.0);
         }
     } else {
-        let disc: f32 = b * b - a * c;
+        var disc: f32 = b * b - a * c;
+        if (a < 0.0) {
+            // One circle strictly contains the other, so every fragment is on
+            // some interpolated circle and the discriminant is never really
+            // negative. At the focal point it is mathematically zero and rounds
+            // just below, which would punch a hole exactly where the first stop
+            // belongs, so hold it at zero rather than reading it as a miss.
+            disc = max(disc, 0.0);
+        }
         if (disc >= 0.0) {
             let s: f32 = sqrt(disc);
             // One reciprocal, two roots (a is guaranteed away from zero here).

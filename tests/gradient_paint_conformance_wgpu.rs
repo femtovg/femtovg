@@ -565,3 +565,207 @@ fn two_point_radial_leaves_uncovered_transparent() {
         "covered region must be painted"
     );
 }
+
+/// Two circles that coincide exactly paint nothing. From the web platform test
+/// `2d.gradient.radial.equal`, whose nine sample points must all keep the colour
+/// underneath. The Canvas algorithm says so outright; note SVG disagrees, and
+/// its own test `svg/pservers/reftests/radialgradient-fully-overlapping.svg`
+/// was flipped in 2019 to expect a gradient instead, so this is a deliberate
+/// choice of the Canvas reading rather than a universal one.
+#[test]
+fn two_point_radial_identical_circles_paint_nothing() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        let g = Paint::two_point_radial_gradient(
+            150.0,
+            60.0,
+            40.0,
+            150.0,
+            60.0,
+            40.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    for (x, y) in [(150usize, 60usize), (150, 30), (20, 20), (280, 100), (150, 100)] {
+        assert!(
+            near(px(&pixels, x, y), [255, 255, 255], 3),
+            "({x}, {y}) should be untouched, got {:?}",
+            px(&pixels, x, y)
+        );
+    }
+}
+
+/// The point at the centre of a zero-radius start circle has to be painted: it
+/// is reached only by the interpolated circle of radius exactly zero, so a
+/// solver that requires a strictly positive radius leaves a hole there. From
+/// Skia's `test_two_point_conical_zero_radius` (skia bug 5023), whose comment
+/// reads "We should still shade pixels for which the radius is exactly 0."
+#[test]
+fn two_point_radial_zero_radius_centre_is_painted() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        let g = Paint::two_point_radial_gradient(
+            150.0,
+            60.0,
+            0.0,
+            152.0,
+            62.0,
+            80.0,
+            Color::rgb(0, 200, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let at_focus = px(&pixels, 150, 60);
+    assert!(
+        near(at_focus, [0, 200, 0], 6),
+        "the focus must take the first stop, got {at_focus:?}"
+    );
+}
+
+/// A focal point outside the end circle is drawn as the cone it describes, with
+/// the region the cone does not reach left untouched. SVG 1.1 required moving
+/// such a focus onto the circle; SVG 2 removed that to match Canvas, and every
+/// engine followed: Gecko dropped its clamp in bug 1638051, WebKit in bug 97986,
+/// resvg in #562. Geometry from resvg's `focal-point-correction` test.
+#[test]
+fn two_point_radial_focus_outside_the_end_circle_is_a_cone() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        let g = Paint::two_point_radial_gradient(
+            233.0,
+            105.0,
+            0.0,
+            160.0,
+            40.0,
+            75.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    // The end circle's centre is well inside the cone and takes a late offset.
+    let inside = px(&pixels, 160, 40);
+    assert!(
+        inside[2] > inside[0] + 60,
+        "the end circle centre should be blue-ward, got {inside:?}"
+    );
+    // Behind the focus, away from the cone, nothing is painted.
+    let behind = px(&pixels, 292, 118);
+    assert!(
+        near(behind, [255, 255, 255], 3),
+        "behind the focus must stay untouched, got {behind:?}"
+    );
+}
+
+/// The same shape at two very different scales must be classified the same way.
+/// The leading coefficient of the quadratic is a squared length, so it grows
+/// with the square of the scale factor; testing it against a fixed constant
+/// makes a focal point that sits on the end circle read as a degenerate at one
+/// size and as a cone at another. This is the case tiny-skia tightened its own
+/// threshold for after real SVG content regressed.
+#[test]
+fn two_point_radial_degenerate_test_is_scale_invariant() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // Focus on the end circle: |dc| == dr, so the quadratic degenerates.
+    let sample = |scale: f32| {
+        let cx = 150.0;
+        let cy = 60.0;
+        let d = 30.0 * scale;
+        render(&device, &queue, |c| {
+            let g = Paint::two_point_radial_gradient(
+                cx - d,
+                cy,
+                0.0,
+                cx,
+                cy,
+                d,
+                Color::rgb(255, 0, 0),
+                Color::rgb(0, 0, 255),
+            );
+            let mut p = Path::new();
+            p.rect(0.0, 0.0, W as f32, H as f32);
+            c.fill_path(&p, &g);
+        })
+    };
+    // At scale 1 the geometry fits the canvas; the ratio of the sample point to
+    // the shape is what has to stay put, so read the end centre in both.
+    let small = sample(1.0);
+    let large = sample(1000.0);
+    let a = px(&small, 150, 60);
+    let b = px(&large, 150, 60);
+    assert!(
+        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= 8),
+        "scaling the shape must not change how it is classified: {a:?} vs {b:?}"
+    );
+}
+
+/// When one circle strictly contains the other and the radius shrinks along the
+/// sweep, the larger of the two roots always has a negative interpolated radius
+/// and the smaller one is the answer. Skia hit this as a rendering bug and fixed
+/// it by choosing the root by sign rather than always taking the larger; its
+/// `Make2ConicalInsideFlip` case has the smaller root winning at every pixel.
+#[test]
+fn two_point_radial_shrinking_contained_circle_uses_the_other_root() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        // Start circle contains the end circle, and the radius decreases.
+        let g = Paint::two_point_radial_gradient(
+            150.0,
+            60.0,
+            70.0,
+            170.0,
+            45.0,
+            20.0,
+            Color::rgb(230, 40, 40),
+            Color::rgb(40, 60, 230),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    // The end circle's centre is the far end of the sweep.
+    let end = px(&pixels, 170, 45);
+    assert!(
+        end[2] > end[0] + 60,
+        "end circle centre should be blue-ward, got {end:?}"
+    );
+    // Well outside the start circle the sweep has run out and clamps to the first stop.
+    let outside = px(&pixels, 10, 110);
+    assert!(
+        outside[0] > outside[2] + 60,
+        "outside the start circle should clamp to the first stop, got {outside:?}"
+    );
+    // Nothing may be left unpainted: one circle contains the other, so the
+    // gradient covers the whole plane.
+    for (x, y) in [(2usize, 2usize), (297, 2), (2, 117), (297, 117), (150, 60)] {
+        assert!(
+            !near(px(&pixels, x, y), [255, 255, 255], 6),
+            "({x}, {y}) should be covered, got {:?}",
+            px(&pixels, x, y)
+        );
+    }
+}
