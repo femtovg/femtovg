@@ -2079,4 +2079,215 @@ mod tests {
             );
         }
     }
+
+    /// Control points for a single-segment arc, from the web platform test
+    /// `svg/path/interfaces/getPathData-normalize.html`, which pins the
+    /// normalized output of `M 6 10 A 10 10 10 0 0 15 10` to within 0.0005.
+    ///
+    /// This is the tightest available oracle for the per-segment handle length:
+    /// the reference values follow from `4/3 * tan(sweep/4)`, the same kappa
+    /// `arc()` and `ellipse()` use, and a coarser handle length misses them by
+    /// several thousandths.
+    #[test]
+    fn svg_arc_control_points_match_the_web_platform_test() {
+        let mut path = Path::new();
+        path.move_to(6.0, 10.0);
+        path.svg_arc_to(10.0, 10.0, 10.0_f32.to_radians(), false, false, 15.0, 10.0);
+
+        let curves: Vec<_> = path
+            .verbs()
+            .filter_map(|verb| match verb {
+                Verb::BezierTo(a, b, c, d, e, f) => Some((a, b, c, d, e, f)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(curves.len(), 1, "a 51 degree sweep is one segment");
+
+        let (c1x, c1y, c2x, c2y, ex, ey) = curves[0];
+        let expected = [8.8305, 11.4263, 12.1695, 11.4263, 15.0, 10.0];
+        for (actual, want) in [c1x, c1y, c2x, c2y, ex, ey].iter().zip(expected.iter()) {
+            assert!(
+                (actual - *want).abs() < 5e-4,
+                "control points {:?} should match the web platform test {expected:?}",
+                [c1x, c1y, c2x, c2y, ex, ey]
+            );
+        }
+    }
+
+    /// A quarter turn reduces to the circular kappa the other builders share:
+    /// the handles sit at `KAPPA90` along each tangent. Deriving the value
+    /// independently of the constant keeps this honest if `KAPPA90` ever moves.
+    #[test]
+    fn svg_arc_quarter_turn_uses_the_shared_kappa() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.svg_arc_to(1.0, 1.0, 0.0, false, true, 1.0, 1.0);
+
+        let curve = path
+            .verbs()
+            .find_map(|verb| match verb {
+                Verb::BezierTo(a, b, c, d, e, f) => Some((a, b, c, d, e, f)),
+                _ => None,
+            })
+            .expect("one cubic");
+
+        let k = super::KAPPA90;
+        for (actual, want) in
+            [curve.0, curve.1, curve.2, curve.3, curve.4, curve.5]
+                .iter()
+                .zip([k, 0.0, 1.0, 1.0 - k, 1.0, 1.0])
+        {
+            assert!((actual - want).abs() < 1e-5, "quarter turn handles: got {curve:?}");
+        }
+    }
+
+    /// The same endpoints with only the sweep flag flipped must pick the other
+    /// centre, so the two arcs bow to opposite sides. This is the sign choice in
+    /// F.6.5.2, which a lost minus renders as a mirrored arc that still has the
+    /// right endpoints and so survives every endpoint-only assertion.
+    #[test]
+    fn svg_arc_sweep_flag_selects_the_other_centre() {
+        let mut sweep = Path::new();
+        sweep.move_to(0.0, 0.0);
+        sweep.svg_arc_to(1.0, 1.0, 0.0, false, true, 1.0, 1.0);
+
+        let mut against = Path::new();
+        against.move_to(0.0, 0.0);
+        against.svg_arc_to(1.0, 1.0, 0.0, false, false, 1.0, 1.0);
+
+        // Centre (0, 1) bows the arc right and down; centre (1, 0) bows it up.
+        for (px, py) in sample_path(&sweep).0 {
+            let resid = ellipse_residual(px, py, 0.0, 1.0, 1.0, 1.0, 0.0);
+            assert!(resid.abs() < ELLIPSE_RESIDUAL_TOL, "sweep arc off centre (0, 1)");
+        }
+        for (px, py) in sample_path(&against).0 {
+            let resid = ellipse_residual(px, py, 1.0, 0.0, 1.0, 1.0, 0.0);
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "counter-sweep arc off centre (1, 0)"
+            );
+        }
+    }
+
+    /// Radii too small to span the endpoints are scaled by exactly sqrt(lambda)
+    /// per F.6.6.2. Chosen so the arithmetic is exact: a unit circle asked to
+    /// span four units gives lambda = 4 and a scale of exactly 2, leaving a
+    /// half-circle of radius 2 centred midway.
+    #[test]
+    fn svg_arc_out_of_range_radii_scale_by_exactly_sqrt_lambda() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.svg_arc_to(1.0, 1.0, 0.0, false, false, 4.0, 0.0);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!((endpoint.0 - 4.0).abs() < 1e-4 && endpoint.1.abs() < 1e-4);
+        for (px, py) in points {
+            let resid = ellipse_residual(px, py, 2.0, 0.0, 2.0, 2.0, 0.0);
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "point ({px}, {py}) should lie on the radius-2 circle that sqrt(lambda) = 2 produces"
+            );
+        }
+    }
+
+    /// Lambda has to be computed from the endpoint offset *after* rotating it
+    /// into the ellipse's own axes. Taking it from the unrotated offset is a
+    /// silent bug: the arc still joins its endpoints, just through radii around
+    /// a quarter too small. Here the correct scale is 4.0697 and the unrotated
+    /// one would be 3.1623.
+    #[test]
+    fn svg_arc_lambda_is_measured_in_the_rotated_frame() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.svg_arc_to(10.0, 40.0, 90.0_f32.to_radians(), false, true, 60.0, 80.0);
+
+        let scale = 4.069_705_1_f32;
+        for (px, py) in sample_path(&path).0 {
+            let resid = ellipse_residual(px, py, 30.0, 40.0, 10.0 * scale, 40.0 * scale, 90.0_f32.to_radians());
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "point ({px}, {py}) off the ellipse that the rotated-frame lambda gives"
+            );
+        }
+    }
+
+    /// Two half turns must close a circle exactly, the construction an SVG uses
+    /// when it has no circle element to hand. From Gecko's
+    /// `layout/reftests/svg/path-05.svg` (bug 657862), which paints this over a
+    /// radius-79 disc and under a radius-81 one and demands neither shows.
+    #[test]
+    fn svg_arc_two_half_turns_close_a_circle() {
+        let mut path = Path::new();
+        path.move_to(20.0, 100.0);
+        path.svg_arc_to(80.0, 80.0, 0.0, false, true, 180.0, 100.0);
+        path.svg_arc_to(80.0, 80.0, 0.0, false, true, 20.0, 100.0);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(
+            (endpoint.0 - 20.0).abs() < 1e-3 && (endpoint.1 - 100.0).abs() < 1e-3,
+            "the second half turn must return to the start, got {endpoint:?}"
+        );
+        for (px, py) in points {
+            let resid = ellipse_residual(px, py, 100.0, 100.0, 80.0, 80.0, 0.0);
+            assert!(
+                resid.abs() < ELLIPSE_RESIDUAL_TOL,
+                "point ({px}, {py}) off the radius-80 circle, residual {resid}"
+            );
+        }
+    }
+
+    /// Radii large enough that the sweep underflows must not throw the geometry
+    /// across the canvas. From Gecko bug 1988564, whose reduced case is
+    /// `a56270558080367.86,56270558080367.86,0,0,1,-1.2,1.4`; before the fix
+    /// Firefox put the endpoint at x = -171085 instead of 77.2, and its reftest
+    /// `bad-arc.html` expects nothing visible at all.
+    #[test]
+    fn svg_arc_radii_far_larger_than_the_chord_stay_put() {
+        let mut path = Path::new();
+        path.move_to(78.4, 207.2);
+        path.svg_arc_to(
+            56_270_558_080_367.86,
+            56_270_558_080_367.86,
+            0.0,
+            false,
+            true,
+            77.2,
+            208.6,
+        );
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(
+            (endpoint.0 - 77.2).abs() < 1e-2 && (endpoint.1 - 208.6).abs() < 1e-2,
+            "endpoint {endpoint:?} should stay at the requested point"
+        );
+        for (px, py) in points {
+            assert!(px.is_finite() && py.is_finite(), "non-finite point ({px}, {py})");
+            // The chord is under 2 units long; nothing may wander far from it.
+            assert!(
+                (77.0..=79.0).contains(&px) && (207.0..=209.0).contains(&py),
+                "point ({px}, {py}) left the neighbourhood of a 1.8 unit chord"
+            );
+        }
+    }
+
+    /// The first arc of the SVG 1.1 specification's own `arcs01.svg`. Its radii
+    /// need the F.6.6.2 correction, and afterwards the term under the root in
+    /// F.6.5.2 lands a hair below zero in exact arithmetic, so an implementation
+    /// that does not clamp it emits NaN for the whole shape.
+    #[test]
+    fn svg_arc_spec_example_with_a_negative_radicand_stays_finite() {
+        let mut path = Path::new();
+        path.move_to(650.0, 325.0);
+        path.svg_arc_to(25.0, 25.0, -30.0_f32.to_radians(), false, true, 700.0, 300.0);
+
+        let (points, endpoint) = sample_path(&path);
+        assert!(!points.is_empty(), "the arc must emit geometry");
+        assert!(
+            (endpoint.0 - 700.0).abs() < 1e-2 && (endpoint.1 - 300.0).abs() < 1e-2,
+            "endpoint {endpoint:?} should reach (700, 300)"
+        );
+        for (px, py) in points {
+            assert!(px.is_finite() && py.is_finite(), "non-finite point ({px}, {py})");
+        }
+    }
 }
