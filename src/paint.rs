@@ -300,6 +300,17 @@ pub enum PaintFlavor {
         start_angle: f32,
         colors: GradientColors,
     },
+    /// Two-point (independently centered) radial gradient, i.e. the general
+    /// Canvas `createRadialGradient(x0, y0, r0, x1, y1, r1)` form where the start
+    /// and end circles need not share a center. Concentric radial gradients use
+    /// the cheaper [`RadialGradient`](Self::RadialGradient) box-gradient path.
+    TwoPointRadialGradient {
+        start_center: Position,
+        start_radius: f32,
+        end_center: Position,
+        end_radius: f32,
+        colors: GradientColors,
+    },
 }
 
 // Convenience method to fetch the GradientColors out of a PaintFlavor
@@ -324,6 +335,9 @@ impl PaintFlavor {
             Self::ConicGradient { colors, .. } => {
                 colors.mul_alpha(a);
             }
+            Self::TwoPointRadialGradient { colors, .. } => {
+                colors.mul_alpha(a);
+            }
         }
     }
 
@@ -333,6 +347,7 @@ impl PaintFlavor {
             Self::BoxGradient { colors, .. } => Some(colors),
             Self::RadialGradient { colors, .. } => Some(colors),
             Self::ConicGradient { colors, .. } => Some(colors),
+            Self::TwoPointRadialGradient { colors, .. } => Some(colors),
             _ => None,
         }
     }
@@ -872,6 +887,67 @@ impl Paint {
             center: Position { x: cx, y: cy },
             in_radius: (in_rx, in_ry),
             out_radius: (out_rx, out_ry),
+            colors: GradientColors::from_stops(stops),
+        })
+    }
+
+    /// Creates and returns a two-color two-point radial gradient.
+    ///
+    /// This is the general Canvas 2D `createRadialGradient(x0, y0, r0, x1, y1, r1)`
+    /// form: colour `0.0` fills the start circle (`x0`, `y0`, `r0`) and colour
+    /// `1.0` fills the end circle (`x1`, `y1`, `r1`), which may be independently
+    /// centered. Where the two circles are concentric prefer
+    /// [`radial_gradient`](Self::radial_gradient), which uses a cheaper shader.
+    ///
+    /// The gradient is transformed by the current transform when it is passed to
+    /// `fill_paint()` or `stroke_paint()`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn two_point_radial_gradient(
+        start_x: f32,
+        start_y: f32,
+        start_radius: f32,
+        end_x: f32,
+        end_y: f32,
+        end_radius: f32,
+        inner_color: Color,
+        outer_color: Color,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::TwoPointRadialGradient {
+            start_center: Position { x: start_x, y: start_y },
+            start_radius,
+            end_center: Position { x: end_x, y: end_y },
+            end_radius,
+            colors: GradientColors::TwoStop {
+                start_color: inner_color,
+                end_color: outer_color,
+            },
+        })
+    }
+
+    /// Creates and returns a multi-stop two-point radial gradient.
+    ///
+    /// Like [`two_point_radial_gradient`](Self::two_point_radial_gradient), but
+    /// takes a list of colour stops with offsets. The first offset should be
+    /// `0.0` and the last `1.0`. This is the general Canvas 2D
+    /// `createRadialGradient(x0, y0, r0, x1, y1, r1)` form with `addColorStop`.
+    ///
+    /// The gradient is transformed by the current transform when it is passed to
+    /// `fill_paint()` or `stroke_paint()`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn two_point_radial_gradient_stops(
+        start_x: f32,
+        start_y: f32,
+        start_radius: f32,
+        end_x: f32,
+        end_y: f32,
+        end_radius: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::TwoPointRadialGradient {
+            start_center: Position { x: start_x, y: start_y },
+            start_radius,
+            end_center: Position { x: end_x, y: end_y },
+            end_radius,
             colors: GradientColors::from_stops(stops),
         })
     }

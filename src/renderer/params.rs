@@ -254,6 +254,38 @@ impl Params {
                     }
                 }
             }
+            &PaintFlavor::TwoPointRadialGradient {
+                start_center: Position { x: x0, y: y0 },
+                start_radius: r0,
+                end_center: Position { x: x1, y: y1 },
+                end_radius: r1,
+                colors,
+            } => {
+                // Place the start circle at the origin of the gradient's local
+                // space; paint_mat then maps a fragment position into that space,
+                // where the shader solves the two-circle interpolation directly.
+                let mut transform = Transform2D::translation(*x0, *y0);
+                transform *= *global_transform;
+                inv_transform = transform.inverse();
+
+                // Reuse the box-gradient slots for this variant: the end circle's
+                // center relative to the start, the start radius, and the radius
+                // delta. The dedicated shader reads them with this meaning.
+                params.extent[0] = *x1 - *x0;
+                params.extent[1] = *y1 - *y0;
+                params.radius = *r0;
+                params.feather = *r1 - *r0;
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradientRadial;
+                    }
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradientRadial;
+                    }
+                }
+            }
         }
 
         params.paint_mat = inv_transform.to_mat3x4();

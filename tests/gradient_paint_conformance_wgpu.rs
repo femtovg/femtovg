@@ -320,3 +320,248 @@ fn gradient_text_is_continuous_across_the_run() {
         "blue must rise left->right: {samples:?}"
     );
 }
+
+/// Two-point (independently centered) radial gradient — the general Canvas
+/// `createRadialGradient(x0,y0,r0, x1,y1,r1)`. A small start circle nested inside a
+/// large end circle is a focal gradient: the first stop sits at the focus and the
+/// colour ramps out to the last stop at the rim. Anchor values cross-checked
+/// against an independent parametric-search reference implementing the WHATWG
+/// "draw circles from +inf to -inf" definition (which picks the largest offset
+/// whose circle has a non-negative radius, matching Chrome's Skia).
+#[test]
+fn two_point_radial_focal_matches_reference() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        // Focus (110,60) r=10 nested inside end circle (150,60) r=90.
+        let g = Paint::two_point_radial_gradient(
+            110.0,
+            60.0,
+            10.0,
+            150.0,
+            60.0,
+            90.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let y = 60usize;
+    // The focus is the first stop; the far side of the rim is the last stop.
+    assert!(
+        near(px(&pixels, 110, y), [255, 0, 0], 4),
+        "focus must be red, got {:?}",
+        px(&pixels, 110, y)
+    );
+    assert!(
+        near(px(&pixels, 250, y), [0, 0, 255], 4),
+        "past the rim must clamp to blue, got {:?}",
+        px(&pixels, 250, y)
+    );
+    // Anchors from the independent reference (tol covers dither + edge AA).
+    assert!(
+        near(px(&pixels, 90, y), [191, 0, 64], 6),
+        "x90 vs reference, got {:?}",
+        px(&pixels, 90, y)
+    );
+    assert!(
+        near(px(&pixels, 190, y), [106, 0, 149], 5),
+        "x190 vs reference, got {:?}",
+        px(&pixels, 190, y)
+    );
+    assert!(
+        near(px(&pixels, 230, y), [21, 0, 234], 5),
+        "x230 vs reference, got {:?}",
+        px(&pixels, 230, y)
+    );
+    // The focus is the reddest point and blue rises away from it.
+    assert!(
+        px(&pixels, 110, y)[0] > px(&pixels, 190, y)[0] + 60,
+        "colour must fall off from the focus"
+    );
+}
+
+/// With coincident circle centres the two-point solver must reproduce the ordinary
+/// concentric radial exactly. The concentric path uses a different shader (the
+/// box-gradient SDF) that is already validated against Chrome, so agreement here
+/// pins the two-point quadratic to that reference for the concentric case.
+#[test]
+fn two_point_radial_reduces_to_concentric() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let (cx, cy) = (150.0f32, 60.0f32);
+    let two_point = render(&device, &queue, |c| {
+        let g =
+            Paint::two_point_radial_gradient(cx, cy, 20.0, cx, cy, 80.0, Color::rgb(0, 200, 0), Color::rgb(220, 0, 0));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let concentric = render(&device, &queue, |c| {
+        let g = Paint::radial_gradient(cx, cy, 20.0, 80.0, Color::rgb(0, 200, 0), Color::rgb(220, 0, 0));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    // Sample across the ring: inside, on the ramp, and outside.
+    for (x, y) in [(150usize, 60usize), (150, 30), (185, 60), (110, 60), (150, 5), (5, 60)] {
+        let (t, r) = (px(&two_point, x, y), px(&concentric, x, y));
+        assert!(
+            near(t, r, 3),
+            "two-point vs concentric mismatch at ({x},{y}): {t:?} vs {r:?}"
+        );
+    }
+}
+
+/// Degenerate cone where the centre offset equals the radius delta (|Δc| == Δr),
+/// i.e. the end centre sits exactly on the start circle. The quadratic's leading
+/// coefficient is zero here, so the shader must fall back to the linear solution
+/// rather than divide by zero. The covered band still ramps smoothly start->end.
+#[test]
+fn two_point_radial_degenerate_linear_branch() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        // |Δc| = 60, Δr = 80 - 20 = 60.
+        let g = Paint::two_point_radial_gradient(
+            100.0,
+            60.0,
+            20.0,
+            160.0,
+            60.0,
+            80.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let y = 60usize;
+    // No NaN blow-out: values are finite and the band is not uniformly transparent.
+    assert!(
+        near(px(&pixels, 100, y), [255, 0, 0], 4),
+        "start region must be red, got {:?}",
+        px(&pixels, 100, y)
+    );
+    assert!(
+        near(px(&pixels, 260, y), [0, 0, 255], 4),
+        "end must be blue, got {:?}",
+        px(&pixels, 260, y)
+    );
+    // Reference anchors from the independent parametric search.
+    assert!(
+        near(px(&pixels, 130, y), [233, 0, 22], 5),
+        "x130 vs reference, got {:?}",
+        px(&pixels, 130, y)
+    );
+    assert!(
+        near(px(&pixels, 200, y), [84, 0, 171], 5),
+        "x200 vs reference, got {:?}",
+        px(&pixels, 200, y)
+    );
+    // Monotonic across the covered band.
+    assert!(
+        px(&pixels, 130, y)[0] > px(&pixels, 200, y)[0] + 60,
+        "red must fall across the band"
+    );
+}
+
+/// Where two interpolated circles pass through a fragment, Canvas draws them from
+/// the largest offset down without overpainting, so the LARGEST offset wins. Two
+/// equal-radius circles translated apart put every fragment on two circles, which
+/// discriminates the selection rule: at the midpoint the winning offset is ~0.79
+/// (blue-ward), not ~0.21 (red-ward). A smallest-offset implementation fails here.
+#[test]
+fn two_point_radial_selects_largest_offset() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        // Equal radii (40) with centres 140 apart: |Δc| > 0, Δr = 0.
+        let g = Paint::two_point_radial_gradient(
+            80.0,
+            60.0,
+            40.0,
+            220.0,
+            60.0,
+            40.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let y = 60usize;
+    // The rule discriminator: the geometric midpoint is blue-ward (offset ~0.79),
+    // which only holds if the largest covered offset wins.
+    let mid = px(&pixels, 150, y);
+    assert!(
+        mid[2] > mid[0] + 100,
+        "midpoint must be blue-ward (largest offset wins), got {mid:?}"
+    );
+    // Anchors from the independent reference.
+    assert!(
+        near(px(&pixels, 90, y), [164, 0, 91], 5),
+        "x90 vs reference, got {:?}",
+        px(&pixels, 90, y)
+    );
+    assert!(
+        near(px(&pixels, 110, y), [127, 0, 128], 5),
+        "x110 vs reference, got {:?}",
+        px(&pixels, 110, y)
+    );
+    assert!(
+        near(px(&pixels, 150, y), [55, 0, 200], 5),
+        "x150 vs reference, got {:?}",
+        px(&pixels, 150, y)
+    );
+}
+
+/// A fragment reached by no interpolated circle with a non-negative radius is
+/// transparent (leaves the background), not filled with a stop colour. Two small
+/// disjoint circles leave the far side of the start circle uncovered.
+#[test]
+fn two_point_radial_leaves_uncovered_transparent() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let pixels = render(&device, &queue, |c| {
+        let g = Paint::two_point_radial_gradient(
+            80.0,
+            60.0,
+            10.0,
+            200.0,
+            60.0,
+            90.0,
+            Color::rgb(255, 0, 0),
+            Color::rgb(0, 0, 255),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+    let y = 60usize;
+    // Far left of the small start circle is reached by no valid circle -> background.
+    assert!(
+        near(px(&pixels, 20, y), [255, 255, 255], 3),
+        "uncovered region must stay background, got {:?}",
+        px(&pixels, 20, y)
+    );
+    // The interior near the end circle is painted (not background).
+    assert!(
+        !near(px(&pixels, 200, y), [255, 255, 255], 8),
+        "covered region must be painted"
+    );
+}

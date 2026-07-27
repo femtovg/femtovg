@@ -23,6 +23,12 @@ All notable changes to this project will be documented in this file.
   back inflated - for example sub/superscript runs sized via
   `subscript_size()` grew with the zoom level instead of staying proportional
   to the run's font size.
+- Added two-point radial gradients, the general Canvas
+  `createRadialGradient(x0, y0, r0, x1, y1, r1)` form where the start and end
+  circles may have different centres. New `Paint` constructors
+  `two_point_radial_gradient()` and `two_point_radial_gradient_stops()`.
+  Concentric radials keep using the existing cheaper path.
+
 - Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
   into ellipses when a radius did not fit. Radii that overlap along a side are
   now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
