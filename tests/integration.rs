@@ -472,3 +472,207 @@ fn font_italic_falls_back_to_slnt_axis() {
     );
     assert!(italic_metrics.width() > 0.0, "Italic text should have positive width");
 }
+
+/// Headless GPU conformance check for the conic gradient: render a conic gradient
+/// with `start_angle = 0` into an offscreen Rgba8 texture and verify that the
+/// offset-0 color sits at the positive x axis (3 o'clock) and that the ramp
+/// proceeds clockwise, matching the Canvas 2D `createConicGradient` convention.
+///
+/// The gradient is split into a red half (offsets `[0, 0.5)`) and a blue half
+/// (offsets `[0.5, 1)`). With the +x-axis-start, clockwise convention (screen y
+/// points down) the offset-0 color sits at 3 o'clock, and the red->blue boundary
+/// falls at 9 o'clock. Sampling is done away from that boundary, at the four
+/// diagonal directions whose offsets are 0.125 / 0.375 / 0.625 / 0.875:
+/// down-right (0.125) and down-left (0.375) are red; up-left (0.625) and
+/// up-right (0.875) are blue. The offset-0 color is also checked directly at
+/// 3 o'clock.
+///
+/// The old top-start convention would rotate this by a quarter turn, so the
+/// test also locks in the 90-degree phase fix.
+#[cfg(feature = "wgpu")]
+#[test]
+fn conic_gradient_start_angle_matches_canvas_convention() {
+    use femtovg::renderer::WGPURenderer;
+
+    const SIZE: u32 = 64;
+    const CENTER: f32 = SIZE as f32 / 2.0;
+
+    let instance = wgpu::Instance::default();
+
+    let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::default(),
+        force_fallback_adapter: false,
+        compatible_surface: None,
+        ..Default::default()
+    }))
+    .ok() else {
+        // No GPU adapter available (e.g. headless CI without a backend); skip.
+        eprintln!("skipping conic gradient GPU test: no wgpu adapter available");
+        return;
+    };
+
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("conic gradient test device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        ..Default::default()
+    }))
+    .expect("Failed to create device");
+
+    // Offscreen render target.
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("conic gradient target"),
+        size: wgpu::Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    // bytes_per_row must be a multiple of 256.
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_bpr = (SIZE * 4).div_ceil(align) * align;
+
+    // Red for the first half of the sweep, blue for the second half.
+    let red = Color::rgbf(1.0, 0.0, 0.0);
+    let blue = Color::rgbf(0.0, 0.0, 1.0);
+
+    // Render the conic gradient with the given start angle and read the texture
+    // back into a CPU buffer, returning a sampler over the resulting pixels.
+    let render = |start_angle: f32| -> Vec<u8> {
+        let renderer = WGPURenderer::new(device.clone(), queue.clone());
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(SIZE, SIZE, 1.0);
+        canvas.clear_rect(0, 0, SIZE, SIZE, Color::black());
+
+        let paint = Paint::conic_gradient_stops_with_angle(
+            CENTER,
+            CENTER,
+            start_angle,
+            [(0.0, red), (0.4999, red), (0.5, blue), (1.0, blue)],
+        );
+
+        let mut path = Path::new();
+        path.rect(0.0, 0.0, SIZE as f32, SIZE as f32);
+        canvas.fill_path(&path, &paint);
+
+        let commands = canvas.flush_to_output(&texture);
+        queue.submit(commands);
+
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("conic gradient readback"),
+            size: (padded_bpr * SIZE) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bpr),
+                    rows_per_image: Some(SIZE),
+                },
+            },
+            wgpu::Extent3d {
+                width: SIZE,
+                height: SIZE,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| result.expect("buffer map failed"));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll failed");
+
+        let pixels = slice.get_mapped_range().expect("mapped range unavailable").to_vec();
+        readback.unmap();
+        pixels
+    };
+
+    let sampler = |pixels: &[u8], dx: i32, dy: i32| -> (u8, u8, u8) {
+        let x = (CENTER as i32 + dx) as u32;
+        let y = (CENTER as i32 + dy) as u32;
+        let idx = (y * padded_bpr + x * 4) as usize;
+        (pixels[idx], pixels[idx + 1], pixels[idx + 2])
+    };
+
+    let is_red = |(r, _g, b): (u8, u8, u8)| r > 200 && b < 60;
+    let is_blue = |(r, _g, b): (u8, u8, u8)| b > 200 && r < 60;
+
+    // start_angle = 0: offset-0 color sits at +x (3 o'clock), ramp clockwise.
+    let pixels = render(0.0);
+    let sample = |dx, dy| sampler(&pixels, dx, dy);
+
+    // offset-0 color sits exactly at the +x axis (3 o'clock).
+    let right = sample(12, 0);
+    // Diagonals avoid the sharp red/blue boundary that falls on the cardinal axes.
+    let down_right = sample(9, 9); // offset 0.125 -> red
+    let down_left = sample(-9, 9); // offset 0.375 -> red
+    let up_left = sample(-9, -9); // offset 0.625 -> blue
+    let up_right = sample(9, -9); // offset 0.875 -> blue
+
+    assert!(
+        is_red(right),
+        "offset-0 color must sit at the +x axis (3 o'clock); got {right:?}"
+    );
+    assert!(
+        is_red(down_right),
+        "offset-0.125 (clockwise toward 6 o'clock, screen y-down) must be red; got {down_right:?}"
+    );
+    assert!(
+        is_red(down_left),
+        "offset-0.375 (just before 9 o'clock) must be red; got {down_left:?}"
+    );
+    assert!(
+        is_blue(up_left),
+        "offset-0.625 (just after 9 o'clock) must be blue; got {up_left:?}"
+    );
+    assert!(
+        is_blue(up_right),
+        "offset-0.875 (toward 3 o'clock from the top) must be blue; got {up_right:?}"
+    );
+
+    // start_angle = +PI/2 rotates the gradient a quarter turn clockwise (toward 6
+    // o'clock). The red half now spans offsets that map to the down-left and
+    // up-left diagonals, and the blue half maps to the up-right and down-right
+    // diagonals: exactly the quarter-turn clockwise rotation of the start_angle=0
+    // case above. (The exact offset-0 point at 6 o'clock is the wrap boundary, so
+    // it is not asserted; the diagonals unambiguously prove the rotation.)
+    let pixels = render(std::f32::consts::FRAC_PI_2);
+    let sample = |dx, dy| sampler(&pixels, dx, dy);
+
+    let down_left = sample(-9, 9); // offset 0.125 -> red
+    let up_left = sample(-9, -9); // offset 0.375 -> red
+    let up_right = sample(9, -9); // offset 0.625 -> blue
+    let down_right = sample(9, 9); // offset 0.875 -> blue
+
+    assert!(
+        is_red(down_left),
+        "with start_angle=PI/2, offset-0.125 must be red; got {down_left:?}"
+    );
+    assert!(
+        is_red(up_left),
+        "with start_angle=PI/2, offset-0.375 must be red; got {up_left:?}"
+    );
+    assert!(
+        is_blue(up_right),
+        "with start_angle=PI/2, offset-0.625 must be blue; got {up_right:?}"
+    );
+    assert!(
+        is_blue(down_right),
+        "with start_angle=PI/2, offset-0.875 must be blue; got {down_right:?}"
+    );
+}

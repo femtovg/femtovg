@@ -16,7 +16,11 @@ struct Params {
     image_blur_filter_sigma: f32,
     image_blur_filter_direction: vec2<f32>,
     image_blur_filter_coeff: vec3<f32>,
+    // scissor_radius fills the padding after the vec3 (byte offset 204);
+    // conic_start_angle starts the next 16-byte row (byte offset 208), which
+    // is frag[13].x in the flat uniform array written from Rust.
     scissor_radius: f32,
+    conic_start_angle: f32,
 }
 
 const SHADER_TYPE_FillGradient: i32 = 0;
@@ -143,12 +147,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             return params.inner_col;
         }
         case SHADER_TYPE_FillGradientConic: {
+            // Set `result` and fall through to the scissor + stroke-AA multiply
+            // below (like the other gradient cases); returning here would skip
+            // the clip and antialiasing, so conic fills would ignore scissors.
             let d = conicAngleFraction(vertex, params);
-            return mix(params.inner_col,params.outer_col,d);
+            result = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
-            return textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));
+            result = ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
@@ -181,7 +188,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
-    return (-atan2(pt.x,pt.y) / TAU) + 0.5;
+    // Measure the angle clockwise from the positive x axis. In the gradient's
+    // local space (y points down on screen), atan2(pt.y, pt.x) increases in the
+    // clockwise direction, so offset 0 sits at 3 o'clock and the ramp proceeds
+    // clockwise, matching Canvas 2D createConicGradient. fract() wraps the angle
+    // into [0, 1) for negative or large start angles.
+    return fract((atan2(pt.y, pt.x) - params.conic_start_angle) / TAU);
 }
 
 fn sdroundrect(pt: vec2<f32>, ext: vec2<f32>, rad: f32) -> f32 {
@@ -211,12 +223,23 @@ fn strokeMask(vertex: VertexOutput, params: Params) -> f32 {
     //return smoothstep(0.0, 1.0, (1.0-abs(vertex.ftcoord.x*2.0-1.0))*params.stroke_mult) * smoothstep(0.0, 1.0, vertex.ftcoord.y);
 }
 
+// Interleaved gradient noise dither (see the GLSL shader / issue femtovg/femtovg#239):
+// a cheap, deterministic screen-space ordered dither. A sub-LSB colour offset
+// before the 8-bit write breaks up gradient banding between close colours.
+fn ditherNoise(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
+}
+fn ditherGradient(color: vec4<f32>, fragcoord: vec2<f32>) -> vec4<f32> {
+    let d = (ditherNoise(fragcoord) - 0.5) / 255.0;
+    return vec4<f32>(color.rgb + d, color.a);
+}
+
 fn renderGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate gradient color using box gradient
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return mix(params.inner_col,params.outer_col,d);
+    return ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.
@@ -225,7 +248,7 @@ fn renderImageGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0));//mix(innerCol,outerCol,d);
+    return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
 }
 
 fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {

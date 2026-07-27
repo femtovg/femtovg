@@ -152,6 +152,12 @@ impl UniformArray {
     pub fn set_image_blur_filter_coeff(&mut self, coeff: [f32; 3]) {
         self.0[48..51].copy_from_slice(&coeff);
     }
+
+    pub fn set_conic_start_angle(&mut self, angle: f32) {
+        // Byte offset 208 (`conic_start_angle` in the WGSL Params struct);
+        // float 51 (byte offset 204) holds the scissor radius.
+        self.0[52] = angle;
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -176,6 +182,7 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_direction(params.image_blur_filter_direction);
         arr.set_image_blur_filter_sigma(params.image_blur_filter_sigma);
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
+        arr.set_conic_start_angle(params.conic_start_angle);
 
         arr
     }
@@ -239,7 +246,76 @@ pub struct WGPURenderer {
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
 }
 
+/// Rasterizes an image element into an offscreen canvas at the given size.
+#[cfg(target_arch = "wasm32")]
+fn rasterize_to_canvas(
+    element: &web_sys::HtmlImageElement,
+    size: crate::image::Size,
+) -> Result<web_sys::HtmlCanvasElement, crate::ErrorKind> {
+    use wasm_bindgen::JsCast;
+
+    let canvas = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.create_element("canvas").ok())
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        .ok_or(crate::ErrorKind::UnsupportedOperation)?;
+    canvas.set_width(size.width as u32);
+    canvas.set_height(size.height as u32);
+
+    let context = canvas
+        .get_context("2d")
+        .ok()
+        .flatten()
+        .and_then(|context| context.dyn_into::<web_sys::CanvasRenderingContext2d>().ok())
+        .ok_or(crate::ErrorKind::UnsupportedOperation)?;
+    context
+        .draw_image_with_html_image_element_and_dw_and_dh(element, 0., 0., size.width as f64, size.height as f64)
+        .map_err(|_| crate::ErrorKind::UnsupportedOperation)?;
+
+    Ok(canvas)
+}
+
 impl WGPURenderer {
+    /// Uploads a browser-side image source straight into an image's texture.
+    #[cfg(target_arch = "wasm32")]
+    fn copy_external_image(
+        &self,
+        image: &Image,
+        source: wgpu::ExternalImageSource,
+        size: crate::image::Size,
+        x: usize,
+        y: usize,
+    ) -> Result<(), crate::ErrorKind> {
+        let Texture::Internal(texture) = &image.texture else {
+            return Err(crate::ErrorKind::UnsupportedOperation);
+        };
+        self.queue.copy_external_image_to_texture(
+            &wgpu::CopyExternalImageSourceInfo {
+                source,
+                origin: wgpu::Origin2d::ZERO,
+                flip_y: false,
+            },
+            wgpu::CopyExternalImageDestInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: x as u32,
+                    y: y as u32,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+                color_space: wgpu::PredefinedColorSpace::Srgb,
+                premultiplied_alpha: true,
+            },
+            wgpu::Extent3d {
+                width: size.width as _,
+                height: size.height as _,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
     /// Creates a new renderer for the device.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let module = wgpu::include_wgsl!("wgpu/shader.wgsl");
@@ -602,38 +678,6 @@ impl Renderer for WGPURenderer {
         x: usize,
         y: usize,
     ) -> Result<(), crate::ErrorKind> {
-        #[cfg(target_arch = "wasm32")]
-        if let crate::ImageSource::HtmlImageElement(htmlimage) = data {
-            let Texture::Internal(texture) = &image.texture else {
-                return Err(crate::ErrorKind::UnsupportedOperation);
-            };
-            self.queue.copy_external_image_to_texture(
-                &wgpu::CopyExternalImageSourceInfo {
-                    source: wgpu::ExternalImageSource::HTMLImageElement(htmlimage.clone()),
-                    origin: wgpu::Origin2d::ZERO,
-                    flip_y: false,
-                },
-                wgpu::CopyExternalImageDestInfo {
-                    texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: x as u32,
-                        y: y as u32,
-                        z: 0,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                    color_space: wgpu::PredefinedColorSpace::Srgb,
-                    premultiplied_alpha: true,
-                },
-                wgpu::Extent3d {
-                    width: data.dimensions().width as _,
-                    height: data.dimensions().height as _,
-                    depth_or_array_layers: 1,
-                },
-            );
-            return Ok(());
-        }
-
         use rgb::ComponentBytes;
 
         let converted_rgba;
@@ -653,8 +697,22 @@ impl Renderer for WGPURenderer {
             crate::ImageSource::Rgba(img) => (img.buf().as_bytes(), 4),
             crate::ImageSource::Gray(img) => (img.buf().as_bytes(), 1),
             #[cfg(target_arch = "wasm32")]
-            crate::ImageSource::HtmlImageElement(..) => {
-                unreachable!()
+            crate::ImageSource::HtmlImageElement(element) => {
+                let size = data.dimensions();
+                // WebGPU copies from the natural size, so attribute sizes would overflow or crop the rect.
+                let resized =
+                    element.width() != element.natural_width() || element.height() != element.natural_height();
+                let source = if resized {
+                    wgpu::ExternalImageSource::HTMLCanvasElement(rasterize_to_canvas(element, size)?)
+                } else {
+                    wgpu::ExternalImageSource::HTMLImageElement(element.clone())
+                };
+                return self.copy_external_image(image, source, size, x, y);
+            }
+            #[cfg(target_arch = "wasm32")]
+            crate::ImageSource::HtmlCanvasElement(element) => {
+                let source = wgpu::ExternalImageSource::HTMLCanvasElement(element.clone());
+                return self.copy_external_image(image, source, data.dimensions(), x, y);
             }
         };
 

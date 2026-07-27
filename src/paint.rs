@@ -290,6 +290,12 @@ pub enum PaintFlavor {
     },
     ConicGradient {
         center: Position,
+        // Paints serialized before `start_angle` existed represented conic
+        // gradients as `{ center, colors }`. Defaulting the missing field to
+        // 0.0 keeps those payloads deserializable, matching the original
+        // (no-rotation) behavior.
+        #[cfg_attr(feature = "serde", serde(default))]
+        start_angle: f32,
         colors: GradientColors,
     },
 }
@@ -737,14 +743,72 @@ impl Paint {
         })
     }
 
-    /// Creates and returns a multi-stop conic gradient.
+    /// Creates and returns a two-color conic gradient.
     ///
-    /// Parameters (`cx`,`cy`) specify the center.
-    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+    /// Parameters (`cx`,`cy`) specify the center. The gradient begins at the
+    /// positive x axis (the 3 o'clock direction) and proceeds clockwise, matching
+    /// the Canvas 2D `createConicGradient(0, cx, cy)` semantics.
+    pub fn conic_gradient(cx: f32, cy: f32, start_color: Color, end_color: Color) -> Self {
+        Self::conic_gradient_with_angle(cx, cy, 0.0, start_color, end_color)
+    }
+
+    /// Creates and returns a two-color conic gradient with a start angle.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
+    /// measured clockwise from the positive x axis, matching the Canvas 2D
+    /// `createConicGradient(start_angle, cx, cy)` semantics.
+    ///
+    /// Following the Canvas convention that non-finite values must not poison
+    /// rendering state, a non-finite `start_angle` (NaN or an infinity) is
+    /// ignored and treated as `0.0`.
+    pub fn conic_gradient_with_angle(cx: f32, cy: f32, start_angle: f32, start_color: Color, end_color: Color) -> Self {
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
+            start_angle: Self::finite_start_angle_or_zero(start_angle),
+            colors: GradientColors::TwoStop { start_color, end_color },
+        })
+    }
+
+    /// Creates and returns a multi-stop conic gradient.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. The gradient begins at the
+    /// positive x axis (the 3 o'clock direction) and proceeds clockwise, matching
+    /// the Canvas 2D `createConicGradient(0, cx, cy)` semantics.
+    pub fn conic_gradient_stops(cx: f32, cy: f32, stops: impl IntoIterator<Item = (f32, Color)>) -> Self {
+        Self::conic_gradient_stops_with_angle(cx, cy, 0.0, stops)
+    }
+
+    /// Creates and returns a multi-stop conic gradient with a start angle.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center. `start_angle` is in radians,
+    /// measured clockwise from the positive x axis, matching the Canvas 2D
+    /// `createConicGradient(start_angle, cx, cy)` semantics.
+    ///
+    /// Following the Canvas convention that non-finite values must not poison
+    /// rendering state, a non-finite `start_angle` (NaN or an infinity) is
+    /// ignored and treated as `0.0`.
+    pub fn conic_gradient_stops_with_angle(
+        cx: f32,
+        cy: f32,
+        start_angle: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::ConicGradient {
+            center: Position { x: cx, y: cy },
+            start_angle: Self::finite_start_angle_or_zero(start_angle),
             colors: GradientColors::from_stops(stops),
         })
+    }
+
+    /// A NaN or infinite conic start angle would propagate through the shader's
+    /// `fract()` wrap and poison every covered pixel, so the constructors above
+    /// drop such values in favor of the no-rotation default.
+    fn finite_start_angle_or_zero(start_angle: f32) -> f32 {
+        if start_angle.is_finite() {
+            start_angle
+        } else {
+            0.0
+        }
     }
 
     /// Sets the color of the paint.
@@ -1249,7 +1313,10 @@ impl Paint {
 
 #[cfg(test)]
 mod tests {
-    use super::Paint;
+    #[cfg(feature = "serde")]
+    use super::{GradientColors, Position};
+    use super::{Paint, PaintFlavor};
+    use crate::Color;
 
     #[test]
     fn line_dash_empty_pattern_clears() {
@@ -1286,5 +1353,86 @@ mod tests {
         let paint = Paint::default().with_line_dash(&[0.0, 0.0]);
 
         assert_eq!(paint.line_dash(), &[0.0, 0.0]);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn conic_gradient_deserializes_without_start_angle() {
+        let flavor = PaintFlavor::ConicGradient {
+            center: Position { x: 1.0, y: 2.0 },
+            start_angle: 1.5,
+            colors: GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::white(),
+            },
+        };
+
+        // Learn the current serde representation, then strip `start_angle`
+        // to mirror the "old format" payload produced before that field
+        // existed (`ConicGradient { center, colors }`).
+        let mut value = serde_json::to_value(&flavor).expect("serialize ConicGradient");
+        let inner = value
+            .get_mut("ConicGradient")
+            .and_then(|v| v.as_object_mut())
+            .expect("externally tagged ConicGradient object");
+        assert!(inner.remove("start_angle").is_some(), "start_angle should be present");
+
+        // Deserializing the field-less payload must succeed and default to 0.0.
+        let restored: PaintFlavor = serde_json::from_value(value).expect("deserialize old format");
+        match restored {
+            PaintFlavor::ConicGradient {
+                center, start_angle, ..
+            } => {
+                assert_eq!(start_angle, 0.0);
+                assert_eq!(center.x, 1.0);
+                assert_eq!(center.y, 2.0);
+            }
+            other => panic!("expected ConicGradient, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn conic_gradient_round_trip_preserves_start_angle() {
+        let flavor = PaintFlavor::ConicGradient {
+            center: Position { x: 3.0, y: 4.0 },
+            start_angle: 2.75,
+            colors: GradientColors::TwoStop {
+                start_color: Color::black(),
+                end_color: Color::white(),
+            },
+        };
+
+        let json = serde_json::to_string(&flavor).expect("serialize ConicGradient");
+        let restored: PaintFlavor = serde_json::from_str(&json).expect("deserialize ConicGradient");
+        match restored {
+            PaintFlavor::ConicGradient { start_angle, .. } => assert_eq!(start_angle, 2.75),
+            other => panic!("expected ConicGradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conic_gradient_non_finite_start_angle_is_treated_as_zero() {
+        let start_angle_of = |paint: Paint| match paint.flavor {
+            PaintFlavor::ConicGradient { start_angle, .. } => start_angle,
+            other => panic!("expected ConicGradient, got {other:?}"),
+        };
+
+        for bad_angle in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let two_stop = Paint::conic_gradient_with_angle(10.0, 20.0, bad_angle, Color::black(), Color::white());
+            assert_eq!(start_angle_of(two_stop), 0.0);
+
+            let multi_stop = Paint::conic_gradient_stops_with_angle(
+                10.0,
+                20.0,
+                bad_angle,
+                [(0.0, Color::black()), (1.0, Color::white())],
+            );
+            assert_eq!(start_angle_of(multi_stop), 0.0);
+        }
+
+        // Finite angles must pass through untouched.
+        let finite = Paint::conic_gradient_with_angle(10.0, 20.0, -1.25, Color::black(), Color::white());
+        assert_eq!(start_angle_of(finite), -1.25);
     }
 }

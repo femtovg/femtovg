@@ -45,6 +45,7 @@ glutin = { version = "0.32", optional = true, default-features = false }
 web_sys = { version = "0.3", package = "web-sys", features = [
     "WebGlContextAttributes",
     "HtmlImageElement",
+    "CanvasRenderingContext2d",
     "WebGl2RenderingContext",
 ] }
 wasm-bindgen = "0.2"
@@ -59,6 +60,7 @@ textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "
 swash = ["dep:swash"]
 
 [dev-dependencies]
+serde_json = "1.0"
 winit = { version = "0.30.12" }
 euclid = "0.22.3"
 rand = "0.10"

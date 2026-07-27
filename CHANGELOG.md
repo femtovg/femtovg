@@ -1,9 +1,43 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [0.26.0]
+## [Unreleased]
 
+- Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
+  into ellipses when a radius did not fit. Radii that overlap along a side are
+  now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
+  the Canvas `roundRect()` algorithm both specify, so corners keep their shape:
+  a radius larger than half the height now gives a fully rounded end rather than
+  a squashed one. A corner may also use a whole side when the corner next to it
+  is square, which the previous clamp cut in half. Negative and NaN radii leave
+  the corner square instead of bulging it outwards or emitting NaN coordinates,
+  and an infinite radius rounds as far as the box allows. This changes rendering
+  for shapes whose radii did not fit.
+
+## [0.26.0] - 2026-07-20
+
+- Added Canvas 2D drop shadows for fills, strokes and text. New `Canvas` methods
+  `set_shadow_color()`, `set_shadow_blur()` and `set_shadow_offset()`. Shadows
+  cost a per-draw offscreen blur; a transparent shadow color restores the
+  zero-overhead path. Thanks @matthargett
+- Added rounded scissor support. New `Canvas` methods `rounded_scissor()` and
+  `intersect_rounded_scissor()` take a corner radius; intersections that can't
+  be represented exactly fall back to rectangular scissoring. Thanks
+  @matthargett
+- Added a start angle to conic gradients for Canvas conformance. New `Paint`
+  constructors `conic_gradient()`, `conic_gradient_with_angle()` and
+  `conic_gradient_stops_with_angle()`. Previously serialized paints still
+  deserialize, defaulting to the prior no-rotation behavior. Thanks
+  @matthargett
+- Added an `ImageSource::HtmlCanvasElement` variant, letting callers hand over a
+  source already rasterized at the wanted size. This avoids a wgpu panic when
+  enlarging an `HtmlImageElement` for hidpi output. Thanks @yebei199
+- Gradients are dithered to reduce banding. Thanks @matthargett
 - Bumped WGPU renderer to use WGPU 30.x
+- Fixed text layout to preserve the fractional baseline (#281). Thanks
+  @matthargett
+- Fixed scaled-atlas text positioning to use the true scale rather than the
+  quantized one. Thanks @matthargett
 
 ## [0.25.1] - 2026-05-29
 

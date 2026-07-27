@@ -26,6 +26,7 @@ pub struct Params {
     pub(crate) image_blur_filter_direction: [f32; 2],
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
+    pub(crate) conic_start_angle: f32,
 }
 
 impl Params {
@@ -229,11 +230,14 @@ impl Params {
             }
             &PaintFlavor::ConicGradient {
                 center: Position { x: cx, y: cy },
+                start_angle,
                 colors,
             } => {
                 let mut transform = Transform2D::translation(*cx, *cy);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
+
+                params.conic_start_angle = *start_angle;
 
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
