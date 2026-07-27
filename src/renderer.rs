@@ -160,6 +160,11 @@ pub trait Renderer {
     ) -> Result<Self::Image, ErrorKind>;
 
     /// Update an image with new data.
+    ///
+    /// Implementations should start by calling [`ImageSource::check_update`], so
+    /// that a copy reaching past the image, or carrying a pixel format the image
+    /// was not created with, is reported as an error instead of being handed to
+    /// the graphics API, where it fails validation and usually aborts.
     fn update_image(&mut self, image: &mut Self::Image, data: ImageSource, x: usize, y: usize)
         -> Result<(), ErrorKind>;
 

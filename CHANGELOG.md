@@ -1,6 +1,17 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Fixed the WGPU renderer aborting instead of reporting an error when
+  `update_image()` is given a copy that reaches past the destination image, or a
+  source in a different pixel format. Both now return
+  `ErrorKind::ImageUpdateOutOfBounds` and
+  `ErrorKind::ImageUpdateWithDifferentFormat`, as the OpenGL and `Void`
+  renderers already did. The shared check is exposed as
+  `ImageSource::check_update()` for out-of-tree renderers, and reports rather
+  than overflows for an origin close to `usize::MAX`.
+
 ## [0.26.0] - 2026-07-20
 
 - Added Canvas 2D drop shadows for fills, strokes and text. New `Canvas` methods
