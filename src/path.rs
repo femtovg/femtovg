@@ -453,8 +453,10 @@ impl Path {
     /// This is the "overlapping curves" rule shared by CSS backgrounds and
     /// borders and by the Canvas `roundRect()` algorithm.
     ///
-    /// A radius that is negative or not finite does not describe a corner and is
-    /// treated as zero, leaving that corner square.
+    /// A negative radius, or one that is NaN, does not describe a corner and is
+    /// treated as zero, leaving that corner square. An infinite radius asks for
+    /// as much rounding as there is room for and is reduced to fit, like any
+    /// other radius that is too large.
     pub fn rounded_rect_varying(
         &mut self,
         x: f32,
@@ -466,7 +468,19 @@ impl Path {
         rad_bottom_right: f32,
         rad_bottom_left: f32,
     ) {
-        let usable = |r: f32| if r.is_finite() && r > 0.0 { r } else { 0.0 };
+        // An infinite radius stands in for the largest one there is, so that the
+        // reduction below brings it down to what fits rather than the shape
+        // losing its corners entirely. Anything not positive, NaN included, is
+        // not a corner at all.
+        let usable = |r: f32| {
+            if r.is_nan() || r <= 0.0 {
+                0.0
+            } else if r.is_infinite() {
+                f32::MAX
+            } else {
+                r
+            }
+        };
 
         let mut tl = usable(rad_top_left);
         let mut tr = usable(rad_top_right);
@@ -476,23 +490,35 @@ impl Path {
         if tl < 0.1 && tr < 0.1 && br < 0.1 && bl < 0.1 {
             self.rect(x, y, w, h);
         } else {
-            let (width, height) = (w.abs(), h.abs());
+            let (width, height) = (f64::from(w.abs()), f64::from(h.abs()));
+            let (tl64, tr64) = (f64::from(tl), f64::from(tr));
+            let (br64, bl64) = (f64::from(br), f64::from(bl));
 
             // One factor for every radius, taken from whichever side overflows
             // the most. Clamping the axes separately instead would turn a corner
             // into an ellipse. A side whose radii are both zero cannot overflow,
             // so it is left out of the comparison.
-            let scale = [(width, tl + tr), (width, bl + br), (height, tl + bl), (height, tr + br)]
-                .into_iter()
-                .filter(|&(_, sum)| sum > 0.0)
-                .map(|(side, sum)| side / sum)
-                .fold(1.0f32, f32::min);
+            //
+            // The sums are taken at double precision, as Skia and Gecko also do.
+            // Two large radii overflow to infinity when added in single
+            // precision, which makes the factor zero and squares off every corner
+            // of a shape that should merely have been reduced.
+            let scale = [
+                (width, tl64 + tr64),
+                (width, bl64 + br64),
+                (height, tl64 + bl64),
+                (height, tr64 + br64),
+            ]
+            .into_iter()
+            .filter(|&(_, sum)| sum > 0.0)
+            .map(|(side, sum)| side / sum)
+            .fold(1.0f64, f64::min);
 
             if scale < 1.0 {
-                tl *= scale;
-                tr *= scale;
-                br *= scale;
-                bl *= scale;
+                tl = (tl64 * scale) as f32;
+                tr = (tr64 * scale) as f32;
+                br = (br64 * scale) as f32;
+                bl = (bl64 * scale) as f32;
             }
 
             let (sign_x, sign_y) = (w.signum(), h.signum());

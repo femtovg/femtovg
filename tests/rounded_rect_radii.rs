@@ -204,7 +204,7 @@ fn the_scale_comes_from_the_most_overflowing_side() {
 /// and silently drops the shape in the tessellator.
 #[test]
 fn unusable_radii_leave_the_corner_square() {
-    for bad in [-10.0f32, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+    for bad in [-10.0f32, f32::NAN, f32::NEG_INFINITY] {
         let mut path = Path::new();
         path.rounded_rect_varying(0.0, 0.0, 100.0, 100.0, bad, 20.0, 20.0, 20.0);
         let c = corners_of(&path, 0.0, 0.0, 100.0, 100.0);
@@ -254,6 +254,35 @@ fn wpt_negative_extents_round_the_origin_corner() {
     assert_close(c.top_right.rx, 0.0, "top right rx");
     assert_close(c.bottom_right.rx, 0.0, "bottom right rx");
     assert_close(c.bottom_left.rx, 0.0, "bottom left rx");
+}
+
+/// Radii far larger than anything drawable still round the corners as far as the
+/// box allows, rather than collapsing the shape back to a plain rectangle.
+///
+/// This is where reducing by a factor has a trap that clamping does not: the two
+/// radii on a side have to be added together first, and two enormous ones
+/// overflow single precision to infinity, which makes the factor zero and takes
+/// every corner with it. Skia adds them at double precision for this reason,
+/// noting in `SkRRect::scaleRadii` that single precision "can completely miss the
+/// fact that a scale is required" (crbug.com/463920), and Gecko does the same.
+/// Flutter, which scales in single precision, has the visible form of this:
+/// `BorderRadius.circular(double.infinity)` produces a square box
+/// (flutter/flutter#124525) while a merely huge radius produces a circle.
+#[test]
+fn enormous_radii_round_as_far_as_they_fit() {
+    for radius in [1.0e30f32, f32::MAX, f32::INFINITY] {
+        let mut path = Path::new();
+        path.rounded_rect(0.0, 0.0, 100.0, 100.0, radius);
+        let c = corners_of(&path, 0.0, 0.0, 100.0, 100.0);
+        for (corner, name) in [
+            (c.top_left, "top left"),
+            (c.top_right, "top right"),
+            (c.bottom_right, "bottom right"),
+            (c.bottom_left, "bottom left"),
+        ] {
+            assert_circular(corner, 50.0, &format!("radius {radius} {name}"));
+        }
+    }
 }
 
 /// Rectangles given with a negative width or height are drawn from the opposite
@@ -309,6 +338,42 @@ fn wpt_css_border_radius_sum_of_radii() {
         assert_circular(c.bottom_right, expected[2], &format!("{label} bottom right"));
         assert_circular(c.bottom_left, expected[3], &format!("{label} bottom left"));
     }
+}
+
+/// From Gecko's `layout/reftests/border-radius/corner-3.html`, whose border box is
+/// 30 wide and 130 tall with the two right corners rounded by 30. Each horizontal
+/// side holds one radius of 30 in 30 units of width, so nothing is reduced and
+/// the right side bulges across the full width. Clamping to half the box would
+/// halve both to 15.
+#[test]
+fn gecko_corner_3_keeps_full_width_radii() {
+    let mut path = Path::new();
+    path.rounded_rect_varying(0.0, 0.0, 30.0, 130.0, 0.0, 30.0, 30.0, 0.0);
+    let c = corners_of(&path, 0.0, 0.0, 30.0, 130.0);
+
+    assert_circular(c.top_left, 0.0, "top left");
+    assert_circular(c.top_right, 30.0, "top right");
+    assert_circular(c.bottom_right, 30.0, "bottom right");
+    assert_circular(c.bottom_left, 0.0, "bottom left");
+}
+
+/// From Gecko's `layout/reftests/border-radius/border-reduce-height.html`, added
+/// with its implementation of this rule: a 60x20 box with radii 5, 20, 5, 20
+/// reduces by 0.8 to 4, 16, 4, 16.
+///
+/// The factor comes from the short vertical sides, yet it also reduces the
+/// horizontal extent of every corner, which the 60 units of width had ample room
+/// for. That is the part a per-side or per-axis correction cannot reproduce.
+#[test]
+fn gecko_border_reduce_height_scales_the_wide_axis_too() {
+    let mut path = Path::new();
+    path.rounded_rect_varying(0.0, 0.0, 60.0, 20.0, 5.0, 20.0, 5.0, 20.0);
+    let c = corners_of(&path, 0.0, 0.0, 60.0, 20.0);
+
+    assert_circular(c.top_left, 4.0, "top left");
+    assert_circular(c.top_right, 16.0, "top right");
+    assert_circular(c.bottom_right, 4.0, "bottom right");
+    assert_circular(c.bottom_left, 16.0, "bottom left");
 }
 
 /// From WPT `css/css-backgrounds/border-radius-sum-of-radii-002.htm`: radii that
