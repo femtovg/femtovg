@@ -242,6 +242,82 @@ fn reversed_rectangles_keep_their_radii_inside() {
     }
 }
 
+/// Vectors ported from WPT `css/css-backgrounds/border-radius-sum-of-radii-001.htm`,
+/// whose border box is 100x100. Each case there overlays the reduced shape on a
+/// reference drawn with the already-reduced radii and passes when nothing shows
+/// through, so the reference values are the used radii the rule must produce.
+///
+/// Case 4 is the one worth reading twice: the bottom and right sides both fit on
+/// their own, yet their radii still shrink from 30 to 25, because the factor
+/// comes from the overflowing top side and applies to every corner. An
+/// implementation that reduces only what overflows leaves them at 30.
+#[test]
+fn wpt_css_border_radius_sum_of_radii() {
+    // [top left, top right, bottom right, bottom left], as the CSS shorthand orders them.
+    let cases: [([f32; 4], [f32; 4]); 8] = [
+        ([60.0, 150.0, 30.0, 30.0], [28.5714, 71.4286, 14.2857, 14.2857]),
+        ([0.0, 150.0, 0.0, 30.0], [0.0, 100.0, 0.0, 20.0]),
+        ([150.0, 0.0, 30.0, 0.0], [100.0, 0.0, 20.0, 0.0]),
+        ([50.0, 70.0, 30.0, 30.0], [41.6667, 58.3333, 25.0, 25.0]),
+        ([150.0, 150.0, 30.0, 30.0], [50.0, 50.0, 10.0, 10.0]),
+        ([30.0, 50.0, 70.0, 30.0], [25.0, 41.6667, 58.3333, 25.0]),
+        ([30.0, 30.0, 50.0, 70.0], [25.0, 25.0, 41.6667, 58.3333]),
+        ([70.0, 30.0, 30.0, 50.0], [58.3333, 25.0, 25.0, 41.6667]),
+    ];
+
+    for (input, expected) in cases {
+        let mut path = Path::new();
+        path.rounded_rect_varying(0.0, 0.0, 100.0, 100.0, input[0], input[1], input[2], input[3]);
+        let c = corners_of(&path, 0.0, 0.0, 100.0, 100.0);
+        let label = format!("radii {input:?}");
+        assert_circular(c.top_left, expected[0], &format!("{label} top left"));
+        assert_circular(c.top_right, expected[1], &format!("{label} top right"));
+        assert_circular(c.bottom_right, expected[2], &format!("{label} bottom right"));
+        assert_circular(c.bottom_left, expected[3], &format!("{label} bottom left"));
+    }
+}
+
+/// From WPT `css/css-backgrounds/border-radius-sum-of-radii-002.htm`: radii that
+/// exactly fill a side give a factor of one, and the rule only applies below one,
+/// so nothing is reduced. Reducing here would shrink shapes that are already
+/// correct.
+#[test]
+fn wpt_a_factor_of_exactly_one_reduces_nothing() {
+    let mut path = Path::new();
+    path.rounded_rect_varying(0.0, 0.0, 100.0, 100.0, 50.0, 50.0, 30.0, 30.0);
+    let c = corners_of(&path, 0.0, 0.0, 100.0, 100.0);
+
+    assert_circular(c.top_left, 50.0, "top left");
+    assert_circular(c.top_right, 50.0, "top right");
+    assert_circular(c.bottom_right, 30.0, "bottom right");
+    assert_circular(c.bottom_left, 30.0, "bottom left");
+}
+
+/// The geometry behind WPT `2d.path.roundrect.radius.intersecting.1` and `.2`,
+/// which fill a 100x50 canvas with radii of 40 and then 1000. Both reduce to a
+/// circular 25, giving a stadium.
+///
+/// Those two tests only sample pixels well inside the shape, so per-axis
+/// clamping — 40x25 and 50x25 ellipses — passes them both. Asserting the radii
+/// directly is what separates the two behaviours, so this covers the intent of
+/// the WPT cases rather than reproducing assertions that cannot fail.
+#[test]
+fn wpt_canvas_intersecting_radii_reduce_to_a_circle() {
+    for radius in [40.0f32, 1000.0] {
+        let mut path = Path::new();
+        path.rounded_rect(0.0, 0.0, 100.0, 50.0, radius);
+        let c = corners_of(&path, 0.0, 0.0, 100.0, 50.0);
+        for (corner, name) in [
+            (c.top_left, "top left"),
+            (c.top_right, "top right"),
+            (c.bottom_right, "bottom right"),
+            (c.bottom_left, "bottom left"),
+        ] {
+            assert_circular(corner, 25.0, &format!("radius {radius} {name}"));
+        }
+    }
+}
+
 /// A box with no room at all collapses the radii rather than emitting geometry
 /// outside it or dividing by zero.
 #[test]
