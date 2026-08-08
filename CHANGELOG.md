@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed `stroke_text()` line widths under a scaled canvas transform. The width
+  crossed into the rasterizer's space inconsistently per regime: baked-atlas
+  glyphs never scaled it, while path-fallback glyphs scaled it twice, so the
+  drawn width changed law with the zoom, the font size, and even the paint
+  flavor. All user-space text quantities now cross through the baked scale at
+  one place, and a zoom-invariance test suite holds the regime seams.
 - Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
   into ellipses when a radius did not fit. Radii that overlap along a side are
   now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
