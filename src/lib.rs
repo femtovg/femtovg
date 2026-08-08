@@ -2020,11 +2020,6 @@ where
         normalized_coords: &[i16],
         render_mode: RenderMode,
     ) -> Result<(), ErrorKind> {
-        let scale = self.font_scale() * self.device_px_ratio;
-
-        let mut stroke = paint.stroke.clone();
-        stroke.line_width *= scale;
-
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let text_context = self.text_context.clone();
@@ -2078,6 +2073,18 @@ where
             _ => 1.0,
         };
         let effective_font_size = paint.text.font_size * effective_scale;
+
+        // Everything measured in user text space crosses into the rasterizer's
+        // space through `effective_scale`, exactly once, right here: font size,
+        // glyph positions (below), and the stroke width. Bake-space consumers
+        // (the atlas) receive the scaled values; the live-transform consumer
+        // (`render_direct`) has `effective_scale == 1` and receives them
+        // untouched, letting the canvas transform apply the scale instead.
+        // Splitting these -- scaling some quantities and not others, or scaling
+        // one of them twice -- is what made stroke widths change with the zoom
+        // regime rather than the zoom.
+        let mut stroke = paint.stroke.clone();
+        stroke.line_width *= effective_scale;
 
         let Some(font) = text_context.font_mut(font_id) else {
             return Err(ErrorKind::NoFontFound);
@@ -2135,7 +2142,7 @@ where
                 &font_face,
                 non_color_glyphs.iter().map(scaled),
                 effective_font_size,
-                paint.stroke.line_width,
+                stroke.line_width,
                 render_mode,
                 normalized_coords,
             )?
@@ -2162,7 +2169,7 @@ where
                         &font_face,
                         color_glyphs.into_iter(),
                         paint.text.font_size,
-                        paint.stroke.line_width,
+                        stroke.line_width,
                         render_mode,
                         normalized_coords,
                     )?
@@ -2174,7 +2181,7 @@ where
                         &font_face,
                         color_glyphs.iter().map(scaled),
                         effective_font_size,
-                        paint.stroke.line_width,
+                        stroke.line_width,
                         render_mode,
                         normalized_coords,
                     )?
