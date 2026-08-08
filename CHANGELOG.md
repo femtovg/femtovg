@@ -28,6 +28,12 @@ All notable changes to this project will be documented in this file.
   circles may have different centres. New `Paint` constructors
   `two_point_radial_gradient()` and `two_point_radial_gradient_stops()`.
   Concentric radials keep using the existing cheaper path.
+- Added a transform on gradient paints, the role SVG's `gradientTransform`
+  plays. New `Paint` methods `set_gradient_transform()` and
+  `with_gradient_transform()`. It applies to the gradient ahead of the canvas
+  transform, so the shape does not follow it, which is what expresses a gradient
+  whose axes are scaled differently: an elliptical radial gradient could not be
+  described by the circle and radius parameters alone.
 
 - Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
   into ellipses when a radius did not fit. Radii that overlap along a side are

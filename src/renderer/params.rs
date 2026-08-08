@@ -138,6 +138,7 @@ impl Params {
                 start: Position { x: start_x, y: start_y },
                 end: Position { x: end_x, y: end_y },
                 colors,
+                transform: gradient_transform,
             } => {
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
@@ -154,6 +155,7 @@ impl Params {
 
                 let mut transform = Transform2D([dy, -dx, dx, dy, start_x - dx * large, start_y - dy * large]);
 
+                transform *= *gradient_transform;
                 transform *= *global_transform;
 
                 inv_transform = transform.inverse();
@@ -180,8 +182,10 @@ impl Params {
                 radius,
                 feather,
                 colors,
+                transform: gradient_transform,
             } => {
                 let mut transform = Transform2D::translation(x + width * 0.5, y + height * 0.5);
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -205,6 +209,7 @@ impl Params {
                 in_radius: (in_rx, in_ry),
                 out_radius: (out_rx, out_ry),
                 colors,
+                transform: gradient_transform,
             } => {
                 let avg_x = (in_rx + out_rx) * 0.5;
                 let avg_y = (in_ry + out_ry) * 0.5;
@@ -214,6 +219,10 @@ impl Params {
                 // squash into an ellipse
                 let mut transform = Transform2D::scaling(avg_x / effective_r, avg_y / effective_r);
                 transform.translate(*cx, *cy);
+                // The caller's gradient transform maps the whole gradient
+                // definition - elliptical squash included - into user space,
+                // so it composes outside the squash and centre placement.
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -236,8 +245,10 @@ impl Params {
                 center: Position { x: cx, y: cy },
                 start_angle,
                 colors,
+                transform: gradient_transform,
             } => {
                 let mut transform = Transform2D::translation(*cx, *cy);
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -260,11 +271,13 @@ impl Params {
                 end_center: Position { x: x1, y: y1 },
                 end_radius: r1,
                 colors,
+                transform: gradient_transform,
             } => {
                 // Place the start circle at the origin of the gradient's local
                 // space; paint_mat then maps a fragment position into that space,
                 // where the shader solves the two-circle interpolation directly.
                 let mut transform = Transform2D::translation(*x0, *y0);
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 

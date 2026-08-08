@@ -4,7 +4,10 @@
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::{geometry::Position, Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin};
+use crate::{
+    geometry::{Position, Transform2D},
+    Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+};
 
 const MAX_FONT_VARIATIONS: usize = 4;
 
@@ -273,6 +276,12 @@ pub enum PaintFlavor {
         start: Position,
         end: Position,
         colors: GradientColors,
+        /// Maps the gradient's own coordinate system into user space, the
+        /// role SVG's `gradientTransform` plays. Applied before the canvas
+        /// transform, so a gradient can be sheared or given different scales
+        /// on its two axes without the shape following it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        transform: Transform2D,
     },
     BoxGradient {
         pos: Position,
@@ -281,6 +290,12 @@ pub enum PaintFlavor {
         radius: f32,
         feather: f32,
         colors: GradientColors,
+        /// Maps the gradient's own coordinate system into user space, the
+        /// role SVG's `gradientTransform` plays. Applied before the canvas
+        /// transform, so a gradient can be sheared or given different scales
+        /// on its two axes without the shape following it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        transform: Transform2D,
     },
     RadialGradient {
         center: Position,
@@ -289,6 +304,12 @@ pub enum PaintFlavor {
         /// (x, y) radii of the outer boundary. Equal components describe a circle.
         out_radius: (f32, f32),
         colors: GradientColors,
+        /// Maps the gradient's own coordinate system into user space, the
+        /// role SVG's `gradientTransform` plays. Applied before the canvas
+        /// transform, so a gradient can be sheared or given different scales
+        /// on its two axes without the shape following it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        transform: Transform2D,
     },
     ConicGradient {
         center: Position,
@@ -299,6 +320,12 @@ pub enum PaintFlavor {
         #[cfg_attr(feature = "serde", serde(default))]
         start_angle: f32,
         colors: GradientColors,
+        /// Maps the gradient's own coordinate system into user space, the
+        /// role SVG's `gradientTransform` plays. Applied before the canvas
+        /// transform, so a gradient can be sheared or given different scales
+        /// on its two axes without the shape following it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        transform: Transform2D,
     },
     /// Two-point (independently centered) radial gradient, i.e. the general
     /// Canvas `createRadialGradient(x0, y0, r0, x1, y1, r1)` form where the start
@@ -310,6 +337,12 @@ pub enum PaintFlavor {
         end_center: Position,
         end_radius: f32,
         colors: GradientColors,
+        /// Maps the gradient's own coordinate system into user space, the
+        /// role SVG's `gradientTransform` plays. Applied before the canvas
+        /// transform, so a gradient can be sheared or given different scales
+        /// on its two axes without the shape following it.
+        #[cfg_attr(feature = "serde", serde(default))]
+        transform: Transform2D,
     },
 }
 
@@ -611,6 +644,7 @@ impl Paint {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
             colors: GradientColors::TwoStop { start_color, end_color },
+            transform: Transform2D::identity(),
         })
     }
     /// Creates and returns a linear gradient paint with two or more stops.
@@ -646,6 +680,7 @@ impl Paint {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
             colors: GradientColors::from_stops(stops),
+            transform: Transform2D::identity(),
         })
     }
 
@@ -699,6 +734,7 @@ impl Paint {
                 start_color: inner_color,
                 end_color: outer_color,
             },
+            transform: Transform2D::identity(),
         })
     }
 
@@ -794,6 +830,7 @@ impl Paint {
                 start_color: inner_color,
                 end_color: outer_color,
             },
+            transform: Transform2D::identity(),
         })
     }
 
@@ -888,6 +925,7 @@ impl Paint {
             in_radius: (in_rx, in_ry),
             out_radius: (out_rx, out_ry),
             colors: GradientColors::from_stops(stops),
+            transform: Transform2D::identity(),
         })
     }
 
@@ -921,6 +959,7 @@ impl Paint {
                 start_color: inner_color,
                 end_color: outer_color,
             },
+            transform: Transform2D::identity(),
         })
     }
 
@@ -949,6 +988,7 @@ impl Paint {
             end_center: Position { x: end_x, y: end_y },
             end_radius,
             colors: GradientColors::from_stops(stops),
+            transform: Transform2D::identity(),
         })
     }
 
@@ -975,6 +1015,7 @@ impl Paint {
             center: Position { x: cx, y: cy },
             start_angle: Self::finite_start_angle_or_zero(start_angle),
             colors: GradientColors::TwoStop { start_color, end_color },
+            transform: Transform2D::identity(),
         })
     }
 
@@ -1006,6 +1047,7 @@ impl Paint {
             center: Position { x: cx, y: cy },
             start_angle: Self::finite_start_angle_or_zero(start_angle),
             colors: GradientColors::from_stops(stops),
+            transform: Transform2D::identity(),
         })
     }
 
@@ -1532,6 +1574,32 @@ impl Paint {
         self.fill_rule
     }
 
+    /// Sets a transform mapping the gradient's own coordinate system into user
+    /// space, the role SVG's `gradientTransform` plays.
+    ///
+    /// It applies to the gradient only, ahead of the canvas transform, so the
+    /// shape being filled does not move with it. This is what expresses a
+    /// gradient whose two axes are scaled differently — an elliptical radial
+    /// gradient, say, which the circle and radius parameters cannot describe on
+    /// their own. Paints that are not gradients ignore it.
+    pub fn set_gradient_transform(&mut self, transform: Transform2D) {
+        match &mut self.flavor {
+            PaintFlavor::LinearGradient { transform: t, .. }
+            | PaintFlavor::BoxGradient { transform: t, .. }
+            | PaintFlavor::RadialGradient { transform: t, .. }
+            | PaintFlavor::ConicGradient { transform: t, .. }
+            | PaintFlavor::TwoPointRadialGradient { transform: t, .. } => *t = transform,
+            PaintFlavor::Color(_) | PaintFlavor::Image { .. } => {}
+        }
+    }
+
+    /// Builder form of [`Paint::set_gradient_transform`].
+    #[must_use]
+    pub fn with_gradient_transform(mut self, transform: Transform2D) -> Self {
+        self.set_gradient_transform(transform);
+        self
+    }
+
     /// Sets the fill rule for filling paths.
     #[inline]
     pub fn set_fill_rule(&mut self, rule: FillRule) {
@@ -1551,7 +1619,7 @@ mod tests {
     #[cfg(feature = "serde")]
     use super::{GradientColors, Position};
     use super::{Paint, PaintFlavor};
-    use crate::Color;
+    use crate::{geometry::Transform2D, Color};
 
     #[test]
     fn line_dash_empty_pattern_clears() {
@@ -1600,6 +1668,7 @@ mod tests {
                 start_color: Color::black(),
                 end_color: Color::white(),
             },
+            transform: Transform2D::identity(),
         };
 
         // Learn the current serde representation, then strip `start_angle`
@@ -1636,6 +1705,7 @@ mod tests {
                 start_color: Color::black(),
                 end_color: Color::white(),
             },
+            transform: Transform2D::identity(),
         };
 
         let json = serde_json::to_string(&flavor).expect("serialize ConicGradient");

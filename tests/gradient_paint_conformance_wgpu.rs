@@ -13,7 +13,7 @@
 //! no GPU adapter is available.
 #![cfg(all(feature = "wgpu", feature = "textlayout"))]
 
-use femtovg::{renderer::WGPURenderer, Align, Baseline, Canvas, Color, Paint, Path};
+use femtovg::{renderer::WGPURenderer, Align, Baseline, Canvas, Color, Paint, Path, Transform2D};
 
 const W: u32 = 300;
 const H: u32 = 120;
@@ -769,4 +769,62 @@ fn two_point_radial_shrinking_contained_circle_uses_the_other_root() {
             px(&pixels, x, y)
         );
     }
+}
+
+/// A gradient transform scales the gradient's own axes without moving the shape,
+/// which is how an elliptical radial gradient is expressed. The circle and
+/// radius parameters describe a circle by construction, so without this the
+/// shape is unreachable at any call site.
+///
+/// This is the form every design tool emits: a unit circle at the origin plus a
+/// `gradientTransform` that translates and scales it. The Reddit mark carries
+/// eight of them and the WebKit mark six.
+#[test]
+fn gradient_transform_makes_a_radial_gradient_elliptical() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // Unit circle at the origin, stretched three times as wide as it is tall.
+    // Scale the axes by 90 and 30, then move the centre to (150, 60).
+    let t = Transform2D([90.0, 0.0, 0.0, 30.0, 150.0, 60.0]);
+
+    let pixels = render(&device, &queue, |c| {
+        let g = Paint::two_point_radial_gradient(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            Color::rgb(230, 40, 40),
+            Color::rgb(40, 60, 230),
+        )
+        .with_gradient_transform(t);
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        c.fill_path(&p, &g);
+    });
+
+    // The centre is the first stop on both axes.
+    assert!(
+        near(px(&pixels, 150, 60), [230, 40, 40], 6),
+        "centre should be the first stop, got {:?}",
+        px(&pixels, 150, 60)
+    );
+    // Three quarters of the way out along each axis the ramp has reached the
+    // same place, which is what makes the gradient elliptical rather than round:
+    // 67px horizontally is the same offset as 22px vertically.
+    let along_x = px(&pixels, 150 + 67, 60);
+    let along_y = px(&pixels, 150, 60 + 22);
+    assert!(
+        along_x.iter().zip(along_y.iter()).all(|(a, b)| (a - b).abs() <= 12),
+        "the ramp should reach the same colour at proportional distances on each axis: {along_x:?} vs {along_y:?}"
+    );
+    // A circular gradient would still be near the first stop at 67px across;
+    // the stretched one is well past halfway.
+    assert!(
+        along_x[2] > along_x[0],
+        "67px out along the wide axis should be past the midpoint, got {along_x:?}"
+    );
 }
