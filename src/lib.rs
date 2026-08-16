@@ -341,13 +341,6 @@ pub struct Canvas<T: Renderer> {
 /// offset (e.g. text starting with a combining mark), instead of riding that mark
 /// up or down.
 #[cfg(feature = "textlayout")]
-fn run_baseline(glyphs: &[text::ShapedGlyph]) -> Option<f32> {
-    glyphs
-        .iter()
-        .find(|shaped_glyph| !shaped_glyph.c.is_control())
-        .map(|shaped_glyph| shaped_glyph.y - shaped_glyph.offset_y)
-}
-
 impl<T> Canvas<T>
 where
     T: Renderer,
@@ -1943,8 +1936,9 @@ where
             text::normalize_variations(&text_context, &paint.text.font_ids, &paint.text.font_variations)
         };
 
-        // Captured in scaled shaping space; decorations hang off it below.
-        let baseline_scaled = run_baseline(&layout.glyphs);
+        // Whether anything will actually be painted; decorations and shadows
+        // hang off the run only when it has at least one drawable glyph.
+        let has_drawable_glyphs = layout.glyphs.iter().any(|shaped_glyph| !shaped_glyph.c.is_control());
 
         // Draw the drop shadow (if any) under the text. The shaped layout gives a
         // user-space box; transform its corners by the CTM to obtain device-space
@@ -1977,7 +1971,7 @@ where
                 // extent clips the decoration shadows of short (x-height-only)
                 // runs like "www". Deriving it from the metrics covers glyphs,
                 // decorations, ascenders, descenders and diacritics alike.
-                let baseline = baseline_scaled.map_or(layout.y * invscale, |b| b * invscale);
+                let baseline = layout.baseline() * invscale;
                 let (ascent, descent) = {
                     let text_context = self.text_context.borrow();
                     text_context
@@ -2065,10 +2059,8 @@ where
         // pass above already rendered the decorations into its coverage (it
         // re-enters draw_text, which draws them), so glyphs and decorations share
         // a single shadow and the lines must not cast a second one.
-        if glyph_run_result.is_ok() && !paint.text.text_decoration.is_none() {
-            if let Some(baseline_scaled) = baseline_scaled {
-                self.draw_text_decorations(paint, baseline_scaled * invscale, layout.x, layout.width());
-            }
+        if glyph_run_result.is_ok() && !paint.text.text_decoration.is_none() && has_drawable_glyphs {
+            self.draw_text_decorations(paint, layout.baseline(), layout.x, layout.width());
         }
 
         // Restore the shadow state on the success and error paths alike.
@@ -3759,76 +3751,40 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
 /// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)
 /// would otherwise drag every decoration line up or down with the mark.
 ///
-/// This unit-tests `run_baseline` — the exact policy `draw_text` uses to anchor
-/// decorations — with a synthetic run whose first glyph carries an `offset_y`.
-/// The captured baseline must match the run baseline computed without the offset
-/// (i.e. the second, zero-offset glyph's `y`), not the first glyph's shifted `y`.
+/// The baseline `layout()` stores in `TextMetrics` is the anchor decorations
+/// hang from. It must be the run baseline the `Baseline` setting places, not
+/// something re-derived from glyph positions, which per-glyph y-offsets
+/// (combining marks) would skew.
 #[cfg(feature = "textlayout")]
 #[test]
-fn run_baseline_ignores_leading_glyph_offset() {
-    // A real FontId is needed to populate the synthetic glyphs; `run_baseline`
-    // never reads it, but ShapedGlyph requires one.
-    let text_context = TextContext::default();
-    let font_id = text_context
+fn layout_stores_the_run_baseline() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(400, 200, 1.0);
+    let font_id = canvas
         .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
         .expect("failed to load test font");
 
-    // The shared run baseline both glyphs are positioned against.
-    let run_y = 200.0_f32;
+    let y = 80.0;
+    let base_paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(24.0);
+    let metrics = canvas.measure_font(&base_paint).expect("font metrics");
 
-    let make_glyph = |c: char, offset_y: f32| text::ShapedGlyph {
-        // `layout` stores `glyph.y = run_baseline + glyph.offset_y`; mirror that.
-        x: 0.0,
-        y: run_y + offset_y,
-        c,
-        byte_index: 0,
-        font_id,
-        glyph_id: 0,
-        width: 0.0,
-        height: 0.0,
-        advance_x: 0.0,
-        advance_y: 0.0,
-        offset_x: 0.0,
-        offset_y,
-    };
-
-    // First drawable glyph carries a large positive y-offset (a combining mark
-    // pushed below the baseline); the second sits exactly on the baseline.
-    let offset = 15.0_f32;
-    let with_offset = [make_glyph('a', offset), make_glyph('b', 0.0)];
-    // Same run, but the leading glyph has no offset.
-    let without_offset = [make_glyph('a', 0.0), make_glyph('b', 0.0)];
-
-    let captured = run_baseline(&with_offset).expect("run has a drawable glyph");
-    let reference = run_baseline(&without_offset).expect("run has a drawable glyph");
-
-    // The capture must equal the true run baseline, not the shifted first glyph.
-    assert_eq!(
-        captured, run_y,
-        "captured baseline {captured} should equal the shared run baseline {run_y}"
-    );
-    assert_eq!(
-        captured, reference,
-        "leading glyph offset must not shift the captured baseline ({captured} vs {reference})"
-    );
-    assert!(
-        (captured - with_offset[0].y).abs() > offset - 1.0,
-        "captured baseline {captured} must not follow the offset glyph y {}",
-        with_offset[0].y
-    );
-
-    // A leading control glyph (skipped by the drawable filter) must not become
-    // the baseline source either.
-    let with_control = [make_glyph('\n', 99.0), make_glyph('b', 0.0)];
-    assert_eq!(
-        run_baseline(&with_control),
-        Some(run_y),
-        "control glyphs must be skipped when capturing the baseline"
-    );
-
-    // Empty / all-control runs have no baseline.
-    assert_eq!(run_baseline(&[]), None);
-    assert_eq!(run_baseline(&[make_glyph('\t', 0.0)]), None);
+    // The alphabetic baseline is the requested y itself; the other settings
+    // shift it by the run's ascent/descent exactly as layout() aligns glyphs.
+    for (setting, expected) in [
+        (Baseline::Alphabetic, y),
+        (Baseline::Top, y + metrics.ascender()),
+        (Baseline::Middle, y + (metrics.ascender() + metrics.descender()) / 2.0),
+        (Baseline::Bottom, y + metrics.descender()),
+    ] {
+        let paint = base_paint.clone().with_text_baseline(setting);
+        let layout = canvas.measure_text(15.0, y, "Ay", &paint).expect("shaping succeeds");
+        assert!(
+            (layout.baseline() - expected).abs() < 1e-3,
+            "{setting:?}: baseline {} should be {expected}",
+            layout.baseline()
+        );
+    }
 }
 
 /// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables
