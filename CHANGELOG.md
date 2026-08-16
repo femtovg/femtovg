@@ -19,6 +19,14 @@ All notable changes to this project will be documented in this file.
   the corner square instead of bulging it outwards or emitting NaN coordinates,
   and an infinite radius rounds as far as the box allows. This changes rendering
   for shapes whose radii did not fit.
+- Fixed the WGPU renderer aborting instead of reporting an error when
+  `update_image()` is given a copy that reaches past the destination image, or a
+  source in a different pixel format. Both now return
+  `ErrorKind::ImageUpdateOutOfBounds` and
+  `ErrorKind::ImageUpdateWithDifferentFormat`, as the OpenGL and `Void`
+  renderers already did. The shared check is exposed as
+  `ImageSource::check_update()` for out-of-tree renderers, and reports rather
+  than overflows for an origin close to `usize::MAX`.
 
 ## [0.26.0] - 2026-07-20
 

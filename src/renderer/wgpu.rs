@@ -680,6 +680,8 @@ impl Renderer for WGPURenderer {
     ) -> Result<(), crate::ErrorKind> {
         use rgb::ComponentBytes;
 
+        data.check_update(&image.info, x, y)?;
+
         let converted_rgba;
         let (bytes, bpp) = match data {
             crate::ImageSource::Rgb(img) => {
