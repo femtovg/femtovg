@@ -3588,9 +3588,11 @@ fn fill_text_emits_decoration_rects() {
     // -underline_position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
-        let paint = base_paint()
-            .with_font(&[font])
-            .with_text_decoration_lines(true, false, false);
+        let paint = base_paint().with_font(&[font]).with_text_decoration(TextDecoration {
+            underline: true,
+            strikethrough: false,
+            overline: false,
+        });
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
@@ -3616,9 +3618,11 @@ fn fill_text_emits_decoration_rects() {
     // -strikeout_position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
-        let paint = base_paint()
-            .with_font(&[font])
-            .with_text_decoration_lines(false, true, false);
+        let paint = base_paint().with_font(&[font]).with_text_decoration(TextDecoration {
+            underline: false,
+            strikethrough: true,
+            overline: false,
+        });
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
@@ -3641,9 +3645,11 @@ fn fill_text_emits_decoration_rects() {
     // Overline: one fill command with one rect, above the ascent.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
-        let paint = base_paint()
-            .with_font(&[font])
-            .with_text_decoration_lines(false, false, true);
+        let paint = base_paint().with_font(&[font]).with_text_decoration(TextDecoration {
+            underline: false,
+            strikethrough: false,
+            overline: true,
+        });
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
@@ -3662,9 +3668,11 @@ fn fill_text_emits_decoration_rects() {
     // metric-derived position.
     {
         let (mut canvas, commands, verts, font) = make_canvas();
-        let paint = base_paint()
-            .with_font(&[font])
-            .with_text_decoration_lines(true, true, true);
+        let paint = base_paint().with_font(&[font]).with_text_decoration(TextDecoration {
+            underline: true,
+            strikethrough: true,
+            overline: true,
+        });
         canvas.fill_text(50.0, baseline_y, "Hello", &paint).unwrap();
         canvas.flush_to_output(());
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
@@ -3731,7 +3739,11 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
         .with_font(&[font])
         .with_font_size(24.0)
         .with_text_baseline(Baseline::Alphabetic)
-        .with_text_decoration_lines(true, false, false);
+        .with_text_decoration(TextDecoration {
+            underline: true,
+            strikethrough: false,
+            overline: false,
+        });
 
     canvas.scale(scale, scale);
     canvas.fill_text(40.0, baseline_y, "Scaled", &paint).unwrap();
@@ -3913,7 +3925,11 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         .with_font(&[font])
         .with_font_size(20.0)
         .with_text_baseline(Baseline::Alphabetic)
-        .with_text_decoration_lines(true, true, false);
+        .with_text_decoration(TextDecoration {
+            underline: true,
+            strikethrough: true,
+            overline: false,
+        });
     canvas.fill_text(20.0, 100.0, "fallback", &paint).unwrap();
     canvas.flush_to_output(());
     let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());

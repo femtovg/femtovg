@@ -1178,19 +1178,6 @@ impl Paint {
         self
     }
 
-    /// Returns the paint with underline/strikethrough/overline toggled.
-    ///
-    /// A convenience wrapper over [`with_text_decoration`](Self::with_text_decoration).
-    #[inline]
-    pub fn with_text_decoration_lines(mut self, underline: bool, strikethrough: bool, overline: bool) -> Self {
-        self.set_text_decoration(TextDecoration {
-            underline,
-            strikethrough,
-            overline,
-        });
-        self
-    }
-
     // --- Font weight (wght axis) ---
 
     /// Returns the current font weight override for variable fonts, in design space.

@@ -632,7 +632,11 @@ fn decoration_shares_the_single_text_shadow() {
             let paint = Paint::color(Color::white())
                 .with_font(&[font])
                 .with_font_size(40.0)
-                .with_text_decoration_lines(lines.0, lines.1, lines.2);
+                .with_text_decoration(femtovg::TextDecoration {
+                    underline: lines.0,
+                    strikethrough: lines.1,
+                    overline: lines.2,
+                });
             if shadow {
                 canvas.set_shadow_color(Color::rgba(0, 0, 0, 128));
                 canvas.set_shadow_offset(0.0, 40.0); // straight down, well clear of the ink
