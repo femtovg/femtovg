@@ -3870,6 +3870,132 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
 /// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)
 /// would otherwise drag every decoration line up or down with the mark.
 ///
+/// The paragraph base direction follows the first strong character (UAX #9
+/// P2/P3). For an RTL paragraph that puts trailing neutral punctuation at the
+/// visual LEFT end and orders an embedded LTR word between its Arabic
+/// neighbors right-to-left; a pinned-LTR base got both wrong. An LTR-first
+/// paragraph with an embedded Arabic word must keep its old ordering.
+#[cfg(feature = "textlayout")]
+#[test]
+fn paragraph_base_direction_follows_first_strong_character() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    // Mean x position of the glyphs whose byte range covers `needle`.
+    let cluster_x = |layout: &TextMetrics, text: &str, needle: &str| -> f32 {
+        let start = text.find(needle).unwrap();
+        let end = start + needle.len();
+        let xs: Vec<f32> = layout
+            .glyphs
+            .iter()
+            .filter(|g| g.byte_index >= start && g.byte_index < end)
+            .map(|g| g.x)
+            .collect();
+        assert!(!xs.is_empty(), "no glyphs for {needle:?}");
+        xs.iter().sum::<f32>() / xs.len() as f32
+    };
+
+    // RTL paragraph, embedded LTR word: visual order is right-to-left, so the
+    // logically-later Arabic word sits LEFT of "Alice", which sits LEFT of the
+    // logically-first Arabic word.
+    let text = "\u{0642}\u{0631}\u{0623} Alice \u{0643}\u{062A}\u{0627}\u{0628}";
+    let layout = canvas.measure_text(300.0, 100.0, text, &paint).unwrap();
+    let first_word = cluster_x(&layout, text, "\u{0642}\u{0631}\u{0623}");
+    let alice = cluster_x(&layout, text, "Alice");
+    let last_word = cluster_x(&layout, text, "\u{0643}\u{062A}\u{0627}\u{0628}");
+    assert!(
+        last_word < alice && alice < first_word,
+        "RTL paragraph should order runs right-to-left: got first-word x {first_word}, \
+         Alice x {alice}, last-word x {last_word}"
+    );
+
+    // Trailing punctuation of an RTL paragraph resolves to the paragraph level
+    // and lands at the visual LEFT end.
+    let text = "\u{0633}\u{0644}\u{0627}\u{0645}!";
+    let layout = canvas.measure_text(300.0, 100.0, text, &paint).unwrap();
+    let bang = cluster_x(&layout, text, "!");
+    let word = cluster_x(&layout, text, "\u{0633}\u{0644}\u{0627}\u{0645}");
+    assert!(
+        bang < word,
+        "the ! of an RTL sentence belongs at its visual left end (bang x {bang}, word x {word})"
+    );
+
+    // European digits inside an RTL paragraph stay an LTR sequence, placed to
+    // the left of the word that logically precedes them.
+    let text = "\u{0635}\u{0641}\u{062D}\u{0629} 42";
+    let layout = canvas.measure_text(300.0, 100.0, text, &paint).unwrap();
+    let four = cluster_x(&layout, text, "4");
+    let two = cluster_x(&layout, text, "2");
+    let page = cluster_x(&layout, text, "\u{0635}\u{0641}\u{062D}\u{0629}");
+    assert!(four < two, "digits stay left-to-right: 4 at {four}, 2 at {two}");
+    assert!(two < page, "the number sits left of the RTL word that precedes it");
+
+    // An LTR-first paragraph with an embedded RTL word keeps LTR ordering.
+    let text = "The word \u{0633}\u{0644}\u{0627}\u{0645} means peace";
+    let layout = canvas.measure_text(20.0, 100.0, text, &paint).unwrap();
+    let the = cluster_x(&layout, text, "The");
+    let salam = cluster_x(&layout, text, "\u{0633}\u{0644}\u{0627}\u{0645}");
+    let peace = cluster_x(&layout, text, "peace");
+    assert!(
+        the < salam && salam < peace,
+        "LTR-first paragraph keeps left-to-right run order ({the}, {salam}, {peace})"
+    );
+}
+
+/// Paired brackets mirror in RTL runs (UAX #9 L4): the '(' of an Arabic
+/// sentence renders with the ')' glyph. The shaped-word cache must key on the
+/// run direction for this to survive cache hits — shaping the same bracket
+/// text in an LTR sentence first used to poison the cache with the unmirrored
+/// shaping, which the RTL sentence then reused.
+#[cfg(feature = "textlayout")]
+#[test]
+fn brackets_mirror_in_rtl_runs_even_after_ltr_caching() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    let glyph_at = |layout: &TextMetrics, text: &str, needle: char| -> u16 {
+        let at = text.find(needle).unwrap();
+        layout
+            .glyphs
+            .iter()
+            .find(|g| g.byte_index == at)
+            .unwrap_or_else(|| panic!("no glyph for {needle:?}"))
+            .glyph_id
+    };
+
+    // Prime the shaped-word cache with LTR shapings of the same bracket words.
+    let ltr = "he said (yes) loudly";
+    let ltr_layout = canvas.measure_text(20.0, 100.0, ltr, &paint).unwrap();
+    let ltr_open = glyph_at(&ltr_layout, ltr, '(');
+    let ltr_close = glyph_at(&ltr_layout, ltr, ')');
+    assert_ne!(ltr_open, ltr_close, "font distinguishes the paren glyphs");
+
+    // The same words inside an Arabic sentence shape as an RTL run: each paren
+    // must come out mirrored, not replayed from the LTR cache entry.
+    let rtl = "\u{0642}\u{0627}\u{0644} (\u{0646}\u{0639}\u{0645}) \u{0628}\u{0635}\u{0648}\u{062A}";
+    let rtl_layout = canvas.measure_text(300.0, 100.0, rtl, &paint).unwrap();
+    let rtl_open = glyph_at(&rtl_layout, rtl, '(');
+    let rtl_close = glyph_at(&rtl_layout, rtl, ')');
+    assert_eq!(
+        rtl_open, ltr_close,
+        "'(' in an RTL run should render with the ')' glyph (UAX #9 L4 mirroring)"
+    );
+    assert_eq!(
+        rtl_close, ltr_open,
+        "')' in an RTL run should render with the '(' glyph (UAX #9 L4 mirroring)"
+    );
+}
+
 /// `Canvas::measure_font` reports user-space metrics: the same values under
 /// any canvas transform or device pixel ratio, in the space `fill_text()`
 /// consumes — matching `measure_text()` and `TextContext::measure_font()`.

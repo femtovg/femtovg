@@ -15,6 +15,17 @@ All notable changes to this project will be documented in this file.
   `in_radius` and `out_radius` fields changed from `f32` to `(f32, f32)` to hold the
   per-axis radii; `Paint::radial_gradient()` and `radial_gradient_stops()` keep their
   existing scalar-radius signatures unchanged.
+- Fixed the paragraph base direction of shaped text: it now follows the first
+  strong character (UAX #9 rules P2/P3) instead of being pinned
+  left-to-right. An Arabic or Hebrew sentence is treated as a right-to-left
+  paragraph, so its neutral punctuation sits at the visual left end, embedded
+  left-to-right words order correctly between their RTL neighbors, and
+  strong-less text keeps the LTR default. The shaped-word cache now also keys
+  on the run direction, so direction-neutral words (digits, brackets) shaped
+  in one direction are no longer replayed in the other - previously a
+  mirrored bracket could render unmirrored in RTL text if the same word had
+  been shaped in LTR text first.
+
 - Fixed `Canvas::measure_font()` scaling its result by the canvas transform's
   internal glyph-rasterization scale and the DPI factor. It now reports
   user-space metrics that depend only on the paint's font size, matching
