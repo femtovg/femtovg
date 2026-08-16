@@ -4033,6 +4033,35 @@ fn bidi_browser_regression_cases() {
         "the bracket pair must surround its LTR content in RTL order (close {close_x}, test {word_x}, open {open_x})"
     );
 
+    // Explicit directional overrides (UAX #9 X1-X8): RLO forces even strong
+    // LTR characters to RTL, reversing them visually - the WPT
+    // 2d.text.draw.fill.rtl case Chromium's fast glyph path broke (issue
+    // 389726691's class). The override mark itself must add no advance.
+    let text = "\u{202E}abc\u{202C}";
+    let layout = canvas.measure_text(400.0, 100.0, text, &paint).unwrap();
+    let gx = |ch: char| {
+        layout
+            .glyphs
+            .iter()
+            .find(|g| g.byte_index == text.find(ch).unwrap())
+            .unwrap_or_else(|| panic!("no glyph for {ch:?}"))
+            .x
+    };
+    assert!(
+        gx('a') > gx('b') && gx('b') > gx('c'),
+        "RLO must reverse Latin text visually: a at {}, b at {}, c at {}",
+        gx('a'),
+        gx('b'),
+        gx('c')
+    );
+    let plain = canvas.measure_text(400.0, 100.0, "abc", &paint).unwrap();
+    assert!(
+        (layout.width() - plain.width()).abs() < 0.5,
+        "RLO/PDF marks must not add advance: {} vs {}",
+        layout.width(),
+        plain.width()
+    );
+
     // Combining marks travel with their base through RTL reversal (the
     // Firefox bug 721821 class): every Hebrew niqqud mark must sit at the
     // same pen position as its base consonant, not detached at a reversed
