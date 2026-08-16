@@ -1833,7 +1833,6 @@ struct CommandToPipelineAndBindGroupMapper {
     uniform_stride: u64,
     uniform_staging: Vec<u8>,
     current_uniforms: Option<UniformArray>,
-    current_uniform_offset: u64,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1863,7 +1862,6 @@ impl CommandToPipelineAndBindGroupMapper {
             uniform_stride,
             uniform_staging: Vec::new(),
             current_uniforms: None,
-            current_uniform_offset: 0,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1915,14 +1913,14 @@ impl CommandToPipelineAndBindGroupMapper {
 
         let uniforms = UniformArray::from(params);
         if self.current_uniforms.as_ref() != Some(&uniforms) {
-            let offset = self.uniform_staging.len() as u64;
+            let end = self.uniform_staging.len() + self.uniform_stride as usize;
             self.uniform_staging
                 .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
-            self.uniform_staging.resize((offset + self.uniform_stride) as usize, 0);
+            self.uniform_staging.resize(end, 0);
             self.current_uniforms = Some(uniforms);
-            self.current_uniform_offset = offset;
         }
-        let offset = self.current_uniform_offset as u32;
+        // The current command's slot is the last one staged.
+        let offset = (self.uniform_staging.len() - self.uniform_stride as usize) as u32;
         if bind_group_changed || render_pass_builder.current_bound_offset != Some(offset) {
             render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
             render_pass_builder.current_bound_offset = Some(offset);
