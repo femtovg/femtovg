@@ -181,6 +181,7 @@ pub struct TextMetrics {
     pub y: f32,
     width: f32,
     height: f32,
+    baseline: f32,
     /// Vector of shaped glyphs resulting from the text shaping run.
     pub glyphs: Vec<ShapedGlyph>,
     pub(crate) final_byte_index: usize,
@@ -192,6 +193,7 @@ impl TextMetrics {
         self.y *= scale;
         self.width *= scale;
         self.height *= scale;
+        self.baseline *= scale;
 
         for glyph in &mut self.glyphs {
             glyph.x *= scale;
@@ -204,6 +206,14 @@ impl TextMetrics {
     /// width of the glyphs as drawn
     pub fn width(&self) -> f32 {
         self.width
+    }
+
+    /// Y-coordinate of the run's alphabetic baseline, in the same space as the
+    /// glyph positions: the requested `y` adjusted for the paint's
+    /// [`Baseline`](crate::Baseline) setting. Glyphs and text decorations are
+    /// positioned relative to this line.
+    pub fn baseline(&self) -> f32 {
+        self.baseline
     }
 
     /// height of the glyphs as drawn
@@ -267,6 +277,7 @@ fn shape_run(
         y: 0.0,
         width: 0.0,
         height: 0.0,
+        baseline: 0.0,
         glyphs: Vec::with_capacity(text.len()),
         final_byte_index: 0,
     };
@@ -539,6 +550,11 @@ fn layout(
         Baseline::Alphabetic => 0.0,
         Baseline::Bottom => descender,
     };
+
+    // Record where the alphabetic baseline lands so consumers (glyph drawing,
+    // text decorations) need not re-derive it from glyph positions, which
+    // would be skewed by per-glyph y-offsets such as combining marks.
+    res.baseline = cursor_y + alignment_offset_y;
 
     for glyph in &mut res.glyphs {
         glyph.x = cursor_x + glyph.offset_x;
