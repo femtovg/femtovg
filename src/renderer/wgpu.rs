@@ -1577,7 +1577,6 @@ struct RenderPassBuilder<'a> {
     vertex_buffer: wgpu::Buffer,
     rendering_to_texture: bool,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
-    current_bind_group_state: Option<BindGroupState>,
     rpass: Option<wgpu::RenderPass<'a>>,
     screen_stencil_buffer: wgpu::Texture,
     screen_view: [f32; 2],
@@ -1611,7 +1610,6 @@ impl<'a> RenderPassBuilder<'a> {
             vertex_buffer,
             rendering_to_texture: false,
             viewport_bind_group_layout,
-            current_bind_group_state: None,
             rpass: None,
             screen_stencil_buffer: stencil_buffer,
             screen_view,
@@ -1814,7 +1812,6 @@ impl<'a> RenderPassBuilder<'a> {
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         }
         rpass.set_viewport(0., 0., self.viewport[0], self.viewport[1], 0., 0.);
-        self.current_bind_group_state.take();
         rpass.set_bind_group(0, &self.viewport_bind_group, &[]);
         self.rpass = Some(rpass.forget_lifetime());
     }
