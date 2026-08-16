@@ -1757,13 +1757,24 @@ where
             })
     }
 
-    /// Returns font metrics for a particular Paint.
+    /// Returns font metrics for a particular Paint, in user-space units.
+    ///
+    /// The values scale with the paint's font size only — the canvas
+    /// transform and DPI factor do not affect them, matching the space
+    /// [`measure_text`](Self::measure_text) reports and
+    /// [`fill_text`](Self::fill_text) consumes.
     #[cfg(feature = "textlayout")]
     pub fn measure_font(&self, paint: &Paint) -> Result<FontMetrics, ErrorKind> {
-        let scale = self.font_scale() * self.device_px_ratio;
-
+        // User-space units, independent of the canvas transform and DPI
+        // factor: the same space `measure_text()` reports, `fill_text()`
+        // consumes and `TextContext::measure_font()` already returns. The
+        // result was previously multiplied by the canvas's internal
+        // (quantized) glyph-rasterization scale, so metrics read from a
+        // zoomed canvas came back inflated — sub/superscript runs sized from
+        // `subscript_size()` grew with the zoom instead of staying anchored
+        // to the run's font size.
         self.text_context.borrow_mut().measure_font(
-            paint.text.font_size * scale,
+            paint.text.font_size,
             &paint.text.font_ids,
             &paint.text.font_variations,
         )
@@ -3851,6 +3862,93 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
 /// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)
 /// would otherwise drag every decoration line up or down with the mark.
 ///
+/// `Canvas::measure_font` reports user-space metrics: the same values under
+/// any canvas transform or device pixel ratio, in the space `fill_text()`
+/// consumes — matching `measure_text()` and `TextContext::measure_font()`.
+/// A zoomed canvas must not inflate the metrics consumers use to size
+/// sub/superscript runs or position decoration lines; the old behavior
+/// multiplied them by the internal quantized glyph-rasterization scale
+/// (e.g. 2.3 at a 2.35x zoom).
+#[cfg(feature = "textlayout")]
+#[test]
+fn measure_font_is_transform_independent() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(460, 260, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(34.0);
+
+    let reference = canvas.measure_font(&paint).expect("metrics at identity");
+    // The paint's font size is the only scale input: spot values follow the
+    // font's tables (Amiri: OS/2 script sizes of 1433/2048 em).
+    assert!((reference.subscript_size().1 - 34.0 * 1433.0 / 2048.0).abs() < 1e-3);
+
+    let assert_matches = |metrics: &FontMetrics, what: &str| {
+        for (name, got, want) in [
+            ("ascender", metrics.ascender(), reference.ascender()),
+            (
+                "underline_position",
+                metrics.underline_position(),
+                reference.underline_position(),
+            ),
+            (
+                "underline_thickness",
+                metrics.underline_thickness(),
+                reference.underline_thickness(),
+            ),
+            (
+                "subscript_size",
+                metrics.subscript_size().1,
+                reference.subscript_size().1,
+            ),
+            (
+                "subscript_offset",
+                metrics.subscript_offset().1,
+                reference.subscript_offset().1,
+            ),
+            (
+                "superscript_offset",
+                metrics.superscript_offset().1,
+                reference.superscript_offset().1,
+            ),
+        ] {
+            assert!(
+                (got - want).abs() < 1e-3,
+                "{what}: {name} {got} should equal identity-transform value {want}"
+            );
+        }
+    };
+
+    // A camera-style zoom (translate * scale * translate) must not leak into
+    // the metrics. 2.35 quantizes to a 2.3 internal rasterization scale,
+    // which the old behavior multiplied in.
+    canvas.save();
+    canvas.translate(230.0, 130.0);
+    canvas.scale(2.35, 2.35);
+    canvas.translate(-230.0, -130.0);
+    let zoomed = canvas.measure_font(&paint).expect("metrics under zoom");
+    canvas.restore();
+    assert_matches(&zoomed, "zoomed canvas");
+
+    // Neither must the device pixel ratio.
+    canvas.set_size(460, 260, 2.0);
+    let hidpi = canvas.measure_font(&paint).expect("metrics under hidpi");
+    assert_matches(&hidpi, "hidpi canvas");
+
+    // And the TextContext-level API agrees.
+    let context_level = canvas.text_context.borrow_mut().measure_font(
+        paint.text.font_size,
+        &paint.text.font_ids,
+        &paint.text.font_variations,
+    );
+    assert_matches(
+        &context_level.expect("context-level metrics"),
+        "TextContext::measure_font",
+    );
+}
+
 /// The baseline `layout()` stores in `TextMetrics` is the anchor decorations
 /// hang from. It must be the run baseline the `Baseline` setting places, not
 /// something re-derived from glyph positions, which per-glyph y-offsets
