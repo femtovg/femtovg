@@ -329,18 +329,36 @@ pub struct Canvas<T: Renderer> {
     shadow_images: Vec<ImageId>,
 }
 
-/// Returns the shared baseline of a shaped horizontal run, in shaping space, or
-/// `None` if the run has no drawable glyph.
+/// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
+/// where `offset` is the line center relative to the run baseline in +y-down
+/// user space. This is the single source of decoration geometry: the painter
+/// builds its rects from it and the shadow pass sizes its coverage box with it,
+/// so the two can never disagree.
 ///
-/// `layout` positions each glyph as
-/// `glyph.y = cursor_y + alignment_offset + glyph.offset_y`, so every glyph
-/// shares the same (possibly fractional) `cursor_y + alignment_offset` baseline
-/// and the per-glyph term is `glyph.offset_y` (the GPOS y-offset). Recovering the
-/// baseline as `glyph.y - glyph.offset_y` is what keeps text decorations anchored
-/// to the run baseline even when the first drawable glyph carries a non-zero
-/// offset (e.g. text starting with a combining mark), instead of riding that mark
-/// up or down.
+/// OpenType position values measure from the baseline with +y pointing up,
+/// while canvas y grows downward, so a line's center is the negated position.
+/// The overline has no dedicated metric; it sits at the ascent with the
+/// underline's thickness, nudged up by half that thickness so it clears the
+/// glyphs. Thicknesses are clamped to one user-space unit so lines stay
+/// visible for tiny fonts.
 #[cfg(feature = "textlayout")]
+fn decoration_lines(decoration: TextDecoration, metrics: &FontMetrics) -> impl Iterator<Item = (f32, f32)> {
+    let underline_thickness = metrics.underline_thickness().max(1.0);
+    [
+        decoration
+            .underline
+            .then(|| (-metrics.underline_position(), underline_thickness)),
+        decoration
+            .strikethrough
+            .then(|| (-metrics.strikeout_position(), metrics.strikeout_thickness().max(1.0))),
+        decoration
+            .overline
+            .then(|| (-metrics.ascender() - underline_thickness / 2.0, underline_thickness)),
+    ]
+    .into_iter()
+    .flatten()
+}
+
 impl<T> Canvas<T>
 where
     T: Renderer,
@@ -1940,6 +1958,17 @@ where
         // hang off the run only when it has at least one drawable glyph.
         let has_drawable_glyphs = layout.glyphs.iter().any(|shaped_glyph| !shaped_glyph.c.is_control());
 
+        // Font metrics for the run in user-space units, matching the user-space
+        // baseline. Fetched once (with the same variations the run was shaped
+        // with) and shared by the shadow-extent computation and the decoration
+        // painter below.
+        let run_font_metrics = {
+            let text_context = self.text_context.borrow();
+            text_context
+                .measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
+                .ok()
+        };
+
         // Draw the drop shadow (if any) under the text. The shaped layout gives a
         // user-space box; transform its corners by the CTM to obtain device-space
         // bounds and let render_shadow re-enter draw_text with the shadow tint.
@@ -1965,27 +1994,28 @@ where
                 let rx1 = layout.x.max(layout.x + layout.width());
                 let x0 = (gx0 * invscale).min(rx0 * invscale);
                 let x1 = (gx1 * invscale).max(rx1 * invscale);
-                // The vertical extent is the font's line box (baseline - ascent ..
-                // baseline - descent), not the glyph ink box: the overline sits at
-                // the ascent and the underline below the baseline, so an ink-box
-                // extent clips the decoration shadows of short (x-height-only)
-                // runs like "www". Deriving it from the metrics covers glyphs,
-                // decorations, ascenders, descenders and diacritics alike.
+                // The vertical extent starts from the font's line box (baseline -
+                // ascent .. baseline - descent), not the glyph ink box: an ink-box
+                // extent would clip the shadows of ascenders, descenders and
+                // diacritics on short (x-height-only) runs like "www". Any enabled
+                // decoration lines are unioned in through the same geometry the
+                // painter uses, so a line outside the line box (the nudged
+                // overline, a font with an unusual underline position) grows the
+                // box with it.
                 let baseline = layout.baseline() * invscale;
-                let (ascent, descent) = {
-                    let text_context = self.text_context.borrow();
-                    text_context
-                        .measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
-                        .map_or((0.0, 0.0), |m| (m.ascender(), m.descender()))
-                };
-                // A little slack for the overline nudge and antialiased edges.
+                let (ascent, descent) = run_font_metrics
+                    .as_ref()
+                    .map_or((0.0, 0.0), |m| (m.ascender(), m.descender()));
+                let (mut top, mut bottom) = (baseline - ascent, baseline - descent);
+                if let Some(metrics) = &run_font_metrics {
+                    for (offset, thickness) in decoration_lines(paint.text.text_decoration, metrics) {
+                        top = top.min(baseline + offset - thickness / 2.0);
+                        bottom = bottom.max(baseline + offset + thickness / 2.0);
+                    }
+                }
+                // A little slack for antialiased edges and blur reach.
                 let margin = paint.text.font_size * 0.2;
-                (
-                    x0 - margin,
-                    baseline - ascent - margin,
-                    x1 + margin,
-                    baseline - descent + margin,
-                )
+                (x0 - margin, top - margin, x1 + margin, bottom + margin)
             } else {
                 // No drawable glyphs: nothing painted, nothing to shadow.
                 (0.0, 0.0, 0.0, 0.0)
@@ -2060,7 +2090,9 @@ where
         // re-enters draw_text, which draws them), so glyphs and decorations share
         // a single shadow and the lines must not cast a second one.
         if glyph_run_result.is_ok() && !paint.text.text_decoration.is_none() && has_drawable_glyphs {
-            self.draw_text_decorations(paint, layout.baseline(), layout.x, layout.width());
+            if let Some(metrics) = &run_font_metrics {
+                self.draw_text_decorations(paint, metrics, layout.baseline(), layout.x, layout.width());
+            }
         }
 
         // Restore the shadow state on the success and error paths alike.
@@ -2072,9 +2104,10 @@ where
 
     /// Emits the enabled text-decoration lines for a run as filled rectangles in
     /// user space. `baseline` is the run baseline (user space, +y down), `x` the
-    /// run's left edge, and `width` its advance width.
+    /// run's left edge, and `width` its advance width. `metrics` is the run's
+    /// font metrics in the same user-space units as `baseline`.
     #[cfg(feature = "textlayout")]
-    fn draw_text_decorations(&mut self, paint: &Paint, baseline: f32, x: f32, width: f32) {
+    fn draw_text_decorations(&mut self, paint: &Paint, metrics: &FontMetrics, baseline: f32, x: f32, width: f32) {
         // NOTE: this assumes a horizontal writing mode. The lines run along the
         // advance direction (x) and are offset perpendicular to it (y), spanning
         // `[x, x + width]` at a baseline-relative y. That is correct for both LTR
@@ -2083,43 +2116,15 @@ where
         // along y and offset along x, driven by vertical metrics; the geometry
         // below would have to be generalized to the advance axis rather than
         // hardcoding x as the run axis.
-        let decoration = paint.text.text_decoration;
-
-        // Metrics in user-space units (scaled for the unscaled font size) so the
-        // offsets match the user-space baseline. `measure_font` reads the primary
-        // font with the same variations the run was shaped with.
-        let metrics = {
-            let text_context = self.text_context.borrow();
-            text_context.measure_font(paint.text.font_size, &paint.text.font_ids, &paint.text.font_variations)
-        };
-        let Ok(metrics) = metrics else {
-            return;
-        };
-
+        //
         // All enabled lines share one path (a single verbs/coords allocation) and
         // one fill_path call, so a run costs one draw no matter how many lines
         // are on. The rects are disjoint horizontal bands, and the paint below
         // forces NonZero filling, so any degenerate overlap (e.g. thickness
         // clamping on tiny fonts) still paints solid.
         let mut path = Path::new();
-        let mut add_line = |center_y: f32, thickness: f32| {
-            let thickness = thickness.max(1.0);
-            path.rect(x, center_y - thickness / 2.0, width, thickness);
-        };
-
-        // OpenType position values measure from the baseline with +y pointing up,
-        // while canvas y grows downward, so a line's center is `baseline - pos`.
-        if decoration.underline {
-            add_line(baseline - metrics.underline_position(), metrics.underline_thickness());
-        }
-        if decoration.strikethrough {
-            add_line(baseline - metrics.strikeout_position(), metrics.strikeout_thickness());
-        }
-        if decoration.overline {
-            // No dedicated metric; sit the line at the ascent with the underline
-            // thickness, nudged up by half its thickness so it clears the glyphs.
-            let thickness = metrics.underline_thickness().max(1.0);
-            add_line(baseline - metrics.ascender() - thickness / 2.0, thickness);
+        for (offset, thickness) in decoration_lines(paint.text.text_decoration, metrics) {
+            path.rect(x, baseline + offset - thickness / 2.0, width, thickness);
         }
 
         if path.is_empty() {
