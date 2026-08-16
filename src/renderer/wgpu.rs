@@ -1938,17 +1938,17 @@ impl CommandToPipelineAndBindGroupMapper {
             render_pass_builder.stencil_buffer.is_some(),
         );
 
-        let mut pipeline_cache = self.pipeline_cache.borrow_mut();
-        let render_pipeline = pipeline_cache.entry(pipeline_state.clone()).or_insert_with(|| {
-            let pipeline = pipeline_state.materialize(&self.device, &self.pipeline_layout, &self.shader_module);
-            CachedPipeline {
-                pipeline,
-                accessed: false,
-            }
-        });
-
-        render_pipeline.accessed = true;
+        // An unchanged pipeline was looked up, and marked accessed, when it was bound.
         if render_pass_builder.current_pipeline_state.as_ref() != Some(&pipeline_state) {
+            let mut pipeline_cache = self.pipeline_cache.borrow_mut();
+            let render_pipeline = pipeline_cache.entry(pipeline_state.clone()).or_insert_with(|| {
+                let pipeline = pipeline_state.materialize(&self.device, &self.pipeline_layout, &self.shader_module);
+                CachedPipeline {
+                    pipeline,
+                    accessed: false,
+                }
+            });
+            render_pipeline.accessed = true;
             render_pass.set_pipeline(&render_pipeline.pipeline);
             render_pass_builder.current_pipeline_state = Some(pipeline_state);
         }
