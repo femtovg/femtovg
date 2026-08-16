@@ -869,3 +869,49 @@ fn conic_gradient_start_angle_matches_canvas_convention() {
         "with start_angle=PI/2, offset-0.875 must be blue; got {down_right:?}"
     );
 }
+
+#[test]
+fn zeroed_os2_script_metrics_fall_back() {
+    // A present OS/2 table whose sub/superscript sizes are zero cannot mean
+    // "typeset script text at zero size"; it gets the same conventional
+    // fallbacks as a missing table. Patch the font bytes so the table is
+    // present but zeroed, which is what some minimal or broken fonts ship.
+    let mut data = std::fs::read("examples/assets/RobotoFlex-VariableFont.ttf").expect("Font not found");
+
+    // sfnt: numTables at 4, table records from 12, each 16 bytes of
+    // tag/checksum/offset/length. ttf-parser does not re-verify checksums.
+    let num_tables = u16::from_be_bytes([data[4], data[5]]) as usize;
+    let os2_offset = (0..num_tables)
+        .map(|i| 12 + i * 16)
+        .find(|&rec| &data[rec..rec + 4] == b"OS/2")
+        .map(|rec| u32::from_be_bytes(data[rec + 8..rec + 12].try_into().unwrap()) as usize)
+        .expect("font has an OS/2 table");
+    // ySubscriptXSize/YSize at 10/12, ySuperscriptXSize/YSize at 18/20.
+    for field in [10, 12, 18, 20] {
+        data[os2_offset + field] = 0;
+        data[os2_offset + field + 1] = 0;
+    }
+
+    let text_context = femtovg::TextContext::default();
+    let font_id = text_context.add_font_mem(&data).expect("patched font parses");
+
+    let font_size = 32.;
+    let test_paint = femtovg::Paint::default()
+        .with_font(&[font_id])
+        .with_font_size(font_size);
+    let metrics = text_context
+        .measure_font(&test_paint)
+        .expect("font measuring failed unexpectedly");
+
+    // The conventional recommendation: 65% of the em, on both axes.
+    let expected = font_size * 0.65;
+    for (label, (x_size, y_size)) in [
+        ("subscript", metrics.subscript_size()),
+        ("superscript", metrics.superscript_size()),
+    ] {
+        assert!(
+            (x_size - expected).abs() < 1e-3 && (y_size - expected).abs() < 1e-3,
+            "zeroed {label} size should fall back to ({expected}, {expected}), got ({x_size}, {y_size})"
+        );
+    }
+}

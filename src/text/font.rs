@@ -400,7 +400,9 @@ impl Font {
         let underline = ttf_font.underline_metrics();
         let strikeout = ttf_font.strikeout_metrics();
         let subscript = ttf_font.subscript_metrics().filter(|m| m.x_size != 0 && m.y_size != 0);
-        let superscript = ttf_font.superscript_metrics().filter(|m| m.x_size != 0 && m.y_size != 0);
+        let superscript = ttf_font
+            .superscript_metrics()
+            .filter(|m| m.x_size != 0 && m.y_size != 0);
         let fallback_script_size = (em * fallback::SCRIPT_SIZE, em * fallback::SCRIPT_SIZE);
 
         let metrics = FontMetrics {
