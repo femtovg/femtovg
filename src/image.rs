@@ -88,6 +88,35 @@ impl ImageSource<'_> {
             Self::HtmlCanvasElement(element) => Size::new(element.width() as usize, element.height() as usize),
         }
     }
+
+    /// Checks that this source may be copied into the image described by `info`
+    /// with its top left corner at (`x`, `y`).
+    ///
+    /// Every [`Renderer::update_image`](crate::Renderer::update_image)
+    /// implementation should call this before touching the graphics API. A copy
+    /// that reaches past the destination, or that carries a pixel format the
+    /// destination was not created with, is a caller mistake and has to be
+    /// reported as [`ErrorKind::ImageUpdateOutOfBounds`] or
+    /// [`ErrorKind::ImageUpdateWithDifferentFormat`]. Passing one down to the
+    /// graphics API instead produces a driver side validation failure, which
+    /// backends are generally not able to turn back into a recoverable error:
+    /// the usual outcome is an abort that takes the whole process, or on wasm
+    /// the whole application, rather than the single failed call.
+    pub fn check_update(&self, info: &ImageInfo, x: usize, y: usize) -> Result<(), ErrorKind> {
+        let size = self.dimensions();
+
+        // Saturating, so that an origin close to `usize::MAX` reports the error
+        // rather than wrapping into a range that looks valid.
+        if x.saturating_add(size.width) > info.width() || y.saturating_add(size.height) > info.height() {
+            return Err(ErrorKind::ImageUpdateOutOfBounds);
+        }
+
+        if info.format() != self.format() {
+            return Err(ErrorKind::ImageUpdateWithDifferentFormat);
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> From<ImgRef<'a, RGB8>> for ImageSource<'a> {
