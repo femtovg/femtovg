@@ -42,6 +42,11 @@ pub(super) struct ShapingId {
     word_hash: u64,
     font_ids: [Option<FontId>; 8],
     variation_hash: u64,
+    // The same word shapes differently right-to-left than left-to-right
+    // (mirrored brackets, reversed cluster order), so the cached shaping is
+    // only valid for the direction it was produced under. Direction-neutral
+    // words (digits, punctuation) genuinely occur in both.
+    rtl: bool,
 }
 
 impl ShapingId {
@@ -51,6 +56,7 @@ impl ShapingId {
         word: &str,
         max_width: Option<f32>,
         variations: &FontVariations,
+        rtl: bool,
     ) -> Self {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
@@ -63,6 +69,7 @@ impl ShapingId {
             word_hash: hasher.finish(),
             font_ids,
             variation_hash: variations.hash(),
+            rtl,
         }
     }
 }
@@ -239,6 +246,9 @@ pub fn shape(
         text,
         max_width,
         variations,
+        // The run cache keys the whole string; per-run direction is derived
+        // from the text itself below, so it needs no separate key bit.
+        false,
     );
 
     if !context.shaping_run_cache.contains(&id) {
@@ -282,7 +292,11 @@ fn shape_run(
         final_byte_index: 0,
     };
 
-    let bidi_info = BidiInfo::new(text, Some(unicode_bidi::Level::ltr()));
+    // The paragraph base direction follows the first strong character
+    // (UAX #9 rules P2/P3) rather than being pinned left-to-right: an Arabic
+    // or Hebrew sentence is an RTL paragraph, so its neutral punctuation
+    // sits at its visual left end and embedded LTR words order correctly.
+    let bidi_info = BidiInfo::new(text, None);
 
     // this controls whether we should break within words
     let mut first_word_in_paragraph = true;
@@ -313,7 +327,8 @@ fn shape_run(
         let mut byte_index = run.start;
 
         for mut word_txt in sub_text.split_word_bounds() {
-            let id = ShapingId::new(font_size, font_ids, word_txt, max_width, variations);
+            let is_rtl_run = hb_direction == rustybuzz::Direction::RightToLeft;
+            let id = ShapingId::new(font_size, font_ids, word_txt, max_width, variations, is_rtl_run);
 
             if !context.shaped_words_cache.contains(&id) {
                 let word = shape_word(
@@ -359,7 +374,14 @@ fn shape_run(
                             }
 
                             let subword_txt = &word_txt[..bytes_included];
-                            let id = ShapingId::new(font_size, font_ids, subword_txt, Some(max_width), variations);
+                            let id = ShapingId::new(
+                                font_size,
+                                font_ids,
+                                subword_txt,
+                                Some(max_width),
+                                variations,
+                                is_rtl_run,
+                            );
                             if !context.shaped_words_cache.contains(&id) {
                                 let subword = shape_word(
                                     subword_txt,
