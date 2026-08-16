@@ -15,6 +15,14 @@ All notable changes to this project will be documented in this file.
   `in_radius` and `out_radius` fields changed from `f32` to `(f32, f32)` to hold the
   per-axis radii; `Paint::radial_gradient()` and `radial_gradient_stops()` keep their
   existing scalar-radius signatures unchanged.
+- Fixed `Canvas::measure_font()` scaling its result by the canvas transform's
+  internal glyph-rasterization scale and the DPI factor. It now reports
+  user-space metrics that depend only on the paint's font size, matching
+  `measure_text()`, `TextContext::measure_font()` and the coordinate space
+  `fill_text()` consumes. Previously, metrics read from a zoomed canvas came
+  back inflated - for example sub/superscript runs sized via
+  `subscript_size()` grew with the zoom level instead of staying proportional
+  to the run's font size.
 - Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
   into ellipses when a radius did not fit. Radii that overlap along a side are
   now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
