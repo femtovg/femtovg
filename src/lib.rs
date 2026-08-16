@@ -3495,7 +3495,10 @@ fn arc_tessellation_is_deterministic_across_threads() {
 /// such fill command, listing the vertical `[min_y, max_y]` span of each
 /// contour in that command, in screen space.
 #[cfg(all(test, feature = "textlayout"))]
-fn recorded_decoration_fills(commands: &[renderer::Command], verts: &[renderer::Vertex]) -> Vec<Vec<(f32, f32)>> {
+fn recorded_decoration_fills(
+    commands: &[renderer::Command],
+    verts: &[renderer::Vertex],
+) -> Vec<Vec<(f32, f32, f32, f32)>> {
     use crate::paint::GlyphTexture;
     use renderer::{CommandType, RenderTarget};
 
@@ -3511,14 +3514,18 @@ fn recorded_decoration_fills(commands: &[renderer::Command], verts: &[renderer::
                 let mut spans = Vec::new();
                 for drawable in &cmd.drawables {
                     if let Some((offset, len)) = drawable.fill_verts {
+                        let mut min_x = f32::INFINITY;
+                        let mut max_x = f32::NEG_INFINITY;
                         let mut min_y = f32::INFINITY;
                         let mut max_y = f32::NEG_INFINITY;
                         for v in &verts[offset..offset + len] {
+                            min_x = min_x.min(v.x);
+                            max_x = max_x.max(v.x);
                             min_y = min_y.min(v.y);
                             max_y = max_y.max(v.y);
                         }
                         if min_y.is_finite() {
-                            spans.push((min_y, max_y));
+                            spans.push((min_x, min_y, max_x, max_y));
                         }
                     }
                 }
@@ -3598,7 +3605,7 @@ fn fill_text_emits_decoration_rects() {
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
         assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
         assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
-        let (min_y, max_y) = fills[0][0];
+        let (_, min_y, _, max_y) = fills[0][0];
         let center = (min_y + max_y) / 2.0;
         let expected = baseline_y - metrics.underline_position();
         assert!(center > baseline_y, "underline should sit below the baseline");
@@ -3632,7 +3639,7 @@ fn fill_text_emits_decoration_rects() {
             1,
             "expected exactly one strikethrough rect, got {fills:?}"
         );
-        let (min_y, max_y) = fills[0][0];
+        let (_, min_y, _, max_y) = fills[0][0];
         let center = (min_y + max_y) / 2.0;
         let expected = baseline_y - metrics.strikeout_position();
         assert!(center < baseline_y, "strikethrough should sit above the baseline");
@@ -3655,7 +3662,7 @@ fn fill_text_emits_decoration_rects() {
         let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
         assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
         assert_eq!(fills[0].len(), 1, "expected exactly one overline rect, got {fills:?}");
-        let (_, max_y) = fills[0][0];
+        let (_, _, _, max_y) = fills[0][0];
         assert!(
             max_y <= baseline_y - metrics.ascender() + 1.0,
             "overline (bottom {max_y}) should sit at/above the ascent {}",
@@ -3686,29 +3693,115 @@ fn fill_text_emits_decoration_rects() {
 
         // Top to bottom: overline above the ascent, strikethrough above the
         // baseline, underline below it — three non-overlapping bands.
-        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        spans.sort_by(|a, b| a.1.total_cmp(&b.1));
         assert!(
-            spans[0].1 <= baseline_y - metrics.ascender() + 1.0,
+            spans[0].3 <= baseline_y - metrics.ascender() + 1.0,
             "overline (bottom {}) should sit at/above the ascent {}",
-            spans[0].1,
+            spans[0].3,
             baseline_y - metrics.ascender()
         );
-        let strike_center = (spans[1].0 + spans[1].1) / 2.0;
+        let strike_center = (spans[1].1 + spans[1].3) / 2.0;
         let strike_expected = baseline_y - metrics.strikeout_position();
         assert!(
             (strike_center - strike_expected).abs() <= 1.0,
             "strikethrough center {strike_center} should be near {strike_expected}"
         );
-        let under_center = (spans[2].0 + spans[2].1) / 2.0;
+        let under_center = (spans[2].1 + spans[2].3) / 2.0;
         let under_expected = baseline_y - metrics.underline_position();
         assert!(
             (under_center - under_expected).abs() <= 1.0,
             "underline center {under_center} should be near {under_expected}"
         );
         assert!(
-            spans[0].1 <= spans[1].0 && spans[1].1 <= spans[2].0,
+            spans[0].3 <= spans[1].1 && spans[1].3 <= spans[2].1,
             "decoration bands should not overlap: {spans:?}"
         );
+    }
+}
+
+/// A decoration line spans exactly the run's advance box `[layout.x, layout.x
+/// + width]`. Alignment moves `layout.x` (Center/Right shift the run left of
+/// the requested x), and an RTL run lays its glyphs out right-to-left — in
+/// every case the line must track the box the glyphs actually occupy, not the
+/// requested draw position.
+#[cfg(feature = "textlayout")]
+#[test]
+fn decoration_rect_spans_the_run_advance_box() {
+    let anchor_x = 300.0_f32;
+    for (case, text, align) in [
+        ("ltr left", "Deco", Align::Left),
+        ("ltr center", "Deco", Align::Center),
+        ("ltr right", "Deco", Align::Right),
+        // Arabic shapes right-to-left; Amiri provides the glyphs.
+        ("rtl left", "سلام", Align::Left),
+        ("rtl right", "سلام", Align::Right),
+    ] {
+        let renderer = RecordingRenderer::default();
+        let commands = renderer.last_commands.clone();
+        let verts = renderer.last_verts.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(1000, 1000, 1.0);
+        let latin = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        let arabic = canvas
+            .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+            .expect("failed to load test font");
+
+        let paint = Paint::color(Color::black())
+            .with_font(&[latin, arabic])
+            .with_font_size(40.0)
+            .with_text_baseline(Baseline::Alphabetic)
+            .with_text_align(align)
+            .with_text_decoration(TextDecoration {
+                underline: true,
+                strikethrough: false,
+                overline: false,
+            });
+        let layout = canvas.fill_text(anchor_x, 200.0, text, &paint).unwrap();
+        canvas.flush_to_output(());
+
+        assert!(layout.width() > 0.0, "{case}: run should have advance width");
+        match align {
+            Align::Left => assert!((layout.x - anchor_x).abs() < 1e-3, "{case}: run starts at the anchor"),
+            Align::Center | Align::Right => {
+                assert!(layout.x < anchor_x, "{case}: aligned run starts left of the anchor")
+            }
+        }
+
+        let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
+        assert_eq!(
+            fills.len(),
+            1,
+            "{case}: expected exactly one decoration fill, got {fills:?}"
+        );
+        assert_eq!(
+            fills[0].len(),
+            1,
+            "{case}: expected exactly one underline rect, got {fills:?}"
+        );
+        let (min_x, _, max_x, _) = fills[0][0];
+        assert!(
+            (min_x - layout.x).abs() <= 0.5,
+            "{case}: underline left edge {min_x} should be the run's left edge {}",
+            layout.x
+        );
+        assert!(
+            (max_x - (layout.x + layout.width())).abs() <= 0.5,
+            "{case}: underline right edge {max_x} should be the run's right edge {}",
+            layout.x + layout.width()
+        );
+
+        // Independent of the advance-box arithmetic: the line must actually run
+        // under every glyph the shaper placed, wherever alignment or RTL
+        // ordering put them.
+        for glyph in layout.glyphs.iter().filter(|shaped_glyph| !shaped_glyph.c.is_control()) {
+            let glyph_center = glyph.x + glyph.width / 2.0;
+            assert!(
+                min_x <= glyph_center && glyph_center <= max_x,
+                "{case}: underline [{min_x}, {max_x}] must run under the glyph at {glyph_center}"
+            );
+        }
     }
 }
 
@@ -3752,7 +3845,7 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
     let fills = recorded_decoration_fills(&commands.borrow(), &verts.borrow());
     assert_eq!(fills.len(), 1, "expected exactly one decoration fill, got {fills:?}");
     assert_eq!(fills[0].len(), 1, "expected exactly one underline rect, got {fills:?}");
-    let (min_y, max_y) = fills[0][0];
+    let (_, min_y, _, max_y) = fills[0][0];
     let center = (min_y + max_y) / 2.0;
     // User-space underline center is baseline - underline_position; on screen the
     // whole thing is multiplied by the canvas scale.
