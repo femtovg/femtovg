@@ -249,6 +249,8 @@ const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
     .union(crate::ImageFlags::REPEAT_Y)
     .union(crate::ImageFlags::NEAREST);
 
+type SamplerCache = Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>;
+
 #[derive(Debug)]
 struct CachedPipeline {
     pipeline: wgpu::RenderPipeline,
@@ -266,7 +268,7 @@ pub struct WGPURenderer {
     screen_view: [f32; 2],
 
     empty_texture_view: wgpu::TextureView,
-    sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
+    sampler_cache: SamplerCache,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
     vertex_buffer: wgpu::Buffer,
@@ -1828,7 +1830,7 @@ impl<'a> RenderPassBuilder<'a> {
 struct CommandToPipelineAndBindGroupMapper {
     device: wgpu::Device,
     empty_texture_view: wgpu::TextureView,
-    sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
+    sampler_cache: SamplerCache,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
     uniform_staging: Vec<u8>,
@@ -1846,7 +1848,7 @@ impl CommandToPipelineAndBindGroupMapper {
     fn new(
         device: wgpu::Device,
         empty_texture_view: wgpu::TextureView,
-        sampler_cache: Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>,
+        sampler_cache: SamplerCache,
         uniform_buffer: wgpu::Buffer,
         uniform_stride: u64,
         shader_module: Rc<wgpu::ShaderModule>,
