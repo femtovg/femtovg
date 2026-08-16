@@ -272,6 +272,10 @@ impl Font {
         //     it is negative), at roughly 1/14 of the em as thickness.
         //   * strikeout through the middle of the lowercase x-height region,
         //     approximated as ~40% of the ascender above the baseline.
+        // A table that is present but holds a zero is treated like a missing
+        // table, matching the swash backend's `!= 0` checks: a zero position
+        // would draw the line on the baseline and a zero thickness would make
+        // it invisible, neither of which a font can mean.
         let default_thickness = units_per_em as f32 / 14.0;
         let underline = ttf_font.underline_metrics();
         let strikeout = ttf_font.strikeout_metrics();
@@ -280,10 +284,22 @@ impl Font {
             ascender,
             descender,
             height: ttf_font.height() as f32,
-            underline_position: underline.map_or(descender * 0.5, |m| m.position as f32),
-            underline_thickness: underline.map_or(default_thickness, |m| m.thickness as f32),
-            strikeout_position: strikeout.map_or(ascender * 0.4, |m| m.position as f32),
-            strikeout_thickness: strikeout.map_or(default_thickness, |m| m.thickness as f32),
+            underline_position: underline
+                .map(|m| m.position)
+                .filter(|&v| v != 0)
+                .map_or(descender * 0.5, |v| v as f32),
+            underline_thickness: underline
+                .map(|m| m.thickness)
+                .filter(|&v| v != 0)
+                .map_or(default_thickness, |v| v as f32),
+            strikeout_position: strikeout
+                .map(|m| m.position)
+                .filter(|&v| v != 0)
+                .map_or(ascender * 0.4, |v| v as f32),
+            strikeout_thickness: strikeout
+                .map(|m| m.thickness)
+                .filter(|&v| v != 0)
+                .map_or(default_thickness, |v| v as f32),
             flags: FontFlags::new(
                 ttf_font.is_regular(),
                 ttf_font.is_italic(),
