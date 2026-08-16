@@ -1583,7 +1583,9 @@ struct RenderPassBuilder<'a> {
     screen_surface_format: wgpu::TextureFormat,
     stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group: wgpu::BindGroup,
-    pass_generation: u32,
+    current_pipeline_state: Option<PipelineState>,
+    current_stencil_reference: Option<u32>,
+    current_bound_offset: Option<u32>,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -1615,8 +1617,10 @@ impl<'a> RenderPassBuilder<'a> {
             screen_view,
             screen_surface_format,
             stencil_buffer_for_textures,
-            pass_generation: 0,
             viewport_bind_group,
+            current_pipeline_state: None,
+            current_stencil_reference: None,
+            current_bound_offset: None,
         }
     }
 
@@ -1775,7 +1779,10 @@ impl<'a> RenderPassBuilder<'a> {
     }
 
     fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
-        self.pass_generation += 1;
+        // A new render pass resets state, so nothing set on the previous one still counts.
+        self.current_pipeline_state = None;
+        self.current_stencil_reference = None;
+        self.current_bound_offset = None;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer
@@ -1827,10 +1834,6 @@ struct CommandToPipelineAndBindGroupMapper {
     uniform_staging: Vec<u8>,
     current_uniforms: Option<UniformArray>,
     current_uniform_offset: u64,
-    current_pipeline_state: Option<PipelineState>,
-    current_stencil_reference: Option<u32>,
-    current_bound_offset: Option<u32>,
-    current_pass_generation: Option<u32>,
     shader_module: Rc<wgpu::ShaderModule>,
 
     current_bind_group_state: Option<BindGroupState>,
@@ -1861,10 +1864,6 @@ impl CommandToPipelineAndBindGroupMapper {
             uniform_staging: Vec::new(),
             current_uniforms: None,
             current_uniform_offset: 0,
-            current_pipeline_state: None,
-            current_stencil_reference: None,
-            current_bound_offset: None,
-            current_pass_generation: None,
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
@@ -1886,23 +1885,15 @@ impl CommandToPipelineAndBindGroupMapper {
         image: Option<ImageOrTexture>,
         glyph_texture: GlyphTexture,
     ) {
-        // A new render pass resets state, so nothing set on the previous one still counts.
-        if self.current_pass_generation != Some(render_pass_builder.pass_generation) {
-            self.current_pass_generation = Some(render_pass_builder.pass_generation);
-            self.current_pipeline_state = None;
-            self.current_stencil_reference = None;
-            self.current_bound_offset = None;
-        }
-
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();
 
         let stencil_reference = match &stencil_test {
             StencilTest::Enabled { stencil_reference, .. } => *stencil_reference,
             _ => 0,
         };
-        if self.current_stencil_reference != Some(stencil_reference) {
+        if render_pass_builder.current_stencil_reference != Some(stencil_reference) {
             render_pass.set_stencil_reference(stencil_reference);
-            self.current_stencil_reference = Some(stencil_reference);
+            render_pass_builder.current_stencil_reference = Some(stencil_reference);
         }
 
         let bind_group_state = BindGroupState { image, glyph_texture };
@@ -1932,9 +1923,9 @@ impl CommandToPipelineAndBindGroupMapper {
             self.current_uniform_offset = offset;
         }
         let offset = self.current_uniform_offset as u32;
-        if bind_group_changed || self.current_bound_offset != Some(offset) {
+        if bind_group_changed || render_pass_builder.current_bound_offset != Some(offset) {
             render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
-            self.current_bound_offset = Some(offset);
+            render_pass_builder.current_bound_offset = Some(offset);
         }
 
         let pipeline_state = PipelineState::new(
@@ -1959,9 +1950,9 @@ impl CommandToPipelineAndBindGroupMapper {
         });
 
         render_pipeline.accessed = true;
-        if self.current_pipeline_state.as_ref() != Some(&pipeline_state) {
+        if render_pass_builder.current_pipeline_state.as_ref() != Some(&pipeline_state) {
             render_pass.set_pipeline(&render_pipeline.pipeline);
-            self.current_pipeline_state = Some(pipeline_state);
+            render_pass_builder.current_pipeline_state = Some(pipeline_state);
         }
     }
 }
