@@ -4090,6 +4090,32 @@ fn bidi_browser_regression_cases() {
     }
 }
 
+/// The shaped-word cache keys on letter spacing: `shape_word` bakes the
+/// spacing into the cached advances, so the same word measured at two
+/// spacings must not share an entry - previously the second measurement
+/// replayed the first's advances.
+#[cfg(feature = "textlayout")]
+#[test]
+fn letter_spacing_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let base = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    let plain = canvas.measure_text(20.0, 100.0, "cache", &base).unwrap().width();
+    let spaced = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_letter_spacing(6.0))
+        .unwrap()
+        .width();
+    assert!(
+        spaced > plain + 4.0 * 6.0 - 1.0,
+        "letter spacing must widen the cached word: plain {plain}, spaced {spaced}"
+    );
+}
+
 /// Bidi control characters are default-ignorable: isolate marks (U+2066..
 /// U+2069) and direction marks (U+200E/U+200F) must add no advance and no
 /// visible glyph, whether or not the font has real coverage for them - the
