@@ -284,8 +284,10 @@ pub enum PaintFlavor {
     },
     RadialGradient {
         center: Position,
-        in_radius: f32,
-        out_radius: f32,
+        /// (x, y) radii of the inner boundary. Equal components describe a circle.
+        in_radius: (f32, f32),
+        /// (x, y) radii of the outer boundary. Equal components describe a circle.
+        out_radius: (f32, f32),
         colors: GradientColors,
     },
     ConicGradient {
@@ -720,8 +722,59 @@ impl Paint {
     ) -> Self {
         Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
-            in_radius,
-            out_radius,
+            in_radius: (in_radius, in_radius),
+            out_radius: (out_radius, out_radius),
+            colors: GradientColors::TwoStop {
+                start_color: inner_color,
+                end_color: outer_color,
+            },
+        })
+    }
+
+    /// Creates and returns an elliptical gradient/
+    ///
+    /// Parameters (`cx`,`cy`) specify the center, `in_rx`/`in_ry` and `out_rx`/`out_ry` specify
+    /// the inner and outer ellipse radii along the x and y axes, `inner_color` specifies the start
+    /// color and `outer_color` the end color. Passing equal x/y radii is equivalent to
+    /// [`Paint::radial_gradient`].
+    /// The gradient is transformed by the current transform when it is passed to `fill_paint()` or `stroke_paint()`.
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::elliptical_gradient(
+    ///    50.0,
+    ///    50.0,
+    ///    18.0,
+    ///    9.0,
+    ///    24.0,
+    ///    12.0,
+    ///    Color::rgba(0, 0, 0, 128),
+    ///    Color::rgba(0, 0, 0, 0),
+    /// );
+    ///
+    /// let mut path = Path::new();
+    /// path.ellipse(50.0, 50.0, 30.0, 15.0);
+    /// canvas.fill_path(&path, &bg);
+    /// ```
+    #[allow(clippy::too_many_arguments)]
+    pub fn elliptical_gradient(
+        cx: f32,
+        cy: f32,
+        in_rx: f32,
+        in_ry: f32,
+        out_rx: f32,
+        out_ry: f32,
+        inner_color: Color,
+        outer_color: Color,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::RadialGradient {
+            center: Position { x: cx, y: cy },
+            in_radius: (in_rx, in_ry),
+            out_radius: (out_rx, out_ry),
             colors: GradientColors::TwoStop {
                 start_color: inner_color,
                 end_color: outer_color,
@@ -767,8 +820,58 @@ impl Paint {
     ) -> Self {
         Self::with_flavor(PaintFlavor::RadialGradient {
             center: Position { x: cx, y: cy },
-            in_radius,
-            out_radius,
+            in_radius: (in_radius, in_radius),
+            out_radius: (out_radius, out_radius),
+            colors: GradientColors::from_stops(stops),
+        })
+    }
+
+    /// Creates and returns a multi-stop elliptical gradient.
+    ///
+    /// Parameters (`cx`,`cy`) specify the center, `in_rx`/`in_ry` and `out_rx`/`out_ry` specify
+    /// the inner and outer ellipse radii along the x and y axes, colors specifies a list of color
+    /// stops with offsets. The first offset should be 0.0 and the last offset should be 1.0.
+    /// Passing equal x/y radii is equivalent to [`Paint::radial_gradient_stops`].
+    ///
+    /// The gradient is transformed by the current transform when it is passed to `fill_paint()` or `stroke_paint()`.
+    ///
+    /// # Example
+    /// ```
+    /// use femtovg::{Paint, Path, Color, Canvas, ImageFlags, renderer::Void};
+    ///
+    /// let mut canvas = Canvas::new(Void).expect("Cannot create canvas");
+    ///
+    /// let bg = Paint::elliptical_gradient_stops(
+    ///    50.0,
+    ///    50.0,
+    ///    18.0,
+    ///    9.0,
+    ///    24.0,
+    ///    12.0,
+    ///    [
+    ///         (0.0, Color::rgba(0, 0, 0, 128)),
+    ///         (0.5, Color::rgba(0, 0, 128, 128)),
+    ///         (1.0, Color::rgba(0, 128, 0, 128))
+    ///    ]
+    /// );
+    ///
+    /// let mut path = Path::new();
+    /// path.ellipse(50.0, 50.0, 30.0, 15.0);
+    /// canvas.fill_path(&path, &bg);
+    /// ```
+    pub fn elliptical_gradient_stops(
+        cx: f32,
+        cy: f32,
+        in_rx: f32,
+        in_ry: f32,
+        out_rx: f32,
+        out_ry: f32,
+        stops: impl IntoIterator<Item = (f32, Color)>,
+    ) -> Self {
+        Self::with_flavor(PaintFlavor::RadialGradient {
+            center: Position { x: cx, y: cy },
+            in_radius: (in_rx, in_ry),
+            out_radius: (out_rx, out_ry),
             colors: GradientColors::from_stops(stops),
         })
     }

@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
   drawn width changed law with the zoom, the font size, and even the paint
   flavor. All user-space text quantities now cross through the baked scale at
   one place, and a zoom-invariance test suite holds the regime seams.
+- Added elliptical radial gradients, matching CSS's `radial-gradient(ellipse ...)`.
+  New `Paint` constructors `elliptical_gradient()` and `elliptical_gradient_stops()`
+  take separate inner/outer radii per axis. `PaintFlavor::RadialGradient`'s
+  `in_radius` and `out_radius` fields changed from `f32` to `(f32, f32)` to hold the
+  per-axis radii; `Paint::radial_gradient()` and `radial_gradient_stops()` keep their
+  existing scalar-radius signatures unchanged.
 - Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
   into ellipses when a radius did not fit. Radii that overlap along a side are
   now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and

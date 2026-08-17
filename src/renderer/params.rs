@@ -202,20 +202,24 @@ impl Params {
             }
             &PaintFlavor::RadialGradient {
                 center: Position { x: cx, y: cy },
-                in_radius,
-                out_radius,
+                in_radius: (in_rx, in_ry),
+                out_radius: (out_rx, out_ry),
                 colors,
             } => {
-                let r = (in_radius + out_radius) * 0.5;
-                let f = out_radius - in_radius;
+                let avg_x = (in_rx + out_rx) * 0.5;
+                let avg_y = (in_ry + out_ry) * 0.5;
+                let effective_r = (avg_x + avg_y) * 0.5;
+                let f = ((out_rx - in_rx) + (out_ry - in_ry)) * 0.5;
 
-                let mut transform = Transform2D::translation(*cx, *cy);
+                // squash into an ellipse
+                let mut transform = Transform2D::scaling(avg_x / effective_r, avg_y / effective_r);
+                transform.translate(*cx, *cy);
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
-                params.extent[0] = r;
-                params.extent[1] = r;
-                params.radius = r;
+                params.extent[0] = effective_r;
+                params.extent[1] = effective_r;
+                params.radius = effective_r;
                 params.feather = 1.0f32.max(f);
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
