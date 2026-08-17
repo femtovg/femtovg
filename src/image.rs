@@ -549,4 +549,129 @@ impl ImageFilter {
             ],
         }
     }
+
+    /// Folds this filter with `next` (applied after it) into a single
+    /// equivalent filter when both are color matrices.
+    ///
+    /// This is the load-bearing rule for filter chains: a run of N adjacent
+    /// color operations costs one GPU pass and zero intermediate textures,
+    /// because 4x5 matrices compose by multiplication on the CPU. The fold is
+    /// exact in unpremultiplied space - the same space the shader applies the
+    /// matrix in - matching how Skia folds via `asAColorMatrix`/`Compose`.
+    /// Returns `None` when either side is not a color matrix (a blur cannot
+    /// fold), leaving chain execution to run them as separate passes.
+    pub fn fold_with(&self, next: &ImageFilter) -> Option<ImageFilter> {
+        let (ImageFilter::ColorMatrix { matrix: a }, ImageFilter::ColorMatrix { matrix: b }) = (self, next) else {
+            return None;
+        };
+        // `self` runs first, `next` second: out = B * augment(A), where
+        // augment(A) extends the 4x5 matrix with the implicit [0 0 0 0 1] row
+        // so the constant column composes correctly.
+        let mut m = [0.0f32; 20];
+        for row in 0..4 {
+            for col in 0..5 {
+                let mut sum = 0.0;
+                for k in 0..4 {
+                    sum += b[row * 5 + k] * a[k * 5 + col];
+                }
+                if col == 4 {
+                    // The implicit augmented row contributes next's constant.
+                    sum += b[row * 5 + 4];
+                }
+                m[row * 5 + col] = sum;
+            }
+        }
+        Some(ImageFilter::ColorMatrix { matrix: m })
+    }
+}
+
+#[cfg(test)]
+mod filter_fold_tests {
+    use super::ImageFilter;
+
+    fn apply(m: &[f32; 20], px: [f32; 4]) -> [f32; 4] {
+        let mut out = [0.0f32; 4];
+        for row in 0..4 {
+            out[row] = m[row * 5] * px[0]
+                + m[row * 5 + 1] * px[1]
+                + m[row * 5 + 2] * px[2]
+                + m[row * 5 + 3] * px[3]
+                + m[row * 5 + 4];
+        }
+        out
+    }
+
+    fn matrix(f: &ImageFilter) -> [f32; 20] {
+        let ImageFilter::ColorMatrix { matrix } = f else {
+            panic!("not a color matrix")
+        };
+        *matrix
+    }
+
+    /// The fold must equal sequential application for arbitrary pixels - the
+    /// property that lets a chain of N color ops run as one GPU pass.
+    #[test]
+    fn folding_matches_sequential_application() {
+        let first = ImageFilter::sepia(0.8);
+        let second = ImageFilter::hue_rotate(1.1);
+        let folded = first.fold_with(&second).expect("two color matrices fold");
+
+        for px in [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.2, 0.7, 0.4, 0.5],
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0],
+            [0.9, 0.1, 0.6, 0.3],
+        ] {
+            let sequential = apply(&matrix(&second), apply(&matrix(&first), px));
+            let one_pass = apply(&matrix(&folded), px);
+            for c in 0..4 {
+                assert!(
+                    (sequential[c] - one_pass[c]).abs() < 1e-5,
+                    "channel {c} of {px:?}: sequential {} vs folded {}",
+                    sequential[c],
+                    one_pass[c]
+                );
+            }
+        }
+    }
+
+    /// Folding with an identity leaves the other matrix unchanged, and the
+    /// constant column (brightness offsets, invert) composes in order.
+    #[test]
+    fn folding_respects_order_and_identity() {
+        let invert = ImageFilter::invert(1.0);
+        let bright = ImageFilter::brightness(2.0);
+        // invert then brighten: 2*(1-c) ; brighten then invert: 1-2c. Distinct.
+        let a = matrix(&invert.fold_with(&bright).unwrap());
+        let b = matrix(&bright.fold_with(&invert).unwrap());
+        let px = [0.25, 0.5, 0.75, 1.0];
+        let ab = apply(&a, px);
+        let ba = apply(&b, px);
+        assert!(
+            (ab[0] - 2.0 * (1.0 - 0.25)).abs() < 1e-5,
+            "invert-then-brighten got {}",
+            ab[0]
+        );
+        assert!(
+            (ba[0] - (1.0 - 2.0 * 0.25)).abs() < 1e-5,
+            "brighten-then-invert got {}",
+            ba[0]
+        );
+
+        let identity = ImageFilter::saturate(1.0);
+        let folded = ImageFilter::sepia(1.0).fold_with(&identity).unwrap();
+        let direct = matrix(&ImageFilter::sepia(1.0));
+        for (x, y) in matrix(&folded).iter().zip(direct.iter()) {
+            assert!((x - y).abs() < 1e-5);
+        }
+    }
+
+    /// Blurs cannot fold - the chain executor must run them as passes.
+    #[test]
+    fn blur_does_not_fold() {
+        let blur = ImageFilter::GaussianBlur { sigma: 2.0 };
+        assert!(blur.fold_with(&ImageFilter::sepia(1.0)).is_none());
+        assert!(ImageFilter::sepia(1.0).fold_with(&blur).is_none());
+    }
 }
