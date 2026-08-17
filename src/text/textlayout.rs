@@ -45,8 +45,12 @@ pub(super) struct ShapingId {
     // The same word shapes differently right-to-left than left-to-right
     // (mirrored brackets, reversed cluster order), so the cached shaping is
     // only valid for the direction it was produced under. Direction-neutral
-    // words (digits, punctuation) genuinely occur in both.
-    rtl: bool,
+    // words (digits, punctuation) genuinely occur in both. `None` marks a
+    // whole-run key, where the direction is derived from the text itself.
+    rtl: Option<bool>,
+    // Letter spacing is baked into the cached advances by `shape_word`, so
+    // shapings at different spacings must not share an entry.
+    letter_spacing_key: u32,
 }
 
 impl ShapingId {
@@ -56,7 +60,8 @@ impl ShapingId {
         word: &str,
         max_width: Option<f32>,
         variations: &FontVariations,
-        rtl: bool,
+        letter_spacing: f32,
+        rtl: Option<bool>,
     ) -> Self {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
@@ -70,6 +75,7 @@ impl ShapingId {
             font_ids,
             variation_hash: variations.hash(),
             rtl,
+            letter_spacing_key: (letter_spacing * 10.0).trunc() as u32,
         }
     }
 }
@@ -246,9 +252,10 @@ pub fn shape(
         text,
         max_width,
         variations,
+        text_settings.letter_spacing,
         // The run cache keys the whole string; per-run direction is derived
-        // from the text itself below, so it needs no separate key bit.
-        false,
+        // from the text itself below.
+        None,
     );
 
     if !context.shaping_run_cache.contains(&id) {
@@ -326,9 +333,18 @@ fn shape_run(
         let mut word_break_reached = false;
         let mut byte_index = run.start;
 
+        let is_rtl_run = hb_direction == rustybuzz::Direction::RightToLeft;
+
         for mut word_txt in sub_text.split_word_bounds() {
-            let is_rtl_run = hb_direction == rustybuzz::Direction::RightToLeft;
-            let id = ShapingId::new(font_size, font_ids, word_txt, max_width, variations, is_rtl_run);
+            let id = ShapingId::new(
+                font_size,
+                font_ids,
+                word_txt,
+                max_width,
+                variations,
+                letter_spacing,
+                Some(is_rtl_run),
+            );
 
             if !context.shaped_words_cache.contains(&id) {
                 let word = shape_word(
@@ -380,7 +396,8 @@ fn shape_run(
                                 subword_txt,
                                 Some(max_width),
                                 variations,
-                                is_rtl_run,
+                                letter_spacing,
+                                Some(is_rtl_run),
                             );
                             if !context.shaped_words_cache.contains(&id) {
                                 let subword = shape_word(
