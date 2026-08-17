@@ -203,7 +203,7 @@ impl GlTexture {
 
         match src {
             ImageSource::Gray(data) => unsafe {
-                let format = if opengles_2_0 { glow::LUMINANCE } else { glow::R8 };
+                let format = if opengles_2_0 { glow::LUMINANCE } else { glow::RED };
 
                 context.tex_sub_image_2d(
                     glow::TEXTURE_2D,
