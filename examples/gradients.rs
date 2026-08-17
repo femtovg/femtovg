@@ -10,7 +10,7 @@ use helpers::{PerfGraph, WindowSurface};
 
 fn main() {
     #[cfg(not(target_arch = "wasm32"))]
-    helpers::start(1000, 670, "Gradient test", false);
+    helpers::start(1000, 930, "Gradient test", false);
     #[cfg(target_arch = "wasm32")]
     helpers::start();
 }
@@ -344,6 +344,157 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
         ),
     );
 
+    // OPAQUE ELLIPSE
+    y += 130.0;
+    x = 10.0;
+    r(
+        x,
+        y,
+        "ellipse opaque",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            Color::rgba(255, 0, 0, 255),
+            Color::rgba(0, 0, 255, 255),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "0,0 el opaque",
+        Paint::elliptical_gradient(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            Color::rgba(255, 0, 0, 255),
+            Color::rgba(0, 0, 255, 255),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "fill el opaque",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
+            Color::rgba(255, 0, 0, 255),
+            Color::rgba(0, 0, 255, 255),
+        ),
+    );
+
+    // 50% ELLIPSE
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ellipse 50%",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            Color::rgba(255, 0, 0, 128),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "0,0 ellipse 50%",
+        Paint::elliptical_gradient(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            Color::rgba(255, 0, 0, 128),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "fill ellipse 50%",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
+            Color::rgba(255, 0, 0, 128),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+
+    // TRANSPARENT TO OPAQUE ELLIPSE
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ellipse 0-100",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            Color::rgba(255, 0, 0, 0),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "0,0 ellipse 0-100",
+        Paint::elliptical_gradient(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            Color::rgba(255, 0, 0, 0),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "fill ellipse 0-100",
+        Paint::elliptical_gradient(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
+            Color::rgba(255, 0, 0, 0),
+            Color::rgba(0, 0, 255, 128),
+        ),
+    );
+
     // Multistop!
     y += 130.0;
     x = 10.0;
@@ -651,6 +802,182 @@ fn draw_gradients<T: Renderer>(canvas: &mut Canvas<T>) {
             50.0,
             25.0,
             75.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 0)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+
+    // Multistop ellipse
+    y += 130.0;
+    x = 10.0;
+    r(
+        x,
+        y,
+        "ms ellipse opq",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 255)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms 0,0 el opq",
+        Paint::elliptical_gradient_stops(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 255)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms fill el opq",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
+            [
+                (0.0, Color::rgba(255, 0, 0, 255)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 255)),
+            ],
+        ),
+    );
+    // Multistop ellipse 50%
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms ellipse 50%",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 128)),
+                (0.5, Color::rgba(0, 255, 0, 128)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms 0,0 el 50%",
+        Paint::elliptical_gradient_stops(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 128)),
+                (0.5, Color::rgba(0, 255, 0, 128)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms fill el 50%",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
+            [
+                (0.0, Color::rgba(255, 0, 0, 128)),
+                (0.5, Color::rgba(0, 255, 0, 128)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+    // Multistop ellipse transparent
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms ellipse 0-100",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            0.0,
+            0.0,
+            50.0,
+            25.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 0)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms 0,0 el 0-100",
+        Paint::elliptical_gradient_stops(
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+            [
+                (0.0, Color::rgba(255, 0, 0, 0)),
+                (0.5, Color::rgba(0, 255, 0, 255)),
+                (1.0, Color::rgba(0, 0, 255, 128)),
+            ],
+        ),
+    );
+    x += 110.0;
+    r(
+        x,
+        y,
+        "ms fill el 0-100",
+        Paint::elliptical_gradient_stops(
+            50.0,
+            50.0,
+            25.0,
+            12.5,
+            75.0,
+            37.5,
             [
                 (0.0, Color::rgba(255, 0, 0, 0)),
                 (0.5, Color::rgba(0, 255, 0, 255)),
