@@ -337,7 +337,13 @@ impl Path {
         // Split arc into max 90 degree segments.
         let ndivs = ((da.abs() / (PI * 0.5) + 0.5) as i32).clamp(1, 5);
         let hda = (da / ndivs as f32) / 2.0;
-        let mut kappa = (4.0 / 3.0 * (1.0 - hda.cos()) / hda.sin()).abs();
+        // 4/3 * tan(hda/2), the same value as 4/3 * (1 - cos hda) / sin hda by
+        // the half-angle identity, but defined where that form is not: a sweep
+        // of zero leaves both parts of the quotient at zero and yields NaN,
+        // which then spreads through every control point of the shape. The
+        // tangent form also keeps its accuracy for very short segments, where
+        // 1 - cos hda loses all of its significant bits.
+        let mut kappa = (4.0 / 3.0 * (hda / 2.0).tan()).abs();
 
         let mut commands = Vec::with_capacity(ndivs as usize);
         let mut coords = Vec::with_capacity(ndivs as usize);
@@ -393,7 +399,10 @@ impl Path {
             || Position::segment_distance(pos1, pos0, pos2) < self.dist_tol * self.dist_tol
             || radius < self.dist_tol
         {
-            self.line_to(pos1.x, pos1.y);
+            // The corner cannot be rounded, so the line to it is the whole
+            // segment. Falling through would append a second, meaningless arc
+            // built from vectors that are about to be normalized to nothing.
+            return self.line_to(pos1.x, pos1.y);
         }
 
         let mut dpos0 = pos0 - pos1;
@@ -2288,6 +2297,59 @@ mod tests {
         );
         for (px, py) in points {
             assert!(px.is_finite() && py.is_finite(), "non-finite point ({px}, {py})");
+        }
+    }
+
+    /// A corner that cannot be rounded contributes the line to it and nothing
+    /// else. Continuing into the arc appends a second segment built from
+    /// direction vectors that normalize to nothing, which paints as a seam
+    /// across the fill. Upstream nanovg returns here; the port dropped it.
+    #[test]
+    fn arc_to_degenerate_corner_emits_only_the_line() {
+        for (x1, y1, x2, y2, radius) in [
+            (120.0f32, 130.0f32, 210.0f32, 130.0f32, 40.0f32), // collinear
+            (30.0, 130.0, 210.0, 130.0, 40.0),                 // corner on the start point
+            (120.0, 130.0, 120.0, 130.0, 40.0),                // corner on the end point
+            (120.0, 60.0, 210.0, 130.0, 0.0),                  // no radius to round with
+        ] {
+            let mut path = Path::new();
+            path.move_to(30.0, 130.0);
+            path.arc_to(x1, y1, x2, y2, radius);
+
+            let verbs: Vec<_> = path.verbs().collect();
+            assert_eq!(
+                verbs.len(),
+                2,
+                "({x1}, {y1}) r={radius} should add one line, got {verbs:?}"
+            );
+            assert!(
+                matches!(verbs[1], Verb::LineTo(..)),
+                "expected a line, got {:?}",
+                verbs[1]
+            );
+        }
+    }
+
+    /// An arc that sweeps no angle still has to produce usable geometry. The
+    /// handle length was computed as (1 - cos hda) / sin hda, which is 0/0 at a
+    /// zero sweep and put NaN into every control point of the shape.
+    #[test]
+    fn arc_with_no_sweep_stays_finite() {
+        for solidity in [super::Solidity::Solid, super::Solidity::Hole] {
+            let mut path = Path::new();
+            path.move_to(10.0, 10.0);
+            path.arc(50.0, 50.0, 20.0, 1.0, 1.0, solidity);
+
+            for verb in path.verbs() {
+                let coords = match verb {
+                    Verb::MoveTo(a, b) | Verb::LineTo(a, b) => vec![a, b],
+                    Verb::BezierTo(a, b, c, d, e, f) => vec![a, b, c, d, e, f],
+                    _ => vec![],
+                };
+                for value in coords {
+                    assert!(value.is_finite(), "{solidity:?} zero sweep produced {value}");
+                }
+            }
         }
     }
 }
