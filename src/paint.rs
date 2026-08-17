@@ -300,8 +300,10 @@ pub enum PaintFlavor {
     RadialGradient {
         center: Position,
         /// (x, y) radii of the inner boundary. Equal components describe a circle.
+        #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_radius_pair"))]
         in_radius: (f32, f32),
         /// (x, y) radii of the outer boundary. Equal components describe a circle.
+        #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_radius_pair"))]
         out_radius: (f32, f32),
         colors: GradientColors,
         /// Maps the gradient's own coordinate system into user space, the
@@ -1744,9 +1746,87 @@ mod tests {
     }
 }
 
+/// Accepts either the current `(x, y)` radius pair or the scalar a radial
+/// gradient serialized before the radii became per-axis, expanding the scalar
+/// to a circle, so older serialized paints keep deserializing.
+#[cfg(feature = "serde")]
+fn deserialize_radius_pair<'de, D>(deserializer: D) -> Result<(f32, f32), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum ScalarOrPair {
+        Scalar(f32),
+        Pair(f32, f32),
+    }
+    Ok(match <ScalarOrPair as serde::Deserialize>::deserialize(deserializer)? {
+        ScalarOrPair::Scalar(r) => (r, r),
+        ScalarOrPair::Pair(x, y) => (x, y),
+    })
+}
+
 #[cfg(all(test, feature = "serde"))]
 mod serde_tests {
     use super::*;
+
+    /// A gradient flavor serialized before `transform` existed omits that
+    /// field. With `#[serde(default)]` it must fall back to the identity
+    /// transform instead of failing to deserialize, so older serialized
+    /// paints keep their exact prior rendering.
+    #[test]
+    fn gradient_flavor_deserializes_without_transform() {
+        let json = r#"{
+            "RadialGradient": {
+                "center": { "x": 10.0, "y": 20.0 },
+                "in_radius": [0.0, 0.0],
+                "out_radius": [30.0, 30.0],
+                "colors": {
+                    "TwoStop": {
+                        "start_color": { "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0 },
+                        "end_color": { "r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0 }
+                    }
+                }
+            }
+        }"#;
+        let restored: PaintFlavor = serde_json::from_str(json).expect("pre-transform paint deserializes");
+        let PaintFlavor::RadialGradient { transform, .. } = restored else {
+            panic!("wrong flavor");
+        };
+        assert_eq!(
+            transform,
+            crate::Transform2D::identity(),
+            "missing transform falls back to identity"
+        );
+    }
+
+    /// A radial gradient serialized before the radii became per-axis pairs
+    /// holds scalars; they must deserialize as circles rather than erroring.
+    #[test]
+    fn radial_gradient_deserializes_scalar_radii() {
+        let json = r#"{
+            "RadialGradient": {
+                "center": { "x": 0.0, "y": 0.0 },
+                "in_radius": 5.0,
+                "out_radius": 30.0,
+                "colors": {
+                    "TwoStop": {
+                        "start_color": { "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0 },
+                        "end_color": { "r": 0.0, "g": 0.0, "b": 1.0, "a": 1.0 }
+                    }
+                }
+            }
+        }"#;
+        let restored: PaintFlavor = serde_json::from_str(json).expect("scalar-radius paint deserializes");
+        let PaintFlavor::RadialGradient {
+            in_radius, out_radius, ..
+        } = restored
+        else {
+            panic!("wrong flavor");
+        };
+        assert_eq!(in_radius, (5.0, 5.0));
+        assert_eq!(out_radius, (30.0, 30.0));
+    }
 
     /// A paint serialized before `text_decoration` existed omits that field. With
     /// `#[serde(default)]` the field must fall back to `TextDecoration::default()`
