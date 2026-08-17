@@ -779,6 +779,7 @@ impl Paint {
                 start_color: inner_color,
                 end_color: outer_color,
             },
+            transform: Transform2D::identity(),
         })
     }
 
@@ -875,6 +876,7 @@ impl Paint {
             in_radius: (in_radius, in_radius),
             out_radius: (out_radius, out_radius),
             colors: GradientColors::from_stops(stops),
+            transform: Transform2D::identity(),
         })
     }
 

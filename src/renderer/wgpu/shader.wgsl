@@ -162,6 +162,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         }
         case SHADER_TYPE_FilterImageColorMatrix: {
             return renderColorMatrix(vertex, params);
+        }
         case SHADER_TYPE_FillGradientRadial: {
             // Set `result` and fall through to the scissor + stroke-AA multiply.
             result = renderGradientRadial(vertex, params);

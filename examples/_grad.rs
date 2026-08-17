@@ -30,7 +30,11 @@ fn main() {
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: None,
-        size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -74,8 +78,14 @@ fn main() {
     // r4: gradientTransform on a linear gradient - unit-x axis rotated 25deg,
     // scaled to 160 and placed at (260,150): matrix = translate * rotate * scale.
     let (sin, cos) = (25.0f32).to_radians().sin_cos();
-    let g4 = Paint::linear_gradient(0.0, 0.0, 1.0, 0.0, green, magenta)
-        .with_gradient_transform(Transform2D([160.0 * cos, 160.0 * sin, -160.0 * sin, 160.0 * cos, 260.0, 150.0]));
+    let g4 = Paint::linear_gradient(0.0, 0.0, 1.0, 0.0, green, magenta).with_gradient_transform(Transform2D([
+        160.0 * cos,
+        160.0 * sin,
+        -160.0 * sin,
+        160.0 * cos,
+        260.0,
+        150.0,
+    ]));
     let mut p = Path::new();
     p.rect(250.0, 140.0, 180.0, 100.0);
     canvas.fill_path(&p, &g4);
@@ -110,7 +120,11 @@ fn main() {
                 rows_per_image: Some(H),
             },
         },
-        wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
     );
     queue.submit(Some(encoder.finish()));
 
