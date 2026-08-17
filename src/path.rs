@@ -665,7 +665,10 @@ impl Path {
     /// A negative radius, or one that is NaN, does not describe a corner and is
     /// treated as zero, leaving that corner square. An infinite radius asks for
     /// as much rounding as there is room for and is reduced to fit, like any
-    /// other radius that is too large.
+    /// other radius that is too large. Only a radius of zero squares a corner
+    /// off: however small the rest are, they are kept, since path units say
+    /// nothing about how large the corner ends up once the transform and the
+    /// pen have had their say.
     pub fn rounded_rect_varying(
         &mut self,
         x: f32,
@@ -696,7 +699,13 @@ impl Path {
         let mut br = usable(rad_bottom_right);
         let mut bl = usable(rad_bottom_left);
 
-        if tl < 0.1 && tr < 0.1 && br < 0.1 && bl < 0.1 {
+        // Only a shape with no corners at all is a plain rectangle. nanovg
+        // squared off anything under 0.1 here, which is a threshold in path
+        // units and so blind to both the transform and the line width: a 0.05
+        // radius is five pixels under a scale of 100, and stroking a 0.01
+        // corner 50 wide should give an outer edge of radius 25.01 rather than
+        // a mitre spike (slint-ui/slint#1988).
+        if tl == 0.0 && tr == 0.0 && br == 0.0 && bl == 0.0 {
             self.rect(x, y, w, h);
         } else {
             let (width, height) = (f64::from(w.abs()), f64::from(h.abs()));

@@ -222,6 +222,39 @@ fn unusable_radii_leave_the_corner_square() {
     }
 }
 
+/// A radius that is merely small is still a corner. nanovg, and femtovg after
+/// it, dropped every radius under 0.1 and emitted a plain rectangle instead,
+/// which is a threshold in path units that knows nothing about the transform or
+/// about how the shape will be painted.
+///
+/// Both of those bite. Under a scale of 100 a radius of 0.05 is a five pixel
+/// corner, not a square one. And stroking magnifies it: a stroke is the path
+/// offset by half the line width, so a 0.01 corner stroked 50 wide has an outer
+/// edge of radius 25.01, while the squared-off substitute has a miter spike out
+/// to the corner point. That is slint-ui/slint#1988, where a rectangle whose
+/// background is filled with the outer radius and whose border is stroked along
+/// the inset path had the border poke out past the background at every corner.
+#[test]
+fn small_radii_still_round_the_corner() {
+    for radius in [0.001f32, 0.01, 0.05, 0.099] {
+        let mut path = Path::new();
+        path.rounded_rect(0.0, 0.0, 100.0, 100.0, radius);
+
+        // Stated separately from the radii below, because the tolerance that
+        // reads a corner back off the path is wider than these radii are: a
+        // squared-off shape would otherwise pass on the numbers alone.
+        let curves = path.verbs().filter(|verb| matches!(verb, Verb::BezierTo(..))).count();
+        assert_eq!(curves, 4, "radius {radius} lost its corners");
+
+        let c = corners_of(&path, 0.0, 0.0, 100.0, 100.0);
+
+        assert_circular(c.top_left, radius, &format!("top left for {radius}"));
+        assert_circular(c.top_right, radius, &format!("top right for {radius}"));
+        assert_circular(c.bottom_right, radius, &format!("bottom right for {radius}"));
+        assert_circular(c.bottom_left, radius, &format!("bottom left for {radius}"));
+    }
+}
+
 /// From WPT `2d.path.roundrect.negative`: with a negative width or height the
 /// rectangle is drawn back towards its origin, and the top left radius rounds the
 /// corner at (`x`, `y`) wherever that lands on screen. The reduction has to run
