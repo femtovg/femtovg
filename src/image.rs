@@ -537,6 +537,21 @@ impl ImageFilter {
         }
     }
 
+    /// The `feColorMatrix type="luminanceToAlpha"` matrix: the output alpha
+    /// is the input's Rec. 709 relative luminance (0.2126 R + 0.7152 G +
+    /// 0.0722 B) and the color channels go to zero. This is the conversion
+    /// SVG luminance masks apply to their mask content.
+    pub fn luminance_to_alpha() -> Self {
+        #[rustfmt::skip]
+        let matrix = [
+            0.0,    0.0,    0.0,    0.0, 0.0,
+            0.0,    0.0,    0.0,    0.0, 0.0,
+            0.0,    0.0,    0.0,    0.0, 0.0,
+            0.2126, 0.7152, 0.0722, 0.0, 0.0,
+        ];
+        ImageFilter::ColorMatrix { matrix }
+    }
+
     /// CSS `opacity(amount)`; `amount` is clamped to `[0, 1]` and scales alpha.
     pub fn opacity(amount: f32) -> Self {
         let a = amount.clamp(0.0, 1.0);

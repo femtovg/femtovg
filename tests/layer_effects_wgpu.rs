@@ -256,3 +256,154 @@ fn layer_composite_honors_outer_scissor() {
     );
     assert_eq!(px(&out, 50, 50), [255, 255, 255], "outside the scissor must stay white");
 }
+
+fn circle_mask_image(canvas: &mut Canvas<WGPURenderer>) -> femtovg::ImageId {
+    // White circle on transparent: full luminance coverage inside, none outside.
+    let mask = canvas
+        .create_image_empty(
+            48,
+            48,
+            femtovg::PixelFormat::Rgba8,
+            femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+        )
+        .unwrap();
+    canvas.save();
+    canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+    canvas.clear_rect(0, 0, 48, 48, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+    canvas.reset_transform();
+    let mut p = Path::new();
+    p.circle(24.0, 24.0, 20.0);
+    canvas.fill_path(&p, &Paint::color(Color::white()));
+    canvas.set_render_target(femtovg::RenderTarget::Screen);
+    canvas.restore();
+    mask
+}
+
+/// A luminance mask shows the layer inside its white region and hides it
+/// outside (uncovered pixels mask out fully) - SVG mask semantics.
+#[test]
+fn luminance_mask_gates_the_layer() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        let mask = circle_mask_image(canvas);
+        canvas.begin_layer(&LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 8.0, 8.0, 48.0, 48.0));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+        canvas.end_layer();
+    });
+    let inside = px(&out, 32, 32); // circle centre (mask at 8..56)
+    let outside_circle = px(&out, 12, 12); // inside mask rect, outside circle
+    let outside_rect = px(&out, 60, 60); // outside the mask rect entirely
+    assert!(
+        close(inside[0], 255) && close(inside[1], 0),
+        "inside the mask circle the layer shows, got {inside:?}"
+    );
+    assert_eq!(
+        outside_circle,
+        [255, 255, 255],
+        "outside the circle the layer is masked out"
+    );
+    assert_eq!(
+        outside_rect,
+        [255, 255, 255],
+        "beyond the mask rect the layer is masked out"
+    );
+}
+
+/// A black region of a luminance mask hides content even though its alpha is
+/// opaque - proving coverage is luminance, not alpha.
+#[test]
+fn luminance_mask_uses_luminance_not_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // Opaque half-white / half-black mask.
+        let mask = canvas
+            .create_image_empty(
+                64,
+                64,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, 64, 64, Color::black());
+        canvas.reset_transform();
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.fill_path(&p, &Paint::color(Color::white()));
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        canvas.begin_layer(&LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+        canvas.end_layer();
+    });
+    assert!(
+        close(px(&out, 16, 32)[0], 255) && close(px(&out, 16, 32)[1], 0),
+        "white mask half shows the layer"
+    );
+    assert_eq!(
+        px(&out, 48, 32),
+        [255, 255, 255],
+        "black (but opaque) mask half hides the layer - luminance, not alpha"
+    );
+}
+
+/// Masking a FILTERED layer keeps both the mask and the content upright -
+/// the storage-parity flag selection for the filtered case.
+#[test]
+fn masked_filtered_layer_keeps_orientation() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // Mask: white on the TOP half only.
+        let mask = canvas
+            .create_image_empty(
+                64,
+                64,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, 64, 64, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        canvas.reset_transform();
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, 64.0, 32.0);
+        canvas.fill_path(&p, &Paint::color(Color::white()));
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        canvas.begin_layer(
+            &LayerEffects::new()
+                .with_filters(&[ImageFilter::brightness(1.0)])
+                .with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0),
+        );
+        // Red on top, blue on bottom.
+        red_rect(canvas, 0.0, 0.0, 64.0, 32.0);
+        let mut p = Path::new();
+        p.rect(0.0, 32.0, 64.0, 32.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 255)));
+        canvas.end_layer();
+    });
+    let top = px(&out, 32, 12);
+    let bottom = px(&out, 32, 52);
+    assert!(
+        close(top[0], 255) && close(top[2], 0),
+        "top-half mask over a filtered layer must show the RED top, got {top:?}"
+    );
+    assert_eq!(
+        bottom,
+        [255, 255, 255],
+        "bottom must be masked out, got {bottom:?} - blue here means the mask or content mirrored"
+    );
+}

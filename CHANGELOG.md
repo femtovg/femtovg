@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha
+  by a mask image's coverage - luminance-derived (SVG `mask`'s default, via
+  the new `ImageFilter::luminance_to_alpha()`) or the mask's own alpha -
+  applied after the layer's filter chain, matching SVG's order for a group
+  carrying both `filter` and `mask`.
 - Added layers: `Canvas::begin_layer()` / `end_layer()` capture a group of
   draws into a bounded transient image and composite it back with declared
   `LayerEffects` - group opacity that fades the group as one image

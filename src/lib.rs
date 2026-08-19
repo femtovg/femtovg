@@ -342,6 +342,28 @@ pub struct Canvas<T: Renderer> {
 pub struct LayerEffects {
     opacity: f32,
     filters: Vec<ImageFilter>,
+    mask: Option<LayerMask>,
+}
+
+/// How a layer mask's coverage is derived from its image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskKind {
+    /// Coverage is the mask content's Rec. 709 relative luminance - SVG
+    /// `mask`'s default `mask-type`.
+    Luminance,
+    /// Coverage is the mask content's own alpha channel.
+    Alpha,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LayerMask {
+    image: ImageId,
+    kind: MaskKind,
+    // Device-space placement of the mask image.
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 impl LayerEffects {
@@ -350,6 +372,7 @@ impl LayerEffects {
         Self {
             opacity: 1.0,
             filters: Vec::new(),
+            mask: None,
         }
     }
 
@@ -374,6 +397,29 @@ impl LayerEffects {
     #[must_use]
     pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
         self.filters = filters.to_vec();
+        self
+    }
+
+    /// Masks the layer by `image`, placed at the device-space rect
+    /// `(x, y, width, height)`, with coverage derived per `kind` - SVG
+    /// `mask` semantics (`MaskKind::Luminance` is SVG's default mask-type).
+    /// Applied after the filter chain, matching SVG's order for a group
+    /// carrying both `filter` and `mask`. Pixels the mask rect does not
+    /// cover are fully masked out.
+    ///
+    /// The mask image is borrowed, not owned: render mask content into your
+    /// own image (upload or render target - its `ImageFlags` orientation is
+    /// respected) and release it on your own schedule after the flush.
+    #[must_use]
+    pub fn with_mask(mut self, image: ImageId, kind: MaskKind, x: f32, y: f32, width: f32, height: f32) -> Self {
+        self.mask = Some(LayerMask {
+            image,
+            kind,
+            x,
+            y,
+            width,
+            height,
+        });
         self
     }
 }
@@ -1130,11 +1176,27 @@ where
             }
         };
 
+        let (minx, miny) = record.origin;
+
+        // Apply the mask (after the filter chain, SVG's order) by multiplying
+        // the layer's alpha with the mask coverage via a DestinationIn draw
+        // into the layer image. Orientation bookkeeping: draws into an image
+        // target land in flipped storage, so a fragment at draw-space row 0
+        // writes the storage row that holds the RAW capture's top but the
+        // FILTERED result's bottom (the chain flipped storage parity once).
+        // The normalized mask therefore samples upright for the raw capture
+        // and flipped for the filtered one; both variants are freshly
+        // acquired transients, so the flag is picked per case.
+        let source = if let Some(mask) = record.effects.mask {
+            self.apply_layer_mask(source, &record, mask, source != image)
+        } else {
+            source
+        };
+
         let alpha = record.outer_alpha * record.effects.opacity;
         if alpha <= 0.0 {
             return;
         }
-        let (minx, miny) = record.origin;
         let tint = Color::rgbaf(1.0, 1.0, 1.0, alpha);
         let mut layer_paint =
             Paint::image_tint(source, minx, miny, record.width as f32, record.height as f32, 0.0, tint);
@@ -1156,6 +1218,93 @@ where
         self.state_mut().transform = saved_transform;
         self.state_mut().alpha = saved_alpha;
         self.state_mut().shadow_color = saved_shadow;
+    }
+
+    /// Multiplies `layer`'s alpha by the mask coverage, in layer space.
+    /// `layer_is_filtered` selects the storage-parity handling documented at
+    /// the call site. Returns the masked image (always `layer` itself; the
+    /// intermediates are transients).
+    fn apply_layer_mask(
+        &mut self,
+        layer: ImageId,
+        record: &LayerRecord,
+        mask: LayerMask,
+        layer_is_filtered: bool,
+    ) -> ImageId {
+        let (width, height) = (record.width, record.height);
+        let (minx, miny) = record.origin;
+
+        // Normalize the mask into layer space: draw it (its own ImageFlags
+        // decide upright sampling) into a layer-sized transient, so caller
+        // storage conventions never leak into the parity math below.
+        let normalized_flags = if layer_is_filtered {
+            // Draw-space rows invert against upright (filtered) storage;
+            // leaving the flag off makes the DestinationIn draw line up.
+            ImageFlags::PREMULTIPLIED
+        } else {
+            ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+        };
+        let Ok(normalized) = self.acquire_transient_image(width, height, normalized_flags) else {
+            return layer; // degrade: unmasked rather than dropped
+        };
+        let previous_target = self.current_render_target;
+        self.save();
+        self.set_render_target(RenderTarget::Image(normalized));
+        self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        self.state_mut().scissor = Scissor::default();
+        self.state_mut().composite_operation = CompositeOperationState::default();
+        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        let mut mask_rect = Path::new();
+        mask_rect.rect(mask.x - minx, mask.y - miny, mask.width, mask.height);
+        let mut mask_paint = Paint::image(
+            mask.image,
+            mask.x - minx,
+            mask.y - miny,
+            mask.width,
+            mask.height,
+            0.0,
+            1.0,
+        );
+        mask_paint.set_anti_alias(false);
+        self.fill_path_internal(&mask_rect, &mask_paint.flavor, false, FillRule::NonZero);
+
+        // Luminance masks convert content to alpha coverage; the color-matrix
+        // pass flips storage parity once, so the converted image needs the
+        // opposite sampling flag from the normalized one.
+        let coverage = match mask.kind {
+            MaskKind::Alpha => normalized,
+            MaskKind::Luminance => {
+                let converted_flags = if layer_is_filtered {
+                    ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+                } else {
+                    ImageFlags::PREMULTIPLIED
+                };
+                match self.acquire_transient_image(width, height, converted_flags) {
+                    Ok(converted) => {
+                        self.filter_image(converted, ImageFilter::luminance_to_alpha(), normalized);
+                        converted
+                    }
+                    Err(_) => normalized, // degrade to alpha-kind coverage
+                }
+            }
+        };
+
+        // layer.alpha *= coverage.alpha across the whole layer; pixels the
+        // mask rect does not cover are transparent in `coverage`, so they
+        // mask out fully.
+        self.set_render_target(RenderTarget::Image(layer));
+        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::DestinationIn);
+        let mut full_rect = Path::new();
+        full_rect.rect(0.0, 0.0, width as f32, height as f32);
+        let mut coverage_paint = Paint::image(coverage, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+        coverage_paint.set_anti_alias(false);
+        self.fill_path_internal(&full_rect, &coverage_paint.flavor, false, FillRule::NonZero);
+
+        self.restore();
+        self.set_render_target(previous_target);
+        layer
     }
 
     // Transforms
