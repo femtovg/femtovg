@@ -866,10 +866,23 @@ where
     /// The target ends up in the same orientation convention as a single
     /// color-matrix [`filter_image`](Self::filter_image) call: content stored
     /// vertically flipped, sampled upright via [`ImageFlags::FLIP_Y`]. An
-    /// empty list degrades to a plain copy under that same convention.
+    /// empty list degrades to a plain copy under that same convention. A
+    /// chain whose flip parity comes out even (for example a lone blur) pays
+    /// one extra identity pass for that uniformity; blur-only callers who
+    /// want the single-pass form can call `filter_image` directly.
+    ///
+    /// The chain borrows `source_image` and `target_image` without taking
+    /// ownership - both may be caller-managed or acquired transients (a layer
+    /// capture pass, say, can feed its layer in as `source_image` and keep
+    /// releasing it on its own schedule). Only the internal scratches are
+    /// tied to the flush lifecycle, so composing this under group effects
+    /// adds no copies and no extra retained images.
     pub fn filter_image_chain(&mut self, target_image: ImageId, filters: &[ImageFilter], source_image: ImageId) {
-        // Fold adjacent color matrices; the folded run costs one pass.
-        let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len().max(1));
+        // Fold adjacent color matrices; the folded run costs one pass. The
+        // capacity covers the worst case (nothing folds) plus the possible
+        // parity pass below, so the list never reallocates; ImageFilter is
+        // Copy, so building it never deep-copies anything.
+        let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len() + 1);
         for filter in filters {
             if let Some(prev) = passes.last_mut() {
                 if let Some(folded) = prev.fold_with(filter) {
