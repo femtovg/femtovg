@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added layers: `Canvas::begin_layer()` / `end_layer()` capture a group of
+  draws into a bounded transient image and composite it back with declared
+  `LayerEffects` - group opacity that fades the group as one image
+  (overlapping children no longer double-blend, the SVG group-opacity
+  semantic) and/or an image-filter chain. Effects are declared at
+  `begin_layer` so the backing store is sized to the current scissor rect
+  plus the declared blur reach, not the whole canvas.
+
 - Added `Canvas::filter_image_chain()`, executing a list of image filters as
   one chain - the model behind Canvas `ctx.filter` lists
   (`"blur(5px) brightness(1.2)"`) and SVG filter chains. Runs of adjacent

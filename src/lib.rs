@@ -327,6 +327,69 @@ pub struct Canvas<T: Renderer> {
     // referenced by deferred draw commands, so they can only be freed once those
     // commands have been submitted to the renderer (i.e. after flush).
     transient_images: Vec<ImageId>,
+    // Open layers from begin_layer(), innermost last.
+    layers: Vec<LayerRecord>,
+}
+
+/// Effects applied to a layer when [`Canvas::end_layer`] composites it back.
+///
+/// Declared up front at [`Canvas::begin_layer`] - like Canvas 2D's
+/// `beginLayer(filter)` proposal - so the layer's backing store can be sized
+/// for the effects (a blur needs kernel-reach padding). Construct with
+/// [`LayerEffects::new`] and the builder methods; more effect kinds can be
+/// added without breaking callers.
+#[derive(Clone, Debug, Default)]
+pub struct LayerEffects {
+    opacity: f32,
+    filters: Vec<ImageFilter>,
+}
+
+impl LayerEffects {
+    /// No-op effects: full opacity, no filters.
+    pub fn new() -> Self {
+        Self {
+            opacity: 1.0,
+            filters: Vec::new(),
+        }
+    }
+
+    /// Sets the group opacity the composite applies to the layer as a whole.
+    ///
+    /// This is SVG group-opacity / Canvas layer semantics: overlapping
+    /// children inside the layer do NOT double-blend; the finished layer is
+    /// faded as one image. Non-finite values are ignored; the value clamps
+    /// to [0, 1].
+    #[must_use]
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        if opacity.is_finite() {
+            self.opacity = opacity.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    /// Sets an image-filter chain applied to the captured layer before it is
+    /// composited, executing through
+    /// [`filter_image_chain`](Canvas::filter_image_chain) - runs of color
+    /// matrices still fold to one pass.
+    #[must_use]
+    pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
+        self.filters = filters.to_vec();
+        self
+    }
+}
+
+#[derive(Debug)]
+struct LayerRecord {
+    // None marks a pass-through layer (allocation failed or bounds were
+    // degenerate): draws went to the previous target unchanged and end_layer
+    // only rebalances state.
+    image: Option<ImageId>,
+    previous_target: RenderTarget,
+    origin: (f32, f32),
+    width: usize,
+    height: usize,
+    effects: LayerEffects,
+    outer_alpha: f32,
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -385,6 +448,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            layers: Vec::new(),
         };
 
         canvas.save();
@@ -415,6 +479,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            layers: Vec::new(),
         };
 
         canvas.save();
@@ -935,6 +1000,162 @@ where
             self.filter_image(dst, *filter, src);
             src = dst;
         }
+    }
+
+    /// Opens a layer: subsequent drawing is captured into a transient
+    /// offscreen image instead of the current target, until the matching
+    /// [`end_layer`](Self::end_layer) composites the finished layer back with
+    /// `effects` applied - group opacity as ONE fade over the whole layer
+    /// (overlapping children do not double-blend, the SVG group-opacity /
+    /// Canvas 2D `beginLayer()` semantic) and/or an image-filter chain.
+    ///
+    /// The effects are declared here rather than at `end_layer` so the
+    /// backing store can be sized for them: the layer captures the current
+    /// scissor rect (the natural memory bound - set a scissor before opening
+    /// a layer to keep it small) padded by the blur kernel reach when the
+    /// chain contains Gaussian blurs. Content outside that padded rect does
+    /// not survive into the layer, mirroring SVG's filter-region behavior.
+    /// A rotated or rounded scissor cannot be captured as a rect; the layer
+    /// then spans the whole canvas and the scissor keeps clipping normally.
+    ///
+    /// Inside the layer, `global_alpha` resets to 1 (the outer alpha folds
+    /// into the composite), the composite operation resets to source-over,
+    /// and shadows keep working. The composite honors the scissor and
+    /// composite operation in effect at `begin_layer` time. Layers nest;
+    /// each level costs one transient image (plus one more if filtered),
+    /// released at the next flush through the same pool seam the filter
+    /// chain and shadow passes use. When the backing store cannot be
+    /// allocated (degenerate or absurd bounds), the layer degrades to a
+    /// pass-through: drawing continues on the current target and `end_layer`
+    /// only rebalances state.
+    pub fn begin_layer(&mut self, effects: &LayerEffects) {
+        let state = *self.state();
+        let (canvas_w, canvas_h) = (self.width as f32, self.height as f32);
+
+        // Blur reach padding, matching the shadow pass: 3 sigma covers
+        // >99.7% of the kernel, clamped to the in-shader sigma bound.
+        let max_sigma = effects
+            .filters
+            .iter()
+            .map(|f| match f {
+                ImageFilter::GaussianBlur { sigma } if sigma.is_finite() && *sigma > 0.0 => sigma.min(8.0),
+                _ => 0.0,
+            })
+            .fold(0.0f32, f32::max);
+        let pad = if max_sigma > 0.0 {
+            (max_sigma * 3.0).ceil() + 2.0
+        } else {
+            0.0
+        };
+
+        let (keep_scissor, rect) = match state.scissor.as_rect(canvas_w, canvas_h) {
+            Some(rect) => (false, rect),
+            // Rounded/rotated scissors clip per fragment inside the layer.
+            None => (true, Rect::new(0.0, 0.0, canvas_w, canvas_h)),
+        };
+        let minx = (rect.x - pad).floor().max(-pad);
+        let miny = (rect.y - pad).floor().max(-pad);
+        let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
+        let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad);
+        let width = (maxx - minx) as usize;
+        let height = (maxy - miny) as usize;
+
+        let image = if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            None
+        } else {
+            // Render-target storage is premultiplied and vertically flipped;
+            // FLIP_Y makes the unfiltered composite sample it upright.
+            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y)
+                .ok()
+        };
+
+        self.layers.push(LayerRecord {
+            image,
+            previous_target: self.current_render_target,
+            origin: (minx, miny),
+            width,
+            height,
+            effects: effects.clone(),
+            outer_alpha: state.alpha,
+        });
+
+        self.save();
+        let Some(image) = image else {
+            return; // pass-through layer: keep drawing on the current target
+        };
+        self.set_render_target(RenderTarget::Image(image));
+        self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+
+        // Shift device space so the captured rect's origin lands on (0, 0),
+        // exactly like the shadow pass maps its padded bbox.
+        let mut layer_transform = Transform2D::translation(-minx, -miny);
+        layer_transform.premultiply(&state.transform);
+        self.state_mut().transform = layer_transform;
+        self.state_mut().alpha = 1.0;
+        self.state_mut().composite_operation = CompositeOperationState::default();
+        if !keep_scissor {
+            self.state_mut().scissor = Scissor::default();
+        }
+    }
+
+    /// Closes the innermost [`begin_layer`](Self::begin_layer) and composites
+    /// the captured layer onto the previous target with the layer's declared
+    /// effects, honoring the outer scissor and composite operation.
+    /// Unbalanced calls are ignored.
+    pub fn end_layer(&mut self) {
+        let Some(record) = self.layers.pop() else {
+            return;
+        };
+        self.restore();
+        self.set_render_target(record.previous_target);
+        let Some(image) = record.image else {
+            return; // pass-through layer: nothing captured
+        };
+
+        // Run the filter chain, if any. Orientation bookkeeping per the chain
+        // contract: the capture holds flipped storage; the chain flips
+        // storage-parity exactly once, so the filtered result is stored
+        // upright and must be sampled WITHOUT the FLIP_Y flag the raw capture
+        // needs.
+        let source = if record.effects.filters.is_empty() {
+            image
+        } else {
+            match self.acquire_transient_image(record.width, record.height, ImageFlags::PREMULTIPLIED) {
+                Ok(filtered) => {
+                    self.filter_image_chain(filtered, &record.effects.filters, image);
+                    filtered
+                }
+                // Degrade to the unfiltered layer rather than dropping content.
+                Err(_) => image,
+            }
+        };
+
+        let alpha = record.outer_alpha * record.effects.opacity;
+        if alpha <= 0.0 {
+            return;
+        }
+        let (minx, miny) = record.origin;
+        let tint = Color::rgbaf(1.0, 1.0, 1.0, alpha);
+        let mut layer_paint =
+            Paint::image_tint(source, minx, miny, record.width as f32, record.height as f32, 0.0, tint);
+        layer_paint.set_anti_alias(false);
+
+        // Composite in plain device space at the captured origin; the state
+        // restored above supplies the outer scissor and composite operation.
+        let saved_transform = self.state().transform;
+        let saved_alpha = self.state().alpha;
+        let saved_shadow = self.state().shadow_color;
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+
+        let mut layer_rect = Path::new();
+        layer_rect.rect(minx, miny, record.width as f32, record.height as f32);
+        self.fill_path_internal(&layer_rect, &layer_paint.flavor, false, FillRule::NonZero);
+
+        self.state_mut().transform = saved_transform;
+        self.state_mut().alpha = saved_alpha;
+        self.state_mut().shadow_color = saved_shadow;
     }
 
     // Transforms
@@ -4420,6 +4641,48 @@ fn layout_stores_the_run_baseline() {
             layout.baseline()
         );
     }
+}
+
+/// Layer backing stores are bounded by the scissor rect plus declared blur
+/// reach - the memory rule that keeps nested layers from allocating
+/// full-canvas images. Pass-through degradation keeps begin/end balanced.
+#[cfg(test)]
+#[test]
+fn layer_bounds_follow_the_scissor() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(800, 600, 1.0);
+
+    // Unscissored: the layer spans the canvas.
+    canvas.begin_layer(&LayerEffects::new());
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (800, 600));
+    canvas.end_layer();
+
+    // A rect scissor bounds the layer to its size.
+    canvas.save();
+    canvas.scissor(100.0, 50.0, 120.0, 80.0);
+    canvas.begin_layer(&LayerEffects::new());
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (120, 80));
+    canvas.end_layer();
+
+    // Declaring a blur pads the store by the kernel reach (3*sigma + 2).
+    canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 4.0 }]));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (120 + 2 * 14, 80 + 2 * 14));
+    canvas.end_layer();
+    canvas.restore();
+
+    // Two plain layers cost one transient each; the blurred layer costs its
+    // capture, the filtered target, and the chain's single ping-pong scratch.
+    assert_eq!(canvas.transient_images.len(), 5);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transient_images.len(), 0);
+
+    // Unbalanced end_layer is ignored.
+    canvas.end_layer();
 }
 
 /// Chain execution stays within the femto budget: any run of color matrices
