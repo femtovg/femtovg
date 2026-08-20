@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added arbitrary-path clipping: `Canvas::clip_path(path, fill_rule)`
+  intersects the clip region with any path under the current transform -
+  Canvas 2D `clip()` / SVG `clip-path` semantics with the `clip-rule`
+  respected - scoped by `save()`/`restore()` like the rest of the state. The
+  clip lives in a reserved bit of the stencil attachment both backends
+  already carry, so it costs no textures, no allocations, and no render-pass
+  breaks; clip-free rendering is untouched. Clip edges are hard
+  (single-sample); antialiased clip boundaries are a follow-up.
+
 - Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha
   by a mask image's coverage - luminance-derived (SVG `mask`'s default, via
   the new `ImageFilter::luminance_to_alpha()`) or the mask's own alpha -

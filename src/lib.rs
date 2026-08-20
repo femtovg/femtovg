@@ -279,6 +279,9 @@ struct State {
     transform: Transform2D,
     scissor: Scissor,
     alpha: f32,
+    // How many clip_path() entries this state level owns; restore() pops the
+    // clip stack back to the saved depth and replays the survivors.
+    clip_depth: usize,
     // Canvas 2D drop-shadow attributes. Defaults match the HTML spec: a fully
     // transparent shadow color (which disables shadows entirely), zero blur and
     // zero offset. See `Canvas::set_shadow_color` and friends.
@@ -299,6 +302,7 @@ impl Default for State {
             shadow_color: Color::rgbaf(0.0, 0.0, 0.0, 0.0),
             shadow_blur: 0.0,
             shadow_offset: [0.0, 0.0],
+            clip_depth: 0,
         }
     }
 }
@@ -329,6 +333,17 @@ pub struct Canvas<T: Renderer> {
     transient_images: Vec<ImageId>,
     // Open layers from begin_layer(), innermost last.
     layers: Vec<LayerRecord>,
+    // The active clip_path() stack (innermost last) and the render target it
+    // was armed on; commands to other targets are not clipped.
+    clip_stack: Vec<ClipEntry>,
+    clip_target: RenderTarget,
+}
+
+#[derive(Clone, Debug)]
+struct ClipEntry {
+    path: Path,
+    fill_rule: FillRule,
+    transform: Transform2D,
 }
 
 /// Effects applied to a layer when [`Canvas::end_layer`] composites it back.
@@ -495,6 +510,8 @@ where
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
             layers: Vec::new(),
+            clip_stack: Vec::new(),
+            clip_target: RenderTarget::Screen,
         };
 
         canvas.save();
@@ -526,6 +543,8 @@ where
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
             layers: Vec::new(),
+            clip_stack: Vec::new(),
+            clip_target: RenderTarget::Screen,
         };
 
         canvas.save();
@@ -637,6 +656,11 @@ where
             self.state_stack.pop();
         } else {
             self.reset();
+        }
+        let depth = self.state().clip_depth;
+        if self.clip_stack.len() > depth {
+            self.clip_stack.truncate(depth);
+            self.replay_clip_stack();
         }
     }
 
@@ -757,6 +781,13 @@ where
     }
 
     fn append_cmd(&mut self, cmd: Command) {
+        let mut cmd = cmd;
+        if !matches!(
+            cmd.cmd_type,
+            CommandType::ClipFill | CommandType::ClipReset { .. } | CommandType::SetRenderTarget(_)
+        ) {
+            cmd.clip_active = !self.clip_stack.is_empty() && self.current_render_target == self.clip_target;
+        }
         self.commands.push(cmd);
     }
 
@@ -1307,6 +1338,103 @@ where
         layer
     }
 
+    /// Intersects the current clip region with `path` under the current
+    /// transform, using `fill_rule` as the clip-rule - Canvas 2D `clip()` /
+    /// SVG `clip-path` semantics. Subsequent drawing on this render target is
+    /// limited to the intersection of every active clip. `save()` /
+    /// [`restore`](Self::restore) scope clips like the rest of the state:
+    /// restoring pops the clips taken since the matching save and replays the
+    /// survivors.
+    ///
+    /// The clip lives in a reserved bit of the stencil attachment both
+    /// backends already carry for concave fills, so it costs no textures, no
+    /// allocations, and no render-pass breaks: winding for the clip path is
+    /// accumulated only where the previous clip bit is set (nesting
+    /// intersects for free) and two bounded quads resolve the new bit.
+    /// Clip-free rendering is untouched - the plane is armed by the first
+    /// `clip_path` and disarmed when the last clip is restored. Clip edges
+    /// are hard (single-sample); antialiased clip boundaries are a documented
+    /// follow-up.
+    pub fn clip_path(&mut self, path: &Path, fill_rule: FillRule) {
+        if self.clip_stack.is_empty() {
+            self.clip_target = self.current_render_target;
+            self.emit_clip_reset(true);
+        } else if self.current_render_target != self.clip_target {
+            // One clip context per target: ignore rather than corrupt.
+            return;
+        }
+        let transform = self.state().transform;
+        self.emit_clip_fill(path, fill_rule, &transform);
+        self.clip_stack.push(ClipEntry {
+            path: path.clone(),
+            fill_rule,
+            transform,
+        });
+        self.state_mut().clip_depth = self.clip_stack.len();
+    }
+
+    /// Re-establishes the stencil clip plane after entries were popped:
+    /// disarm entirely when none survive, otherwise reset to visible and
+    /// re-intersect the survivors (a few stencil-only draws, no color work).
+    fn replay_clip_stack(&mut self) {
+        if self.clip_stack.is_empty() {
+            self.emit_clip_reset(false);
+            return;
+        }
+        self.emit_clip_reset(true);
+        let entries = self.clip_stack.clone();
+        for entry in &entries {
+            self.emit_clip_fill(&entry.path, entry.fill_rule, &entry.transform);
+        }
+    }
+
+    fn emit_clip_reset(&mut self, visible: bool) {
+        let mut cmd = Command::new(CommandType::ClipReset { visible });
+        let offset = self.verts.len();
+        let (w, h) = (self.width as f32, self.height as f32);
+        self.verts.push(Vertex::new(0.0, h, 0.5, 1.0));
+        self.verts.push(Vertex::new(w, h, 0.5, 1.0));
+        self.verts.push(Vertex::new(0.0, 0.0, 0.5, 1.0));
+        self.verts.push(Vertex::new(w, 0.0, 0.5, 1.0));
+        cmd.triangles_verts = Some((offset, 4));
+        self.append_cmd(cmd);
+    }
+
+    fn emit_clip_fill(&mut self, path: &Path, fill_rule: FillRule, transform: &Transform2D) {
+        let mut path_cache = path.cache(transform, self.tess_tol, self.dist_tol);
+        // No fringe: the clip edge is a hard stencil edge.
+        path_cache.expand_fill(0.0, LineJoin::Miter, 2.4);
+
+        let mut cmd = Command::new(CommandType::ClipFill);
+        cmd.fill_rule = fill_rule;
+
+        let mut offset = self.verts.len();
+        cmd.drawables.reserve_exact(path_cache.contours.len());
+        for contour in &path_cache.contours {
+            let mut drawable = Drawable::default();
+            if !contour.fill.is_empty() {
+                drawable.fill_verts = Some((offset, contour.fill.len()));
+                self.verts.extend_from_slice(&contour.fill);
+                offset += contour.fill.len();
+            }
+            cmd.drawables.push(drawable);
+        }
+
+        // Resolve quad over the path bounds, padded a pixel for the raster
+        // edge. Quad 1 must reach every pixel whose clip bit may clear -
+        // which is the WHOLE previously-visible region, not just the new
+        // path's bounds - so it spans the canvas.
+        let (w, h) = (self.width as f32, self.height as f32);
+        let quad = self.verts.len();
+        self.verts.push(Vertex::new(0.0, h, 0.5, 1.0));
+        self.verts.push(Vertex::new(w, h, 0.5, 1.0));
+        self.verts.push(Vertex::new(0.0, 0.0, 0.5, 1.0));
+        self.verts.push(Vertex::new(w, 0.0, 0.5, 1.0));
+        cmd.triangles_verts = Some((quad, 4));
+
+        self.append_cmd(cmd);
+    }
+
     // Transforms
 
     /// Resets current transform to a identity matrix.
@@ -1575,10 +1703,14 @@ where
 
         // Detect if this path fill is in fact just an unclipped image copy
 
-        if let (Some(path_rect), Some(scissor_rect), true) = (
+        if let (Some(path_rect), Some(scissor_rect), true, true) = (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
+            // The unclipped blit bypasses the stencil clip plane (the #292
+            // rounded-scissor precedent): route clipped blits through the
+            // normal masked path.
+            self.clip_stack.is_empty() || self.current_render_target != self.clip_target,
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
