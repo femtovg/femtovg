@@ -1310,6 +1310,20 @@ where
         coverage_paint.set_anti_alias(false);
         self.fill_path_internal(&full_rect, &coverage_paint.flavor, false, FillRule::NonZero);
 
+        // The luminanceToAlpha matrix runs unpremultiplied (feColorMatrix
+        // semantics), so `converted` holds the luminance of the STRAIGHT
+        // color - a white pixel fading to transparent keeps coverage 1.
+        // SVG mask coverage is luminance x alpha, so multiply the mask's
+        // own alpha in with a second DestinationIn draw of the normalized
+        // mask, whose sampling convention the alpha-kind case already
+        // proves out. Skipped when the luminance conversion degraded to
+        // `normalized` itself: that path applied alpha once already.
+        if matches!(mask.kind, MaskKind::Luminance) && coverage != normalized {
+            let mut alpha_paint = Paint::image(normalized, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+            alpha_paint.set_anti_alias(false);
+            self.fill_path_internal(&full_rect, &alpha_paint.flavor, false, FillRule::NonZero);
+        }
+
         self.restore();
         self.set_render_target(previous_target);
         layer
