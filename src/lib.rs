@@ -865,7 +865,10 @@ where
     ///
     /// The target ends up in the same orientation convention as a single
     /// color-matrix [`filter_image`](Self::filter_image) call: content stored
-    /// vertically flipped, sampled upright via [`ImageFlags::FLIP_Y`]. An
+    /// vertically flipped, sampled upright via [`ImageFlags::FLIP_Y`], and
+    /// carrying premultiplied alpha - create chain targets with
+    /// `ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y` so semi-transparent
+    /// results composite once, not twice. An
     /// empty list degrades to a plain copy under that same convention. A
     /// chain whose flip parity comes out even (for example a lone blur) pays
     /// one extra identity pass for that uniformity; blur-only callers who
@@ -925,7 +928,12 @@ where
             } else {
                 let slot = i % 2;
                 if scratch[slot].is_none() {
-                    let Ok(id) = self.acquire_transient_image(width, height, ImageFlags::empty()) else {
+                    // Scratches hold premultiplied filter output; the flag
+                    // keeps every consumer (filter passes and composites)
+                    // reading them under the same alpha convention. Without
+                    // it, semi-transparent content is premultiplied a second
+                    // time at each read and darkens per pass.
+                    let Ok(id) = self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) else {
                         return;
                     };
                     scratch[slot] = Some(id);

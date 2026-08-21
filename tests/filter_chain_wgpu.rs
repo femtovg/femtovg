@@ -66,7 +66,12 @@ fn run_chain(
         )
         .expect("source image");
     let filtered = canvas
-        .create_image_empty(W as usize, H as usize, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
+        .create_image_empty(
+            W as usize,
+            H as usize,
+            PixelFormat::Rgba8,
+            ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED,
+        )
         .expect("target image");
     canvas.filter_image_chain(filtered, chain, source);
 
@@ -216,6 +221,31 @@ fn chain_orientation_is_stable_across_shapes() {
             "chain #{i}: bottom should stay blue, got {bottom:?} - a swapped pair means a mirrored chain"
         );
     }
+}
+
+/// Semi-transparent content keeps its color through multi-pass chains: the
+/// scratches and target carry the premultiplied convention, so alpha is not
+/// re-applied at every pass boundary (which darkened content per pass).
+#[test]
+fn semitransparent_content_survives_chains() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // Premultiplied half-alpha green.
+    let src = solid(femtovg::rgb::RGBA8::new(20, 90, 20, 128));
+    let out = run_chain(
+        &device,
+        &queue,
+        &src,
+        &[ImageFilter::brightness(1.0), ImageFilter::GaussianBlur { sigma: 1.0 }],
+    );
+    let center = px(&out, 16, 16);
+    // Over white: 0.5*(40,180,40) + 0.5*255 = (147, 217, 147).
+    assert!(
+        close(center[0], 147, 8) && close(center[1], 217, 8) && close(center[2], 147, 8),
+        "half-alpha green through a two-pass chain should stay green, got {center:?}"
+    );
 }
 
 /// An alpha-amplifying matrix feeding a blur must clamp between passes
