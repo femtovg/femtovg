@@ -407,3 +407,75 @@ fn masked_filtered_layer_keeps_orientation() {
         "bottom must be masked out, got {bottom:?} - blue here means the mask or content mirrored"
     );
 }
+
+/// A luminance mask's coverage is luminance x alpha (SVG mask semantics):
+/// white fading to transparent must fade the layer out, not hold it at
+/// full coverage the way a straight luminanceToAlpha conversion would.
+/// Regression for background-noodles-left-dark.svg, whose white->transparent
+/// gradient mask was ignored entirely.
+#[test]
+fn luminance_mask_multiplies_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        canvas.clear_rect(0, 0, W, H, Color::white());
+
+        // Canvas-sized white->transparent vertical fade, captured mid-frame
+        // the way SVG integrations rasterize <mask> content.
+        let mask = canvas
+            .create_image_empty(
+                W as usize,
+                H as usize,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, W, H, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        canvas.reset_transform();
+        let mut r = Path::new();
+        r.rect(0.0, 0.0, W as f32, H as f32);
+        let fade = Paint::linear_gradient(
+            0.0,
+            0.0,
+            0.0,
+            H as f32,
+            Color::white(),
+            Color::rgbaf(1.0, 1.0, 1.0, 0.0),
+        );
+        canvas.fill_path(&r, &fade);
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            0.0,
+            0.0,
+            W as f32,
+            H as f32,
+        ));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.end_layer();
+    });
+    // Top row: coverage ~1 -> red survives.
+    assert!(
+        close(px(&out, 32, 1)[0], 255) && close(px(&out, 32, 1)[1], 0),
+        "top should stay red, got {:?}",
+        px(&out, 32, 1)
+    );
+    // Midpoint: coverage ~0.5 -> half red over white.
+    let mid = px(&out, 32, H / 2);
+    assert!(
+        (mid[1] as i32 - 128).abs() <= 12 && close(mid[0], 255),
+        "midpoint should be half-faded red, got {mid:?}"
+    );
+    // Bottom row: coverage ~0 -> white shows through.
+    let bottom = px(&out, 32, H - 1);
+    assert!(bottom[1] > 240, "bottom should fade to white, got {bottom:?}");
+}
