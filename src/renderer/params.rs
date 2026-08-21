@@ -164,8 +164,13 @@ impl Params {
 
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Two-stop endpoints upload straight (unpremultiplied):
+                        // the shader mixes them per fragment and premultiplies
+                        // the result, so transparent stops keep their hue - the
+                        // interpolation Canvas and SVG gradients apply, and the
+                        // same one the multi-stop LUT bakes texel by texel.
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -191,8 +196,10 @@ impl Params {
                 params.feather = *feather;
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Straight endpoints; the shader premultiplies post-mix
+                        // (see the linear-gradient arm).
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -223,8 +230,10 @@ impl Params {
                 params.feather = 1.0f32.max(f);
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Straight endpoints; the shader premultiplies post-mix
+                        // (see the linear-gradient arm).
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -245,8 +254,10 @@ impl Params {
 
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Straight endpoints; the shader premultiplies post-mix
+                        // (see the linear-gradient arm).
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradientConic;
                     }
                     GradientColors::MultiStop { .. } => {
