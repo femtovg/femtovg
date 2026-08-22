@@ -326,7 +326,116 @@ pub struct Canvas<T: Renderer> {
     // Transient offscreen images allocated for drop-shadow passes. They are
     // referenced by deferred draw commands, so they can only be freed once those
     // commands have been submitted to the renderer (i.e. after flush).
-    shadow_images: Vec<ImageId>,
+    transient_images: Vec<ImageId>,
+    // Open layers from begin_layer(), innermost last.
+    layers: Vec<LayerRecord>,
+}
+
+/// Effects applied to a layer when [`Canvas::end_layer`] composites it back.
+///
+/// Declared up front at [`Canvas::begin_layer`] - like Canvas 2D's
+/// `beginLayer(filter)` proposal - so the layer's backing store can be sized
+/// for the effects (a blur needs kernel-reach padding). Construct with
+/// [`LayerEffects::new`] and the builder methods; more effect kinds can be
+/// added without breaking callers.
+#[derive(Clone, Debug, Default)]
+pub struct LayerEffects {
+    opacity: f32,
+    filters: Vec<ImageFilter>,
+    mask: Option<LayerMask>,
+}
+
+/// How a layer mask's coverage is derived from its image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskKind {
+    /// Coverage is the mask content's Rec. 709 relative luminance - SVG
+    /// `mask`'s default `mask-type`.
+    Luminance,
+    /// Coverage is the mask content's own alpha channel.
+    Alpha,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LayerMask {
+    image: ImageId,
+    kind: MaskKind,
+    // Device-space placement of the mask image.
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl LayerEffects {
+    /// No-op effects: full opacity, no filters.
+    pub fn new() -> Self {
+        Self {
+            opacity: 1.0,
+            filters: Vec::new(),
+            mask: None,
+        }
+    }
+
+    /// Sets the group opacity the composite applies to the layer as a whole.
+    ///
+    /// This is SVG group-opacity / Canvas layer semantics: overlapping
+    /// children inside the layer do NOT double-blend; the finished layer is
+    /// faded as one image. Non-finite values are ignored; the value clamps
+    /// to [0, 1].
+    #[must_use]
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        if opacity.is_finite() {
+            self.opacity = opacity.clamp(0.0, 1.0);
+        }
+        self
+    }
+
+    /// Sets an image-filter chain applied to the captured layer before it is
+    /// composited, executing through
+    /// [`filter_image_chain`](Canvas::filter_image_chain) - runs of color
+    /// matrices still fold to one pass.
+    #[must_use]
+    pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
+        self.filters = filters.to_vec();
+        self
+    }
+
+    /// Masks the layer by `image`, placed at the device-space rect
+    /// `(x, y, width, height)`, with coverage derived per `kind` - SVG
+    /// `mask` semantics (`MaskKind::Luminance` is SVG's default mask-type).
+    /// Applied after the filter chain, matching SVG's order for a group
+    /// carrying both `filter` and `mask`. Pixels the mask rect does not
+    /// cover are fully masked out.
+    ///
+    /// The mask image is borrowed, not owned: render mask content into your
+    /// own image (upload or render target - its `ImageFlags` orientation is
+    /// respected) and release it on your own schedule after the flush.
+    #[must_use]
+    pub fn with_mask(mut self, image: ImageId, kind: MaskKind, x: f32, y: f32, width: f32, height: f32) -> Self {
+        self.mask = Some(LayerMask {
+            image,
+            kind,
+            x,
+            y,
+            width,
+            height,
+        });
+        self
+    }
+}
+
+#[derive(Debug)]
+struct LayerRecord {
+    // None marks a pass-through layer (allocation failed or bounds were
+    // degenerate): draws went to the previous target unchanged and end_layer
+    // only rebalances state.
+    image: Option<ImageId>,
+    previous_target: RenderTarget,
+    origin: (f32, f32),
+    width: usize,
+    height: usize,
+    effects: LayerEffects,
+    outer_alpha: f32,
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -384,7 +493,8 @@ where
             tess_tol: 0.25,
             dist_tol: 0.01,
             gradients: GradientStore::new(),
-            shadow_images: Vec::new(),
+            transient_images: Vec::new(),
+            layers: Vec::new(),
         };
 
         canvas.save();
@@ -414,7 +524,8 @@ where
             tess_tol: 0.25,
             dist_tol: 0.01,
             gradients: GradientStore::new(),
-            shadow_images: Vec::new(),
+            transient_images: Vec::new(),
+            layers: Vec::new(),
         };
 
         canvas.save();
@@ -495,7 +606,7 @@ where
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
-        self.release_shadow_images();
+        self.release_transient_images();
         if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
@@ -834,6 +945,388 @@ where
         cmd.triangles_verts = Some((vertex_offset, 6));
 
         self.append_cmd(cmd)
+    }
+
+    /// Acquires a transient offscreen image that is released automatically
+    /// after the next flush. This is the seam a shared render-target pool can
+    /// later drop into; today it creates a fresh image and defers the delete.
+    fn acquire_transient_image(
+        &mut self,
+        width: usize,
+        height: usize,
+        flags: ImageFlags,
+    ) -> Result<ImageId, ErrorKind> {
+        let id = self.create_image_empty(width, height, PixelFormat::Rgba8, flags)?;
+        self.transient_images.push(id);
+        Ok(id)
+    }
+
+    /// Applies a list of image filters as one chain, `filters[0]` first —
+    /// the execution model behind a Canvas `ctx.filter` list
+    /// (`"blur(5px) brightness(1.2)"`) and SVG filter chains.
+    ///
+    /// Runs of adjacent color-matrix filters fold into a single matrix on the
+    /// CPU (see [`ImageFilter::fold_with`]), so any number of consecutive
+    /// color operations costs one GPU pass. Passes that cannot fold ping-pong
+    /// between at most two transient scratch images sized like the source, so
+    /// peak transient memory is twice the source image regardless of chain
+    /// length; the scratches are freed at the next flush. All color work is
+    /// in unpremultiplied sRGB with output clamped to [0, 1] per pass, so an
+    /// alpha-amplifying matrix feeding a blur cannot blow out later passes.
+    ///
+    /// The target ends up in the same orientation convention as a single
+    /// color-matrix [`filter_image`](Self::filter_image) call: content stored
+    /// vertically flipped, sampled upright via [`ImageFlags::FLIP_Y`], and
+    /// carrying premultiplied alpha - create chain targets with
+    /// `ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y` so semi-transparent
+    /// results composite once, not twice. An
+    /// empty list degrades to a plain copy under that same convention. A
+    /// chain whose flip parity comes out even (for example a lone blur) pays
+    /// one extra identity pass for that uniformity; blur-only callers who
+    /// want the single-pass form can call `filter_image` directly.
+    ///
+    /// The chain borrows `source_image` and `target_image` without taking
+    /// ownership - both may be caller-managed or acquired transients (a layer
+    /// capture pass, say, can feed its layer in as `source_image` and keep
+    /// releasing it on its own schedule). Only the internal scratches are
+    /// tied to the flush lifecycle, so composing this under group effects
+    /// adds no copies and no extra retained images.
+    pub fn filter_image_chain(&mut self, target_image: ImageId, filters: &[ImageFilter], source_image: ImageId) {
+        // Fold adjacent color matrices; the folded run costs one pass. The
+        // capacity covers the worst case (nothing folds) plus the possible
+        // parity pass below, so the list never reallocates; ImageFilter is
+        // Copy, so building it never deep-copies anything.
+        let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len() + 1);
+        for filter in filters {
+            if let Some(prev) = passes.last_mut() {
+                if let Some(folded) = prev.fold_with(filter) {
+                    *prev = folded;
+                    continue;
+                }
+            }
+            passes.push(*filter);
+        }
+
+        // Orientation parity: a color-matrix pass flips the image (the
+        // render-target convention), the two-pass Gaussian blur preserves it.
+        // Appending an identity matrix when the flip count is even pins the
+        // documented flipped-storage contract for every chain shape - and
+        // makes the empty list a copy.
+        let flips = passes
+            .iter()
+            .filter(|f| matches!(f, ImageFilter::ColorMatrix { .. }))
+            .count();
+        if flips % 2 == 0 {
+            passes.push(ImageFilter::saturate(1.0));
+        }
+
+        if passes.len() == 1 {
+            self.filter_image(target_image, passes[0], source_image);
+            return;
+        }
+
+        let Ok((width, height)) = self.image_size(source_image) else {
+            return;
+        };
+
+        // Ping-pong between at most two scratches regardless of chain length.
+        let mut scratch: [Option<ImageId>; 2] = [None, None];
+        let mut src = source_image;
+        let last = passes.len() - 1;
+        for (i, filter) in passes.iter().enumerate() {
+            let dst = if i == last {
+                target_image
+            } else {
+                let slot = i % 2;
+                if scratch[slot].is_none() {
+                    // Scratches hold premultiplied filter output; the flag
+                    // keeps every consumer (filter passes and composites)
+                    // reading them under the same alpha convention. Without
+                    // it, semi-transparent content is premultiplied a second
+                    // time at each read and darkens per pass.
+                    let Ok(id) = self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) else {
+                        return;
+                    };
+                    scratch[slot] = Some(id);
+                }
+                scratch[slot].unwrap()
+            };
+            self.filter_image(dst, *filter, src);
+            src = dst;
+        }
+    }
+
+    /// Opens a layer: subsequent drawing is captured into a transient
+    /// offscreen image instead of the current target, until the matching
+    /// [`end_layer`](Self::end_layer) composites the finished layer back with
+    /// `effects` applied - group opacity as ONE fade over the whole layer
+    /// (overlapping children do not double-blend, the SVG group-opacity /
+    /// Canvas 2D `beginLayer()` semantic) and/or an image-filter chain.
+    ///
+    /// The effects are declared here rather than at `end_layer` so the
+    /// backing store can be sized for them: the layer captures the current
+    /// scissor rect (the natural memory bound - set a scissor before opening
+    /// a layer to keep it small) padded by the blur kernel reach when the
+    /// chain contains Gaussian blurs. Content outside that padded rect does
+    /// not survive into the layer, mirroring SVG's filter-region behavior.
+    /// A rotated or rounded scissor cannot be captured as a rect; the layer
+    /// then spans the whole canvas and the scissor keeps clipping normally.
+    ///
+    /// Inside the layer, `global_alpha` resets to 1 (the outer alpha folds
+    /// into the composite), the composite operation resets to source-over,
+    /// and shadows keep working. The composite honors the scissor and
+    /// composite operation in effect at `begin_layer` time. Layers nest;
+    /// each level costs one transient image (plus one more if filtered),
+    /// released at the next flush through the same pool seam the filter
+    /// chain and shadow passes use. When the backing store cannot be
+    /// allocated (degenerate or absurd bounds), the layer degrades to a
+    /// pass-through: drawing continues on the current target and `end_layer`
+    /// only rebalances state.
+    pub fn begin_layer(&mut self, effects: &LayerEffects) {
+        let state = *self.state();
+        let (canvas_w, canvas_h) = (self.width as f32, self.height as f32);
+
+        // Blur reach padding, matching the shadow pass: 3 sigma covers
+        // >99.7% of the kernel, clamped to the in-shader sigma bound.
+        let max_sigma = effects
+            .filters
+            .iter()
+            .map(|f| match f {
+                ImageFilter::GaussianBlur { sigma } if sigma.is_finite() && *sigma > 0.0 => sigma.min(8.0),
+                _ => 0.0,
+            })
+            .fold(0.0f32, f32::max);
+        let pad = if max_sigma > 0.0 {
+            (max_sigma * 3.0).ceil() + 2.0
+        } else {
+            0.0
+        };
+
+        let (keep_scissor, rect) = match state.scissor.as_rect(canvas_w, canvas_h) {
+            Some(rect) => (false, rect),
+            // Rounded/rotated scissors clip per fragment inside the layer.
+            None => (true, Rect::new(0.0, 0.0, canvas_w, canvas_h)),
+        };
+        let minx = (rect.x - pad).floor().max(-pad);
+        let miny = (rect.y - pad).floor().max(-pad);
+        let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
+        let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad);
+        let width = (maxx - minx) as usize;
+        let height = (maxy - miny) as usize;
+
+        let image = if width == 0 || height == 0 || width > 8192 || height > 8192 {
+            None
+        } else {
+            // Render-target storage is premultiplied and vertically flipped;
+            // FLIP_Y makes the unfiltered composite sample it upright.
+            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y)
+                .ok()
+        };
+
+        self.layers.push(LayerRecord {
+            image,
+            previous_target: self.current_render_target,
+            origin: (minx, miny),
+            width,
+            height,
+            effects: effects.clone(),
+            outer_alpha: state.alpha,
+        });
+
+        self.save();
+        let Some(image) = image else {
+            return; // pass-through layer: keep drawing on the current target
+        };
+        self.set_render_target(RenderTarget::Image(image));
+        self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+
+        // Shift device space so the captured rect's origin lands on (0, 0),
+        // exactly like the shadow pass maps its padded bbox.
+        let mut layer_transform = Transform2D::translation(-minx, -miny);
+        layer_transform.premultiply(&state.transform);
+        self.state_mut().transform = layer_transform;
+        self.state_mut().alpha = 1.0;
+        self.state_mut().composite_operation = CompositeOperationState::default();
+        if !keep_scissor {
+            self.state_mut().scissor = Scissor::default();
+        }
+    }
+
+    /// Closes the innermost [`begin_layer`](Self::begin_layer) and composites
+    /// the captured layer onto the previous target with the layer's declared
+    /// effects, honoring the outer scissor and composite operation.
+    /// Unbalanced calls are ignored.
+    pub fn end_layer(&mut self) {
+        let Some(record) = self.layers.pop() else {
+            return;
+        };
+        self.restore();
+        self.set_render_target(record.previous_target);
+        let Some(image) = record.image else {
+            return; // pass-through layer: nothing captured
+        };
+
+        // Run the filter chain, if any. Orientation bookkeeping per the chain
+        // contract: the capture holds flipped storage; the chain flips
+        // storage-parity exactly once, so the filtered result is stored
+        // upright and must be sampled WITHOUT the FLIP_Y flag the raw capture
+        // needs.
+        let source = if record.effects.filters.is_empty() {
+            image
+        } else {
+            match self.acquire_transient_image(record.width, record.height, ImageFlags::PREMULTIPLIED) {
+                Ok(filtered) => {
+                    self.filter_image_chain(filtered, &record.effects.filters, image);
+                    filtered
+                }
+                // Degrade to the unfiltered layer rather than dropping content.
+                Err(_) => image,
+            }
+        };
+
+        let (minx, miny) = record.origin;
+
+        // Apply the mask (after the filter chain, SVG's order) by multiplying
+        // the layer's alpha with the mask coverage via a DestinationIn draw
+        // into the layer image. Orientation bookkeeping: draws into an image
+        // target land in flipped storage, so a fragment at draw-space row 0
+        // writes the storage row that holds the RAW capture's top but the
+        // FILTERED result's bottom (the chain flipped storage parity once).
+        // The normalized mask therefore samples upright for the raw capture
+        // and flipped for the filtered one; both variants are freshly
+        // acquired transients, so the flag is picked per case.
+        let source = if let Some(mask) = record.effects.mask {
+            self.apply_layer_mask(source, &record, mask, source != image)
+        } else {
+            source
+        };
+
+        let alpha = record.outer_alpha * record.effects.opacity;
+        if alpha <= 0.0 {
+            return;
+        }
+        let tint = Color::rgbaf(1.0, 1.0, 1.0, alpha);
+        let mut layer_paint =
+            Paint::image_tint(source, minx, miny, record.width as f32, record.height as f32, 0.0, tint);
+        layer_paint.set_anti_alias(false);
+
+        // Composite in plain device space at the captured origin; the state
+        // restored above supplies the outer scissor and composite operation.
+        let saved_transform = self.state().transform;
+        let saved_alpha = self.state().alpha;
+        let saved_shadow = self.state().shadow_color;
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+
+        let mut layer_rect = Path::new();
+        layer_rect.rect(minx, miny, record.width as f32, record.height as f32);
+        self.fill_path_internal(&layer_rect, &layer_paint.flavor, false, FillRule::NonZero);
+
+        self.state_mut().transform = saved_transform;
+        self.state_mut().alpha = saved_alpha;
+        self.state_mut().shadow_color = saved_shadow;
+    }
+
+    /// Multiplies `layer`'s alpha by the mask coverage, in layer space.
+    /// `layer_is_filtered` selects the storage-parity handling documented at
+    /// the call site. Returns the masked image (always `layer` itself; the
+    /// intermediates are transients).
+    fn apply_layer_mask(
+        &mut self,
+        layer: ImageId,
+        record: &LayerRecord,
+        mask: LayerMask,
+        layer_is_filtered: bool,
+    ) -> ImageId {
+        let (width, height) = (record.width, record.height);
+        let (minx, miny) = record.origin;
+
+        // Normalize the mask into layer space: draw it (its own ImageFlags
+        // decide upright sampling) into a layer-sized transient, so caller
+        // storage conventions never leak into the parity math below.
+        let normalized_flags = if layer_is_filtered {
+            // Draw-space rows invert against upright (filtered) storage;
+            // leaving the flag off makes the DestinationIn draw line up.
+            ImageFlags::PREMULTIPLIED
+        } else {
+            ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+        };
+        let Ok(normalized) = self.acquire_transient_image(width, height, normalized_flags) else {
+            return layer; // degrade: unmasked rather than dropped
+        };
+        let previous_target = self.current_render_target;
+        self.save();
+        self.set_render_target(RenderTarget::Image(normalized));
+        self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        self.state_mut().scissor = Scissor::default();
+        self.state_mut().composite_operation = CompositeOperationState::default();
+        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        let mut mask_rect = Path::new();
+        mask_rect.rect(mask.x - minx, mask.y - miny, mask.width, mask.height);
+        let mut mask_paint = Paint::image(
+            mask.image,
+            mask.x - minx,
+            mask.y - miny,
+            mask.width,
+            mask.height,
+            0.0,
+            1.0,
+        );
+        mask_paint.set_anti_alias(false);
+        self.fill_path_internal(&mask_rect, &mask_paint.flavor, false, FillRule::NonZero);
+
+        // Luminance masks convert content to alpha coverage; the color-matrix
+        // pass flips storage parity once, so the converted image needs the
+        // opposite sampling flag from the normalized one.
+        let coverage = match mask.kind {
+            MaskKind::Alpha => normalized,
+            MaskKind::Luminance => {
+                let converted_flags = if layer_is_filtered {
+                    ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+                } else {
+                    ImageFlags::PREMULTIPLIED
+                };
+                match self.acquire_transient_image(width, height, converted_flags) {
+                    Ok(converted) => {
+                        self.filter_image(converted, ImageFilter::luminance_to_alpha(), normalized);
+                        converted
+                    }
+                    Err(_) => normalized, // degrade to alpha-kind coverage
+                }
+            }
+        };
+
+        // layer.alpha *= coverage.alpha across the whole layer; pixels the
+        // mask rect does not cover are transparent in `coverage`, so they
+        // mask out fully.
+        self.set_render_target(RenderTarget::Image(layer));
+        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::DestinationIn);
+        let mut full_rect = Path::new();
+        full_rect.rect(0.0, 0.0, width as f32, height as f32);
+        let mut coverage_paint = Paint::image(coverage, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+        coverage_paint.set_anti_alias(false);
+        self.fill_path_internal(&full_rect, &coverage_paint.flavor, false, FillRule::NonZero);
+
+        // The luminanceToAlpha matrix runs unpremultiplied (feColorMatrix
+        // semantics), so `converted` holds the luminance of the STRAIGHT
+        // color - a white pixel fading to transparent keeps coverage 1.
+        // SVG mask coverage is luminance x alpha, so multiply the mask's
+        // own alpha in with a second DestinationIn draw of the normalized
+        // mask, whose sampling convention the alpha-kind case already
+        // proves out. Skipped when the luminance conversion degraded to
+        // `normalized` itself: that path applied alpha once already.
+        if matches!(mask.kind, MaskKind::Luminance) && coverage != normalized {
+            let mut alpha_paint = Paint::image(normalized, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
+            alpha_paint.set_anti_alias(false);
+            self.fill_path_internal(&full_rect, &alpha_paint.flavor, false, FillRule::NonZero);
+        }
+
+        self.restore();
+        self.set_render_target(previous_target);
+        layer
     }
 
     // Transforms
@@ -1618,16 +2111,16 @@ where
 
         // The transient images are referenced by deferred draw commands, so they
         // can only be freed after the next flush. Queue them for later cleanup.
-        self.shadow_images.push(coverage_image);
+        self.transient_images.push(coverage_image);
         if let Some(blurred_image) = blurred_image {
-            self.shadow_images.push(blurred_image);
+            self.transient_images.push(blurred_image);
         }
     }
 
     /// Frees offscreen images allocated by drop-shadow passes during the frame.
     /// Called after the renderer has consumed the frame's commands.
-    fn release_shadow_images(&mut self) {
-        for id in std::mem::take(&mut self.shadow_images) {
+    fn release_transient_images(&mut self) {
+        for id in std::mem::take(&mut self.transient_images) {
             self.images.remove(&mut self.renderer, id);
         }
     }
@@ -2451,7 +2944,7 @@ where
         self.verts.clear();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
-        self.release_shadow_images();
+        self.release_transient_images();
         if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
@@ -4319,6 +4812,114 @@ fn layout_stores_the_run_baseline() {
             layout.baseline()
         );
     }
+}
+
+/// Layer backing stores are bounded by the scissor rect plus declared blur
+/// reach - the memory rule that keeps nested layers from allocating
+/// full-canvas images. Pass-through degradation keeps begin/end balanced.
+#[cfg(test)]
+#[test]
+fn layer_bounds_follow_the_scissor() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(800, 600, 1.0);
+
+    // Unscissored: the layer spans the canvas.
+    canvas.begin_layer(&LayerEffects::new());
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (800, 600));
+    canvas.end_layer();
+
+    // A rect scissor bounds the layer to its size.
+    canvas.save();
+    canvas.scissor(100.0, 50.0, 120.0, 80.0);
+    canvas.begin_layer(&LayerEffects::new());
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (120, 80));
+    canvas.end_layer();
+
+    // Declaring a blur pads the store by the kernel reach (3*sigma + 2).
+    canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 4.0 }]));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!((record.width, record.height), (120 + 2 * 14, 80 + 2 * 14));
+    canvas.end_layer();
+    canvas.restore();
+
+    // Two plain layers cost one transient each; the blurred layer costs its
+    // capture, the filtered target, and the chain's single ping-pong scratch.
+    assert_eq!(canvas.transient_images.len(), 5);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transient_images.len(), 0);
+
+    // Unbalanced end_layer is ignored.
+    canvas.end_layer();
+}
+
+/// Chain execution stays within the femto budget: any run of color matrices
+/// folds to a single pass (zero transient images), and longer mixed chains
+/// ping-pong between exactly two transient scratches however long they get -
+/// the WebKit-600MB-intermediates class (bug 218422) made into an invariant.
+#[cfg(test)]
+#[test]
+fn filter_chain_bounds_transient_images() {
+    use crate::ImageFilter;
+    let make = || {
+        let renderer = RecordingRenderer::default();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        let src = canvas
+            .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        let dst = canvas
+            .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
+            .unwrap();
+        (canvas, src, dst)
+    };
+
+    // Five color operations fold into ONE pass: no scratches at all.
+    let (mut canvas, src, dst) = make();
+    canvas.filter_image_chain(
+        dst,
+        &[
+            ImageFilter::sepia(0.5),
+            ImageFilter::brightness(1.2),
+            ImageFilter::saturate(0.7),
+            ImageFilter::hue_rotate(0.3),
+            ImageFilter::contrast(1.1),
+        ],
+        src,
+    );
+    assert_eq!(
+        canvas.transient_images.len(),
+        0,
+        "folded color run must not allocate scratches"
+    );
+
+    // A long mixed chain (blurs break the folds) caps at two scratches.
+    let (mut canvas, src, dst) = make();
+    canvas.filter_image_chain(
+        dst,
+        &[
+            ImageFilter::GaussianBlur { sigma: 1.0 },
+            ImageFilter::sepia(1.0),
+            ImageFilter::GaussianBlur { sigma: 2.0 },
+            ImageFilter::invert(1.0),
+            ImageFilter::GaussianBlur { sigma: 1.5 },
+            ImageFilter::brightness(1.3),
+        ],
+        src,
+    );
+    assert_eq!(
+        canvas.transient_images.len(),
+        2,
+        "mixed chains ping-pong between exactly two scratches"
+    );
+
+    // The empty chain is a single identity pass - a copy, no scratches.
+    let (mut canvas, src, dst) = make();
+    canvas.filter_image_chain(dst, &[], src);
+    assert_eq!(canvas.transient_images.len(), 0);
 }
 
 /// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables

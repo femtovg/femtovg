@@ -684,6 +684,12 @@ impl OpenGl {
         );
         blur_params.shader_type = ShaderType::FilterImage;
 
+        // Degenerate standard deviations must stay pass-through rather than
+        // poisoning the pass: sigma 0 (or negative / NaN) divides the Gaussian
+        // coefficient by zero and blanks the output, and a huge sigma must clamp
+        // to the same in-shader bound the loop uses so the coefficients and the
+        // iteration count agree. Near-zero renders as a visually exact copy.
+        let sigma = if sigma > 0.0 { sigma.min(8.0) } else { 1e-3 };
         let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
         let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
         let gauss_coeff_z = gauss_coeff_y * gauss_coeff_y;
