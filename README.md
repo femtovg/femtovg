@@ -45,6 +45,7 @@ Run with `cargo run --example text`
 * [x] Fill rules - EvenOdd/NonZero
 * [x] Rectangle scissoring
 * [x] Composition modes (SourceOver, SourceIn, SourceOut, Atop, etc..)
+* [x] Image filters - gaussian blur and color matrices (the CSS filter functions), chained in a single call
 * [x] Global alpha
 * [x] Text filling and stroking
 * [x] Text shaping
