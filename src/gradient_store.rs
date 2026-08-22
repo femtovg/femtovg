@@ -142,5 +142,66 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
             break;
         }
     }
+
+    // Pad from the last stop to the end of the ramp, mirroring the head pad
+    // above: SVG `spreadMethod="pad"` and Canvas gradients clamp to the last
+    // stop's color. Without this the texels past a last stop below 1.0 were
+    // never written - transparent on a fresh texture, stale on a recycled one.
+    let last_stop = gradient.get(gradient.len() - 1);
+    if last_stop.0 < 1.0 {
+        gradient_span(&mut dest, last_stop.1, last_stop.1, last_stop.0, 1.0);
+    }
     imgref::Img::new(dest.to_vec(), 256, 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paint::GradientColors;
+
+    fn lut(stops: Vec<(f32, Color)>) -> Vec<rgb::RGBA8> {
+        match GradientColors::from_stops(stops) {
+            GradientColors::MultiStop { stops } => linear_gradient_stops(&stops).buf().to_vec(),
+            GradientColors::TwoStop { .. } => panic!("expected a multi-stop gradient"),
+        }
+    }
+
+    /// SVG `spreadMethod="pad"` / Canvas semantics: past the last stop the
+    /// ramp holds the last stop's color. Regression for the Firefox logo
+    /// (splash-logo.svg, mr-settodefault.svg), whose 4-stop flame gradient
+    /// ends at offset 0.70 and rendered its last 30% unwritten.
+    #[test]
+    fn ramp_pads_past_the_last_stop() {
+        let last = Color::rgb(227, 21, 135);
+        let texels = lut(vec![
+            (0.05, Color::rgb(255, 244, 79)),
+            (0.37, Color::rgb(255, 152, 14)),
+            (0.53, Color::rgb(255, 54, 71)),
+            (0.70, last),
+        ]);
+        for i in [180usize, 200, 230, 255] {
+            let t = texels[i];
+            assert_eq!(
+                (t.r, t.g, t.b, t.a),
+                (227, 21, 135, 255),
+                "texel {i} must hold the last stop's color"
+            );
+        }
+        // The head pad keeps working too.
+        let head = texels[0];
+        assert_eq!((head.r, head.g, head.b, head.a), (255, 244, 79, 255));
+    }
+
+    /// A transparent last stop pads transparent (premultiplied zero), not
+    /// black.
+    #[test]
+    fn transparent_last_stop_pads_transparent() {
+        let texels = lut(vec![
+            (0.0, Color::rgb(255, 0, 0)),
+            (0.4, Color::rgb(0, 255, 0)),
+            (0.6, Color::rgba(0, 0, 255, 0)),
+        ]);
+        let t = texels[255];
+        assert_eq!((t.r, t.g, t.b, t.a), (0, 0, 0, 0));
+    }
 }
