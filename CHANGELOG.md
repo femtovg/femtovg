@@ -3,6 +3,42 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added arbitrary-path clipping: `Canvas::clip_path(path, fill_rule)`
+  intersects the clip region with any path under the current transform -
+  Canvas 2D `clip()` / SVG `clip-path` semantics with the `clip-rule`
+  respected - scoped by `save()`/`restore()` like the rest of the state. The
+  clip lives in a reserved bit of the stencil attachment both backends
+  already carry, so it costs no textures, no allocations, and no render-pass
+  breaks; clip-free rendering is untouched. Clip edges are hard
+  (single-sample); antialiased clip boundaries are a follow-up.
+
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha
+  by a mask image's coverage - luminance-derived (SVG `mask`'s default, via
+  the new `ImageFilter::luminance_to_alpha()`) or the mask's own alpha -
+  applied after the layer's filter chain, matching SVG's order for a group
+  carrying both `filter` and `mask`.
+- Added layers: `Canvas::begin_layer()` / `end_layer()` capture a group of
+  draws into a bounded transient image and composite it back with declared
+  `LayerEffects` - group opacity that fades the group as one image
+  (overlapping children no longer double-blend, the SVG group-opacity
+  semantic) and/or an image-filter chain. Effects are declared at
+  `begin_layer` so the backing store is sized to the current scissor rect
+  plus the declared blur reach, not the whole canvas.
+
+- Added `Canvas::filter_image_chain()`, executing a list of image filters as
+  one chain - the model behind Canvas `ctx.filter` lists
+  (`"blur(5px) brightness(1.2)"`) and SVG filter chains. Runs of adjacent
+  color-matrix filters fold into a single matrix on the CPU
+  (`ImageFilter::fold_with()`), so any number of consecutive color operations
+  costs one GPU pass; passes that cannot fold ping-pong between at most two
+  transient scratch images, keeping peak transient memory at twice the source
+  image regardless of chain length.
+- Fixed Gaussian blur with a degenerate standard deviation: sigma 0 (or
+  negative / non-finite) divided the Gaussian coefficient by zero and blanked
+  the output instead of passing the image through, and a huge sigma computed
+  coefficients from the unclamped value while the shader loop used the
+  clamped one. Both backends now sanitize sigma at one place.
+
 - Fixed `stroke_text()` line widths under a scaled canvas transform. The width
   crossed into the rasterizer's space inconsistently per regime: baked-atlas
   glyphs never scaled it, while path-fallback glyphs scaled it twice, so the

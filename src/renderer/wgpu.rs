@@ -673,6 +673,23 @@ impl Renderer for WGPURenderer {
                         images,
                     );
                 }
+                super::CommandType::ClipFill => {
+                    clip_fill(
+                        &command,
+                        &mut pipeline_and_bindgroup_mapper,
+                        &mut render_pass_builder,
+                        images,
+                    );
+                }
+                super::CommandType::ClipReset { visible } => {
+                    clip_reset(
+                        &command,
+                        &mut pipeline_and_bindgroup_mapper,
+                        &mut render_pass_builder,
+                        images,
+                        visible,
+                    );
+                }
                 super::CommandType::RenderFilteredImage { target_image, filter } => match filter {
                     crate::ImageFilter::GaussianBlur { sigma } => {
                         gaussian_blur_filter(
@@ -890,6 +907,12 @@ fn gaussian_blur_filter(
     );
     blur_params.shader_type = ShaderType::FilterImage;
 
+    // Degenerate standard deviations must stay pass-through rather than
+    // poisoning the pass: sigma 0 (or negative / NaN) divides the Gaussian
+    // coefficient by zero and blanks the output, and a huge sigma must clamp
+    // to the same in-shader bound the loop uses so the coefficients and the
+    // iteration count agree. Near-zero renders as a visually exact copy.
+    let sigma = if sigma > 0.0 { sigma.min(8.0) } else { 1e-3 };
     let gauss_coeff_x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
     let gauss_coeff_y = f32::exp(-0.5 / (sigma * sigma));
     let gauss_coeff_z = gauss_coeff_y * gauss_coeff_y;
@@ -1056,7 +1079,7 @@ fn triangles(
         render_pass_builder,
         blend_state(command).into(),
         wgpu::PrimitiveTopology::TriangleList,
-        StencilTest::Disabled,
+        clip_guard(command.clip_active),
         Some(wgpu::Face::Back),
         params,
         images,
@@ -1105,9 +1128,11 @@ fn stencil_stroke(
                     pass_op: wgpu::StencilOperation::IncrementClamp,
                 },
                 read_mask: !0,
-                write_mask: !0,
+                // With a clip armed the untouched in-clip value is 0x80 and
+                // the stroke counter stays inside the winding bits.
+                write_mask: if command.clip_active { 0x7f } else { !0 },
             },
-            stencil_reference: 0,
+            stencil_reference: if command.clip_active { 0x80 } else { 0 },
         },
         Some(wgpu::Face::Back),
         &params2,
@@ -1145,7 +1170,7 @@ fn stencil_stroke(
                 read_mask: !0,
                 write_mask: !0,
             },
-            stencil_reference: 0,
+            stencil_reference: if command.clip_active { 0x80 } else { 0 },
         },
         Some(wgpu::Face::Back),
         &params1,
@@ -1181,7 +1206,8 @@ fn stencil_stroke(
                     pass_op: wgpu::StencilOperation::Zero,
                 },
                 read_mask: !0,
-                write_mask: !0,
+                // Clear the stroke counters; the clip bit is write-protected.
+                write_mask: if command.clip_active { 0x7f } else { !0 },
             },
             stencil_reference: 0,
         },
@@ -1214,7 +1240,7 @@ fn stroke(
             render_pass_builder,
             blend_state(command).into(),
             wgpu::PrimitiveTopology::TriangleStrip,
-            StencilTest::Disabled,
+            clip_guard(command.clip_active),
             Some(wgpu::Face::Back),
             &params,
             images,
@@ -1241,21 +1267,31 @@ fn concave_fill(
             StencilTest::Enabled {
                 stencil_state: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
-                        compare: wgpu::CompareFunction::Always,
+                        // With a clip armed, winding accumulates only inside
+                        // the clip and bit 7 stays write-protected.
+                        compare: if command.clip_active {
+                            wgpu::CompareFunction::Equal
+                        } else {
+                            wgpu::CompareFunction::Always
+                        },
                         fail_op: wgpu::StencilOperation::Keep,
                         depth_fail_op: wgpu::StencilOperation::Keep,
                         pass_op: wgpu::StencilOperation::IncrementWrap,
                     },
                     back: wgpu::StencilFaceState {
-                        compare: wgpu::CompareFunction::Always,
+                        compare: if command.clip_active {
+                            wgpu::CompareFunction::Equal
+                        } else {
+                            wgpu::CompareFunction::Always
+                        },
                         fail_op: wgpu::StencilOperation::Keep,
                         depth_fail_op: wgpu::StencilOperation::Keep,
                         pass_op: wgpu::StencilOperation::DecrementWrap,
                     },
-                    read_mask: !0,
-                    write_mask: !0,
+                    read_mask: if command.clip_active { 0x80 } else { !0 },
+                    write_mask: if command.clip_active { 0x7f } else { !0 },
                 },
-                stencil_reference: 0,
+                stencil_reference: if command.clip_active { 0x80 } else { 0 },
             },
             None,
             stencil_params,
@@ -1294,16 +1330,20 @@ fn concave_fill(
                             depth_fail_op: wgpu::StencilOperation::Keep,
                             pass_op: wgpu::StencilOperation::Keep,
                         },
-                        read_mask: match command.fill_rule {
-                            FillRule::NonZero => 0xff,
-                            FillRule::EvenOdd => 0x1,
+                        read_mask: match (command.clip_active, command.fill_rule) {
+                            (false, FillRule::NonZero) => 0xff,
+                            (false, FillRule::EvenOdd) => 0x1,
+                            // Fringe where the clip bit is set and no winding
+                            // arrived (stencil == exactly 0x80).
+                            (true, FillRule::NonZero) => 0xff,
+                            (true, FillRule::EvenOdd) => 0x81,
                         },
                         write_mask: match command.fill_rule {
                             FillRule::NonZero => 0xff,
                             FillRule::EvenOdd => 0x1,
                         },
                     },
-                    stencil_reference: 0,
+                    stencil_reference: if command.clip_active { 0x80 } else { 0 },
                 },
                 Some(wgpu::Face::Back),
                 fill_params,
@@ -1326,27 +1366,44 @@ fn concave_fill(
             StencilTest::Enabled {
                 stencil_state: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
-                        compare: wgpu::CompareFunction::NotEqual,
+                        // Under a clip, only in-clip pixels can carry winding
+                        // and 0x80|w > 0x80 exactly when w != 0, so LESS
+                        // (reference < stencil) is the whole test; the ZERO
+                        // ops are masked to the winding bits below.
+                        compare: if command.clip_active {
+                            wgpu::CompareFunction::Less
+                        } else {
+                            wgpu::CompareFunction::NotEqual
+                        },
                         fail_op: wgpu::StencilOperation::Zero,
                         depth_fail_op: wgpu::StencilOperation::Zero,
                         pass_op: wgpu::StencilOperation::Zero,
                     },
                     back: wgpu::StencilFaceState {
-                        compare: wgpu::CompareFunction::NotEqual,
+                        compare: if command.clip_active {
+                            wgpu::CompareFunction::Less
+                        } else {
+                            wgpu::CompareFunction::NotEqual
+                        },
                         fail_op: wgpu::StencilOperation::Zero,
                         depth_fail_op: wgpu::StencilOperation::Zero,
                         pass_op: wgpu::StencilOperation::Zero,
                     },
-                    read_mask: match command.fill_rule {
-                        FillRule::NonZero => 0xff,
-                        FillRule::EvenOdd => 0x1,
+                    read_mask: match (command.clip_active, command.fill_rule) {
+                        (false, FillRule::NonZero) => 0xff,
+                        (false, FillRule::EvenOdd) => 0x1,
+                        (true, FillRule::NonZero) => 0xff,
+                        (true, FillRule::EvenOdd) => 0x81,
                     },
-                    write_mask: match command.fill_rule {
-                        FillRule::NonZero => 0xff,
-                        FillRule::EvenOdd => 0x1,
+                    write_mask: match (command.clip_active, command.fill_rule) {
+                        (false, FillRule::NonZero) => 0xff,
+                        (false, FillRule::EvenOdd) => 0x1,
+                        // The clip bit is write-protected while the winding
+                        // bits are cleared for the next shape.
+                        (true, _) => 0x7f,
                     },
                 },
-                stencil_reference: 0,
+                stencil_reference: if command.clip_active { 0x80 } else { 0 },
             },
             Some(wgpu::Face::Back),
             fill_params,
@@ -1354,6 +1411,177 @@ fn concave_fill(
             command.image.map(ImageOrTexture::Image),
             command.glyph_texture,
         );
+        render_pass_builder.draw(start as u32..(start + count) as u32);
+    }
+}
+
+/// Intersects the persistent stencil clip with the command's path (winding
+/// gated on the current clip bit, then two resolve quads), color writes off.
+fn clip_fill(
+    command: &super::Command,
+    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
+    render_pass_builder: &mut RenderPassBuilder<'_>,
+    images: &mut ImageStore<Image>,
+) {
+    let stencil_params = Params {
+        stroke_thr: -1.0,
+        shader_type: ShaderType::Stencil,
+        ..Params::default()
+    };
+
+    // Winding, only where the clip bit is currently set; bit 7 protected.
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        None,
+        wgpu::PrimitiveTopology::TriangleList,
+        StencilTest::Enabled {
+            stencil_state: wgpu::StencilState {
+                front: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Equal,
+                    fail_op: wgpu::StencilOperation::Keep,
+                    depth_fail_op: wgpu::StencilOperation::Keep,
+                    pass_op: wgpu::StencilOperation::IncrementWrap,
+                },
+                back: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Equal,
+                    fail_op: wgpu::StencilOperation::Keep,
+                    depth_fail_op: wgpu::StencilOperation::Keep,
+                    pass_op: wgpu::StencilOperation::DecrementWrap,
+                },
+                read_mask: 0x80,
+                write_mask: 0x7f,
+            },
+            stencil_reference: 0x80,
+        },
+        None,
+        &stencil_params,
+        images,
+        None,
+        GlyphTexture::None,
+    );
+    for drawable in &command.drawables {
+        if let Some((start, count)) = drawable.fill_verts {
+            render_pass_builder.draw(start as u32..(start + count) as u32);
+        }
+    }
+
+    let Some((start, count)) = command.triangles_verts else {
+        return;
+    };
+    let winding_read_mask = match command.fill_rule {
+        FillRule::NonZero => 0xff,
+        FillRule::EvenOdd => 0x81,
+    };
+
+    // Quad 1: clip bit set but no winding -> outside the new clip.
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        None,
+        wgpu::PrimitiveTopology::TriangleStrip,
+        StencilTest::Enabled {
+            stencil_state: wgpu::StencilState {
+                front: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Equal,
+                    fail_op: wgpu::StencilOperation::Keep,
+                    depth_fail_op: wgpu::StencilOperation::Keep,
+                    pass_op: wgpu::StencilOperation::Zero,
+                },
+                back: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Equal,
+                    fail_op: wgpu::StencilOperation::Keep,
+                    depth_fail_op: wgpu::StencilOperation::Keep,
+                    pass_op: wgpu::StencilOperation::Zero,
+                },
+                read_mask: winding_read_mask,
+                write_mask: 0x80,
+            },
+            stencil_reference: 0x80,
+        },
+        None,
+        &stencil_params,
+        images,
+        None,
+        GlyphTexture::None,
+    );
+    render_pass_builder.draw(start as u32..(start + count) as u32);
+
+    // Quad 2: clear the winding bits.
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        None,
+        wgpu::PrimitiveTopology::TriangleStrip,
+        StencilTest::Enabled {
+            stencil_state: wgpu::StencilState {
+                front: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Always,
+                    fail_op: wgpu::StencilOperation::Zero,
+                    depth_fail_op: wgpu::StencilOperation::Zero,
+                    pass_op: wgpu::StencilOperation::Zero,
+                },
+                back: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Always,
+                    fail_op: wgpu::StencilOperation::Zero,
+                    depth_fail_op: wgpu::StencilOperation::Zero,
+                    pass_op: wgpu::StencilOperation::Zero,
+                },
+                read_mask: 0xff,
+                write_mask: 0x7f,
+            },
+            stencil_reference: 0,
+        },
+        None,
+        &stencil_params,
+        images,
+        None,
+        GlyphTexture::None,
+    );
+    render_pass_builder.draw(start as u32..(start + count) as u32);
+}
+
+/// Rewrites the clip plane with a full-canvas quad: armed (0x80 everywhere)
+/// or disarmed back to the zero ambient.
+fn clip_reset(
+    command: &super::Command,
+    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
+    render_pass_builder: &mut RenderPassBuilder<'_>,
+    images: &mut ImageStore<Image>,
+    visible: bool,
+) {
+    let stencil_params = Params {
+        stroke_thr: -1.0,
+        shader_type: ShaderType::Stencil,
+        ..Params::default()
+    };
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        None,
+        wgpu::PrimitiveTopology::TriangleStrip,
+        StencilTest::Enabled {
+            stencil_state: wgpu::StencilState {
+                front: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Always,
+                    fail_op: wgpu::StencilOperation::Replace,
+                    depth_fail_op: wgpu::StencilOperation::Replace,
+                    pass_op: wgpu::StencilOperation::Replace,
+                },
+                back: wgpu::StencilFaceState {
+                    compare: wgpu::CompareFunction::Always,
+                    fail_op: wgpu::StencilOperation::Replace,
+                    depth_fail_op: wgpu::StencilOperation::Replace,
+                    pass_op: wgpu::StencilOperation::Replace,
+                },
+                read_mask: 0xff,
+                write_mask: 0xff,
+            },
+            stencil_reference: if visible { 0x80 } else { 0x00 },
+        },
+        None,
+        &stencil_params,
+        images,
+        None,
+        GlyphTexture::None,
+    );
+    if let Some((start, count)) = command.triangles_verts {
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 }
@@ -1373,7 +1601,7 @@ fn convex_fill(
                 render_pass_builder,
                 blend_state,
                 wgpu::PrimitiveTopology::TriangleList,
-                StencilTest::Disabled,
+                clip_guard(command.clip_active),
                 Some(wgpu::Face::Back),
                 params,
                 images,
@@ -1388,7 +1616,7 @@ fn convex_fill(
                 render_pass_builder,
                 blend_state,
                 wgpu::PrimitiveTopology::TriangleStrip,
-                StencilTest::Disabled,
+                clip_guard(command.clip_active),
                 Some(wgpu::Face::Back),
                 params,
                 images,
@@ -1453,6 +1681,29 @@ enum StencilTest {
         stencil_state: wgpu::StencilState,
         stencil_reference: u32,
     },
+}
+
+/// Stencil test for plain color draws under an armed clip plane: pass only
+/// where the clip bit (0x80) is set; never write.
+fn clip_guard(active: bool) -> StencilTest {
+    if !active {
+        return StencilTest::Disabled;
+    }
+    let face = wgpu::StencilFaceState {
+        compare: wgpu::CompareFunction::Equal,
+        fail_op: wgpu::StencilOperation::Keep,
+        depth_fail_op: wgpu::StencilOperation::Keep,
+        pass_op: wgpu::StencilOperation::Keep,
+    };
+    StencilTest::Enabled {
+        stencil_state: wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0x80,
+            write_mask: 0,
+        },
+        stencil_reference: 0x80,
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
