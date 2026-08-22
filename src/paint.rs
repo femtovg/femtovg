@@ -158,6 +158,10 @@ impl MultiStopGradient {
         stop
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.shared_stops.len()
+    }
+
     pub(crate) fn pairs(&self) -> impl Iterator<Item = [GradientStop; 2]> + '_ {
         self.shared_stops.as_ref().windows(2).map(move |pair| {
             let mut stops = [pair[0], pair[1]];
@@ -207,7 +211,7 @@ impl GradientColors {
             }
         }
     }
-    fn from_stops<Stops>(stops: Stops) -> Self
+    pub(crate) fn from_stops<Stops>(stops: Stops) -> Self
     where
         Stops: IntoIterator<Item = (f32, Color)>,
     {
