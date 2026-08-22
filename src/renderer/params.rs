@@ -140,6 +140,17 @@ impl Params {
                 colors,
                 transform: gradient_transform,
             } => {
+                // Fold the gradient transform into the endpoints instead of
+                // composing it onto the paint matrix: an affine map keeps a
+                // linear gradient linear, and the nanovg `large` offset below
+                // must not be multiplied through a transform. Design-tool
+                // SVGs (Sketch, Illustrator) author endpoints a fraction of a
+                // unit apart under a gradientTransform with translations of
+                // 1e5..1e6; composed the other way round, the paint matrix
+                // translation reaches ~1e7 where f32 resolves whole units
+                // and `t` quantizes into visible stairs.
+                let (start_x, start_y, end_x, end_y) =
+                    fold_linear_gradient_transform(*start_x, *start_y, *end_x, *end_y, gradient_transform);
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
                 let mut dy = end_y - start_y;
@@ -155,7 +166,6 @@ impl Params {
 
                 let mut transform = Transform2D([dy, -dx, dx, dy, start_x - dx * large, start_y - dy * large]);
 
-                transform *= *gradient_transform;
                 transform *= *global_transform;
 
                 inv_transform = transform.inverse();
@@ -309,4 +319,31 @@ impl Params {
     pub(crate) fn uses_glyph_texture(self) -> bool {
         self.glyph_texture_type != 0
     }
+}
+
+/// Maps a linear gradient's endpoints through `transform` so the resulting
+/// user-space gradient is exactly the transformed one: the start point maps
+/// directly, and the end point is placed along the transformed gradient
+/// direction (A^-T v, the image of the iso-line normal) at the distance that
+/// keeps t = 1 there. For similarities this is just mapping both endpoints;
+/// for anisotropic or skewed transforms it is the only exact answer.
+/// Degenerate inputs (zero-length gradient, singular transform) fall back
+/// to mapping both endpoints.
+fn fold_linear_gradient_transform(sx: f32, sy: f32, ex: f32, ey: f32, transform: &Transform2D) -> (f32, f32, f32, f32) {
+    let [a, b, c, d, e, f] = transform.0;
+    let (nsx, nsy) = (a * sx + c * sy + e, b * sx + d * sy + f);
+    let (vx, vy) = (ex - sx, ey - sy);
+    let vv = vx * vx + vy * vy;
+    let det = a * d - b * c;
+    if vv <= f32::EPSILON || det.abs() <= f32::EPSILON {
+        return (nsx, nsy, a * ex + c * ey + e, b * ex + d * ey + f);
+    }
+    // w = A^-T v / |v|^2 : the user-space gradient of t.
+    let wx = (d * vx - b * vy) / det / vv;
+    let wy = (-c * vx + a * vy) / det / vv;
+    let ww = wx * wx + wy * wy;
+    if ww <= f32::EPSILON {
+        return (nsx, nsy, a * ex + c * ey + e, b * ex + d * ey + f);
+    }
+    (nsx, nsy, nsx + wx / ww, nsy + wy / ww)
 }

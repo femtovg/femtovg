@@ -828,3 +828,93 @@ fn gradient_transform_makes_a_radial_gradient_elliptical() {
         "67px out along the wide axis should be past the midpoint, got {along_x:?}"
     );
 }
+
+/// Design-tool SVGs (Sketch, Illustrator) author linear gradients with
+/// endpoints a fraction of a unit apart under a gradientTransform whose
+/// translation is 1e5..1e6. That must render exactly like the equivalent
+/// user-space gradient: the transform folds into the endpoints, so the
+/// nanovg `large` offset never rides through a huge translation where f32
+/// would quantize `t` into visible stairs. Regression for Mozilla's
+/// splash-logo.svg (Firefox logo, `gradientTransform="matrix(480 0 0 -496
+/// 428684 1098420)"`).
+#[test]
+fn huge_gradient_transform_translation_stays_smooth() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let stops = || {
+        vec![
+            (0.0, Color::rgb(255, 244, 79)),
+            (0.5, Color::rgb(255, 54, 71)),
+            (1.0, Color::rgb(227, 21, 135)),
+        ]
+    };
+    // The transform maps the tiny authored span onto a 300-unit diagonal
+    // across the canvas: user-space start (10, 10) -> end (290, 110).
+    let (a, d, e, f) = (480.0f32, -496.0f32, 428_684.0f32, 1_098_420.0f32);
+    let (sx, sy) = ((10.0 - e) / a, (10.0 - f) / d);
+    let (ex, ey) = ((290.0 - e) / a, (110.0 - f) / d);
+    let transformed = render(&device, &queue, |canvas| {
+        let paint = Paint::linear_gradient_stops(sx, sy, ex, ey, stops())
+            .with_gradient_transform(Transform2D([a, 0.0, 0.0, d, e, f]));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &paint);
+    });
+    let folded = render(&device, &queue, |canvas| {
+        let paint = Paint::linear_gradient_stops(10.0, 10.0, 290.0, 110.0, stops());
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &paint);
+    });
+    // Every pixel agrees to within f32 rounding of the folded endpoints
+    // (dither is seeded by position, so it cancels); before the fold the
+    // transformed render quantized into stairs dozens of levels off.
+    let mut worst = 0;
+    for y in (2..H as usize - 2).step_by(3) {
+        for x in (2..W as usize - 2).step_by(3) {
+            let t = px(&transformed, x, y);
+            let g = px(&folded, x, y);
+            worst = worst.max((0..3).map(|i| (t[i] - g[i]).abs()).max().unwrap());
+        }
+    }
+    assert!(
+        worst <= 4,
+        "transformed and folded gradients must agree; worst channel delta {worst}"
+    );
+}
+
+/// An anisotropic gradientTransform is still a linear gradient in user
+/// space, but its direction is the image of the iso-line normal (A^-T v),
+/// not the image of the endpoint vector. Pin the exact mapping: under
+/// scale(2, 1) a gradient along (1, 1) has user-space t = (x/2 + y) / 2, so
+/// the iso-line t = 0.5 passes through (2, 0) and (0, 1) — points that the
+/// naive "map both endpoints" answer would color differently.
+#[test]
+fn anisotropic_gradient_transform_keeps_exact_iso_lines() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // Gradient space: start (0, 0), end (1, 1); transform scale(2, 1) then
+    // place it at (60, 20) with a 100x magnification for readable pixels.
+    let s = 100.0f32;
+    let out = render(&device, &queue, |canvas| {
+        let paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, Color::rgb(0, 0, 0), Color::rgb(255, 255, 255))
+            .with_gradient_transform(Transform2D([2.0 * s, 0.0, 0.0, s, 60.0, 10.0]));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &paint);
+    });
+    // t(x, y) = ((x - 60) / (2 s) + (y - 10) / s) / 2.
+    let t_at = |x: f32, y: f32| ((x - 60.0) / (2.0 * s) + (y - 10.0) / s) / 2.0;
+    for (x, y) in [(160.0f32, 10.0f32), (60.0, 60.0), (110.0, 35.0), (210.0, 60.0)] {
+        let expect = (t_at(x, y).clamp(0.0, 1.0) * 255.0).round() as i32;
+        let got = px(&out, x as usize, y as usize)[1];
+        assert!(
+            (got - expect).abs() <= 3,
+            "at ({x}, {y}) expected gray {expect}, got {got}"
+        );
+    }
+}
