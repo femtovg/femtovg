@@ -248,6 +248,15 @@ pub enum ShaderType {
     FillImageGradientConic,
     /// Color-matrix image filter shader (`feColorMatrix` / CSS color functions).
     FilterImageColorMatrix,
+    /// Fill two-point (independently centered) radial gradient shader.
+    ///
+    /// This is the general Canvas `createRadialGradient(x0, y0, r0, x1, y1, r1)`
+    /// form, where the start and end circles may have different centers. Ordinary
+    /// concentric radial gradients keep using the cheaper box-gradient
+    /// [`FillGradient`](Self::FillGradient) path.
+    FillGradientRadial,
+    /// Fill image two-point radial gradient shader (multi-stop LUT variant).
+    FillImageGradientRadial,
 }
 
 impl ShaderType {
@@ -265,6 +274,8 @@ impl ShaderType {
             Self::FillGradientConic => 8,
             Self::FillImageGradientConic => 9,
             Self::FilterImageColorMatrix => 10,
+            Self::FillGradientRadial => 11,
+            Self::FillImageGradientRadial => 12,
         }
     }
 

@@ -38,7 +38,7 @@ Run with `cargo run --example text`
 * [x] Anti-aliasing
 * [x] Bézier paths filling and stroking
 * [x] Solid color and image pattern fills and strokes
-* [x] Gradients - box, linear and radial
+* [x] Gradients - box, linear, radial (including two-point / focal), and conic, with multi-stop colors and gradient transforms
 * [x] Stroke width and miterlimit
 * [x] Stroke caps: butt, round and square
 * [x] Stroke joins: miter, round and bevel
