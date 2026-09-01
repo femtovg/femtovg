@@ -1,6 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Fixed multi-stop gradients whose last stop ends before 1.0: the rest of the
+  ramp was left transparent (or holding stale texture data) instead of the last
+  stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
+  render it. Showed as a wedge cut out of the Firefox logo's flame.
+
 ## [0.27.0] - 2026-08-31
 
 - Added text decoration for `fill_text()` and `stroke_text()`: underline,
