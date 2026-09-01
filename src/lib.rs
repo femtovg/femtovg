@@ -3865,6 +3865,79 @@ fn decoration_rect_tracks_scaled_atlas_transform() {
     );
 }
 
+/// `TextMetrics::y` and `height` must bracket the ink the glyphs actually
+/// draw. `layout()` places each glyph on the alphabetic baseline, so the run
+/// box has to back out the glyph's `bearing_y` to reach the ink top. Measuring
+/// from the baseline instead put the reported box a cap height below the drawn
+/// text, which made the demo's gutter bubble - sized from `measure_text` -
+/// render below its line number.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_metrics_box_brackets_the_drawn_ink() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(200, 100, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black())
+        .with_font(&[font_id])
+        .with_font_size(12.0)
+        .with_text_baseline(Baseline::Middle);
+
+    let requested_y = 50.0;
+    let layout = canvas.measure_text(100.0, requested_y, "1", &paint).unwrap();
+    let glyph = layout.glyphs.first().expect("expected a glyph for the digit");
+
+    let ink_top = glyph.y - glyph.bearing_y;
+    let ink_bottom = ink_top + glyph.height;
+    assert!(
+        layout.y <= ink_top + 0.001 && layout.y + layout.height() >= ink_bottom - 0.001,
+        "run box {}..{} must contain the glyph ink {ink_top}..{ink_bottom}",
+        layout.y,
+        layout.y + layout.height()
+    );
+
+    // A digit draws entirely above the alphabetic baseline, so the whole box
+    // must sit above it too.
+    assert!(
+        layout.y + layout.height() <= layout.baseline() + 0.001,
+        "run box bottom {} must not fall below the baseline {}",
+        layout.y + layout.height(),
+        layout.baseline()
+    );
+
+    // `Baseline::Middle` centers the digit on the requested y, so the box has
+    // to start above it. Measuring from the baseline pinned the top at exactly
+    // the requested y and pushed the rest below the glyph.
+    assert!(
+        layout.y < requested_y,
+        "with Baseline::Middle the run box must start above the requested y \
+         (box top {}, requested {requested_y})",
+        layout.y
+    );
+
+    // `measure_text` reports user-space units, so a DPI ratio must not skew
+    // the relationship between the box, the baseline and the per-glyph
+    // bearing: shaping happens in device space and is scaled back down.
+    canvas.set_size(200, 100, 2.0);
+    let hidpi = canvas.measure_text(100.0, requested_y, "1", &paint).unwrap();
+    let hidpi_glyph = hidpi.glyphs.first().expect("expected a glyph for the digit");
+    let hidpi_ink_top = hidpi_glyph.y - hidpi_glyph.bearing_y;
+    assert!(
+        hidpi.y <= hidpi_ink_top + 0.001 && hidpi.y + hidpi.height() >= hidpi_ink_top + hidpi_glyph.height - 0.001,
+        "run box {}..{} must contain the glyph ink at a 2x DPI ratio",
+        hidpi.y,
+        hidpi.y + hidpi.height()
+    );
+    assert!(
+        (hidpi.y - layout.y).abs() < 0.5,
+        "the user-space box top must not depend on the DPI ratio ({} at 1x, {} at 2x)",
+        layout.y,
+        hidpi.y
+    );
+}
+
 /// The decoration baseline must be the shared run baseline, independent of the
 /// first drawable glyph's GPOS y-offset. `layout` bakes that offset into
 /// `glyph.y`, so a run beginning with a combining mark (non-zero `offset_y`)

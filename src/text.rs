@@ -26,10 +26,12 @@ pub use textlayout::*;
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().
 const GLYPH_PADDING: u32 = 1;
-// We add an additional margin of 1 pixel outside of the sampled area,
-// to deal with the linear interpolation of texels at the edge of that area
-// which mixes in the texels just outside of the edge.
-// This manifests as noise around the glyph, outside of the padding.
+// We add an additional margin of 1 texel outside of the sampled area.
+// The atlas is NEAREST-sampled (since 62e5be6), so no filter tap blends
+// across the boundary; the margin is a guard band for GPUs whose
+// interpolated texture coordinates drift at quad edges and select a
+// neighbouring texel instead (issues #22, #310). Atlas textures start
+// zero-initialized on both backends, so margin texels are blank.
 const GLYPH_MARGIN: u32 = 1;
 
 const TEXTURE_SIZE: usize = 512;
@@ -788,8 +790,8 @@ impl GlyphAtlas {
 
         let is_color = image.content == swash::scale::image::Content::Color;
 
-        // Create a padded image with zeroed borders to avoid sampling undefined
-        // texture data at glyph edges (the atlas texture is not zero-initialized).
+        // Create a padded image with zeroed borders so the sampled rect's edge
+        // texels are blank (the texture itself starts zero-initialized).
         let padded_width = (glyph_width + 2 * GLYPH_PADDING) as usize;
         let padded_height = (glyph_height + 2 * GLYPH_PADDING) as usize;
         let mut pixels = vec![rgb::RGBA8::new(0, 0, 0, 0); padded_width * padded_height];
