@@ -47,6 +47,20 @@ impl GlTexture {
             external: false,
         };
 
+        // Upload a zeroed buffer instead of NULL so the texture's contents are
+        // defined from creation: glTexImage2D with NULL leaves them undefined,
+        // and embedded GL drivers hand back recycled, unscrubbed memory that
+        // edge-of-quad NEAREST lookups can pick up as stray pixels (#310).
+        // Desktop drivers zero pages in practice, which is why this went
+        // unnoticed; the wgpu backend guarantees zero-initialized textures, so
+        // this also aligns the two backends.
+        let bytes_per_pixel = match info.format() {
+            PixelFormat::Gray8 => 1,
+            PixelFormat::Rgb8 => 3,
+            PixelFormat::Rgba8 => 4,
+        };
+        let zeroed = vec![0u8; info.width() * info.height() * bytes_per_pixel];
+
         match info.format() {
             PixelFormat::Gray8 => unsafe {
                 let internal_format = if opengles_2_0 { glow::LUMINANCE } else { glow::R8 };
@@ -61,7 +75,7 @@ impl GlTexture {
                     0,
                     format,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None), //data.buf().as_ptr() as *const GLvoid
+                    glow::PixelUnpackData::Slice(Some(&zeroed)),
                 );
             },
             PixelFormat::Rgb8 => unsafe {
@@ -74,8 +88,7 @@ impl GlTexture {
                     0,
                     glow::RGB,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                    //data.buf().as_ptr() as *const GLvoid
+                    glow::PixelUnpackData::Slice(Some(&zeroed)),
                 );
             },
             PixelFormat::Rgba8 => unsafe {
@@ -88,8 +101,7 @@ impl GlTexture {
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                    //data.buf().as_ptr() as *const GLvoid
+                    glow::PixelUnpackData::Slice(Some(&zeroed)),
                 );
             },
         }

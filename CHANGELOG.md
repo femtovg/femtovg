@@ -1,57 +1,69 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.27.0] - 2026-08-31
 
-- Fixed `stroke_text()` line widths under a scaled canvas transform. The width
-  crossed into the rasterizer's space inconsistently per regime: baked-atlas
-  glyphs never scaled it, while path-fallback glyphs scaled it twice, so the
-  drawn width changed law with the zoom, the font size, and even the paint
-  flavor. All user-space text quantities now cross through the baked scale at
-  one place, and a zoom-invariance test suite holds the regime seams.
-- Added elliptical radial gradients, matching CSS's `radial-gradient(ellipse ...)`.
-  New `Paint` constructors `elliptical_gradient()` and `elliptical_gradient_stops()`
-  take separate inner/outer radii per axis. `PaintFlavor::RadialGradient`'s
-  `in_radius` and `out_radius` fields changed from `f32` to `(f32, f32)` to hold the
-  per-axis radii; `Paint::radial_gradient()` and `radial_gradient_stops()` keep their
-  existing scalar-radius signatures unchanged.
+- Added text decoration for `fill_text()` and `stroke_text()`: underline,
+  strikethrough and overline. New `TextDecoration` type, set through
+  `Paint::set_text_decoration()` and `with_text_decoration()`. Line position and
+  thickness come from the font's own metrics.
+- Added `Path::svg_arc_to()`, the SVG path data `A` command: an elliptical arc
+  to an endpoint, with per-axis radii, an x-axis rotation, and the large-arc and
+  sweep flags.
+- Added `ImageFilter::ColorMatrix` (SVG `feColorMatrix`) with constructors for
+  the CSS filter functions: `grayscale()`, `sepia()`, `saturate()`,
+  `hue_rotate()`, `brightness()`, `contrast()`, `invert()` and `opacity()`.
+- Added elliptical radial gradients, matching CSS `radial-gradient(ellipse ...)`.
+  New `Paint` constructors `elliptical_gradient()` and
+  `elliptical_gradient_stops()` take separate radii per axis.
+  `radial_gradient()` and `radial_gradient_stops()` are unchanged.
+- **Breaking:** `PaintFlavor::RadialGradient`'s `in_radius` and `out_radius`
+  changed from `f32` to `(f32, f32)` to hold the per-axis radii. Paints
+  serialized by earlier versions no longer deserialize.
+- Added typesetting metrics to `FontMetrics`: `subscript_size()`,
+  `subscript_offset()`, `superscript_size()`, `superscript_offset()`,
+  `x_height()`, `cap_height()`, `line_gap()`, `underline_position()`,
+  `underline_thickness()`, `strikeout_position()` and `strikeout_thickness()`.
+  Missing or zeroed font tables fall back to conventional em fractions.
+- Added `TextMetrics::baseline()`, the run's baseline in the same space as the
+  glyph positions.
 - Fixed the paragraph base direction of shaped text: it now follows the first
-  strong character (UAX #9 rules P2/P3) instead of being pinned
-  left-to-right. An Arabic or Hebrew sentence is treated as a right-to-left
-  paragraph, so its neutral punctuation sits at the visual left end, embedded
-  left-to-right words order correctly between their RTL neighbors, and
-  strong-less text keeps the LTR default. The shaped-word cache now also keys
-  on the run direction, so direction-neutral words (digits, brackets) shaped
-  in one direction are no longer replayed in the other - previously a
-  mirrored bracket could render unmirrored in RTL text if the same word had
-  been shaped in LTR text first.
-
-- Fixed `Canvas::measure_font()` scaling its result by the canvas transform's
-  internal glyph-rasterization scale and the DPI factor. It now reports
-  user-space metrics that depend only on the paint's font size, matching
-  `measure_text()`, `TextContext::measure_font()` and the coordinate space
-  `fill_text()` consumes. Previously, metrics read from a zoomed canvas came
-  back inflated - for example sub/superscript runs sized via
-  `subscript_size()` grew with the zoom level instead of staying proportional
-  to the run's font size.
-- Fixed `Path::rounded_rect()` and `rounded_rect_varying()` flattening corners
-  into ellipses when a radius did not fit. Radii that overlap along a side are
-  now reduced by one common factor, as CSS Backgrounds and Borders Level 3 and
-  the Canvas `roundRect()` algorithm both specify, so corners keep their shape:
-  a radius larger than half the height now gives a fully rounded end rather than
-  a squashed one. A corner may also use a whole side when the corner next to it
-  is square, which the previous clamp cut in half. Negative and NaN radii leave
-  the corner square instead of bulging it outwards or emitting NaN coordinates,
-  and an infinite radius rounds as far as the box allows. This changes rendering
-  for shapes whose radii did not fit.
-- Fixed the WGPU renderer aborting instead of reporting an error when
+  strong character (UAX #9 P2/P3) instead of always being left to right, so an
+  Arabic or Hebrew sentence orders its punctuation and embedded words
+  correctly. The shaped word cache now also keys on the run direction, so a word
+  shaped in one direction is no longer reused in the other.
+- Fixed `stroke_text()` line widths under a scaled canvas transform. The width
+  was left unscaled for atlas glyphs and scaled twice for path fallback glyphs,
+  so it changed with the zoom, the font size and the paint.
+- Fixed `Canvas::measure_font()` scaling its result by the internal glyph
+  rasterization scale and the DPI factor. It now reports user space metrics,
+  like `measure_text()` and `TextContext::measure_font()` do.
+- Fixed `measure_text()` returning a run box shifted down by the glyph bearing
+  (about 4.5px at font size 12). `TextMetrics::y` and `height()` are measured
+  from the glyph ink again, not from the baseline.
+- Fixed `Path::rounded_rect()` and `rounded_rect_varying()` squashing corners
+  into ellipses when a radius did not fit. Radii that overlap are now reduced by
+  one common factor, as CSS and the Canvas `roundRect()` algorithm specify, and
+  negative or NaN radii leave the corner square. This changes rendering for
+  shapes whose radii did not fit.
+- Fixed `Path::arc_to()` drawing a thin seam across the fill when the corner
+  could not be rounded, and `Path::arc()` producing NaN control points for a
+  zero sweep (#309).
+- Fixed the WGPU renderer aborting instead of returning an error when
   `update_image()` is given a copy that reaches past the destination image, or a
-  source in a different pixel format. Both now return
-  `ErrorKind::ImageUpdateOutOfBounds` and
-  `ErrorKind::ImageUpdateWithDifferentFormat`, as the OpenGL and `Void`
-  renderers already did. The shared check is exposed as
-  `ImageSource::check_update()` for out-of-tree renderers, and reports rather
-  than overflows for an origin close to `usize::MAX`.
+  source in a different pixel format, as the other renderers already did. The
+  shared check is exposed as `ImageSource::check_update()` for out-of-tree
+  renderers.
+- Fixed Gray texture updates being dropped by strict OpenGL drivers: the
+  external format passed to `glTexSubImage2D` is now `RED`, not the sized `R8`,
+  which is invalid there.
+- Fixed OpenGL textures being created with undefined contents, which could show
+  up as specks at glyph edges on embedded drivers (#310). They are now zeroed at
+  creation, as the WGPU backend already guaranteed.
+- Sped up the WGPU backend, most of all on WebAssembly. The frame's uniforms go
+  into one buffer, uploaded in a single call and bound with dynamic offsets; the
+  vertex buffer stays resident across frames; and samplers, texture views,
+  pipeline and bind group state are no longer rebuilt for every draw.
 
 ## [0.26.0] - 2026-07-20
 
@@ -482,3 +494,5 @@ All notable changes to this project will be documented in this file.
 [0.24.0]: https://github.com/femtovg/femtovg/releases/tag/v0.24.0
 [0.25.0]: https://github.com/femtovg/femtovg/releases/tag/v0.25.0
 [0.25.1]: https://github.com/femtovg/femtovg/releases/tag/v0.25.1
+[0.26.0]: https://github.com/femtovg/femtovg/releases/tag/v0.26.0
+[0.27.0]: https://github.com/femtovg/femtovg/releases/tag/v0.27.0

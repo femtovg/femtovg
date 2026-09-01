@@ -28,6 +28,7 @@ pub struct ShapedGlyph {
     pub advance_y: f32,
     pub offset_x: f32,
     pub offset_y: f32,
+    pub bearing_y: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -213,6 +214,7 @@ impl TextMetrics {
             glyph.y *= scale;
             glyph.width *= scale;
             glyph.height *= scale;
+            glyph.bearing_y *= scale;
         }
     }
 
@@ -524,11 +526,13 @@ fn shape_word(
                 advance_y: position.y_advance as f32 * scale,
                 offset_x: position.x_offset as f32 * scale,
                 offset_y: position.y_offset as f32 * scale,
+                bearing_y: 0.0,
             };
 
             if let Some(glyph) = font.glyph(&font_face, g.glyph_id, &normalized_coords) {
                 g.width = glyph.metrics.width * scale;
                 g.height = glyph.metrics.height * scale;
+                g.bearing_y = glyph.metrics.bearing_y * scale;
             }
 
             shaped_word.width += g.advance_x + letter_spacing;
@@ -599,8 +603,10 @@ fn layout(
         glyph.x = cursor_x + glyph.offset_x;
         glyph.y = cursor_y + alignment_offset_y + glyph.offset_y;
 
-        min_y = min_y.min(glyph.y);
-        max_y = max_y.max(glyph.y + glyph.height);
+        // `glyph.y` is the baseline, so the ink box starts `bearing_y` above it.
+        let ink_top = glyph.y - glyph.bearing_y;
+        min_y = min_y.min(ink_top);
+        max_y = max_y.max(ink_top + glyph.height);
 
         cursor_x += glyph.advance_x + text_settings.letter_spacing;
         cursor_y += glyph.advance_y;
