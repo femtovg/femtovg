@@ -1,6 +1,14 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+- Fixed two-stop gradients fading a transparent stop through the wrong colors:
+  the stop's own color was discarded, so `transparent` to blue turned a plain
+  light blue instead of darkening, and transparent red to blue lost its red.
+  Two-stop and multi-stop gradients now interpolate the same way, matching
+  Canvas and SVG gradients in browsers.
+
 ## [0.27.0] - 2026-08-31
 
 - Added text decoration for `fill_text()` and `stroke_text()`: underline,
