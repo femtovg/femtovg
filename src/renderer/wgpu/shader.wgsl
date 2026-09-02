@@ -34,6 +34,8 @@ const SHADER_TYPE_FillColorUnclipped: i32 = 7;
 const SHADER_TYPE_FillGradientConic: i32 = 8;
 const SHADER_TYPE_FillImageGradientConic: i32 = 9;
 const SHADER_TYPE_FilterImageColorMatrix: i32 = 10;
+const SHADER_TYPE_FillGradientTwoPointRadial: i32 = 11;
+const SHADER_TYPE_FillImageGradientTwoPointRadial: i32 = 12;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -161,6 +163,13 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         case SHADER_TYPE_FilterImageColorMatrix: {
             return renderColorMatrix(vertex, params);
         }
+        case SHADER_TYPE_FillGradientTwoPointRadial: {
+            // Set `result` and fall through to the scissor + stroke-AA multiply.
+            result = renderGradientTwoPointRadial(vertex, params);
+        }
+        case SHADER_TYPE_FillImageGradientTwoPointRadial: {
+            result = renderImageGradientTwoPointRadial(vertex, params);
+        }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
         }
@@ -221,6 +230,98 @@ fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {
     // clockwise, matching Canvas 2D createConicGradient. fract() wraps the angle
     // into [0, 1) for negative or large start angles.
     return fract((atan2(pt.y, pt.x) - params.conic_start_angle) / TAU);
+}
+
+// Two-point (independently centered) radial gradient: the general Canvas
+// createRadialGradient(x0,y0,r0, x1,y1,r1). paint_mat places the start circle at
+// the origin, so in local space the start circle is (0,0) radius r0 and the end
+// circle is `extent` away with radius r0 + dr (dr in feather). For a fragment pt
+// we solve for the interpolation offset t where |pt - t*cd| = r0 + t*dr, i.e.
+// a*t^2 - 2b*t + c = 0. `covered` reports whether any interpolated circle with a
+// non-negative radius reaches the fragment; uncovered fragments are transparent.
+struct RadialT {
+    t: f32,
+    covered: bool,
+}
+
+fn radialTwoPointT(vertex: VertexOutput, params: Params) -> RadialT {
+    let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
+    let cd: vec2<f32> = params.extent;  // end circle center relative to start
+    let r0: f32 = params.radius;
+    let dr: f32 = params.feather;       // r1 - r0
+    let a: f32 = dot(cd, cd) - dr * dr;
+    let b: f32 = dot(pt, cd) + r0 * dr;
+    let c: f32 = dot(pt, pt) - r0 * r0;
+    var result: RadialT;
+    result.covered = false;
+    result.t = 0.0;
+    // `a` is a squared length, so how close to zero it counts as depends on the
+    // size of the shape: the same geometry scaled up scales `a` with the square
+    // of the scale factor. Comparing it against a fixed constant would treat a
+    // focal point sitting on the end circle as a cone in one scene and as a
+    // degenerate in another. Measure it against the terms it came from instead,
+    // which also folds in the case where both are zero and the circles coincide.
+    let a_scale = max(dot(cd, cd), dr * dr);
+    if (a_scale == 0.0) {
+        // The two circles are the same circle. There is no sweep to walk, so
+        // the whole plane takes the far end of the ramp. The Canvas algorithm
+        // says to paint nothing here, but SVG resolved the opposite and its
+        // test suite asserts the gradient is drawn, so follow SVG.
+        result.t = 1.0;
+        result.covered = true;
+    } else if (abs(a) <= 1e-4 * a_scale) {
+        // Degenerate cone (|cd| == |dr|): the quadratic collapses to the linear
+        // equation -2b*t + c = 0. This is exactly the case where the end center
+        // sits on the start circle, common in focal-style gradients.
+        if (abs(b) > 1e-6) {
+            result.t = c / (2.0 * b);
+            result.covered = (r0 + result.t * dr >= 0.0);
+        }
+    } else {
+        let disc: f32 = b * b - a * c;
+        // When one circle strictly contains the other (a < 0), every fragment
+        // is on some interpolated circle and the discriminant is never really
+        // negative: at the focal point it is mathematically zero and rounds
+        // just below, which would punch a hole exactly where the first stop
+        // belongs. So a negative discriminant only counts as a miss for a > 0.
+        if (a < 0.0 || disc >= 0.0) {
+            let s: f32 = sqrt(max(disc, 0.0));
+            // One reciprocal, two roots (a is guaranteed away from zero here).
+            let inv_a: f32 = 1.0 / a;
+            let root_a: f32 = (b - s) * inv_a;
+            let root_b: f32 = (b + s) * inv_a;
+            let t_lo: f32 = min(root_a, root_b);
+            let t_hi: f32 = max(root_a, root_b);
+            // Canvas draws circles from the largest offset toward the smallest and
+            // does not overpaint, so the largest offset whose interpolated circle
+            // has a non-negative radius is the one that claims the fragment.
+            if (r0 + t_hi * dr >= 0.0) {
+                result.t = t_hi;
+                result.covered = true;
+            } else if (r0 + t_lo * dr >= 0.0) {
+                result.t = t_lo;
+                result.covered = true;
+            }
+        }
+    }
+    result.t = clamp(result.t, 0.0, 1.0);
+    return result;
+}
+
+fn renderGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    let r: RadialT = radialTwoPointT(vertex, params);
+    if (!r.covered) {
+        return vec4<f32>(0.0);
+    }
+    return ditherGradient(mix(params.inner_col, params.outer_col, r.t), vertex.position.xy);
+}
+
+fn renderImageGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    let r: RadialT = radialTwoPointT(vertex, params);
+    if (!r.covered) {
+        return vec4<f32>(0.0);
+    }
+    return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(r.t, 0.0)), vertex.position.xy);
 }
 
 fn sdroundrect(pt: vec2<f32>, ext: vec2<f32>, rad: f32) -> f32 {

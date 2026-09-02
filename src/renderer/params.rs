@@ -138,7 +138,19 @@ impl Params {
                 start: Position { x: start_x, y: start_y },
                 end: Position { x: end_x, y: end_y },
                 colors,
+                transform: gradient_transform,
             } => {
+                // Fold the gradient transform into the endpoints instead of
+                // composing it onto the paint matrix: an affine map keeps a
+                // linear gradient linear, and the nanovg `large` offset below
+                // must not be multiplied through a transform. Design-tool
+                // SVGs (Sketch, Illustrator) author endpoints a fraction of a
+                // unit apart under a gradientTransform with translations of
+                // 1e5..1e6; composed the other way round, the paint matrix
+                // translation reaches ~1e7 where f32 resolves whole units
+                // and `t` quantizes into visible stairs.
+                let (start_x, start_y, end_x, end_y) =
+                    fold_linear_gradient_transform(*start_x, *start_y, *end_x, *end_y, gradient_transform);
                 let large = 1e5f32;
                 let mut dx = end_x - start_x;
                 let mut dy = end_y - start_y;
@@ -180,8 +192,10 @@ impl Params {
                 radius,
                 feather,
                 colors,
+                transform: gradient_transform,
             } => {
                 let mut transform = Transform2D::translation(x + width * 0.5, y + height * 0.5);
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -205,6 +219,7 @@ impl Params {
                 in_radius: (in_rx, in_ry),
                 out_radius: (out_rx, out_ry),
                 colors,
+                transform: gradient_transform,
             } => {
                 let avg_x = (in_rx + out_rx) * 0.5;
                 let avg_y = (in_ry + out_ry) * 0.5;
@@ -214,6 +229,10 @@ impl Params {
                 // squash into an ellipse
                 let mut transform = Transform2D::scaling(avg_x / effective_r, avg_y / effective_r);
                 transform.translate(*cx, *cy);
+                // The caller's gradient transform maps the whole gradient
+                // definition - elliptical squash included - into user space,
+                // so it composes outside the squash and centre placement.
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -236,8 +255,10 @@ impl Params {
                 center: Position { x: cx, y: cy },
                 start_angle,
                 colors,
+                transform: gradient_transform,
             } => {
                 let mut transform = Transform2D::translation(*cx, *cy);
+                transform *= *gradient_transform;
                 transform *= *global_transform;
                 inv_transform = transform.inverse();
 
@@ -254,6 +275,40 @@ impl Params {
                     }
                 }
             }
+            &PaintFlavor::TwoPointRadialGradient {
+                start_center: Position { x: x0, y: y0 },
+                start_radius: r0,
+                end_center: Position { x: x1, y: y1 },
+                end_radius: r1,
+                colors,
+                transform: gradient_transform,
+            } => {
+                // Place the start circle at the origin of the gradient's local
+                // space; paint_mat then maps a fragment position into that space,
+                // where the shader solves the two-circle interpolation directly.
+                let mut transform = Transform2D::translation(*x0, *y0);
+                transform *= *gradient_transform;
+                transform *= *global_transform;
+                inv_transform = transform.inverse();
+
+                // Reuse the box-gradient slots for this variant: the end circle's
+                // center relative to the start, the start radius, and the radius
+                // delta. The dedicated shader reads them with this meaning.
+                params.extent[0] = *x1 - *x0;
+                params.extent[1] = *y1 - *y0;
+                params.radius = *r0;
+                params.feather = *r1 - *r0;
+                match colors {
+                    GradientColors::TwoStop { start_color, end_color } => {
+                        params.inner_col = start_color.premultiplied().to_array();
+                        params.outer_col = end_color.premultiplied().to_array();
+                        params.shader_type = ShaderType::FillGradientTwoPointRadial;
+                    }
+                    GradientColors::MultiStop { .. } => {
+                        params.shader_type = ShaderType::FillImageGradientTwoPointRadial;
+                    }
+                }
+            }
         }
 
         params.paint_mat = inv_transform.to_mat3x4();
@@ -264,4 +319,32 @@ impl Params {
     pub(crate) fn uses_glyph_texture(self) -> bool {
         self.glyph_texture_type != 0
     }
+}
+
+/// Maps a linear gradient's endpoints through `transform` so the resulting
+/// user-space gradient is exactly the transformed one: the start point maps
+/// directly, and the end point is placed along the transformed gradient
+/// direction (A^-T v, the image of the iso-line normal) at the distance that
+/// keeps t = 1 there. For similarities this is just mapping both endpoints;
+/// for anisotropic or skewed transforms it is the only exact answer.
+/// Degenerate inputs (zero-length gradient, singular transform) fall back
+/// to mapping both endpoints.
+fn fold_linear_gradient_transform(sx: f32, sy: f32, ex: f32, ey: f32, transform: &Transform2D) -> (f32, f32, f32, f32) {
+    let (nsx, nsy) = transform.transform_point(sx, sy);
+    let (nex, ney) = transform.transform_point(ex, ey);
+    let [a, b, c, d, _, _] = transform.0;
+    let (vx, vy) = (ex - sx, ey - sy);
+    let vv = vx * vx + vy * vy;
+    let det = a * d - b * c;
+    if vv <= f32::EPSILON || det.abs() <= f32::EPSILON {
+        return (nsx, nsy, nex, ney);
+    }
+    // w = A^-T v / |v|^2 : the user-space gradient of t.
+    let wx = (d * vx - b * vy) / det / vv;
+    let wy = (-c * vx + a * vy) / det / vv;
+    let ww = wx * wx + wy * wy;
+    if ww <= f32::EPSILON {
+        return (nsx, nsy, nex, ney);
+    }
+    (nsx, nsy, nsx + wx / ww, nsy + wy / ww)
 }

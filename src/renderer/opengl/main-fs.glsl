@@ -44,6 +44,8 @@ varying vec2 fpos;
  #define SHADER_TYPE_FillGradientConic 8
  #define SHADER_TYPE_FillImageGradientConic 9
  #define SHADER_TYPE_FilterImageColorMatrix 10
+ #define SHADER_TYPE_FillGradientTwoPointRadial 11
+ #define SHADER_TYPE_FillImageGradientTwoPointRadial 12
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -122,6 +124,89 @@ vec4 renderGradientConic() {
 
 vec4 renderImageGradientConic() {
     float d = conicAngleFraction();
+    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+}
+
+// Two-point (independently centered) radial gradient: the general Canvas
+// createRadialGradient(x0,y0,r0, x1,y1,r1). paintMat places the start circle at
+// the origin, so in local space the start circle is (0,0) radius r0 and the end
+// circle is `extent` away with radius r0 + dr (dr in feather). For a fragment pt
+// we solve for the interpolation offset t where |pt - t*cd| = r0 + t*dr, i.e.
+// a*t^2 - 2b*t + c = 0. `covered` reports whether any interpolated circle with a
+// non-negative radius reaches the fragment; uncovered fragments are transparent.
+float radialTwoPointT(out bool covered) {
+    vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
+    vec2 cd = extent;    // end circle center relative to start
+    float r0 = radius;
+    float dr = feather;  // r1 - r0
+    float a = dot(cd, cd) - dr * dr;
+    float b = dot(pt, cd) + r0 * dr;
+    float c = dot(pt, pt) - r0 * r0;
+    covered = false;
+    float t = 0.0;
+    // `a` is a squared length, so how close to zero it counts as depends on the
+    // size of the shape: the same geometry scaled up scales `a` with the square
+    // of the scale factor. Comparing it against a fixed constant would treat a
+    // focal point sitting on the end circle as a cone in one scene and as a
+    // degenerate in another. Measure it against the terms it came from instead,
+    // which also folds in the case where both are zero and the circles coincide.
+    float a_scale = max(dot(cd, cd), dr * dr);
+    if (a_scale == 0.0) {
+        // The two circles are the same circle. There is no sweep to walk, so
+        // the whole plane takes the far end of the ramp. The Canvas algorithm
+        // says to paint nothing here, but SVG resolved the opposite and its
+        // test suite asserts the gradient is drawn, so follow SVG.
+        t = 1.0;
+        covered = true;
+    } else if (abs(a) <= 1e-4 * a_scale) {
+        // Degenerate cone (|cd| == |dr|): the quadratic collapses to the linear
+        // equation -2b*t + c = 0. This is exactly the case where the end center
+        // sits on the start circle, common in focal-style gradients.
+        if (abs(b) > 1e-6) {
+            t = c / (2.0 * b);
+            covered = (r0 + t * dr >= 0.0);
+        }
+    } else {
+        float disc = b * b - a * c;
+        // When one circle strictly contains the other (a < 0), every fragment
+        // is on some interpolated circle and the discriminant is never really
+        // negative: at the focal point it is mathematically zero and rounds
+        // just below, which would punch a hole exactly where the first stop
+        // belongs. So a negative discriminant only counts as a miss for a > 0.
+        if (a < 0.0 || disc >= 0.0) {
+            float s = sqrt(max(disc, 0.0));
+            // One reciprocal, two roots (a is guaranteed away from zero here).
+            float inv_a = 1.0 / a;
+            float root_a = (b - s) * inv_a;
+            float root_b = (b + s) * inv_a;
+            float t_lo = min(root_a, root_b);
+            float t_hi = max(root_a, root_b);
+            // Canvas draws circles from the largest offset toward the smallest and
+            // does not overpaint, so the largest offset whose interpolated circle
+            // has a non-negative radius is the one that claims the fragment.
+            if (r0 + t_hi * dr >= 0.0) {
+                t = t_hi;
+                covered = true;
+            } else if (r0 + t_lo * dr >= 0.0) {
+                t = t_lo;
+                covered = true;
+            }
+        }
+    }
+    return clamp(t, 0.0, 1.0);
+}
+
+vec4 renderGradientTwoPointRadial() {
+    bool covered;
+    float d = radialTwoPointT(covered);
+    if (!covered) return vec4(0.0);
+    return ditherGradient(mix(innerCol, outerCol, d));
+}
+
+vec4 renderImageGradientTwoPointRadial() {
+    bool covered;
+    float d = radialTwoPointT(covered);
+    if (!covered) return vec4(0.0);
     return ditherGradient(texture2D(tex, vec2(d, 0.0)));
 }
 
@@ -241,6 +326,10 @@ void main(void) {
     result = renderImageGradientConic();
 #elif SELECT_SHADER == SHADER_TYPE_FilterImageColorMatrix
     result = renderColorMatrix();
+#elif SELECT_SHADER == SHADER_TYPE_FillGradientTwoPointRadial
+    result = renderGradientTwoPointRadial();
+#elif SELECT_SHADER == SHADER_TYPE_FillImageGradientTwoPointRadial
+    result = renderImageGradientTwoPointRadial();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
