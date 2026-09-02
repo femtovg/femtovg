@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 11],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 13],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 11],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 13],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -194,6 +194,18 @@ impl OpenGl {
                         false,
                     )?)
                 },
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillGradientTwoPointRadial,
+                    with_glyph_texture,
+                )?),
+                Some(MainProgram::new(
+                    &context,
+                    antialias,
+                    ShaderType::FillImageGradientTwoPointRadial,
+                    with_glyph_texture,
+                )?),
             ])
         };
 

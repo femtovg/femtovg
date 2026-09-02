@@ -9,6 +9,15 @@ All notable changes to this project will be documented in this file.
   Two-stop and multi-stop gradients now interpolate the same way, fixing flame
   gradient accuracy in Firefox's kit.svg embedded art, and now matching
   Canvas and SVG gradient behaviors in multiple web browsers.
+- Added two-point radial gradients, the general Canvas
+  `createRadialGradient(x0, y0, r0, x1, y1, r1)` form where the start and end
+  circles can have different centres. New `Paint` constructors
+  `two_point_radial_gradient()` and `two_point_radial_gradient_stops()`;
+  concentric gradients keep using the existing cheaper path.
+- Added gradient transforms, the role of SVG's `gradientTransform`: new `Paint`
+  methods `set_gradient_transform()` and `with_gradient_transform()` transform
+  the gradient without affecting the shape it fills, which is how SVG tools
+  express skewed or unevenly scaled gradients.
 - Fixed the WGPU backend painting a nonzero fill's whole bounding box after an
   even-odd fill, because the even-odd fill left winding counts in the stencil
   buffer. Showed as a block above the bow tie of the DuckDuckGo logo.
