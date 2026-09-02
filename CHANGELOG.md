@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
   Two-stop and multi-stop gradients now interpolate the same way, fixing flame
   gradient accuracy in Firefox's kit.svg embedded art, and now matching
   Canvas and SVG gradient behaviors in multiple web browsers.
+- Fixed the WGPU backend painting a nonzero fill's whole bounding box after an
+  even-odd fill, because the even-odd fill left winding counts in the stencil
+  buffer. Showed as a block above the bow tie of the DuckDuckGo logo.
 
 ## [0.27.0] - 2026-08-31
 

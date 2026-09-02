@@ -1341,10 +1341,13 @@ fn concave_fill(
                         FillRule::NonZero => 0xff,
                         FillRule::EvenOdd => 0x1,
                     },
-                    write_mask: match command.fill_rule {
-                        FillRule::NonZero => 0xff,
-                        FillRule::EvenOdd => 0x1,
-                    },
+                    // Even-odd reads only the parity bit, but the winding pass
+                    // wrote the full count (2 in overlaps, 0xff for a wrapped
+                    // -1). Clearing only bit 0 left those high bits behind,
+                    // and the next nonzero fill's NotEqual-0 test painted its
+                    // whole bounding quad over them. Clear every bit, as the
+                    // OpenGL backend's 0xff stencil mask already does.
+                    write_mask: 0xff,
                 },
                 stencil_reference: 0,
             },
