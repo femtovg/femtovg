@@ -41,6 +41,27 @@ jobs:
       - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
       - run: cargo test
+  # The *_wgpu integration tests are gated behind the `wgpu` feature, so the
+  # plain `cargo test` above compiles each of them to an executable that runs
+  # zero tests. This job runs the GPU regression test for real, on a runner
+  # with a Metal adapter, once the cheap matrix has passed.
+  gpu-regression:
+    needs: [build, format]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+      - name: Gradient tail pad (Metal)
+        env:
+          # Fail instead of skipping when no adapter is found, and insist on Metal.
+          FEMTOVG_REQUIRE_GPU: metal
+        run: cargo test --features wgpu --test gradient_tail_pad_wgpu -- --nocapture
   format:
     runs-on: ubuntu-latest
     steps:
