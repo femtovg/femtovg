@@ -41,6 +41,28 @@ jobs:
       - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
       - run: cargo test
+  # `cargo test` above never runs the GPU tests: every tests/*_wgpu.rs is gated
+  # behind the `wgpu` feature, which that command does not enable, so each of
+  # those executables is built and then reports "running 0 tests". This job
+  # runs them for real on a runner with a Metal adapter, once the cheap matrix
+  # has passed. FEMTOVG_REQUIRE_GPU makes a missing adapter a failure instead
+  # of a skip, so the job cannot go green without having exercised the GPU.
+  gpu-tests:
+    needs: [build, format]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+      - name: Run the GPU test suite
+        env:
+          FEMTOVG_REQUIRE_GPU: metal
+        run: cargo test --features wgpu --no-fail-fast -- --nocapture
   format:
     runs-on: ubuntu-latest
     steps:
