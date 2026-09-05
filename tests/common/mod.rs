@@ -4,24 +4,77 @@
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color};
 
+/// Set `FEMTOVG_REQUIRE_GPU` to turn "no adapter" from a skip into a failure:
+/// any value (`1`, `true`, `any`) requires that some adapter was found, and a
+/// backend name (`metal`, `vulkan`, `dx12`, `gl`) additionally requires that
+/// backend. CI's GPU job sets it, so the job cannot report success by quietly
+/// skipping every test on a runner where adapter creation failed.
+fn gpu_requirement() -> Option<String> {
+    std::env::var("FEMTOVG_REQUIRE_GPU")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
 pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let require = gpu_requirement();
     let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::default(),
         force_fallback_adapter: false,
         compatible_surface: None,
         ..Default::default()
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+    })) {
+        Ok(adapter) => adapter,
+        Err(err) => {
+            assert!(
+                require.is_none(),
+                "FEMTOVG_REQUIRE_GPU is set but no wgpu adapter was found: {err}"
+            );
+            eprintln!("skipping: no wgpu adapter available ({err})");
+            return None;
+        }
+    };
+
+    // Which GPU ran the suite is the first thing anyone reading a CI failure
+    // needs; print it once per test binary rather than once per test.
+    let info = adapter.get_info();
+    static ANNOUNCE: std::sync::Once = std::sync::Once::new();
+    ANNOUNCE.call_once(|| {
+        eprintln!(
+            "wgpu adapter: {} | backend {:?} | type {:?} | driver {} {}",
+            info.name, info.backend, info.device_type, info.driver, info.driver_info
+        );
+    });
+    if let Some(required) = require.as_deref() {
+        let backend = format!("{:?}", info.backend).to_ascii_lowercase();
+        assert!(
+            matches!(required, "1" | "true" | "any") || required == backend,
+            "FEMTOVG_REQUIRE_GPU={required} but the adapter's backend is {backend}"
+        );
+    }
+
+    let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("femtovg test device"),
         required_features: wgpu::Features::empty(),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::MemoryUsage,
         trace: wgpu::Trace::default(),
-    }))
-    .ok()?;
+    })) {
+        Ok(pair) => pair,
+        Err(err) => {
+            assert!(
+                require.is_none(),
+                "FEMTOVG_REQUIRE_GPU is set but the device request failed: {err}"
+            );
+            eprintln!("skipping: wgpu device request failed ({err})");
+            return None;
+        }
+    };
+    // A validation error must fail the test that provoked it, not scroll past
+    // in the log while the test reads back plausible-looking pixels.
+    device.on_uncaptured_error(std::sync::Arc::new(|err| panic!("wgpu uncaptured error: {err}")));
     Some((device, queue))
 }
 
@@ -54,8 +107,11 @@ pub fn render_rgba(
     canvas.set_size(width, height, 1.0);
     canvas.clear_rect(0, 0, width, height, clear);
     draw(&mut canvas);
-    let commands = canvas.flush_to_output(&target);
-    queue.submit(commands);
+    // The render and the copy that reads it back go to the queue together, so
+    // the pixels cannot depend on the ordering of two separate submissions.
+    let commands = canvas
+        .flush_to_output(&target)
+        .expect("flush_to_output produced no command buffer for a frame with draws");
 
     let unpadded = width * 4;
     let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -87,10 +143,19 @@ pub fn render_rgba(
             depth_or_array_layers: 1,
         },
     );
-    queue.submit(Some(enc.finish()));
+    queue.submit([commands, enc.finish()]);
     let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        sender.send(result).expect("map result receiver dropped");
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed while waiting for the readback");
+    receiver
+        .recv()
+        .expect("map_async callback never ran")
+        .expect("readback buffer map failed");
     let mapped = slice.get_mapped_range().expect("readback");
     let mut pixels = vec![0u8; (unpadded * height) as usize];
     for row in 0..height as usize {
