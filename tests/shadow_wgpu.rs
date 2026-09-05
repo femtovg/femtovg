@@ -11,34 +11,14 @@
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path, RenderTarget};
 
+mod common;
+use common::headless_device;
+
 const W: u32 = 120;
 const H: u32 = 120;
 
 /// Lazily create a headless wgpu device/queue. Returns `None` when no adapter is
 /// available (e.g. backend-less CI), so the caller can skip the test.
-fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::default();
-
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        ..Default::default()
-    }))
-    .ok()?;
-
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("femtovg shadow test device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::default(),
-    }))
-    .ok()?;
-
-    Some((device, queue))
-}
 
 /// Render `draw` into an offscreen RGBA8 texture and read the pixels back.
 /// Returns a row-major buffer of `[r, g, b, a]` per pixel.

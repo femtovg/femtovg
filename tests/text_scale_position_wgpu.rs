@@ -19,6 +19,9 @@
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path};
 
+mod common;
+use common::headless_device;
+
 const W: u32 = 640;
 const H: u32 = 400;
 const FONT: &[u8] = include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf");
@@ -30,27 +33,6 @@ const ZS: [f32; 7] = [1.40, 1.42, 1.44, 1.46, 1.48, 1.50, 1.52];
 // by under a pixel per step. 6 px cleanly separates the two while tolerating
 // antialiasing and centroid noise.
 const MAX_STEP: f32 = 6.0;
-
-fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        ..Default::default()
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("femtovg text scale position test device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::default(),
-    }))
-    .ok()?;
-    Some((device, queue))
-}
 
 /// Render a scene under a zoom of `z` around `pivot`. Returns row-major
 /// `[r,g,b,a]` pixels.

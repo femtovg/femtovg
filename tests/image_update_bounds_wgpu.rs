@@ -10,26 +10,8 @@ use femtovg::{renderer::WGPURenderer, Canvas, ErrorKind, ImageFlags};
 use imgref::Img;
 use rgb::{alt::Gray, RGBA8};
 
-fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        ..Default::default()
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("femtovg image update bounds test device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::default(),
-    }))
-    .ok()?;
-    Some((device, queue))
-}
+mod common;
+use common::headless_device;
 
 fn canvas() -> Option<Canvas<WGPURenderer>> {
     let (device, queue) = headless_device()?;

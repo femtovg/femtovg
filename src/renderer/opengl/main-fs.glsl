@@ -95,7 +95,11 @@ vec4 renderGradient() {
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    return ditherGradient(mix(innerCol,outerCol,d));
+    // Endpoints arrive straight (unpremultiplied) so transparent stops keep
+    // their hue through the mix - the interpolation Canvas and SVG gradients
+    // apply; premultiply here for the compositing pipeline.
+    vec4 color = ditherGradient(mix(innerCol,outerCol,d));
+    return vec4(color.rgb * color.a, color.a);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.
@@ -119,7 +123,9 @@ float conicAngleFraction() {
 
 vec4 renderGradientConic() {
     float d = conicAngleFraction();
-    return ditherGradient(mix(innerCol,outerCol,d));
+    // Straight endpoints, premultiplied post-mix (see renderGradient).
+    vec4 color = ditherGradient(mix(innerCol,outerCol,d));
+    return vec4(color.rgb * color.a, color.a);
 }
 
 vec4 renderImageGradientConic() {

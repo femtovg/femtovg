@@ -154,7 +154,9 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             // below (like the other gradient cases); returning here would skip
             // the clip and antialiasing, so conic fills would ignore scissors.
             let d = conicAngleFraction(vertex, params);
-            result = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
+            // Straight endpoints, premultiplied post-mix (see renderGradient).
+            let mixed = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
+            result = vec4<f32>(mixed.rgb * mixed.a, mixed.a);
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
@@ -367,7 +369,11 @@ fn renderGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
+    // Endpoints arrive straight (unpremultiplied) so transparent stops keep
+    // their hue through the mix - the interpolation Canvas and SVG gradients
+    // apply; premultiply here for the compositing pipeline.
+    let color: vec4<f32> = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
+    return vec4<f32>(color.rgb * color.a, color.a);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.

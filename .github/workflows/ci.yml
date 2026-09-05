@@ -41,11 +41,13 @@ jobs:
       - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
       - run: cargo test
-  # The *_wgpu integration tests are gated behind the `wgpu` feature, so the
-  # plain `cargo test` above compiles each of them to an executable that runs
-  # zero tests. This job runs the GPU regression test for real, on a runner
-  # with a Metal adapter, once the cheap matrix has passed.
-  gpu-regression:
+  # `cargo test` above never runs the GPU tests: every tests/*_wgpu.rs is gated
+  # behind the `wgpu` feature, which that command does not enable, so each of
+  # those executables is built and then reports "running 0 tests". This job
+  # runs them for real on a runner with a Metal adapter, once the cheap matrix
+  # has passed. FEMTOVG_REQUIRE_GPU makes a missing adapter a failure instead
+  # of a skip, so the job cannot go green without having exercised the GPU.
+  gpu-tests:
     needs: [build, format]
     runs-on: macos-latest
     steps:
@@ -57,11 +59,10 @@ jobs:
           toolchain: stable
           override: true
           profile: minimal
-      - name: Gradient tail pad (Metal)
+      - name: Run the GPU test suite
         env:
-          # Fail instead of skipping when no adapter is found, and insist on Metal.
           FEMTOVG_REQUIRE_GPU: metal
-        run: cargo test --features wgpu --test gradient_tail_pad_wgpu -- --nocapture
+        run: cargo test --features wgpu --no-fail-fast -- --nocapture
   format:
     runs-on: ubuntu-latest
     steps:

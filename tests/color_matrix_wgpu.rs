@@ -7,29 +7,11 @@
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFilter, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 
+mod common;
+use common::headless_device;
+
 const W: u32 = 32;
 const H: u32 = 32;
-
-fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        ..Default::default()
-    }))
-    .ok()?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("femtovg color matrix test device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::default(),
-    }))
-    .ok()?;
-    Some((device, queue))
-}
 
 /// Fill a source image with `src`, apply `filter` into a target image, draw the
 /// target to the output, and return the centre pixel `[r,g,b,a]`.
