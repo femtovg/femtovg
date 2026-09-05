@@ -21,6 +21,9 @@
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path};
 
+mod common;
+use common::headless_device;
+
 const W: u32 = 220;
 const H: u32 = 64;
 
@@ -40,64 +43,6 @@ const WHITE: [u8; 3] = [255, 255, 255];
 /// Unlike anything in the ramp or the clear, so a strip pixel cannot be
 /// mistaken for either.
 const MAGENTA: [u8; 3] = [200, 0, 200];
-
-fn gpu_requirement() -> Option<String> {
-    std::env::var("FEMTOVG_REQUIRE_GPU")
-        .ok()
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-}
-
-fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let require = gpu_requirement();
-    let instance = wgpu::Instance::default();
-    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::default(),
-        force_fallback_adapter: false,
-        compatible_surface: None,
-        ..Default::default()
-    })) {
-        Ok(adapter) => adapter,
-        Err(err) => {
-            if require.is_some() {
-                panic!("FEMTOVG_REQUIRE_GPU is set but no wgpu adapter was found: {err}");
-            }
-            eprintln!("skipping: no wgpu adapter available ({err})");
-            return None;
-        }
-    };
-    let info = adapter.get_info();
-    eprintln!(
-        "wgpu adapter: {} | backend {:?} | type {:?} | driver {} {}",
-        info.name, info.backend, info.device_type, info.driver, info.driver_info
-    );
-    if let Some(required) = require.as_deref() {
-        let backend = format!("{:?}", info.backend).to_ascii_lowercase();
-        if !matches!(required, "1" | "true" | "any") && required != backend {
-            panic!("FEMTOVG_REQUIRE_GPU={required} but the adapter's backend is {backend}");
-        }
-    }
-    let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("femtovg gradient tail pad test device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::MemoryUsage,
-        trace: wgpu::Trace::default(),
-    })) {
-        Ok(pair) => pair,
-        Err(err) => {
-            if require.is_some() {
-                panic!("FEMTOVG_REQUIRE_GPU is set but the device request failed: {err}");
-            }
-            eprintln!("skipping: wgpu device request failed ({err})");
-            return None;
-        }
-    };
-    // Validation errors are failures, not log lines.
-    device.on_uncaptured_error(std::sync::Arc::new(|err| panic!("wgpu uncaptured error: {err}")));
-    Some((device, queue))
-}
 
 /// Flushes the canvas into `target` and reads the target back. The render
 /// command buffer and the copy are submitted together, in that order, so the
