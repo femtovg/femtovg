@@ -257,6 +257,11 @@ pub enum ShaderType {
     FillGradientTwoPointRadial,
     /// Fill image two-point radial gradient shader (multi-stop LUT variant).
     FillImageGradientTwoPointRadial,
+    /// Turbulence generator shader (SVG `feTurbulence`); samples the noise
+    /// lattice bound in place of the image.
+    FilterImageTurbulence,
+    /// sRGB transfer-curve shader: linearRGB to sRGB, or the reverse.
+    FilterImageTransfer,
 }
 
 impl ShaderType {
@@ -276,6 +281,8 @@ impl ShaderType {
             Self::FilterImageColorMatrix => 10,
             Self::FillGradientTwoPointRadial => 11,
             Self::FillImageGradientTwoPointRadial => 12,
+            Self::FilterImageTurbulence => 13,
+            Self::FilterImageTransfer => 14,
         }
     }
 

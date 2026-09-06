@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `ImageFilter::Turbulence`, the SVG `feTurbulence` primitive, generated on
+  the GPU from the SVG 1.1 reference algorithm - the same Park-Miller generator
+  and Perlin lattice Chromium and Firefox run, so a seed gives a browser's noise.
+  The lattice is uploaded once per seed as a 512 KB texture with the spec's two
+  dependent permutation lookups pre-composed, so every fetch is addressed
+  straight from the pixel (the shape tile-based mobile GPUs pipeline) at eight
+  fetches per octave for all four channels; the last four seeds stay cached. A
+  `transform` maps noise space onto the output so the pattern scales with the
+  content, and `stitchTiles` is supported. Added `ImageFilter::LinearRgbToSrgb`
+  and `SrgbToLinearRgb`, the sRGB transfer curve as a pass, so a chain can run
+  in linearRGB the way SVG filters do by default and hand back what a browser
+  displays; an adjacent pair folds away.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single

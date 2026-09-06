@@ -46,6 +46,8 @@ varying vec2 fpos;
  #define SHADER_TYPE_FilterImageColorMatrix 10
  #define SHADER_TYPE_FillGradientTwoPointRadial 11
  #define SHADER_TYPE_FillImageGradientTwoPointRadial 12
+ #define SHADER_TYPE_FilterImageTurbulence 13
+ #define SHADER_TYPE_FilterImageTransfer 14
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -291,6 +293,104 @@ vec4 renderColorMatrix() {
     return outc;
 }
 
+// SVG feTurbulence (SVG 1.1 section 15.19), all four channels at once. `tex`
+// is the lattice texture built by src/turbulence.rs: texel (bx, by) of the
+// left 256 columns holds the unit gradient vectors of channels 0 and 1 at
+// lattice corner (bx, by), the right 256 columns those of channels 2 and 3,
+// each component stored as (g + 1) / 2. The reference code's integer
+// truncation and 0xff mask become floor() and mod() here - GLSL ES 1.00 has
+// no bitwise operators - and the PerlinN offset that kept its integers
+// positive drops out, so the stitch thresholds arrive from Rust without it.
+#define TURBULENCE_MAX_OCTAVES 10.0
+
+vec2 turbulenceWrap(vec2 corner) {
+    return corner - 256.0 * floor(corner / 256.0);
+}
+
+vec4 turbulenceGradients(vec2 corner, float pair) {
+    return texture2D(tex, vec2(corner.x + pair * 256.0 + 0.5, corner.y + 0.5) / vec2(512.0, 256.0)) * 2.0 - 1.0;
+}
+
+// One octave of classic Perlin noise at v: the spec's noise2() for the four
+// channels. stitch is (tile width, tile height, wrap x, wrap y) in lattice units.
+vec4 turbulenceOctave(vec2 v, vec4 stitch, bool stitching) {
+    vec2 b0 = floor(v);
+    vec2 r0 = v - b0;
+    vec2 b1 = b0 + 1.0;
+    vec2 r1 = r0 - 1.0;
+    if (stitching) {
+        if (b0.x >= stitch.z) b0.x -= stitch.x;
+        if (b1.x >= stitch.z) b1.x -= stitch.x;
+        if (b0.y >= stitch.w) b0.y -= stitch.y;
+        if (b1.y >= stitch.w) b1.y -= stitch.y;
+    }
+    b0 = turbulenceWrap(b0);
+    b1 = turbulenceWrap(b1);
+    vec2 c10 = vec2(b1.x, b0.y);
+    vec2 c01 = vec2(b0.x, b1.y);
+    vec4 gA00 = turbulenceGradients(b0, 0.0);
+    vec4 gB00 = turbulenceGradients(b0, 1.0);
+    vec4 gA10 = turbulenceGradients(c10, 0.0);
+    vec4 gB10 = turbulenceGradients(c10, 1.0);
+    vec4 gA01 = turbulenceGradients(c01, 0.0);
+    vec4 gB01 = turbulenceGradients(c01, 1.0);
+    vec4 gA11 = turbulenceGradients(b1, 0.0);
+    vec4 gB11 = turbulenceGradients(b1, 1.0);
+    vec2 r10 = vec2(r1.x, r0.y);
+    vec2 r01 = vec2(r0.x, r1.y);
+    vec4 u00 = vec4(dot(r0, gA00.xy), dot(r0, gA00.zw), dot(r0, gB00.xy), dot(r0, gB00.zw));
+    vec4 u10 = vec4(dot(r10, gA10.xy), dot(r10, gA10.zw), dot(r10, gB10.xy), dot(r10, gB10.zw));
+    vec4 u01 = vec4(dot(r01, gA01.xy), dot(r01, gA01.zw), dot(r01, gB01.xy), dot(r01, gB01.zw));
+    vec4 u11 = vec4(dot(r1, gA11.xy), dot(r1, gA11.zw), dot(r1, gB11.xy), dot(r1, gB11.zw));
+    vec2 s = r0 * r0 * (3.0 - 2.0 * r0);
+    return mix(mix(u00, u10, s.x), mix(u01, u11, s.x), s.y);
+}
+
+vec4 renderTurbulence() {
+    // Slots (see ImageFilter::single_pass): frag[0] = inverse transform a b c d,
+    // frag[1] = e f and the base frequency, frag[2] = octaves, fractal flag and
+    // the stitch tile size, frag[3] = the stitch wrap thresholds and flag.
+    // Each output pixel is evaluated at its integer index mapped into noise space.
+    vec2 px = floor(fpos.xy);
+    vec2 p = vec2(frag[0].x * px.x + frag[0].z * px.y + frag[1].x,
+                  frag[0].y * px.x + frag[0].w * px.y + frag[1].y);
+    vec2 v = p * frag[1].zw;
+    float octaves = frag[2].x;
+    bool fractal = frag[2].y > 0.5;
+    vec4 stitch = vec4(frag[2].zw, frag[3].xy);
+    bool stitching = frag[3].z > 0.5;
+    vec4 sum = vec4(0.0);
+    float ratio = 1.0;
+    for (float o = 0.0; o < TURBULENCE_MAX_OCTAVES; o += 1.0) {
+        // GLES 2.0 loops need a constant bound; the octave count breaks out.
+        if (o >= octaves) break;
+        vec4 n = turbulenceOctave(v, stitch, stitching);
+        sum += (fractal ? n : abs(n)) / ratio;
+        v *= 2.0;
+        ratio *= 2.0;
+        stitch *= 2.0;
+    }
+    vec4 c = clamp(fractal ? (sum + 1.0) / 2.0 : sum, 0.0, 1.0);
+    return vec4(c.rgb * c.a, c.a);
+}
+
+// The sRGB transfer curve (IEC 61966-2-1) on unpremultiplied color, alpha
+// untouched: frag[0].x > 0.5 converts linearRGB to sRGB, otherwise the reverse.
+vec4 renderTransfer() {
+    vec4 c = texture2D(tex, fpos.xy / extent);
+    if (c.a > 0.0) {
+        c.rgb /= c.a;
+    }
+    vec3 x = clamp(c.rgb, 0.0, 1.0);
+    vec3 y;
+    if (frag[0].x > 0.5) {
+        y = mix(x * 12.92, 1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3(2.4)), step(0.04045, x));
+    }
+    return vec4(y * c.a, c.a);
+}
+
 void main(void) {
     vec4 result;
 
@@ -336,6 +436,10 @@ void main(void) {
     result = renderGradientTwoPointRadial();
 #elif SELECT_SHADER == SHADER_TYPE_FillImageGradientTwoPointRadial
     result = renderImageGradientTwoPointRadial();
+#elif SELECT_SHADER == SHADER_TYPE_FilterImageTurbulence
+    result = renderTurbulence();
+#elif SELECT_SHADER == SHADER_TYPE_FilterImageTransfer
+    result = renderTransfer();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
@@ -356,7 +460,7 @@ void main(void) {
     mask *= scissor;
     result *= mask;
 #else
-#if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage && SELECT_SHADER != SHADER_TYPE_FilterImageColorMatrix
+#if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage && SELECT_SHADER != SHADER_TYPE_FilterImageColorMatrix && SELECT_SHADER != SHADER_TYPE_FilterImageTurbulence && SELECT_SHADER != SHADER_TYPE_FilterImageTransfer
         // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;

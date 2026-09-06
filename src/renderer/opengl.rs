@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 13],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 15],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 13],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 15],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -206,6 +206,26 @@ impl OpenGl {
                     ShaderType::FillImageGradientTwoPointRadial,
                     with_glyph_texture,
                 )?),
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageTurbulence,
+                        false,
+                    )?)
+                },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageTransfer,
+                        false,
+                    )?)
+                },
             ])
         };
 
@@ -605,19 +625,29 @@ impl OpenGl {
     ) {
         match filter {
             ImageFilter::GaussianBlur { sigma } => self.render_gaussian_blur(images, cmd, target_image, sigma),
-            ImageFilter::ColorMatrix { matrix } => self.render_color_matrix(images, cmd, target_image, matrix),
+            single_pass => {
+                let target_image_info = images.get(target_image).unwrap().info();
+                let (shader_type, slots) = single_pass
+                    .single_pass(target_image_info.width() as f32, target_image_info.height() as f32)
+                    .expect("every filter but the Gaussian blur runs as one pass");
+                self.render_filter_pass(images, cmd, target_image, shader_type, slots)
+            }
         }
     }
 
-    fn render_color_matrix(
+    /// Runs a one-pass filter (color matrix, turbulence, transfer) over the
+    /// command's quad into `target_image`, sampling the command's image.
+    fn render_filter_pass(
         &mut self,
         images: &mut ImageStore<GlTexture>,
         cmd: Command,
         target_image: ImageId,
-        matrix: [f32; 20],
+        shader_type: ShaderType,
+        slots: [f32; 20],
     ) {
         let original_render_target = self.current_render_target;
         let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
+        let target_image_info = images.get(target_image).unwrap().info();
 
         let image_paint = crate::Paint::image(
             cmd.image.unwrap(),
@@ -638,21 +668,24 @@ impl OpenGl {
             0.,
             0.,
         );
-        params.shader_type = ShaderType::FilterImageColorMatrix;
-        // The color matrix rides the scissor/paint-matrix uniform slots, which are
-        // dead during a filter pass (no scissor, no paint gradient): frag[0..2]
-        // hold the first 12 values, frag[3..4] the last 8, so no uniform-array
-        // growth is needed. The shader reads them back as a row-major 4x5 matrix.
-        params.scissor_mat.copy_from_slice(&matrix[..12]);
-        params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+        params.shader_type = shader_type;
+        // The filter's parameters ride the scissor/paint-matrix uniform slots,
+        // which are dead during a filter pass (no scissor, no paint gradient):
+        // frag[0..2] hold the first 12 values, frag[3..4] the last 8, so no
+        // uniform-array growth is needed (see `ImageFilter::single_pass`).
+        params.scissor_mat.copy_from_slice(&slots[..12]);
+        params.paint_mat[..8].copy_from_slice(&slots[12..20]);
+        // A generating pass binds its lookup table as the image, so the output
+        // extent comes from the target rather than from what is sampled.
+        params.extent = [target_image_info.width() as f32, target_image_info.height() as f32];
 
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
         self.clear_rect(
             0,
             0,
-            source_image_info.width() as _,
-            source_image_info.height() as _,
+            target_image_info.width() as _,
+            target_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
         );
         self.triangles(images, &cmd, &params);

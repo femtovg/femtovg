@@ -36,6 +36,8 @@ const SHADER_TYPE_FillImageGradientConic: i32 = 9;
 const SHADER_TYPE_FilterImageColorMatrix: i32 = 10;
 const SHADER_TYPE_FillGradientTwoPointRadial: i32 = 11;
 const SHADER_TYPE_FillImageGradientTwoPointRadial: i32 = 12;
+const SHADER_TYPE_FilterImageTurbulence: i32 = 13;
+const SHADER_TYPE_FilterImageTransfer: i32 = 14;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -172,6 +174,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         case SHADER_TYPE_FillImageGradientTwoPointRadial: {
             result = renderImageGradientTwoPointRadial(vertex, params);
         }
+        case SHADER_TYPE_FilterImageTurbulence: {
+            return renderTurbulence(vertex, params);
+        }
+        case SHADER_TYPE_FilterImageTransfer: {
+            return renderTransfer(vertex, params);
+        }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
         }
@@ -222,6 +230,114 @@ fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let a = m3.w * c.r + m4.x * c.g + m4.y * c.b + m4.z * c.a + m4.w;
     let outc = clamp(vec4<f32>(r, g, b, a), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec4<f32>(outc.rgb * outc.a, outc.a);
+}
+
+// SVG feTurbulence (SVG 1.1 section 15.19), all four channels at once. The
+// image texture is the lattice built by src/turbulence.rs: texel (bx, by) of
+// the left 256 columns holds the unit gradient vectors of channels 0 and 1 at
+// lattice corner (bx, by), the right 256 columns those of channels 2 and 3,
+// each component stored as (g + 1) / 2. The reference code's integer
+// truncation and 0xff mask become floor() and a floored modulo, the same
+// arithmetic as the GLSL ES 1.00 shader so both backends agree, and the
+// PerlinN offset that kept its integers positive drops out, so the stitch
+// thresholds arrive from Rust without it.
+const TURBULENCE_MAX_OCTAVES: f32 = 10.0;
+
+fn turbulenceWrap(corner: vec2<f32>) -> vec2<f32> {
+    return corner - 256.0 * floor(corner / 256.0);
+}
+
+fn turbulenceGradients(corner: vec2<f32>, pair: f32) -> vec4<f32> {
+    let uv = vec2<f32>(corner.x + pair * 256.0 + 0.5, corner.y + 0.5) / vec2<f32>(512.0, 256.0);
+    return textureSample(image_texture, image_sampler, uv) * 2.0 - 1.0;
+}
+
+// One octave of classic Perlin noise at v: the spec's noise2() for the four
+// channels. stitch is (tile width, tile height, wrap x, wrap y) in lattice units.
+fn turbulenceOctave(v: vec2<f32>, stitch: vec4<f32>, stitching: bool) -> vec4<f32> {
+    var b0 = floor(v);
+    let r0 = v - b0;
+    var b1 = b0 + 1.0;
+    let r1 = r0 - 1.0;
+    if (stitching) {
+        if (b0.x >= stitch.z) { b0.x -= stitch.x; }
+        if (b1.x >= stitch.z) { b1.x -= stitch.x; }
+        if (b0.y >= stitch.w) { b0.y -= stitch.y; }
+        if (b1.y >= stitch.w) { b1.y -= stitch.y; }
+    }
+    b0 = turbulenceWrap(b0);
+    b1 = turbulenceWrap(b1);
+    let c10 = vec2<f32>(b1.x, b0.y);
+    let c01 = vec2<f32>(b0.x, b1.y);
+    let gA00 = turbulenceGradients(b0, 0.0);
+    let gB00 = turbulenceGradients(b0, 1.0);
+    let gA10 = turbulenceGradients(c10, 0.0);
+    let gB10 = turbulenceGradients(c10, 1.0);
+    let gA01 = turbulenceGradients(c01, 0.0);
+    let gB01 = turbulenceGradients(c01, 1.0);
+    let gA11 = turbulenceGradients(b1, 0.0);
+    let gB11 = turbulenceGradients(b1, 1.0);
+    let r10 = vec2<f32>(r1.x, r0.y);
+    let r01 = vec2<f32>(r0.x, r1.y);
+    let u00 = vec4<f32>(dot(r0, gA00.xy), dot(r0, gA00.zw), dot(r0, gB00.xy), dot(r0, gB00.zw));
+    let u10 = vec4<f32>(dot(r10, gA10.xy), dot(r10, gA10.zw), dot(r10, gB10.xy), dot(r10, gB10.zw));
+    let u01 = vec4<f32>(dot(r01, gA01.xy), dot(r01, gA01.zw), dot(r01, gB01.xy), dot(r01, gB01.zw));
+    let u11 = vec4<f32>(dot(r1, gA11.xy), dot(r1, gA11.zw), dot(r1, gB11.xy), dot(r1, gB11.zw));
+    let s = r0 * r0 * (3.0 - 2.0 * r0);
+    return mix(mix(u00, u10, s.x), mix(u01, u11, s.x), s.y);
+}
+
+fn renderTurbulence(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    // Slots (see ImageFilter::single_pass): scissor_mat[0] = inverse transform
+    // a b c d, scissor_mat[1] = e f and the base frequency, scissor_mat[2] =
+    // octaves, fractal flag and the stitch tile size, paint_mat[0] = the stitch
+    // wrap thresholds and flag. Each output pixel is evaluated at its integer
+    // index mapped into noise space.
+    let m0 = params.scissor_mat[0];
+    let m1 = params.scissor_mat[1];
+    let m2 = params.scissor_mat[2];
+    let m3 = params.paint_mat[0];
+    let px = floor(vertex.fpos.xy);
+    let p = vec2<f32>(m0.x * px.x + m0.z * px.y + m1.x, m0.y * px.x + m0.w * px.y + m1.y);
+    var v = p * m1.zw;
+    let octaves = m2.x;
+    let fractal = m2.y > 0.5;
+    var stitch = vec4<f32>(m2.zw, m3.xy);
+    let stitching = m3.z > 0.5;
+    var sum = vec4<f32>(0.0);
+    var ratio: f32 = 1.0;
+    for (var o: f32 = 0.0; o < TURBULENCE_MAX_OCTAVES; o += 1.0) {
+        // Constant loop bound with the octave count breaking out, as in the
+        // GLES 2.0 shader, so both backends sum the same octaves.
+        if (o >= octaves) {
+            break;
+        }
+        let n = turbulenceOctave(v, stitch, stitching);
+        sum += select(abs(n), n, fractal) / ratio;
+        v *= 2.0;
+        ratio *= 2.0;
+        stitch *= 2.0;
+    }
+    let c = clamp(select(sum, (sum + 1.0) / 2.0, fractal), vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(c.rgb * c.a, c.a);
+}
+
+// The sRGB transfer curve (IEC 61966-2-1) on unpremultiplied color, alpha
+// untouched: scissor_mat[0].x > 0.5 converts linearRGB to sRGB, otherwise the
+// reverse.
+fn renderTransfer(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    var c: vec4<f32> = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent);
+    if (c.a > 0.0) {
+        c = vec4<f32>(c.rgb / c.a, c.a);
+    }
+    let x = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var y: vec3<f32>;
+    if (params.scissor_mat[0].x > 0.5) {
+        y = mix(x * 12.92, 1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, step(vec3<f32>(0.0031308), x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3<f32>(2.4)), step(vec3<f32>(0.04045), x));
+    }
+    return vec4<f32>(y * c.a, c.a);
 }
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {

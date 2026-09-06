@@ -4,6 +4,9 @@ use rgb::alt::Gray;
 use rgb::*;
 use slotmap::{DefaultKey, SlotMap};
 
+use crate::geometry::Transform2D;
+use crate::renderer::ShaderType;
+
 #[cfg(feature = "image-loading")]
 use ::image::DynamicImage;
 
@@ -357,6 +360,74 @@ pub enum ImageFilter {
         /// Row-major 4x5 color matrix.
         matrix: [f32; 20],
     },
+    /// Perlin turbulence or fractal noise: the SVG `feTurbulence` primitive,
+    /// generated from the reference algorithm in SVG 1.1 section 15.19 that
+    /// Chromium and Firefox both implement, so the same parameters give the
+    /// same noise as a browser.
+    ///
+    /// Unlike the other filters this one does not sample its source image -
+    /// `feTurbulence` takes no input - it only sizes the output from it.
+    /// Each pixel gets four independent noise channels (RGBA, each in
+    /// `[0, 1]`) and the result is stored premultiplied. `fractalNoise` is
+    /// centered on 0.5 and `turbulence` on 0 in every channel, alpha
+    /// included, exactly as the primitive is specified; a chain typically
+    /// follows with a [`ColorMatrix`](Self::ColorMatrix) that remaps the
+    /// channels into a color and an opacity.
+    ///
+    /// The noise lives in its own coordinate space: `transform` maps that
+    /// space onto output pixels, so the pattern scales and moves with the
+    /// content it decorates instead of sticking to the device grid. Pixel
+    /// `(x, y)` is evaluated at `transform⁻¹ · (x, y)`; with the identity
+    /// transform one noise unit is one pixel, which is what a browser does
+    /// at 1:1 and what Firefox does at any zoom (Chromium additionally snaps
+    /// the mapped position to whole noise units).
+    ///
+    /// The primitive's values are defined in the filter's working color
+    /// space, which SVG defaults to linearRGB; end such a chain with
+    /// [`LinearRgbToSrgb`](Self::LinearRgbToSrgb) to get what a browser
+    /// displays for a default `<filter>`.
+    ///
+    /// Octaves past the tenth are skipped: octave `n` contributes at most
+    /// `1 / 2ⁿ`, so the ones skipped change the sum by less than half of an
+    /// 8-bit step, and the bound keeps the per-pixel cost finite on GLES 2.0
+    /// hardware, where loops need a constant bound.
+    Turbulence {
+        /// Base frequency per axis, in cycles per noise unit (SVG `baseFrequency`).
+        base_frequency: [f32; 2],
+        /// Number of octaves to sum (SVG `numOctaves`); 0 sums nothing.
+        num_octaves: u32,
+        /// Random seed (SVG `seed`, already truncated to an integer).
+        seed: i32,
+        /// Adjust the frequency and wrap the lattice so the noise tiles
+        /// seamlessly across the output image (SVG `stitchTiles="stitch"`).
+        stitch_tiles: bool,
+        /// `fractalNoise` or `turbulence` (SVG `type`).
+        kind: TurbulenceKind,
+        /// Maps noise space onto output pixels.
+        transform: Transform2D,
+    },
+    /// Converts unpremultiplied color from linearRGB to sRGB with the sRGB
+    /// transfer curve (IEC 61966-2-1), leaving alpha unchanged. SVG filters
+    /// run in linearRGB by default (`color-interpolation-filters`), so a
+    /// chain that reproduces one ends with this to hand the display the
+    /// sRGB values a browser shows. Adjacent to its inverse it folds away.
+    LinearRgbToSrgb,
+    /// The inverse of [`LinearRgbToSrgb`](Self::LinearRgbToSrgb): converts
+    /// unpremultiplied sRGB color to linearRGB, for filtering an ordinary
+    /// image the way a linearRGB SVG filter would.
+    SrgbToLinearRgb,
+}
+
+/// The noise function of [`ImageFilter::Turbulence`]: SVG `feTurbulence`'s
+/// `type` attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TurbulenceKind {
+    /// Sums signed octaves: smooth, cloud-like values centered on 0.5.
+    FractalNoise,
+    /// Sums the absolute value of each octave: sharper, vein-like values
+    /// centered on 0. The SVG default.
+    #[default]
+    Turbulence,
 }
 
 impl ImageFilter {
@@ -582,10 +653,20 @@ impl ImageFilter {
     /// sequential result and from Chromium. `next` may overflow freely: its
     /// output is clamped at the end of the pass either way.
     ///
-    /// Returns `None` when either side is not a color matrix (a blur cannot
-    /// fold) or when `self` is not range-safe, leaving chain execution to run
-    /// the passes separately.
+    /// A color-space transfer followed by its inverse folds to the identity:
+    /// the pair is a mathematical no-op, and skipping it is more exact than
+    /// running it, which would round the linear intermediate to 8 bits.
+    ///
+    /// Returns `None` for any other pairing that is not two color matrices
+    /// (a blur or a turbulence cannot fold) or when `self` is not
+    /// range-safe, leaving chain execution to run the passes separately.
     pub fn fold_with(self, next: Self) -> Option<Self> {
+        if matches!(
+            (self, next),
+            (Self::LinearRgbToSrgb, Self::SrgbToLinearRgb) | (Self::SrgbToLinearRgb, Self::LinearRgbToSrgb)
+        ) {
+            return Some(Self::identity());
+        }
         let (Self::ColorMatrix { matrix: a }, Self::ColorMatrix { matrix: b }) = (self, next) else {
             return None;
         };
@@ -620,8 +701,37 @@ impl ImageFilter {
     /// it. Exhaustive on purpose - a new variant must declare its parity here.
     pub(crate) fn flips_output(&self) -> bool {
         match self {
-            Self::ColorMatrix { .. } => true,
+            Self::ColorMatrix { .. } | Self::Turbulence { .. } | Self::LinearRgbToSrgb | Self::SrgbToLinearRgb => true,
             Self::GaussianBlur { .. } => false,
+        }
+    }
+
+    /// The shader and its 20 parameter slots for a filter that runs as one
+    /// full-image pass over a `width` x `height` target; `None` for the
+    /// two-pass Gaussian blur, which the renderers drive themselves.
+    ///
+    /// The slots ride the scissor and paint matrix uniforms, which are dead
+    /// during a filter pass (no scissor, no paint gradient): the first 12
+    /// land in `scissor_mat`, the last 8 in `paint_mat`, so no uniform-array
+    /// growth is needed. Each shader documents its own layout; the color
+    /// matrix is its 20 values row-major, a transfer uses slot 0 as its
+    /// direction (1 = to sRGB), turbulence is laid out by
+    /// [`turbulence::shader_slots`](crate::turbulence::shader_slots).
+    pub(crate) fn single_pass(&self, width: f32, height: f32) -> Option<(ShaderType, [f32; 20])> {
+        let transfer = |to_srgb: f32| {
+            let mut slots = [0.0f32; 20];
+            slots[0] = to_srgb;
+            (ShaderType::FilterImageTransfer, slots)
+        };
+        match *self {
+            Self::GaussianBlur { .. } => None,
+            Self::ColorMatrix { matrix } => Some((ShaderType::FilterImageColorMatrix, matrix)),
+            Self::Turbulence { .. } => Some((
+                ShaderType::FilterImageTurbulence,
+                crate::turbulence::shader_slots(self, width, height),
+            )),
+            Self::LinearRgbToSrgb => Some(transfer(1.0)),
+            Self::SrgbToLinearRgb => Some(transfer(0.0)),
         }
     }
 }

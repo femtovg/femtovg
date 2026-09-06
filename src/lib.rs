@@ -44,7 +44,9 @@ use text::{GlyphAtlas, TextContextImpl};
 
 mod image;
 use crate::image::ImageStore;
-pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat};
+pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind};
+
+mod turbulence;
 
 mod color;
 pub use color::Color;
@@ -327,6 +329,10 @@ pub struct Canvas<T: Renderer> {
     // referenced by deferred draw commands, so they can only be freed once those
     // commands have been submitted to the renderer (i.e. after flush).
     transient_images: Vec<ImageId>,
+    // Turbulence lattice textures by seed, most recently used last. Bounded by
+    // `turbulence::LATTICE_CACHE_CAPACITY`; an evicted one is released through
+    // `transient_images` so a command already recorded against it still runs.
+    turbulence_lattices: Vec<(i32, ImageId)>,
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -385,6 +391,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            turbulence_lattices: Vec::new(),
         };
 
         canvas.save();
@@ -415,6 +422,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            turbulence_lattices: Vec::new(),
         };
 
         canvas.save();
@@ -799,15 +807,27 @@ where
     ///
     /// The filtering does not take any transformation set on the Canvas into account nor does it
     /// change the current rendering target.
+    ///
+    /// [`ImageFilter::Turbulence`] reads nothing from `source_image` - it only takes the output
+    /// size from it - and keeps a small per-seed cache of lattice textures (512 KB each, the
+    /// last four seeds used) alive across flushes.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
         let Ok((image_width, image_height)) = self.image_size(source_image) else {
             return;
         };
 
         // The renderer will receive a RenderFilteredImage command with two triangles attached that
-        // cover the image and the source image.
+        // cover the image and the source image. A turbulence pass generates rather than samples,
+        // so it binds its noise lattice where the source would go; the source still sizes the quad.
+        let sampled = match filter {
+            ImageFilter::Turbulence { seed, .. } => match self.turbulence_lattice(seed) {
+                Ok(lattice) => lattice,
+                Err(_) => return,
+            },
+            _ => source_image,
+        };
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
-        cmd.image = Some(source_image);
+        cmd.image = Some(sampled);
 
         let vertex_offset = self.verts.len();
 
@@ -834,6 +854,26 @@ where
         cmd.triangles_verts = Some((vertex_offset, 6));
 
         self.append_cmd(cmd)
+    }
+
+    /// The lattice texture for a turbulence seed, built on first use and kept
+    /// for the [`turbulence::LATTICE_CACHE_CAPACITY`] most recently used seeds.
+    /// An evicted lattice is released after the next flush, once any command
+    /// already recorded against it has run.
+    fn turbulence_lattice(&mut self, seed: i32) -> Result<ImageId, ErrorKind> {
+        if let Some(at) = self.turbulence_lattices.iter().position(|(s, _)| *s == seed) {
+            let entry = self.turbulence_lattices.remove(at);
+            self.turbulence_lattices.push(entry);
+            return Ok(entry.1);
+        }
+        let texels = turbulence::lattice_texels(seed);
+        let id = self.create_image(turbulence::lattice_source(&texels), turbulence::lattice_flags())?;
+        self.turbulence_lattices.push((seed, id));
+        if self.turbulence_lattices.len() > turbulence::LATTICE_CACHE_CAPACITY {
+            let (_, evicted) = self.turbulence_lattices.remove(0);
+            self.transient_images.push(evicted);
+        }
+        Ok(id)
     }
 
     /// Acquires a transient offscreen image that is released automatically
@@ -4500,6 +4540,61 @@ fn layout_stores_the_run_baseline() {
             layout.baseline()
         );
     }
+}
+
+/// Turbulence lattices are cached per seed with a fixed capacity: a repeated
+/// seed reuses its texture, the least recently used seed is evicted through
+/// the transient list (so a command recorded against it still runs before the
+/// delete), and a flush releases only the evicted ones.
+#[test]
+fn turbulence_lattice_cache_is_bounded() {
+    use crate::{ImageFilter, TurbulenceKind};
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let src = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let dst = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
+        .unwrap();
+    let noise = |seed: i32| ImageFilter::Turbulence {
+        base_frequency: [0.1, 0.1],
+        num_octaves: 2,
+        seed,
+        stitch_tiles: false,
+        kind: TurbulenceKind::FractalNoise,
+        transform: Transform2D::identity(),
+    };
+
+    for seed in 1..=turbulence::LATTICE_CACHE_CAPACITY as i32 {
+        canvas.filter_image(dst, noise(seed), src);
+    }
+    assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
+    assert!(canvas.transient_images.is_empty());
+
+    // A cache hit reorders, allocating nothing.
+    canvas.filter_image(dst, noise(1), src);
+    assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
+    assert_eq!(canvas.turbulence_lattices.last().unwrap().0, 1);
+    assert!(canvas.transient_images.is_empty());
+
+    // One past capacity evicts the least recently used seed (2, since 1 was
+    // just touched) into the transient list, not straight to the renderer.
+    let evicted = canvas.turbulence_lattices[0].1;
+    canvas.filter_image(dst, noise(99), src);
+    assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
+    assert!(canvas.turbulence_lattices.iter().all(|(s, _)| *s != 2));
+    assert_eq!(canvas.transient_images, vec![evicted]);
+    assert!(
+        canvas.images.info(evicted).is_some(),
+        "evicted lattice stays alive until flush"
+    );
+
+    canvas.flush_to_output(());
+    assert!(canvas.transient_images.is_empty());
+    assert!(canvas.images.info(evicted).is_none());
+    assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
 }
 
 /// Chain execution stays within a bounded transient budget: a run of
