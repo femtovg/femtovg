@@ -1035,6 +1035,10 @@ where
     /// uniformity; blur-only callers who want the single-pass form can call
     /// `filter_image` directly.
     ///
+    /// If a scratch cannot be acquired within the transient budget the chain
+    /// stops before the pass that needs it and `target_image` is left as it
+    /// was; a layer then composites its unfiltered capture instead.
+    ///
     /// The chain borrows `source_image` and `target_image` without taking
     /// ownership - both may be caller-managed or acquired transients (a layer
     /// capture pass, say, can feed its layer in as `source_image` and keep
@@ -1042,6 +1046,20 @@ where
     /// tied to the flush lifecycle, so composing this under group effects
     /// adds no copies and no extra retained images.
     pub fn filter_image_chain(&mut self, target_image: ImageId, filters: &[ImageFilter], source_image: ImageId) {
+        let _ = self.filter_image_chain_checked(target_image, filters, source_image);
+    }
+
+    /// [`filter_image_chain`](Self::filter_image_chain) with its outcome: `Err`
+    /// when a scratch could not be acquired within the transient budget, in
+    /// which case no pass from that point on was recorded and `target_image`
+    /// may be untouched. A layer uses this to composite its unfiltered
+    /// capture instead of a blank result.
+    fn filter_image_chain_checked(
+        &mut self,
+        target_image: ImageId,
+        filters: &[ImageFilter],
+        source_image: ImageId,
+    ) -> Result<(), ErrorKind> {
         // Fold adjacent color matrices; the folded run costs one pass. The
         // capacity covers the worst case (nothing folds) plus the possible
         // parity pass below, so the list never reallocates; ImageFilter is
@@ -1072,6 +1090,7 @@ where
         let mut scratch: [Option<ImageId>; 2] = [None, None];
         let mut src = source_image;
         let last = passes.len() - 1;
+        let mut outcome = Ok(());
         for (i, filter) in passes.iter().enumerate() {
             let dst = if i == last {
                 target_image
@@ -1079,30 +1098,36 @@ where
                 match scratch[i % 2] {
                     Some(id) => id,
                     None => {
-                        let Ok((width, height)) = self.image_size(source_image) else {
-                            return;
-                        };
                         // Scratches hold premultiplied filter output; the flag
                         // keeps every consumer (filter passes and composites)
                         // reading them under the same alpha convention. Without
                         // it, semi-transparent content is premultiplied a second
                         // time at each read and darkens per pass.
-                        let Ok(id) = self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) else {
-                            return;
-                        };
-                        scratch[i % 2] = Some(id);
-                        id
+                        let acquired = self.image_size(source_image).and_then(|(width, height)| {
+                            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED)
+                        });
+                        match acquired {
+                            Ok(id) => {
+                                scratch[i % 2] = Some(id);
+                                id
+                            }
+                            Err(err) => {
+                                outcome = Err(err);
+                                break;
+                            }
+                        }
                     }
                 }
             };
             self.filter_image(dst, *filter, src);
             src = dst;
         }
-        // The last pass has been recorded; both scratches are free for the
-        // next chain (or layer) of this size.
+        // Whatever ran has been recorded; the scratches are free for the next
+        // chain (or layer) of this size.
         for id in scratch.into_iter().flatten() {
             self.release_transient_image(id);
         }
+        outcome
     }
 
     /// Opens a layer: subsequent drawing is captured into a transient
@@ -1239,10 +1264,15 @@ where
             image
         } else {
             match self.acquire_transient_image(record.width, record.height, ImageFlags::PREMULTIPLIED) {
-                Ok(filtered) => {
-                    self.filter_image_chain(filtered, &record.effects.filters, image);
-                    filtered
-                }
+                Ok(filtered) => match self.filter_image_chain_checked(filtered, &record.effects.filters, image) {
+                    Ok(()) => filtered,
+                    // No budget for the chain's scratches: composite the
+                    // unfiltered capture rather than a blank result.
+                    Err(_) => {
+                        self.release_transient_image(filtered);
+                        image
+                    }
+                },
                 // Degrade to the unfiltered layer rather than dropping content.
                 Err(_) => image,
             }
@@ -5087,6 +5117,33 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
     }
     assert_eq!(canvas.transient_images.len(), 3);
     assert_eq!(canvas.transient_image_bytes(), 3 * padded);
+}
+
+/// A budget that fits a blurred layer's capture and filtered target but not
+/// the chain's scratch composites the unfiltered capture, not a blank image:
+/// the chain reports the exhausted budget and the layer degrades to it.
+#[test]
+fn a_chain_without_scratch_budget_degrades_to_the_capture() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(128, 128, 1.0);
+    let padded = (128 + 2 * 8) * (128 + 2 * 8) * 4;
+    canvas.set_transient_image_budget(2 * padded);
+    canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]));
+    let capture = canvas.layers.last().unwrap().image.unwrap();
+    canvas.end_layer();
+    // The composite command samples the capture (FLIP_Y), not the filtered
+    // target; the target was freed back to the pool unused.
+    let composite = canvas
+        .commands
+        .iter()
+        .rev()
+        .find(|c| c.image.is_some())
+        .expect("a composite was recorded");
+    assert_eq!(composite.image, Some(capture));
+    assert_eq!(canvas.transient_images.len(), 2);
+    assert_eq!(canvas.transient_free.len(), 2);
 }
 
 /// Shadows draw through the pool too: the coverage and blurred images of one

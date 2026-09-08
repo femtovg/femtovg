@@ -473,7 +473,9 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
         // One blurred layer's worth: capture, filtered target, chain scratch,
         // each padded by the blur reach (3 * 2 + 2 = 8 px each side).
         let padded = (W as usize + 16) * (H as usize + 16) * 4;
-        canvas.set_transient_image_budget(3 * padded);
+        // ...plus the first, unblurred layer's unpadded store, a different
+        // size the blurred siblings cannot reuse.
+        canvas.set_transient_image_budget(3 * padded + (W as usize) * (H as usize) * 4);
         canvas.clear_rect(0, 0, W, H, Color::white());
 
         // First layer: a red rect on the left, faded to 50%.
@@ -506,10 +508,19 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
     // to green, and the blur softens its edge (a pixel just outside the rect
     // picks up green it would not without the blur).
     let right = px(&out, 52, 32);
-    assert!(close(right[0], 0) && close(right[1], 255), "right should converge to green; got {right:?}");
+    assert!(
+        close(right[0], 0) && close(right[1], 255),
+        "right should converge to green; got {right:?}"
+    );
     let edge = px(&out, 37, 32);
-    assert!(edge[0] < 250 && edge[1] > 200, "blur should reach outside the rect; got {edge:?}");
+    assert!(
+        edge[0] < 250 && edge[1] > 200,
+        "blur should reach outside the rect; got {edge:?}"
+    );
     // Between: white, untouched by either layer.
     let gap = px(&out, 32, 32);
-    assert!(close(gap[0], 255) && close(gap[1], 255), "gap should stay white; got {gap:?}");
+    assert!(
+        close(gap[0], 255) && close(gap[1], 255),
+        "gap should stay white; got {gap:?}"
+    );
 }
