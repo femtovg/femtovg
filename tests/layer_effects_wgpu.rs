@@ -472,9 +472,9 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
     let out = render(&device, &queue, |canvas| {
         // One blurred layer's worth: capture, filtered target, chain scratch,
         // each padded by the blur reach (3 * 2 + 2 = 8 px each side).
-        let padded = (W as usize + 16) * (H as usize + 16) * 4;
-        // ...plus the first, unblurred layer's unpadded store, a different
-        // size the blurred siblings cannot reuse.
+        let padded = 128 * 128 * 4; // 80 x 80 padded, rounded up to the 64 px store granularity
+                                    // ...plus the first, unblurred layer's unpadded store, a different
+                                    // size the blurred siblings cannot reuse.
         canvas.set_transient_image_budget(3 * padded + (W as usize) * (H as usize) * 4);
         canvas.clear_rect(0, 0, W, H, Color::white());
 
