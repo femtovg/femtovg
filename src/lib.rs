@@ -1482,6 +1482,13 @@ where
             self.fill_path_internal(&full_rect, &alpha_paint.flavor, false, FillRule::NonZero);
         }
 
+        // The draws that read the mask coverage are recorded; the next masked
+        // layer of this size draws its mask into the same images.
+        self.release_transient_image(normalized);
+        if coverage != normalized {
+            self.release_transient_image(coverage);
+        }
+
         self.restore();
         self.set_render_target(previous_target);
         layer
@@ -5307,6 +5314,32 @@ fn a_chain_without_scratch_budget_degrades_to_the_capture() {
     assert_eq!(composite.image, Some(capture));
     assert_eq!(canvas.transient_images.len(), 2);
     assert_eq!(canvas.transient_free.len(), 2);
+}
+
+/// Masked sibling layers reuse the mask's transients too: a luminance mask
+/// needs the layer capture, the normalized mask and its alpha conversion,
+/// once for any number of siblings.
+#[test]
+fn masked_siblings_reuse_mask_transients() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(200, 120, 1.0);
+    let mask = canvas
+        .create_image_empty(200, 120, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    for _ in 0..4 {
+        canvas.begin_layer(&LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 200.0, 120.0));
+        assert!(canvas.layers.last().unwrap().image.is_some());
+        canvas.end_layer();
+    }
+    assert_eq!(
+        canvas.transient_images.len(),
+        3,
+        "capture, normalized mask, converted mask - once"
+    );
+    assert_eq!(canvas.transient_free.len(), 3);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transient_images.len(), 0);
 }
 
 /// Shadows draw through the pool too: the coverage and blurred images of one
