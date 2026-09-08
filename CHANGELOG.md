@@ -25,9 +25,16 @@ All notable changes to this project will be documented in this file.
   overlapping shapes fade as one like an SVG group, and/or an image-filter
   chain. The offscreen image is sized to the current scissor rect plus the
   blur reach, not the whole canvas, and layers stay open across a flush. The shadow state in effect at `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` rule, and what SVG `feDropShadow` on a group means) and resets inside the layer, so children are not each shadowed on their own.
-  `Canvas::set_transient_image_budget()` caps the memory held by layers,
-  filter scratches and masks (default 256 MiB); past it, layers pass through
-  rather than allocate.
+  A layer's backing images return to a pool at `end_layer()` and the next
+  layer of the same size takes them (commands run in order, so this needs no
+  synchronization), as do filter-chain scratches and shadow coverage; a
+  frame's transient memory is therefore its deepest nesting, not its layer
+  count - at 1080p a viewport-sized layer is 4.7 MB and thirteen blurred ones
+  would fill 256 MiB, while real artwork opens hundreds per frame.
+  `Canvas::set_transient_image_budget()` caps what is held at once (default
+  256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
+  through, chains run unfiltered and shadows are skipped rather than
+  allocate.
 - Fixed two-stop gradients fading a transparent stop through the wrong colors:
   the stop's own color was discarded, so `transparent` to blue turned a plain
   light blue instead of darkening, and transparent red to blue lost its red.

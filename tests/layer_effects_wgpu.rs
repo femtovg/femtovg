@@ -457,3 +457,59 @@ fn a_layer_without_shadow_state_casts_none() {
         "unexpected shadow: {both:?} {one:?}"
     );
 }
+
+/// Sibling layers reuse one backing store, and each reuse starts from a
+/// cleared image: the second layer's composite carries none of the first
+/// layer's content, and a budget that fits a single blurred layer's images
+/// renders a frame of forty blurred layers with every blur and opacity
+/// applied - what a 1080p portrait of a few hundred layers needs.
+#[test]
+fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // One blurred layer's worth: capture, filtered target, chain scratch,
+        // each padded by the blur reach (3 * 2 + 2 = 8 px each side).
+        let padded = (W as usize + 16) * (H as usize + 16) * 4;
+        canvas.set_transient_image_budget(3 * padded);
+        canvas.clear_rect(0, 0, W, H, Color::white());
+
+        // First layer: a red rect on the left, faded to 50%.
+        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        red_rect(canvas, 0.0, 0.0, 24.0, H as f32);
+        canvas.end_layer();
+
+        // Forty more blurred siblings drawing a green rect on the right; each
+        // reuses the images of the previous one. If a reused store were not
+        // cleared, the red rect would ride along and darken the left side.
+        for _ in 0..40 {
+            canvas.begin_layer(
+                &LayerEffects::new()
+                    .with_opacity(0.5)
+                    .with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]),
+            );
+            let mut p = Path::new();
+            p.rect(40.0, 0.0, 24.0, H as f32);
+            canvas.fill_path(&p, &Paint::color(Color::rgb(0, 255, 0)));
+            canvas.end_layer();
+        }
+    });
+    // Left: red at 50% over white, once - not forty-one times.
+    let left = px(&out, 12, 32);
+    assert!(
+        close(left[0], 255) && close(left[1], 128) && close(left[2], 128),
+        "left should be the first layer's 50% red only; got {left:?}"
+    );
+    // Right: forty 50% green layers compound; the centre of the rect converges
+    // to green, and the blur softens its edge (a pixel just outside the rect
+    // picks up green it would not without the blur).
+    let right = px(&out, 52, 32);
+    assert!(close(right[0], 0) && close(right[1], 255), "right should converge to green; got {right:?}");
+    let edge = px(&out, 37, 32);
+    assert!(edge[0] < 250 && edge[1] > 200, "blur should reach outside the rect; got {edge:?}");
+    // Between: white, untouched by either layer.
+    let gap = px(&out, 32, 32);
+    assert!(close(gap[0], 255) && close(gap[1], 255), "gap should stay white; got {gap:?}");
+}
