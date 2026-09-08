@@ -331,6 +331,12 @@ pub struct Canvas<T: Renderer> {
     // referenced by deferred draw commands, so they can only be freed once those
     // commands have been submitted to the renderer (i.e. after flush).
     transient_images: Vec<ImageId>,
+    // Transients whose last consumer command has been recorded, free for the
+    // next acquire of the same size and flags until the flush deletes them.
+    // Commands run in order, so a later layer may draw into an image an
+    // earlier layer's composite reads; this is what makes a frame's transient
+    // memory its deepest nesting rather than its layer count.
+    transient_free: Vec<ImageId>,
     /// Bytes currently held by transient images, against `transient_budget`.
     transient_bytes: usize,
     /// Upper bound on live transient image memory; see `set_transient_image_budget`.
@@ -517,6 +523,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            transient_free: Vec::new(),
             transient_bytes: 0,
             transient_budget: DEFAULT_TRANSIENT_IMAGE_BUDGET,
             layers: Vec::new(),
@@ -552,6 +559,7 @@ where
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transient_images: Vec::new(),
+            transient_free: Vec::new(),
             transient_bytes: 0,
             transient_budget: DEFAULT_TRANSIENT_IMAGE_BUDGET,
             layers: Vec::new(),
@@ -1021,15 +1029,27 @@ where
         self.append_cmd(cmd)
     }
 
-    /// Acquires a transient offscreen image that is released automatically
-    /// after the next flush. This is the seam a shared render-target pool can
-    /// later drop into; today it creates a fresh image and defers the delete.
+    /// Acquires a transient offscreen image: one released earlier this frame
+    /// with the same size and flags if there is one, otherwise a fresh image
+    /// counted against the transient budget. Every transient is deleted at the
+    /// next flush; between a [`release_transient_image`](Self::release_transient_image)
+    /// and that flush the image is reusable, so a frame's peak transient
+    /// memory is what is live at once (nesting depth times layer size), not
+    /// the sum over every layer, chain and shadow it draws.
     fn acquire_transient_image(
         &mut self,
         width: usize,
         height: usize,
         flags: ImageFlags,
     ) -> Result<ImageId, ErrorKind> {
+        let reusable = self.transient_free.iter().position(|&id| {
+            self.images
+                .info(id)
+                .is_some_and(|info| info.width() == width && info.height() == height && info.flags() == flags)
+        });
+        if let Some(at) = reusable {
+            return Ok(self.transient_free.swap_remove(at));
+        }
         let bytes = width.saturating_mul(height).saturating_mul(4);
         if self.transient_bytes.saturating_add(bytes) > self.transient_budget {
             return Err(ErrorKind::TransientImageBudgetExceeded);
@@ -1039,12 +1059,36 @@ where
         Ok(id)
     }
 
+    /// Returns a transient image to the pool once every command that reads it
+    /// has been recorded. The next acquire of the same size and flags gets it
+    /// back; whoever does must clear or fully overwrite it, as layers and
+    /// filter passes do.
+    fn release_transient_image(&mut self, id: ImageId) {
+        debug_assert!(self.transient_images.contains(&id), "released image is not a transient");
+        debug_assert!(!self.transient_free.contains(&id), "transient released twice");
+        self.transient_free.push(id);
+    }
+
+    /// Bytes currently held by transient images - layer backings, filter-chain
+    /// scratches and shadow coverage. Transients live until the next flush and
+    /// are reused within the frame, so just before a flush this is the frame's
+    /// peak: the figure to size [`set_transient_image_budget`](Self::set_transient_image_budget)
+    /// against.
+    pub fn transient_image_bytes(&self) -> usize {
+        self.transient_bytes
+    }
+
     /// Caps the memory held by transient images - layer backings, filter-chain
-    /// scratches and mask coverage - at `bytes` (default 256 MiB). Every
-    /// transient is released at the next flush, so this bounds what a frame
-    /// can accumulate: once the budget is reached, further layers degrade to
-    /// pass-through, chains run unfiltered and masks are skipped, rather than
-    /// allocating without bound. Nesting depth is bounded by the same limit.
+    /// scratches, shadow coverage and mask coverage - at `bytes` (default
+    /// 256 MiB). Within a frame a layer's images are reused by the next layer
+    /// of the same size once its composite is recorded, so what counts against
+    /// the cap is the deepest nesting, not the number of layers: at 1080p a
+    /// viewport-sized layer is 4.7 MB and a blurred one four times that, so a
+    /// frame of hundreds of sibling layers stays at a few tens of MB. Once the
+    /// cap is reached, further layers degrade to pass-through, chains run
+    /// unfiltered, shadows and masks are skipped, rather than allocating
+    /// without bound; [`transient_image_bytes`](Self::transient_image_bytes)
+    /// reports what a frame actually held.
     pub fn set_transient_image_budget(&mut self, bytes: usize) {
         self.transient_budget = bytes;
     }
@@ -1098,6 +1142,10 @@ where
     /// uniformity; blur-only callers who want the single-pass form can call
     /// `filter_image` directly.
     ///
+    /// If a scratch cannot be acquired within the transient budget the chain
+    /// stops before the pass that needs it and `target_image` is left as it
+    /// was; a layer then composites its unfiltered capture instead.
+    ///
     /// The chain borrows `source_image` and `target_image` without taking
     /// ownership - both may be caller-managed or acquired transients (a layer
     /// capture pass, say, can feed its layer in as `source_image` and keep
@@ -1105,6 +1153,20 @@ where
     /// tied to the flush lifecycle, so composing this under group effects
     /// adds no copies and no extra retained images.
     pub fn filter_image_chain(&mut self, target_image: ImageId, filters: &[ImageFilter], source_image: ImageId) {
+        let _ = self.filter_image_chain_checked(target_image, filters, source_image);
+    }
+
+    /// [`filter_image_chain`](Self::filter_image_chain) with its outcome: `Err`
+    /// when a scratch could not be acquired within the transient budget, in
+    /// which case no pass from that point on was recorded and `target_image`
+    /// may be untouched. A layer uses this to composite its unfiltered
+    /// capture instead of a blank result.
+    fn filter_image_chain_checked(
+        &mut self,
+        target_image: ImageId,
+        filters: &[ImageFilter],
+        source_image: ImageId,
+    ) -> Result<(), ErrorKind> {
         // Fold adjacent color matrices; the folded run costs one pass. The
         // capacity covers the worst case (nothing folds) plus the possible
         // parity pass below, so the list never reallocates; ImageFilter is
@@ -1135,6 +1197,7 @@ where
         let mut scratch: [Option<ImageId>; 2] = [None, None];
         let mut src = source_image;
         let last = passes.len() - 1;
+        let mut outcome = Ok(());
         for (i, filter) in passes.iter().enumerate() {
             let dst = if i == last {
                 target_image
@@ -1142,25 +1205,36 @@ where
                 match scratch[i % 2] {
                     Some(id) => id,
                     None => {
-                        let Ok((width, height)) = self.image_size(source_image) else {
-                            return;
-                        };
                         // Scratches hold premultiplied filter output; the flag
                         // keeps every consumer (filter passes and composites)
                         // reading them under the same alpha convention. Without
                         // it, semi-transparent content is premultiplied a second
                         // time at each read and darkens per pass.
-                        let Ok(id) = self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) else {
-                            return;
-                        };
-                        scratch[i % 2] = Some(id);
-                        id
+                        let acquired = self.image_size(source_image).and_then(|(width, height)| {
+                            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED)
+                        });
+                        match acquired {
+                            Ok(id) => {
+                                scratch[i % 2] = Some(id);
+                                id
+                            }
+                            Err(err) => {
+                                outcome = Err(err);
+                                break;
+                            }
+                        }
                     }
                 }
             };
             self.filter_image(dst, *filter, src);
             src = dst;
         }
+        // Whatever ran has been recorded; the scratches are free for the next
+        // chain (or layer) of this size.
+        for id in scratch.into_iter().flatten() {
+            self.release_transient_image(id);
+        }
+        outcome
     }
 
     /// Opens a layer: subsequent drawing is captured into a transient
@@ -1297,10 +1371,15 @@ where
             image
         } else {
             match self.acquire_transient_image(record.width, record.height, ImageFlags::PREMULTIPLIED) {
-                Ok(filtered) => {
-                    self.filter_image_chain(filtered, &record.effects.filters, image);
-                    filtered
-                }
+                Ok(filtered) => match self.filter_image_chain_checked(filtered, &record.effects.filters, image) {
+                    Ok(()) => filtered,
+                    // No budget for the chain's scratches: composite the
+                    // unfiltered capture rather than a blank result.
+                    Err(_) => {
+                        self.release_transient_image(filtered);
+                        image
+                    }
+                },
                 // Degrade to the unfiltered layer rather than dropping content.
                 Err(_) => image,
             }
@@ -1325,6 +1404,7 @@ where
 
         let alpha = record.outer_alpha * record.effects.opacity;
         if alpha <= 0.0 {
+            self.release_layer_images(image, source);
             return;
         }
         let tint = Color::rgbaf(1.0, 1.0, 1.0, alpha);
@@ -1352,6 +1432,19 @@ where
 
         self.state_mut().transform = saved_transform;
         self.state_mut().alpha = saved_alpha;
+
+        // The composite that reads the layer is recorded; its images can back
+        // the next layer of this size.
+        self.release_layer_images(image, source);
+    }
+
+    /// Returns a finished layer's capture and, when different, its filtered
+    /// result to the transient pool.
+    fn release_layer_images(&mut self, capture: ImageId, source: ImageId) {
+        self.release_transient_image(capture);
+        if source != capture {
+            self.release_transient_image(source);
+        }
     }
 
     /// Multiplies `layer`'s alpha by the mask coverage, in layer space.
@@ -1448,6 +1541,13 @@ where
             let mut alpha_paint = Paint::image(normalized, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
             alpha_paint.set_anti_alias(false);
             self.fill_path_internal(&full_rect, &alpha_paint.flavor, false, FillRule::NonZero);
+        }
+
+        // The draws that read the mask coverage are recorded; the next masked
+        // layer of this size draws its mask into the same images.
+        self.release_transient_image(normalized);
+        if coverage != normalized {
+            self.release_transient_image(coverage);
         }
 
         self.restore();
@@ -2234,16 +2334,18 @@ where
         // The Gaussian blur is unaffected: each of its two passes flips once, so
         // the blurred image keeps the coverage image's orientation.
         let image_flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
-        let Ok(coverage_image) = self.create_image_empty(width, height, PixelFormat::Rgba8, image_flags) else {
+        // Both come from the transient pool: past the budget the shadow is
+        // skipped rather than allocated, like a layer degrading.
+        let Ok(coverage_image) = self.acquire_transient_image(width, height, image_flags) else {
             return;
         };
         // The blur kernel divides by sigma, so a zero (or sub-pixel) blur skips
         // the filter pass entirely — and with it the second offscreen image.
         let blurred_image = if sigma >= 0.01 {
-            match self.create_image_empty(width, height, PixelFormat::Rgba8, image_flags) {
+            match self.acquire_transient_image(width, height, image_flags) {
                 Ok(image) => Some(image),
                 Err(_) => {
-                    self.delete_image(coverage_image);
+                    self.release_transient_image(coverage_image);
                     return;
                 }
             }
@@ -2336,11 +2438,11 @@ where
         self.state_mut().alpha = saved_alpha;
         self.state_mut().shadow_color = shadow_color;
 
-        // The transient images are referenced by deferred draw commands, so they
-        // can only be freed after the next flush. Queue them for later cleanup.
-        self.track_transient_image(coverage_image);
+        // The composite that reads them is recorded; the next shadow of this
+        // size draws into the same images.
+        self.release_transient_image(coverage_image);
         if let Some(blurred_image) = blurred_image {
-            self.track_transient_image(blurred_image);
+            self.release_transient_image(blurred_image);
         }
     }
 
@@ -2352,6 +2454,7 @@ where
         // come must land in the same image. It is released at the flush after
         // its end_layer like any other transient.
         let held: Vec<ImageId> = self.layers.iter().filter_map(|layer| layer.image).collect();
+        self.transient_free.clear();
         let mut kept = Vec::new();
         for id in std::mem::take(&mut self.transient_images) {
             if held.contains(&id) {
@@ -5168,11 +5271,16 @@ fn layer_bounds_follow_the_scissor() {
     canvas.end_layer();
     canvas.restore();
 
-    // Two plain layers cost one transient each; the blurred layer costs its
-    // capture, the filtered target, and the chain's single ping-pong scratch.
+    // Two plain layers cost one transient each (their sizes differ, so no
+    // reuse); the blurred layer costs its capture, the filtered target, and
+    // the chain's single ping-pong scratch. All five are free again once
+    // their layers have ended, and the flush deletes them.
     assert_eq!(canvas.transient_images.len(), 5);
+    assert_eq!(canvas.transient_free.len(), 5);
     canvas.flush_to_output(());
     assert_eq!(canvas.transient_images.len(), 0);
+    assert_eq!(canvas.transient_free.len(), 0);
+    assert_eq!(canvas.transient_image_bytes(), 0);
 
     // Unbalanced end_layer is ignored.
     canvas.end_layer();
@@ -5261,10 +5369,162 @@ fn filter_chain_bounds_transient_images() {
         2,
         "mixed chains ping-pong between exactly two scratches"
     );
+    assert_eq!(
+        canvas.transient_free.len(),
+        2,
+        "a finished chain returns both scratches"
+    );
 
     // The empty chain is a single identity pass - a copy, no scratches.
     let (mut canvas, src, dst) = make();
     canvas.filter_image_chain(dst, &[], src);
+    assert_eq!(canvas.transient_images.len(), 0);
+}
+
+/// Sibling layers share backing stores: a layer's images return to the pool
+/// at end_layer and the next layer of the same size takes them, so a frame's
+/// transient memory is its deepest nesting, not its layer count. This is what
+/// lets a 1080p frame of a few hundred layers - every BuseyBench portrait -
+/// stay within tens of MB instead of the gigabytes their sum would be.
+#[test]
+fn sibling_layers_reuse_backing_stores() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(320, 200, 1.0);
+    let bytes = 320 * 200 * 4;
+
+    // Three plain siblings: one allocation.
+    for _ in 0..3 {
+        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(canvas.layers.last().unwrap().image.is_some());
+        canvas.end_layer();
+    }
+    assert_eq!(canvas.transient_images.len(), 1);
+    assert_eq!(canvas.transient_image_bytes(), bytes);
+
+    // Nesting needs one store per open level: a child cannot take its parent's.
+    canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+    canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+    canvas.end_layer();
+    canvas.end_layer();
+    assert_eq!(canvas.transient_images.len(), 2);
+
+    // Blurred siblings: capture, filtered target and one chain scratch, once.
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    for _ in 0..4 {
+        canvas.begin_layer(&blur);
+        canvas.end_layer();
+    }
+    let padded = (320 + 2 * 8) * (200 + 2 * 8) * 4;
+    assert_eq!(canvas.transient_images.len(), 2 + 3);
+    assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 3 * padded);
+
+    // Everything is free between layers, nothing after the flush.
+    assert_eq!(canvas.transient_free.len(), 5);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transient_images.len(), 0);
+    assert_eq!(canvas.transient_image_bytes(), 0);
+}
+
+/// A budget that fits exactly one blurred layer's images (capture, filtered
+/// target, scratch) is enough for any number of sibling blurred layers: none
+/// degrades to pass-through. Before the pool, the fourth would have.
+#[test]
+fn a_budget_for_one_layer_fits_a_frame_of_them() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(256, 256, 1.0);
+    let padded = (256 + 2 * 8) * (256 + 2 * 8) * 4;
+    canvas.set_transient_image_budget(3 * padded);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    for i in 0..200 {
+        canvas.begin_layer(&blur);
+        assert!(
+            canvas.layers.last().unwrap().image.is_some(),
+            "layer {i} degraded to pass-through"
+        );
+        canvas.end_layer();
+    }
+    assert_eq!(canvas.transient_images.len(), 3);
+    assert_eq!(canvas.transient_image_bytes(), 3 * padded);
+}
+
+/// A budget that fits a blurred layer's capture and filtered target but not
+/// the chain's scratch composites the unfiltered capture, not a blank image:
+/// the chain reports the exhausted budget and the layer degrades to it.
+#[test]
+fn a_chain_without_scratch_budget_degrades_to_the_capture() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(128, 128, 1.0);
+    let padded = (128 + 2 * 8) * (128 + 2 * 8) * 4;
+    canvas.set_transient_image_budget(2 * padded);
+    canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]));
+    let capture = canvas.layers.last().unwrap().image.unwrap();
+    canvas.end_layer();
+    // The composite command samples the capture (FLIP_Y), not the filtered
+    // target; the target was freed back to the pool unused.
+    let composite = canvas
+        .commands
+        .iter()
+        .rev()
+        .find(|c| c.image.is_some())
+        .expect("a composite was recorded");
+    assert_eq!(composite.image, Some(capture));
+    assert_eq!(canvas.transient_images.len(), 2);
+    assert_eq!(canvas.transient_free.len(), 2);
+}
+
+/// Masked sibling layers reuse the mask's transients too: a luminance mask
+/// needs the layer capture, the normalized mask and its alpha conversion,
+/// once for any number of siblings.
+#[test]
+fn masked_siblings_reuse_mask_transients() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(200, 120, 1.0);
+    let mask = canvas
+        .create_image_empty(200, 120, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    for _ in 0..4 {
+        canvas.begin_layer(&LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 200.0, 120.0));
+        assert!(canvas.layers.last().unwrap().image.is_some());
+        canvas.end_layer();
+    }
+    assert_eq!(
+        canvas.transient_images.len(),
+        3,
+        "capture, normalized mask, converted mask - once"
+    );
+    assert_eq!(canvas.transient_free.len(), 3);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transient_images.len(), 0);
+}
+
+/// Shadows draw through the pool too: the coverage and blurred images of one
+/// shadow serve the next shadow of the same size.
+#[test]
+fn shadow_passes_reuse_their_images() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(256, 256, 1.0);
+    canvas.set_shadow_color(Color::rgba(0, 0, 0, 128));
+    canvas.set_shadow_blur(4.0);
+    let mut path = Path::new();
+    path.rect(40.0, 40.0, 100.0, 60.0);
+    for _ in 0..5 {
+        canvas.fill_path(&path, &Paint::color(Color::rgb(200, 0, 0)));
+    }
+    assert_eq!(
+        canvas.transient_images.len(),
+        2,
+        "five same-sized shadows allocate one coverage and one blur image"
+    );
+    assert_eq!(canvas.transient_free.len(), 2);
+    canvas.flush_to_output(());
     assert_eq!(canvas.transient_images.len(), 0);
 }
 
