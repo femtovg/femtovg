@@ -453,6 +453,17 @@ impl LayerEffects {
 /// of full-screen layers at 4K plus their filter and mask scratch.
 const DEFAULT_TRANSIENT_IMAGE_BUDGET: usize = 256 * 1024 * 1024;
 
+/// Transient image dimensions are rounded up to a multiple of this many
+/// pixels. Sibling layers whose scissors or blur reaches differ by a few
+/// pixels then request the same size and share one pooled store instead of
+/// each holding its own; the cost is at most 63 px per axis (a tenth of a
+/// 1080 px layer), and the extra area is clipped away at the composite.
+const TRANSIENT_GRANULARITY: usize = 64;
+
+fn round_up_transient(n: usize) -> usize {
+    n.div_ceil(TRANSIENT_GRANULARITY) * TRANSIENT_GRANULARITY
+}
+
 #[derive(Debug)]
 struct LayerRecord {
     // None marks a pass-through layer (allocation failed or bounds were
@@ -1248,7 +1259,8 @@ where
     /// backing store can be sized for them: the layer captures the current
     /// scissor rect (the natural memory bound - set a scissor before opening
     /// a layer to keep it small) padded by the blur kernel reach when the
-    /// chain contains Gaussian blurs. Content outside that padded rect does
+    /// chain contains Gaussian blurs, rounded up to 64 px per axis so sibling
+    /// layers share one pooled store. Content outside that padded rect does
     /// not survive into the layer, mirroring SVG's filter-region behavior.
     /// A rotated or rounded scissor cannot be captured as a rect; the layer
     /// then spans the whole canvas and the scissor keeps clipping normally.
@@ -1297,8 +1309,8 @@ where
         let miny = (rect.y - pad).floor().max(-pad);
         let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
         let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad);
-        let width = (maxx - minx) as usize;
-        let height = (maxy - miny) as usize;
+        let width = round_up_transient((maxx - minx) as usize);
+        let height = round_up_transient((maxy - miny) as usize);
 
         let image = if width == 0 || height == 0 || width > 8192 || height > 8192 {
             None
@@ -2309,8 +2321,8 @@ where
         let maxx = (shape_bounds.maxx + pad).ceil();
         let maxy = (shape_bounds.maxy + pad).ceil();
 
-        let width = (maxx - minx) as usize;
-        let height = (maxy - miny) as usize;
+        let width = round_up_transient((maxx - minx) as usize);
+        let height = round_up_transient((maxy - miny) as usize);
 
         // Guard against absurd allocations (e.g. enormous blur on a huge shape).
         if width == 0 || height == 0 || width > 8192 || height > 8192 {
@@ -5253,7 +5265,8 @@ fn layer_bounds_follow_the_scissor() {
     // Unscissored: the layer spans the canvas.
     canvas.begin_layer(&LayerEffects::new());
     let record = canvas.layers.last().unwrap();
-    assert_eq!((record.width, record.height), (800, 600));
+    // Stores round up to 64 px per axis so siblings share them (see TRANSIENT_GRANULARITY).
+    assert_eq!((record.width, record.height), (832, 640));
     canvas.end_layer();
 
     // A rect scissor bounds the layer to its size.
@@ -5261,13 +5274,13 @@ fn layer_bounds_follow_the_scissor() {
     canvas.scissor(100.0, 50.0, 120.0, 80.0);
     canvas.begin_layer(&LayerEffects::new());
     let record = canvas.layers.last().unwrap();
-    assert_eq!((record.width, record.height), (120, 80));
+    assert_eq!((record.width, record.height), (128, 128));
     canvas.end_layer();
 
     // Declaring a blur pads the store by the kernel reach (3*sigma + 2).
     canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 4.0 }]));
     let record = canvas.layers.last().unwrap();
-    assert_eq!((record.width, record.height), (120 + 2 * 14, 80 + 2 * 14));
+    assert_eq!((record.width, record.height), (192, 128)); // 148 x 108 before rounding
     canvas.end_layer();
     canvas.restore();
 
@@ -5392,7 +5405,7 @@ fn sibling_layers_reuse_backing_stores() {
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(320, 200, 1.0);
-    let bytes = 320 * 200 * 4;
+    let bytes = 320 * 256 * 4; // 320 x 200 rounds up to 320 x 256
 
     // Three plain siblings: one allocation.
     for _ in 0..3 {
@@ -5416,7 +5429,7 @@ fn sibling_layers_reuse_backing_stores() {
         canvas.begin_layer(&blur);
         canvas.end_layer();
     }
-    let padded = (320 + 2 * 8) * (200 + 2 * 8) * 4;
+    let padded = 384 * 256 * 4; // 336 x 216 padded, rounded
     assert_eq!(canvas.transient_images.len(), 2 + 3);
     assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 3 * padded);
 
@@ -5436,7 +5449,7 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(256, 256, 1.0);
-    let padded = (256 + 2 * 8) * (256 + 2 * 8) * 4;
+    let padded = 320 * 320 * 4; // 272 x 272 padded, rounded
     canvas.set_transient_image_budget(3 * padded);
     let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
     for i in 0..200 {
@@ -5460,7 +5473,7 @@ fn a_chain_without_scratch_budget_degrades_to_the_capture() {
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(128, 128, 1.0);
-    let padded = (128 + 2 * 8) * (128 + 2 * 8) * 4;
+    let padded = 192 * 192 * 4; // 144 x 144 padded, rounded
     canvas.set_transient_image_budget(2 * padded);
     canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]));
     let capture = canvas.layers.last().unwrap().image.unwrap();

@@ -46,7 +46,8 @@ All notable changes to this project will be documented in this file.
   blur reach, not the whole canvas, and layers stay open across a flush. The shadow state in effect at `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` rule, and what SVG `feDropShadow` on a group means) and resets inside the layer, so children are not each shadowed on their own.
   A layer's backing images return to a pool at `end_layer()` and the next
   layer of the same size takes them (commands run in order, so this needs no
-  synchronization), as do filter-chain scratches and shadow coverage; a
+  synchronization; store sizes round up to 64 px so siblings with different
+  blur reaches share one), as do filter-chain scratches and shadow coverage; a
   frame's transient memory is therefore its deepest nesting, not its layer
   count - at 1080p a viewport-sized layer is 4.7 MB and thirteen blurred ones
   would fill 256 MiB, while real artwork opens hundreds per frame.
