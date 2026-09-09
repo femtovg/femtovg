@@ -1052,7 +1052,8 @@ where
     }
 
     /// Caps the memory held by transient images - layer backing stores,
-    /// filtered results, filter-chain scratches and shadow coverage - at
+    /// filtered results, filter-chain scratches, shadow coverage and mask
+    /// coverage - at
     /// `bytes` (default 256 MiB). Within a frame a layer's images are reused
     /// by the next layer of the same size once its composite is recorded, so
     /// what counts against the cap is the deepest nesting, not the number of
@@ -1061,7 +1062,8 @@ where
     /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
     /// the layer passes through with its effects dropped,
     /// [`filter_image_chain`](Self::filter_image_chain) returns
-    /// [`ErrorKind::TransientImageBudgetExceeded`], and shadows are skipped;
+    /// [`ErrorKind::TransientImageBudgetExceeded`], and shadows and masks are
+    /// skipped;
     /// [`transient_image_bytes`](Self::transient_image_bytes) reports what a
     /// frame actually held.
     ///
@@ -5520,7 +5522,7 @@ fn masked_siblings_reuse_mask_transients() {
         .create_image_empty(200, 120, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
     for _ in 0..4 {
-        canvas.begin_layer(&LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 200.0, 120.0));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 200.0, 120.0)));
         assert!(canvas.layers.last().unwrap().image.is_some());
         canvas.end_layer();
     }
