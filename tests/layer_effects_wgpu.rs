@@ -110,7 +110,7 @@ fn group_opacity_does_not_double_blend() {
         return;
     };
     let layered = render(&device, &queue, |canvas| {
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
         red_rect(canvas, 8.0, 8.0, 32.0, 32.0);
         red_rect(canvas, 24.0, 24.0, 32.0, 32.0); // overlaps the first
         canvas.end_layer();
@@ -149,7 +149,7 @@ fn filtered_layer_is_not_mirrored() {
         return;
     };
     let out = render(&device, &queue, |canvas| {
-        canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::brightness(1.0)]));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::brightness(1.0)])));
         red_rect(canvas, 0.0, 0.0, 64.0, 24.0);
         let mut p = Path::new();
         p.rect(0.0, 40.0, 64.0, 24.0);
@@ -178,7 +178,7 @@ fn declared_blur_applies_and_pads() {
         return;
     };
     let blurred = render(&device, &queue, |canvas| {
-        canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 3.0 }]));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 3.0 }])));
         red_rect(canvas, 16.0, 16.0, 32.0, 32.0);
         canvas.end_layer();
     });
@@ -202,8 +202,8 @@ fn nested_layers_multiply_opacity() {
         return;
     };
     let out = render(&device, &queue, |canvas| {
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
         red_rect(canvas, 8.0, 8.0, 48.0, 48.0);
         canvas.end_layer();
         canvas.end_layer();
@@ -227,7 +227,7 @@ fn layer_composite_honors_outer_scissor() {
     let out = render(&device, &queue, |canvas| {
         canvas.save();
         canvas.scissor(16.0, 16.0, 24.0, 24.0);
-        canvas.begin_layer(&LayerEffects::new());
+        assert!(canvas.begin_layer(&LayerEffects::new()));
         red_rect(canvas, 0.0, 0.0, 64.0, 64.0); // fills well past the scissor
         canvas.end_layer();
         canvas.restore();
@@ -315,11 +315,14 @@ fn open_layer_survives_a_flush() {
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(W, H, 1.0);
     canvas.clear_rect(0, 0, W, H, Color::white());
-    canvas.begin_layer(&LayerEffects::new().with_opacity(0.8));
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.8)));
     let mut red = Path::new();
     red.rect(0.0, 0.0, 32.0, 64.0);
     canvas.fill_path(&red, &Paint::color(Color::rgb(255, 0, 0)));
     queue.submit(canvas.flush_to_output(&target));
+    // Every example starts its frame with set_size: the open layer must
+    // keep capturing through it (WPT 2d.layer.flush-on-frame-presentation).
+    canvas.set_size(W, H, 1.0);
     let mut blue = Path::new();
     blue.rect(32.0, 0.0, 32.0, 64.0);
     canvas.fill_path(&blue, &Paint::color(Color::rgb(0, 0, 255)));
@@ -350,7 +353,10 @@ fn layers_degrade_past_the_transient_budget() {
     };
     let out = render(&device, &queue, |canvas| {
         canvas.set_transient_image_budget(1024); // far below one 64x64 RGBA8 layer
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(
+            !canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)),
+            "over budget must report pass-through"
+        );
         let mut p = Path::new();
         p.rect(0.0, 0.0, W as f32, H as f32);
         canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
@@ -363,7 +369,7 @@ fn layers_degrade_past_the_transient_budget() {
     );
     let out = render(&device, &queue, |canvas| {
         canvas.set_transient_image_budget(64 * 64 * 4); // exactly one layer
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
         let mut p = Path::new();
         p.rect(0.0, 0.0, W as f32, H as f32);
         canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
@@ -398,7 +404,7 @@ fn shadowed_overlap(device: &wgpu::Device, queue: &wgpu::Queue, shadow_set: &str
         if shadow_set == "before" {
             set_shadow(canvas);
         }
-        canvas.begin_layer(&LayerEffects::new());
+        assert!(canvas.begin_layer(&LayerEffects::new()));
         if shadow_set == "inside" {
             set_shadow(canvas);
         }
@@ -479,7 +485,7 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
         canvas.clear_rect(0, 0, W, H, Color::white());
 
         // First layer: a red rect on the left, faded to 50%.
-        canvas.begin_layer(&LayerEffects::new().with_opacity(0.5));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
         red_rect(canvas, 0.0, 0.0, 24.0, H as f32);
         canvas.end_layer();
 
@@ -487,11 +493,11 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
         // reuses the images of the previous one. If a reused store were not
         // cleared, the red rect would ride along and darken the left side.
         for _ in 0..40 {
-            canvas.begin_layer(
+            assert!(canvas.begin_layer(
                 &LayerEffects::new()
                     .with_opacity(0.5)
                     .with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]),
-            );
+            ));
             let mut p = Path::new();
             p.rect(40.0, 0.0, 24.0, H as f32);
             canvas.fill_path(&p, &Paint::color(Color::rgb(0, 255, 0)));
