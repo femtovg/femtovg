@@ -20,6 +20,54 @@ All notable changes to this project will be documented in this file.
   ramp was left transparent (or holding stale texture data) instead of the last
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
+- Added `Canvas::clip_path(path, fill_rule)`, which clips later drawing to any
+  path under the current transform - Canvas 2D `clip()` and SVG `clip-path`
+  with `clip-rule` - and is scoped by `save()`/`restore()`. Clips use a bit of
+  the stencil buffer both backends already have, so they add no textures or
+  render passes. Clip edges are not antialiased yet.
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
+  a mask image, using either its luminance (the SVG `mask` default, via the new
+  `ImageFilter::luminance_to_alpha()`) or its alpha. Masks apply after the
+  layer's filters, as in SVG.
+- Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
+  offscreen image and composite it back with `LayerEffects` - group opacity, so
+  overlapping shapes fade as one like an SVG group, and/or an image-filter
+  chain. The offscreen image is sized to the current scissor rect plus the
+  blur reach, not the whole canvas. This fixes mis-rendering of the Google Workspace
+  SVG icon, which now more closely matches browser implementations.
+- Fixed `ImageFilter::GaussianBlur` with a zero, negative or non-finite
+  standard deviation blanking the image instead of leaving it unchanged, and
+  with a very large one using inconsistent coefficients. Both backends now
+  clamp the value the same way, matching WPT test case expectations.
+- Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
+  offscreen image and composite it back with `LayerEffects` - group opacity, so
+  overlapping shapes fade as one like an SVG group, and/or an image-filter
+  chain. The offscreen image is sized to the current scissor rect (under any
+  axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
+  blur reach of the whole chain (successive blurs compound in quadrature),
+  not the whole canvas or render target. `begin_layer()` returns whether the
+  layer captured: `false` means it passed through with its effects dropped -
+  over the transient budget, past the backend's texture limit
+  (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate
+  bounds. Layers stay open across a flush of the same size; a `set_size()`
+  that changes the size, and `reset()`, discard open layers as a Canvas 2D
+  reset does. A layer opened under a non-invertible transform draws nothing,
+  as in Canvas 2D. The web-platform-tests layer suite is ported where the API
+  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` rule, and what SVG `feDropShadow` on a group means) and resets inside the layer, so children are not each shadowed on their own.
+  A layer's backing images return to a pool at `end_layer()` and the next
+  layer of the same size takes them (commands run in order, so this needs no
+  synchronization; store sizes round up to 64 px so siblings with different
+  blur reaches share one), as do filter-chain scratches and shadow coverage; a
+  frame's transient memory is therefore its deepest nesting, not its layer
+  count - at 1080p a viewport-sized layer is 4.7 MB and thirteen blurred ones
+  would fill 256 MiB, while real artwork opens hundreds per frame.
+  `Canvas::set_transient_image_budget()` caps what is held at once (default
+  256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
+  through (`begin_layer()` returns `false`), `filter_image_chain()` returns
+  `ErrorKind::TransientImageBudgetExceeded` and a layer whose chain cannot run
+  composites its unfiltered capture, and shadows are skipped rather than
+  allocate. Shadow coverage rounds to 8 px, not the layers' 64, since shadows
+  are many and small.
 - Fixed two-stop gradients fading a transparent stop through the wrong colors:
   the stop's own color was discarded, so `transparent` to blue turned a plain
   light blue instead of darkening, and transparent red to blue lost its red.
