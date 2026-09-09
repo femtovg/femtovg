@@ -271,7 +271,14 @@ fn luminance_mask_gates_the_layer() {
     };
     let out = render(&device, &queue, |canvas| {
         let mask = circle_mask_image(canvas);
-        canvas.begin_layer(&LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 8.0, 8.0, 48.0, 48.0));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            8.0,
+            8.0,
+            48.0,
+            48.0
+        )));
         red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
         canvas.end_layer();
     });
@@ -322,7 +329,14 @@ fn luminance_mask_uses_luminance_not_alpha() {
         canvas.set_render_target(femtovg::RenderTarget::Screen);
         canvas.restore();
 
-        canvas.begin_layer(&LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            0.0,
+            0.0,
+            64.0,
+            64.0
+        )));
         red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
         canvas.end_layer();
     });
@@ -365,11 +379,11 @@ fn masked_filtered_layer_keeps_orientation() {
         canvas.set_render_target(femtovg::RenderTarget::Screen);
         canvas.restore();
 
-        canvas.begin_layer(
+        assert!(canvas.begin_layer(
             &LayerEffects::new()
                 .with_filters(&[ImageFilter::brightness(1.0)])
                 .with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0),
-        );
+        ));
         // Red on top, blue on bottom.
         red_rect(canvas, 0.0, 0.0, 64.0, 32.0);
         let mut p = Path::new();
@@ -432,14 +446,14 @@ fn luminance_mask_multiplies_alpha() {
         canvas.set_render_target(femtovg::RenderTarget::Screen);
         canvas.restore();
 
-        canvas.begin_layer(&LayerEffects::new().with_mask(
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
             mask,
             femtovg::MaskKind::Luminance,
             0.0,
             0.0,
             W as f32,
             H as f32,
-        ));
+        )));
         let mut p = Path::new();
         p.rect(0.0, 0.0, W as f32, H as f32);
         canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
