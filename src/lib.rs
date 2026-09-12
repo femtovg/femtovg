@@ -1272,24 +1272,16 @@ where
         self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
 
         // Shift device space so the captured rect's origin lands on (0, 0),
-        // exactly like the shadow pass maps its padded bbox.
+        // exactly like the shadow pass maps its padded bbox. Shadow state is
+        // a layer rendering attribute too: it applies to the layer's result
+        // at end_layer, so it must not also apply to every draw inside, or
+        // the layer's children would each cast their own shadow and then the
+        // layer would cast one more over the lot.
         let mut layer_transform = Transform2D::translation(-minx, -miny);
         layer_transform.premultiply(&state.transform);
-        self.state_mut().transform = layer_transform;
-        self.state_mut().alpha = 1.0;
-        self.state_mut().composite_operation = CompositeOperationState::default();
-        // Shadow state is a layer rendering attribute too: it applies to the
-        // layer's result at end_layer, so it must not also apply to every
-        // draw inside, or the layer's children would each cast their own
-        // shadow and then the layer would cast one more over the lot.
-        {
-            let state = self.state_mut();
-            state.shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
-            state.shadow_blur = 0.0;
-            state.shadow_offset = [0.0, 0.0];
-        }
-        if !keep_scissor {
-            self.state_mut().scissor = Scissor::default();
+        self.enter_offscreen_state(layer_transform);
+        if keep_scissor {
+            self.state_mut().scissor = state.scissor;
         }
         true
     }
@@ -1351,17 +1343,13 @@ where
         // 2D's beginLayer applies the shadow to the layer's result and SVG's
         // feDropShadow applies to a filtered group. Inside the layer the
         // shadow state was reset, so nothing has been shadowed twice.
-        let saved_transform = self.state().transform;
-        let saved_alpha = self.state().alpha;
-        self.state_mut().transform = Transform2D::identity();
-        self.state_mut().alpha = 1.0;
-
-        let mut layer_rect = Path::new();
-        layer_rect.rect(minx, miny, record.width as f32, record.height as f32);
-        self.fill_path_internal(&layer_rect, &layer_paint.flavor, false, FillRule::NonZero);
-
-        self.state_mut().transform = saved_transform;
-        self.state_mut().alpha = saved_alpha;
+        self.fill_device_rect(
+            minx,
+            miny,
+            record.width as f32,
+            record.height as f32,
+            &layer_paint.flavor,
+        );
 
         // The composite that reads the layer is recorded; its images can back
         // the next layer of this size.
@@ -1375,6 +1363,38 @@ where
         if source != capture {
             self.release_transient_image(source);
         }
+    }
+
+    /// Puts the current state into the shape every offscreen pass draws
+    /// under: `transform` as the pass's device space, full alpha, no scissor,
+    /// source-over and no shadow. The caller's `save()` holds the state this
+    /// replaces.
+    fn enter_offscreen_state(&mut self, transform: Transform2D) {
+        let state = self.state_mut();
+        state.transform = transform;
+        state.alpha = 1.0;
+        state.scissor = Scissor::default();
+        state.composite_operation = CompositeOperationState::default();
+        state.shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        state.shadow_blur = 0.0;
+        state.shadow_offset = [0.0, 0.0];
+    }
+
+    /// Fills a device-space rect with `paint` under the identity transform,
+    /// at full alpha and without antialiasing: the blit an offscreen pass
+    /// ends with. The scissor, composite operation and shadow state stay the
+    /// caller's - that is how a layer's composite honors the outer scissor
+    /// and casts the group's shadow.
+    fn fill_device_rect(&mut self, x: f32, y: f32, width: f32, height: f32, paint: &PaintFlavor) {
+        let saved_transform = self.state().transform;
+        let saved_alpha = self.state().alpha;
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        let mut rect = Path::new();
+        rect.rect(x, y, width, height);
+        self.fill_path_internal(&rect, paint, false, FillRule::NonZero);
+        self.state_mut().transform = saved_transform;
+        self.state_mut().alpha = saved_alpha;
     }
 
     // Transforms
@@ -2088,16 +2108,12 @@ where
 
         // Build the offset transform for coverage rendering: original CTM with an
         // extra device-space translation that shifts the shape into the offscreen.
-        let mut coverage_transform = Transform2D::translation(-minx, -miny);
-        coverage_transform.premultiply(&state.transform);
-        self.state_mut().transform = coverage_transform;
         // Render the source at full strength: the shadow color's alpha and the
         // global alpha are applied later (the former via the SourceIn mask below,
         // the latter when compositing the finished shadow under the shape).
-        self.state_mut().alpha = 1.0;
-        self.state_mut().scissor = Scissor::default();
-        self.state_mut().composite_operation = CompositeOperationState::default();
-        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        let mut coverage_transform = Transform2D::translation(-minx, -miny);
+        coverage_transform.premultiply(&state.transform);
+        self.enter_offscreen_state(coverage_transform);
 
         // 1. Rasterize the source with its real paint so the offscreen holds the
         //    source's true per-pixel alpha (semi-transparent fills, gradient/image
@@ -2112,11 +2128,8 @@ where
         //    a half-strength shadow. The mask must cover the whole offscreen in its
         //    own pixel space, so draw it with the identity transform (not the
         //    shape's coverage transform, which is scaled/translated).
-        self.state_mut().transform = Transform2D::identity();
         self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
-        let mut mask_rect = Path::new();
-        mask_rect.rect(0.0, 0.0, width as f32, height as f32);
-        self.fill_path_internal(&mask_rect, &PaintFlavor::Color(shadow_color), false, FillRule::NonZero);
+        self.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
 
         self.restore();
 
@@ -2147,18 +2160,10 @@ where
 
         // Composite in plain device space (identity transform) at the offset
         // position, honoring the caller's scissor and composite operation.
-        let saved_transform = self.state().transform;
-        let saved_alpha = self.state().alpha;
-        self.state_mut().transform = Transform2D::identity();
-        self.state_mut().alpha = 1.0;
+        // A shadow casts no shadow of its own: mute the shadow state around
+        // the blit.
         self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
-
-        let mut shadow_rect = Path::new();
-        shadow_rect.rect(dst_x, dst_y, width as f32, height as f32);
-        self.fill_path_internal(&shadow_rect, &shadow_paint.flavor, false, FillRule::NonZero);
-
-        self.state_mut().transform = saved_transform;
-        self.state_mut().alpha = saved_alpha;
+        self.fill_device_rect(dst_x, dst_y, width as f32, height as f32, &shadow_paint.flavor);
         self.state_mut().shadow_color = shadow_color;
 
         // The composite that reads them is recorded; the next shadow of this
