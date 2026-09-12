@@ -896,11 +896,18 @@ impl PathCache {
             && maybe_t1_bottom_right.x == maybe_t2_top_right.x
             && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
         {
+            // A mirrored transform hands the corners over in the opposite
+            // order, so take the extent by min/max rather than by position in
+            // the strip: the fill is the same rect either way, and the blit
+            // maps its texture coordinates through the paint transform, flip
+            // included.
+            let (x0, x1) = (maybe_t1_top_left.x, maybe_t2_top_right.x);
+            let (y0, y1) = (maybe_t1_top_left.y, maybe_t1_bottom_left.y);
             Some(crate::Rect::new(
-                maybe_t1_top_left.x,
-                maybe_t1_top_left.y,
-                maybe_t2_top_right.x - maybe_t1_top_left.x,
-                maybe_t1_bottom_left.y - maybe_t1_top_left.y,
+                x0.min(x1),
+                y0.min(y1),
+                (x1 - x0).abs(),
+                (y1 - y0).abs(),
             ))
         } else {
             None
@@ -1123,6 +1130,28 @@ mod tests {
         path_cache.expand_fill(1.0, LineJoin::Miter, 10.0);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
+    }
+
+    /// A rect stays a rect under a mirrored transform: the corners arrive in
+    /// the opposite order, and the fast image-blit path used to read that as
+    /// a negative extent and draw nothing.
+    #[test]
+    fn a_mirrored_rect_fill_is_still_a_rect() {
+        let mut path = Path::new();
+        path.rect(10.0, 20.0, 30.0, 40.0);
+
+        let upright = Transform2D::identity();
+        let mut cache = PathCache::new(path.verbs(), &upright, 0.25, 0.01);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0);
+        let rect = cache.path_fill_is_rect().expect("an upright rect");
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (10.0, 20.0, 30.0, 40.0));
+
+        // y' = 100 - y: the rect lands at y in 40..80; x' = -x: at x in -40..-10.
+        let mirrored = Transform2D::new(-1.0, 0.0, 0.0, -1.0, 0.0, 100.0);
+        let mut cache = PathCache::new(path.verbs(), &mirrored, 0.25, 0.01);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0);
+        let rect = cache.path_fill_is_rect().expect("a mirrored rect is still a rect");
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (-40.0, 40.0, 30.0, 40.0));
     }
 }
 
