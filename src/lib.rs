@@ -90,7 +90,11 @@ pub enum FillRule {
 }
 
 /// Blend factors.
+///
+/// Non-exhaustive: this mirrors the blend factors the backends expose and is
+/// currently a subset of them, so matching on it must carry a wildcard arm.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[non_exhaustive]
 pub enum BlendFactor {
     /// Not all
     Zero,
@@ -117,7 +121,14 @@ pub enum BlendFactor {
 }
 
 /// Predefined composite oprations.
+///
+/// Non-exhaustive: the separable blend modes that Canvas 2D's
+/// `globalCompositeOperation` and CSS/SVG's `mix-blend-mode` also carry
+/// (`multiply`, `screen`, `overlay`, `color-burn` and the rest) belong in this
+/// enum and are not implemented yet, so matching on it must carry a wildcard
+/// arm.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[non_exhaustive]
 pub enum CompositeOperation {
     /// Displays the source over the destination.
     SourceOver,

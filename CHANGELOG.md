@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `CompositeOperation` and `BlendFactor` are now `#[non_exhaustive]`. Both
+  describe an open-ended capability space - the separable blend modes
+  (`multiply`, `screen`, `color-burn`, ...) belong in `CompositeOperation`, and
+  `BlendFactor` is a subset of what the backends expose - so adding to either
+  should not be a breaking change. Downstream `match`es on them now need a
+  wildcard arm.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single
