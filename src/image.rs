@@ -550,6 +550,24 @@ impl ImageFilter {
         }
     }
 
+    /// The `feColorMatrix type="luminanceToAlpha"` conversion: the output
+    /// alpha is the input's luminance and the color channels go to zero,
+    /// which is how SVG luminance masks read their content. Uses the Rec.
+    /// 709 weights above, the ones Skia's luma filter applies for Chromium's
+    /// masks; the SVG row (0.2125, 0.7154, 0.0721) differs by at most
+    /// 0.0002. Like every color matrix it runs on straight (unpremultiplied)
+    /// color, so the luminance is the color's own, not scaled by alpha.
+    pub fn luminance_to_alpha() -> Self {
+        #[rustfmt::skip]
+        let matrix = [
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            Self::LR, Self::LG, Self::LB, 0.0, 0.0,
+        ];
+        ImageFilter::ColorMatrix { matrix }
+    }
+
     /// CSS `opacity(amount)`; `amount` is clamped to `[0, 1]` and scales alpha.
     pub fn opacity(amount: f32) -> Self {
         let a = amount.clamp(0.0, 1.0);
@@ -788,6 +806,20 @@ mod filter_fold_tests {
     /// constant column composes in order. `brightness(0.5)` and `invert(1.0)`
     /// are both range-safe, so both directions fold, and they do not commute:
     /// brighten-then-invert is `1 - 0.5c`, invert-then-brighten is `0.5 - 0.5c`.
+    /// luminanceToAlpha writes the Rec. 709 luminance into alpha and nothing
+    /// into the color rows, so white converts to full coverage and a pure
+    /// green pixel to 0.7152 of it.
+    #[test]
+    fn luminance_to_alpha_moves_luminance_into_alpha_only() {
+        let ImageFilter::ColorMatrix { matrix } = ImageFilter::luminance_to_alpha() else {
+            panic!("luminance_to_alpha is a color matrix");
+        };
+        assert!(matrix[..15].iter().all(|c| *c == 0.0), "color rows are zero");
+        assert_eq!(&matrix[15..], &[0.2126, 0.7152, 0.0722, 0.0, 0.0]);
+        let white: f32 = matrix[15..18].iter().sum();
+        assert!((white - 1.0).abs() < 1e-4, "white is full coverage, got {white}");
+    }
+
     #[test]
     fn folding_respects_order_and_identity() {
         let bright = ImageFilter::brightness(0.5);

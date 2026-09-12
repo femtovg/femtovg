@@ -20,6 +20,14 @@ All notable changes to this project will be documented in this file.
   ramp was left transparent (or holding stale texture data) instead of the last
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
+  a mask image placed in device space, using either its luminance times alpha
+  (SVG `mask`'s default `mask-type`, via the new
+  `ImageFilter::luminance_to_alpha()`) or its alpha. Masks apply after the
+  layer's filters, as in SVG, and reserve their coverage images with the
+  layer's store, so a masked layer the transient budget cannot fit passes
+  through as a whole (`begin_layer()` returns `false`) rather than composite
+  unmasked.
 - Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
   offscreen image and composite it back with `LayerEffects` - group opacity, so
   overlapping shapes fade as one like an SVG group, and/or an image-filter

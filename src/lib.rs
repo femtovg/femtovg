@@ -369,6 +369,36 @@ pub struct Canvas<T: Renderer> {
 pub struct LayerEffects {
     opacity: f32,
     filters: Vec<ImageFilter>,
+    mask: Option<LayerMask>,
+}
+
+/// How a layer mask's coverage is derived from its image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskKind {
+    /// Coverage is the mask content's luminance (Rec. 709 weights on its
+    /// sRGB values) times its alpha - SVG `mask`'s default `mask-type`.
+    Luminance,
+    /// Coverage is the mask content's own alpha channel.
+    Alpha,
+}
+
+/// The transients a mask draws its coverage through: the mask normalized
+/// into layer space and, for a luminance mask, the alpha it converts to.
+#[derive(Clone, Copy, Debug)]
+struct MaskImages {
+    normalized: ImageId,
+    converted: Option<ImageId>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LayerMask {
+    image: ImageId,
+    kind: MaskKind,
+    // Device-space placement of the mask image.
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 impl LayerEffects {
@@ -377,6 +407,7 @@ impl LayerEffects {
         Self {
             opacity: 1.0,
             filters: Vec::new(),
+            mask: None,
         }
     }
 
@@ -403,6 +434,35 @@ impl LayerEffects {
         self.filters = filters.to_vec();
         self
     }
+
+    /// Masks the layer by `image`, placed at the device-space rect
+    /// `(x, y, width, height)` - device space because a mask is a raster
+    /// captured the way the layer is - with coverage derived per `kind`:
+    /// SVG `mask` semantics, [`MaskKind::Luminance`] being SVG's default
+    /// mask-type, computed on the mask's sRGB values as SVG's default
+    /// `color-interpolation` has it. Applied after the filter chain, SVG's
+    /// order for a group carrying both `filter` and `mask`. Pixels the mask
+    /// rect does not cover are fully masked out.
+    ///
+    /// The mask image is borrowed, not owned: render mask content into your
+    /// own image (upload or render target - its `ImageFlags` orientation is
+    /// respected) and release it on your own schedule after the flush. The
+    /// coverage images the mask draws through are reserved at
+    /// [`begin_layer`](Canvas::begin_layer) with the layer's store, so a
+    /// masked layer the transient budget cannot fit passes through as a
+    /// whole (`begin_layer` returns `false`) rather than composite unmasked.
+    #[must_use]
+    pub fn with_mask(mut self, image: ImageId, kind: MaskKind, x: f32, y: f32, width: f32, height: f32) -> Self {
+        self.mask = Some(LayerMask {
+            image,
+            kind,
+            x,
+            y,
+            width,
+            height,
+        });
+        self
+    }
 }
 
 /// Default cap on live transient image memory: 256 MiB, room for a handful
@@ -414,6 +474,10 @@ struct LayerRecord {
     // degenerate): draws went to the previous target unchanged and end_layer
     // only rebalances state.
     image: Option<ImageId>,
+    // The mask's coverage images, reserved with the store: a masked layer
+    // either captures with everything its composite needs or passes through
+    // as a whole, never composites unmasked.
+    mask_images: Option<MaskImages>,
     previous_target: RenderTarget,
     origin: (f32, f32),
     width: usize,
@@ -1006,7 +1070,8 @@ where
     }
 
     /// Caps the memory held by transient images - layer backing stores,
-    /// filtered results, filter-chain scratches and shadow coverage - at
+    /// filtered results, filter-chain scratches, shadow coverage and mask
+    /// coverage - at
     /// `bytes` (default 256 MiB). Within a frame a layer's images are reused
     /// by the next layer of the same size once its composite is recorded, so
     /// what counts against the cap is the deepest nesting, not the number of
@@ -1015,7 +1080,9 @@ where
     /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
     /// the layer passes through with its effects dropped,
     /// [`filter_image_chain`](Self::filter_image_chain) returns
-    /// [`ErrorKind::TransientImageBudgetExceeded`], and shadows are skipped;
+    /// [`ErrorKind::TransientImageBudgetExceeded`], shadows are skipped and
+    /// a masked layer, which reserves its coverage images with its store,
+    /// passes through as a whole;
     /// [`transient_image_bytes`](Self::transient_image_bytes) reports what a
     /// frame actually held.
     ///
@@ -1196,6 +1263,7 @@ where
                 .ok();
             self.layers.push(LayerRecord {
                 image,
+                mask_images: None,
                 previous_target: self.current_render_target,
                 origin: (0.0, 0.0),
                 width: void,
@@ -1254,8 +1322,25 @@ where
                 .ok()
         };
 
+        // The mask is applied at end_layer, so its coverage images are
+        // reserved here with the store: a layer that could not get them then
+        // would have to composite unmasked, and the return value promises no
+        // effect is dropped silently.
+        let mask_images = match (image, &effects.mask) {
+            (Some(_), Some(mask)) => self.reserve_mask_images(width, height, mask.kind),
+            _ => None,
+        };
+        let image = match (image, effects.mask.is_some() && mask_images.is_none()) {
+            (Some(image), true) => {
+                self.release_transient_image(image);
+                None
+            }
+            (image, _) => image,
+        };
+
         self.layers.push(LayerRecord {
             image,
+            mask_images,
             previous_target: self.current_render_target,
             origin: (minx, miny),
             width,
@@ -1272,24 +1357,16 @@ where
         self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
 
         // Shift device space so the captured rect's origin lands on (0, 0),
-        // exactly like the shadow pass maps its padded bbox.
+        // exactly like the shadow pass maps its padded bbox. Shadow state is
+        // a layer rendering attribute too: it applies to the layer's result
+        // at end_layer, so it must not also apply to every draw inside, or
+        // the layer's children would each cast their own shadow and then the
+        // layer would cast one more over the lot.
         let mut layer_transform = Transform2D::translation(-minx, -miny);
         layer_transform.premultiply(&state.transform);
-        self.state_mut().transform = layer_transform;
-        self.state_mut().alpha = 1.0;
-        self.state_mut().composite_operation = CompositeOperationState::default();
-        // Shadow state is a layer rendering attribute too: it applies to the
-        // layer's result at end_layer, so it must not also apply to every
-        // draw inside, or the layer's children would each cast their own
-        // shadow and then the layer would cast one more over the lot.
-        {
-            let state = self.state_mut();
-            state.shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
-            state.shadow_blur = 0.0;
-            state.shadow_offset = [0.0, 0.0];
-        }
-        if !keep_scissor {
-            self.state_mut().scissor = Scissor::default();
+        self.enter_offscreen_state(layer_transform);
+        if keep_scissor {
+            self.state_mut().scissor = state.scissor;
         }
         true
     }
@@ -1334,9 +1411,18 @@ where
         let alpha = record.outer_alpha * record.effects.opacity;
         if alpha <= 0.0 {
             self.release_layer_images(image, source);
+            if let Some(images) = record.mask_images {
+                self.release_mask_images(images);
+            }
             return;
         }
         let (minx, miny) = record.origin;
+
+        // The mask applies after the filter chain - SVG's order for a group
+        // carrying both - and multiplies the layer's alpha in place.
+        if let (Some(mask), Some(images)) = (record.effects.mask, record.mask_images) {
+            self.apply_layer_mask(source, &record, mask, images, source != image);
+        }
         let tint = Color::rgbaf(1.0, 1.0, 1.0, alpha);
         let mut layer_paint =
             Paint::image_tint(source, minx, miny, record.width as f32, record.height as f32, 0.0, tint);
@@ -1351,17 +1437,13 @@ where
         // 2D's beginLayer applies the shadow to the layer's result and SVG's
         // feDropShadow applies to a filtered group. Inside the layer the
         // shadow state was reset, so nothing has been shadowed twice.
-        let saved_transform = self.state().transform;
-        let saved_alpha = self.state().alpha;
-        self.state_mut().transform = Transform2D::identity();
-        self.state_mut().alpha = 1.0;
-
-        let mut layer_rect = Path::new();
-        layer_rect.rect(minx, miny, record.width as f32, record.height as f32);
-        self.fill_path_internal(&layer_rect, &layer_paint.flavor, false, FillRule::NonZero);
-
-        self.state_mut().transform = saved_transform;
-        self.state_mut().alpha = saved_alpha;
+        self.fill_device_rect(
+            minx,
+            miny,
+            record.width as f32,
+            record.height as f32,
+            &layer_paint.flavor,
+        );
 
         // The composite that reads the layer is recorded; its images can back
         // the next layer of this size.
@@ -1375,6 +1457,153 @@ where
         if source != capture {
             self.release_transient_image(source);
         }
+    }
+
+    /// Puts the current state into the shape every offscreen pass draws
+    /// under: `transform` as the pass's device space, full alpha, no scissor,
+    /// source-over and no shadow. The caller's `save()` holds the state this
+    /// replaces.
+    fn enter_offscreen_state(&mut self, transform: Transform2D) {
+        let state = self.state_mut();
+        state.transform = transform;
+        state.alpha = 1.0;
+        state.scissor = Scissor::default();
+        state.composite_operation = CompositeOperationState::default();
+        state.shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        state.shadow_blur = 0.0;
+        state.shadow_offset = [0.0, 0.0];
+    }
+
+    /// Fills a device-space rect with `paint` under the identity transform,
+    /// at full alpha and without antialiasing: the blit an offscreen pass
+    /// ends with. The scissor, composite operation and shadow state stay the
+    /// caller's - that is how a layer's composite honors the outer scissor
+    /// and casts the group's shadow.
+    fn fill_device_rect(&mut self, x: f32, y: f32, width: f32, height: f32, paint: &PaintFlavor) {
+        let saved_transform = self.state().transform;
+        let saved_alpha = self.state().alpha;
+        self.state_mut().transform = Transform2D::identity();
+        self.state_mut().alpha = 1.0;
+        let mut rect = Path::new();
+        rect.rect(x, y, width, height);
+        self.fill_path_internal(&rect, paint, false, FillRule::NonZero);
+        self.state_mut().transform = saved_transform;
+        self.state_mut().alpha = saved_alpha;
+    }
+
+    /// Acquires a mask's coverage transients for a layer store of
+    /// `width` x `height`: the mask normalized into layer space, sampled
+    /// upright through FLIP_Y like a capture, and for luminance masks the
+    /// conversion target, whose color-matrix pass leaves storage upright.
+    /// `None`, holding nothing, when the budget cannot fit them.
+    fn reserve_mask_images(&mut self, width: usize, height: usize, kind: MaskKind) -> Option<MaskImages> {
+        let normalized = self
+            .acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y)
+            .ok()?;
+        let converted = match kind {
+            MaskKind::Alpha => None,
+            MaskKind::Luminance => match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
+                Ok(converted) => Some(converted),
+                Err(_) => {
+                    self.release_transient_image(normalized);
+                    return None;
+                }
+            },
+        };
+        Some(MaskImages { normalized, converted })
+    }
+
+    fn release_mask_images(&mut self, images: MaskImages) {
+        self.release_transient_image(images.normalized);
+        if let Some(converted) = images.converted {
+            self.release_transient_image(converted);
+        }
+    }
+
+    /// Multiplies `layer`'s alpha by the mask's coverage, in layer space,
+    /// drawing through the coverage images reserved at `begin_layer`.
+    ///
+    /// Orientation: a draw into an image target lands in flipped storage, so
+    /// draw-space row 0 writes the storage row holding a raw capture's top
+    /// but a filtered result's bottom (the chain flipped storage parity
+    /// once). Both coverage images sample upright - `normalized` through
+    /// FLIP_Y like a capture, `converted` without it like a filtered result -
+    /// so the coverage draw runs under the identity for a raw capture and
+    /// under a vertical flip for a filtered one.
+    fn apply_layer_mask(
+        &mut self,
+        layer: ImageId,
+        record: &LayerRecord,
+        mask: LayerMask,
+        images: MaskImages,
+        layer_is_filtered: bool,
+    ) {
+        let (width, height) = (record.width as f32, record.height as f32);
+        let (minx, miny) = record.origin;
+        let previous_target = self.current_render_target;
+        self.save();
+
+        // Normalize the mask into layer space with an ordinary draw, so the
+        // caller's storage convention (an upload or a render target, whatever
+        // ImageFlags it carries) never enters the parity rule above. The
+        // backdrop sets what uncovered pixels mean. A luminance mask lands
+        // over opaque black: every pixel is then opaque, the color-matrix
+        // pass's unpremultiply is the identity, and the luminance it writes
+        // from the premultiplied color is luminance x alpha - SVG's mask
+        // value - in one pass, with the uncovered rest reading black,
+        // coverage 0. An alpha mask lands over transparent and its own alpha
+        // is the coverage.
+        let backdrop = match mask.kind {
+            MaskKind::Luminance => Color::black(),
+            MaskKind::Alpha => Color::rgbaf(0.0, 0.0, 0.0, 0.0),
+        };
+        self.set_render_target(RenderTarget::Image(images.normalized));
+        self.clear_rect(0, 0, record.width as u32, record.height as u32, backdrop);
+        self.enter_offscreen_state(Transform2D::identity());
+        let mask_paint = Paint::image(
+            mask.image,
+            mask.x - minx,
+            mask.y - miny,
+            mask.width,
+            mask.height,
+            0.0,
+            1.0,
+        );
+        self.fill_device_rect(
+            mask.x - minx,
+            mask.y - miny,
+            mask.width,
+            mask.height,
+            &mask_paint.flavor,
+        );
+
+        let coverage = match images.converted {
+            Some(converted) => {
+                self.filter_image(converted, ImageFilter::luminance_to_alpha(), images.normalized);
+                converted
+            }
+            None => images.normalized,
+        };
+
+        // layer.alpha *= coverage.alpha over the whole store.
+        self.set_render_target(RenderTarget::Image(layer));
+        let transform = if layer_is_filtered {
+            Transform2D::new(1.0, 0.0, 0.0, -1.0, 0.0, height)
+        } else {
+            Transform2D::identity()
+        };
+        self.enter_offscreen_state(transform);
+        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::DestinationIn);
+        let coverage_paint = Paint::image(coverage, 0.0, 0.0, width, height, 0.0, 1.0);
+        let mut store = Path::new();
+        store.rect(0.0, 0.0, width, height);
+        self.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
+
+        self.restore();
+        self.set_render_target(previous_target);
+        // The draws that read the coverage are recorded; the next masked
+        // layer of this size draws its mask into the same images.
+        self.release_mask_images(images);
     }
 
     // Transforms
@@ -2088,16 +2317,12 @@ where
 
         // Build the offset transform for coverage rendering: original CTM with an
         // extra device-space translation that shifts the shape into the offscreen.
-        let mut coverage_transform = Transform2D::translation(-minx, -miny);
-        coverage_transform.premultiply(&state.transform);
-        self.state_mut().transform = coverage_transform;
         // Render the source at full strength: the shadow color's alpha and the
         // global alpha are applied later (the former via the SourceIn mask below,
         // the latter when compositing the finished shadow under the shape).
-        self.state_mut().alpha = 1.0;
-        self.state_mut().scissor = Scissor::default();
-        self.state_mut().composite_operation = CompositeOperationState::default();
-        self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+        let mut coverage_transform = Transform2D::translation(-minx, -miny);
+        coverage_transform.premultiply(&state.transform);
+        self.enter_offscreen_state(coverage_transform);
 
         // 1. Rasterize the source with its real paint so the offscreen holds the
         //    source's true per-pixel alpha (semi-transparent fills, gradient/image
@@ -2112,11 +2337,8 @@ where
         //    a half-strength shadow. The mask must cover the whole offscreen in its
         //    own pixel space, so draw it with the identity transform (not the
         //    shape's coverage transform, which is scaled/translated).
-        self.state_mut().transform = Transform2D::identity();
         self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
-        let mut mask_rect = Path::new();
-        mask_rect.rect(0.0, 0.0, width as f32, height as f32);
-        self.fill_path_internal(&mask_rect, &PaintFlavor::Color(shadow_color), false, FillRule::NonZero);
+        self.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
 
         self.restore();
 
@@ -2147,18 +2369,10 @@ where
 
         // Composite in plain device space (identity transform) at the offset
         // position, honoring the caller's scissor and composite operation.
-        let saved_transform = self.state().transform;
-        let saved_alpha = self.state().alpha;
-        self.state_mut().transform = Transform2D::identity();
-        self.state_mut().alpha = 1.0;
+        // A shadow casts no shadow of its own: mute the shadow state around
+        // the blit.
         self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
-
-        let mut shadow_rect = Path::new();
-        shadow_rect.rect(dst_x, dst_y, width as f32, height as f32);
-        self.fill_path_internal(&shadow_rect, &shadow_paint.flavor, false, FillRule::NonZero);
-
-        self.state_mut().transform = saved_transform;
-        self.state_mut().alpha = saved_alpha;
+        self.fill_device_rect(dst_x, dst_y, width as f32, height as f32, &shadow_paint.flavor);
         self.state_mut().shadow_color = shadow_color;
 
         // The composite that reads them is recorded; the next shadow of this
@@ -5336,6 +5550,77 @@ fn shadow_stores_round_to_eight_pixels() {
     canvas.fill_path(&path, &Paint::color(Color::rgb(200, 0, 0)));
     let info = canvas.images.info(canvas.transients.images[0]).unwrap();
     assert_eq!((info.width(), info.height()), (40, 40));
+}
+
+/// Masked sibling layers reuse the mask's transients too: a luminance mask
+/// needs the layer capture, the normalized mask and its alpha conversion,
+/// once for any number of siblings.
+#[test]
+fn masked_siblings_reuse_mask_transients() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(200, 120, 1.0);
+    let mask = canvas
+        .create_image_empty(200, 120, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    for _ in 0..4 {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 200.0, 120.0)));
+        assert!(canvas.layers.last().unwrap().image.is_some());
+        // Reserved with the store: nothing of the mask's is left to chance
+        // at end_layer.
+        assert_eq!(
+            canvas.transients.images.len(),
+            3,
+            "capture, normalized mask, converted mask"
+        );
+        assert!(
+            canvas.transients.free.is_empty(),
+            "all three are held while the layer is open"
+        );
+        canvas.end_layer();
+        assert_eq!(
+            canvas.transients.free.len(),
+            3,
+            "and returned once its composite is recorded"
+        );
+    }
+    assert_eq!(
+        canvas.transients.images.len(),
+        3,
+        "four masked siblings, one set of images"
+    );
+    canvas.flush_to_output(());
+    assert_eq!(canvas.transients.images.len(), 0);
+}
+
+/// A masked layer whose coverage images do not fit the budget passes through
+/// as a whole - `begin_layer` says so - instead of capturing and then
+/// compositing unmasked at end_layer.
+#[test]
+fn a_masked_layer_without_room_for_its_coverage_passes_through() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    // Room for the capture and the normalized mask, not the luminance conversion.
+    canvas.set_transient_image_budget(2 * 64 * 64 * 4);
+    let luminance = LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0);
+    assert!(!canvas.begin_layer(&luminance), "no coverage, no layer");
+    assert!(canvas.layers.last().unwrap().image.is_none());
+    assert!(
+        canvas.transients.free.len() == canvas.transients.images.len(),
+        "nothing stays held"
+    );
+    canvas.end_layer();
+    // The same budget fits an alpha mask, which needs no conversion.
+    let alpha = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&alpha));
+    canvas.end_layer();
+    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
+    assert!(canvas.begin_layer(&luminance), "three images fit three images' worth");
+    canvas.end_layer();
 }
 
 /// Shadows draw through the pool too: the coverage and blurred images of one
