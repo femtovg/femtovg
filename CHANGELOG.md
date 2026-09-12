@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed filled paths landing a pixel too wide when the contour runs clockwise.
+  The antialiasing fringe is extruded along each point's miter vector, whose
+  direction follows the order the points are in, so a clockwise contour pushed
+  it outward instead of inward - `Path::rect()` and `Path::circle()` emit
+  counter-clockwise and were exact, while an SVG arc with `sweep = 1`, or any
+  imported path wound the other way, was a pixel fat all round. Fills now cover
+  the same pixels either way, and the authored winding still selects holes for
+  `FillRule::NonZero`. This also takes most of the over-inking out of thin
+  filled shapes, which were paying the same pixel on both edges.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single

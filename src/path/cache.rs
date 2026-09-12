@@ -62,6 +62,10 @@ pub struct Contour {
     closed: bool,
     bevel: usize,
     solidity: Option<Solidity>,
+    /// Set for the duration of a fill: this contour's points were flipped to
+    /// the orientation the fringe extrusion assumes, so the triangles built
+    /// from them have to be flipped back.
+    reversed: bool,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity,
@@ -74,6 +78,7 @@ impl Default for Contour {
             closed: Default::default(),
             bevel: Default::default(),
             solidity: None,
+            reversed: false,
             fill: Vec::new(),
             stroke: Vec::new(),
             convexity: Convexity::default(),
@@ -101,6 +106,18 @@ impl Contour {
 
     fn point_count(&self) -> usize {
         self.point_range.end - self.point_range.start
+    }
+
+    /// Recomputes each point's direction and length to its successor. Every
+    /// point stores the edge that leaves it, so reversing a contour leaves all
+    /// of them pointing at what is now the previous point.
+    fn recompute_directions(points: &mut [Point]) {
+        for i in 0..points.len() {
+            let next = points[(i + 1) % points.len()].pos;
+            let p = &mut points[i];
+            p.dpos = next - p.pos;
+            p.len = p.dpos.normalize();
+        }
     }
 }
 
@@ -519,6 +536,29 @@ impl PathCache {
     pub(crate) fn expand_fill(&mut self, fringe_width: f32, line_join: LineJoin, miter_limit: f32) {
         let has_fringe = fringe_width > 0.0;
 
+        // Every offset below is taken along a point's miter vector, and that
+        // vector's direction follows the order the contour's points are in. A
+        // contour wound the other way extrudes its fringe outward instead of
+        // inward, so the fill lands a whole fringe too wide - the clockwise
+        // square in #308, a pixel bigger all round than the identical
+        // counter-clockwise one. nanovg never meets this because it normalizes
+        // every contour up front ("Enforce winding" in nvg__flattenPaths, with
+        // nvg__addPath defaulting each path to NVG_CCW). femtovg cannot just do
+        // that: unlike nanovg it lets the authored winding express holes, the
+        // way SVG and Canvas write them, and the stencil pass reads that
+        // winding back off these triangles. So normalize for the geometry, put
+        // the triangles back the way the caller wound them, and restore the
+        // points - a later stroke of the same cached path must still see its
+        // own direction, which decides dash phase and which end gets which cap.
+        for contour in &mut self.contours {
+            let points = &mut self.points[contour.point_range.clone()];
+            contour.reversed = points.len() > 2 && Contour::polygon_area(points) < 0.0;
+            if contour.reversed {
+                points.reverse();
+                Contour::recompute_directions(points);
+            }
+        }
+
         self.calculate_joins(fringe_width, line_join, miter_limit);
 
         // Calculate max vertex usage.
@@ -576,9 +616,20 @@ impl PathCache {
             if triangle_fan_fill.len() > 2 {
                 let center = triangle_fan_fill[0];
                 let tail = &triangle_fan_fill[1..];
+                // Only the stencil pass reads this winding back, to tell a hole
+                // from a solid. A convex path skips the stencil and is drawn
+                // directly, where flipped triangles would just face away.
+                let flip = contour.reversed && !convex;
                 contour.fill = tail
                     .windows(2)
-                    .flat_map(|vertices| IntoIterator::into_iter([center, vertices[0], vertices[1]]))
+                    .flat_map(|vertices| {
+                        let (a, b) = if flip {
+                            (vertices[1], vertices[0])
+                        } else {
+                            (vertices[0], vertices[1])
+                        };
+                        IntoIterator::into_iter([center, a, b])
+                    })
                     .collect();
             }
 
@@ -608,6 +659,16 @@ impl PathCache {
                 let p1 = contour.stroke[1];
                 contour.stroke.push(Vertex::new(p0.x, p0.y, lu, 1.0));
                 contour.stroke.push(Vertex::new(p1.x, p1.y, ru, 1.0));
+            }
+        }
+
+        // The cache outlives this call; a stroke of the same path reads these
+        // same points, so give them back exactly as they arrived.
+        for contour in &mut self.contours {
+            if contour.reversed {
+                let points = &mut self.points[contour.point_range.clone()];
+                points.reverse();
+                Contour::recompute_directions(points);
             }
         }
     }
