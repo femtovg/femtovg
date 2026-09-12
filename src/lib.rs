@@ -1853,11 +1853,16 @@ where
         let mut line_width = (stroke.line_width * transform.average_scale()).max(0.0);
 
         if line_width < self.fringe_width {
-            // If the stroke width is less than pixel size, use alpha to emulate coverage.
-            // Since coverage is area, scale by alpha*alpha.
+            // A stroke thinner than the fringe is drawn at fringe width with its
+            // alpha scaled by the ratio, so it puts down the ink its area calls
+            // for: a fringe-wide stroke integrates to one pixel per unit length,
+            // so a w-pixel line carries w. That is the linear coverage Skia's
+            // hairline path applies (SkDrawTreatAAStrokeAsHairline scales the
+            // paint alpha by the device width); nanovg squared the ratio, which
+            // left a 0.5 px line at a quarter of its coverage.
             let alpha = (line_width / self.fringe_width).clamp(0.0, 1.0);
 
-            paint_flavor.mul_alpha(alpha * alpha);
+            paint_flavor.mul_alpha(alpha);
             line_width = self.fringe_width;
         }
 
