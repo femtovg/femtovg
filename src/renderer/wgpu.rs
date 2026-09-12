@@ -847,6 +847,10 @@ impl Renderer for WGPURenderer {
         drop(image);
     }
 
+    fn max_texture_size(&self) -> usize {
+        self.device.limits().max_texture_dimension_2d as usize
+    }
+
     fn screenshot(&mut self) -> Result<imgref::ImgVec<rgb::RGBA8>, crate::ErrorKind> {
         return Err(crate::ErrorKind::UnsupportedOperation);
     }

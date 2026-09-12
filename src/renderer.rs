@@ -179,6 +179,14 @@ pub trait Renderer {
 
     /// Take a screenshot of the current render target.
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;
+
+    /// The largest width or height this backend can allocate for an image, in
+    /// pixels. Layers and shadows whose stores would exceed it degrade rather
+    /// than fail. The default matches current desktop GPUs; a VideoCore IV
+    /// (Raspberry Pi Zero through 3) reports 2048.
+    fn max_texture_size(&self) -> usize {
+        8192
+    }
 }
 
 /// Marker trait for renderers that don't have a surface.
