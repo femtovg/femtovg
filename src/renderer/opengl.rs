@@ -53,6 +53,7 @@ pub struct OpenGl {
     context: Rc<glow::Context>,
     screen_target: Option<Framebuffer>,
     current_render_target: RenderTarget,
+    max_texture_size: usize,
 }
 
 impl OpenGl {
@@ -120,6 +121,11 @@ impl OpenGl {
         let antialias = true;
 
         let context = Rc::new(context);
+        // What the driver can allocate; a VideoCore IV reports 2048.
+        let max_texture_size = match unsafe { context.get_parameter_i32(glow::MAX_TEXTURE_SIZE) } {
+            size if size > 0 => size as usize,
+            _ => 2048,
+        };
 
         let generate_shader_program_variants = |with_glyph_texture| -> Result<_, ErrorKind> {
             Ok([
@@ -228,6 +234,7 @@ impl OpenGl {
             context,
             screen_target: None,
             current_render_target: RenderTarget::Screen,
+            max_texture_size,
         };
 
         unsafe {
@@ -932,6 +939,10 @@ impl Renderer for OpenGl {
     fn delete_image(&mut self, image: Self::Image, image_id: ImageId) {
         self.framebuffers.remove(&image_id);
         image.delete(&self.context);
+    }
+
+    fn max_texture_size(&self) -> usize {
+        self.max_texture_size
     }
 
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
