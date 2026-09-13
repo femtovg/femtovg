@@ -689,12 +689,16 @@ impl OpenGl {
                 height as i32,
             );
             self.context.clear_color(color.r, color.g, color.b, color.a);
-            // Color only. The stencil carries the clip plane (bit 7, armed
-            // and disarmed by the ClipReset quads) and the winding scratch
-            // that every concave fill zeroes behind itself; clearing it here
-            // would either arm the plane on every cleared pixel or wipe an
-            // active clip's shape, and the WGPU backend leaves it alone too.
-            self.context.clear(glow::COLOR_BUFFER_BIT);
+            // The stencil carries the clip plane in bit 7 (armed and disarmed
+            // by the ClipReset quads) and the winding scratch in the rest.
+            // Clear only the winding bits: a clip must survive the clear,
+            // while a winding count a cover pass missed (a fan vertex pushed
+            // past the cover quad at a cusp) must not leak into the next
+            // frame's fills. glClear honours the stencil write mask.
+            self.context.stencil_mask(0x7f);
+            self.context.clear_stencil(0);
+            self.context.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+            self.context.stencil_mask(0xff);
             self.context.disable(glow::SCISSOR_TEST);
         }
     }

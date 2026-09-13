@@ -407,7 +407,9 @@ fn a_clip_inside_a_layer_clips_its_content() {
 
 /// `clear_rect` is a raw clear: the clip does not apply to it (documented),
 /// while the Canvas 2D `clearRect` form - an opaque DestinationOut fill -
-/// clears only inside the clip.
+/// clears only inside the clip. The clear zeroes the stencil's winding bits
+/// (so nothing a cover pass missed leaks into the next frame) but leaves
+/// the clip plane armed: the clip still gates what is drawn after it.
 #[test]
 fn clear_rect_is_unclipped_and_destination_out_is_the_clipped_clear() {
     let Some((device, queue)) = headless_device() else {
@@ -420,8 +422,13 @@ fn clear_rect_is_unclipped_and_destination_out_is_the_clipped_clear() {
         band.rect(8.0, 0.0, 24.0, 64.0);
         canvas.clip_path(&band, FillRule::NonZero);
         canvas.clear_rect(0, 0, W, H, Color::white());
+        let mut p = Path::new();
+        p.rect(0.0, 40.0, 64.0, 24.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 255)));
     });
     assert_eq!(px(&out, 48, 32), WHITE, "clear_rect cleared outside the clip too");
+    assert_eq!(px(&out, 16, 52), [0, 0, 255], "the clip is still armed after the clear");
+    assert_eq!(px(&out, 48, 52), WHITE, "and still gates draws outside it");
     let out = render(&device, &queue, |canvas| {
         full_red_rect(canvas);
         let mut band = Path::new();

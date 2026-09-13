@@ -1642,7 +1642,29 @@ fn clear_rect(
                 },
             }),
             wgpu::PrimitiveTopology::TriangleList,
-            StencilTest::Disabled, // ### clear stencil mask
+            // Zero the winding bits under the cleared rect and leave the clip
+            // plane (bit 7) alone, as the GL backend's masked stencil clear
+            // does: a winding count a cover pass missed must not leak into
+            // the next frame's fills.
+            StencilTest::Enabled {
+                stencil_state: wgpu::StencilState {
+                    front: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Always,
+                        fail_op: wgpu::StencilOperation::Zero,
+                        depth_fail_op: wgpu::StencilOperation::Zero,
+                        pass_op: wgpu::StencilOperation::Zero,
+                    },
+                    back: wgpu::StencilFaceState {
+                        compare: wgpu::CompareFunction::Always,
+                        fail_op: wgpu::StencilOperation::Zero,
+                        depth_fail_op: wgpu::StencilOperation::Zero,
+                        pass_op: wgpu::StencilOperation::Zero,
+                    },
+                    read_mask: 0xff,
+                    write_mask: 0x7f,
+                },
+                stencil_reference: 0,
+            },
             None,
             &params,
             images,
