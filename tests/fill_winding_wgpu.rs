@@ -140,6 +140,73 @@ fn even_odd_fills_match_whichever_way_the_hole_is_wound() {
     );
 }
 
+/// A hole's fringe must extrude into the fill around it, not into the hole:
+/// with every contour normalized to one orientation the hole's half-pixel
+/// inset and its fringe tent landed inside the hole, so a ring read a full
+/// pixel wider on each hole edge (the SVGenius chair/phone outlines, which
+/// are filled rings). The covered area must be the exact ring area whichever
+/// way the outer contour is wound, and the first pixel inside the hole must
+/// be clean.
+#[test]
+fn a_hole_keeps_its_exact_edge() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let exact = 136.0 * 136.0 - 56.0 * 56.0;
+    for outer_clockwise in [false, true] {
+        for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+            let mut ring = Path::new();
+            contour(&mut ring, &square(60.0, 60.0, 196.0, 196.0, outer_clockwise));
+            // A nonzero hole winds against its outer; even-odd does not care.
+            contour(&mut ring, &square(100.0, 100.0, 156.0, 156.0, !outer_clockwise));
+            let px = fill(&device, &queue, rule, &ring);
+            let area = covered(&px);
+            assert!(
+                (area - exact).abs() < 2.0,
+                "{rule:?}, outer clockwise={outer_clockwise}: ring covered {area:.2} px, exact {exact:.0} (a pixel per hole edge would add 224)"
+            );
+            assert_eq!(
+                alpha_at(&px, 100, 128),
+                0.0,
+                "first column inside the hole must be clear"
+            );
+            assert_eq!(alpha_at(&px, 99, 128), 1.0, "last column of the ring must be solid");
+        }
+    }
+}
+
+/// The hole test judges each contour by the others' winding, so two solid
+/// squares side by side stay solid, and an island inside a hole is solid
+/// again: its fringe goes inward like any solid contour's.
+#[test]
+fn solids_beside_and_inside_holes_keep_their_exact_areas() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let mut pair = Path::new();
+    contour(&mut pair, &square(20.0, 60.0, 100.0, 140.0, true));
+    contour(&mut pair, &square(140.0, 60.0, 220.0, 140.0, true));
+    let area = covered(&fill(&device, &queue, FillRule::NonZero, &pair));
+    assert!(
+        (area - 2.0 * 80.0 * 80.0).abs() < 2.0,
+        "two solid squares covered {area:.2}, exact 12800"
+    );
+
+    let mut island = Path::new();
+    contour(&mut island, &square(40.0, 40.0, 216.0, 216.0, true));
+    contour(&mut island, &square(80.0, 80.0, 176.0, 176.0, false));
+    contour(&mut island, &square(112.0, 112.0, 144.0, 144.0, true));
+    let px = fill(&device, &queue, FillRule::NonZero, &island);
+    let exact = 176.0 * 176.0 - 96.0 * 96.0 + 32.0 * 32.0;
+    let area = covered(&px);
+    assert!(
+        (area - exact).abs() < 2.0,
+        "ring with an island covered {area:.2}, exact {exact:.0}"
+    );
+    assert_eq!(alpha_at(&px, 128, 128), 1.0, "the island is solid");
+    assert_eq!(alpha_at(&px, 96, 128), 0.0, "the moat around it is a hole");
+}
+
 #[test]
 fn a_reversed_concave_contour_covers_its_own_area() {
     let Some((device, queue)) = headless_device() else {
