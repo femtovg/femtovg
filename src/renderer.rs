@@ -32,6 +32,19 @@ pub struct Drawable {
 /// Defines different types of commands that can be executed by the renderer.
 #[derive(Debug)]
 pub enum CommandType {
+    /// Intersects the persistent stencil clip with a path: the drawables carry
+    /// the winding fan triangles and `triangles_verts` the resolve quad over
+    /// the path bounds. `fill_rule` is the clip-rule.
+    ClipFill,
+    /// Rewrites the persistent stencil clip with a full-canvas quad
+    /// (`triangles_verts`): `visible: true` arms the clip plane (everything
+    /// visible, ambient value 0x80), `false` disarms it back to the zero
+    /// ambient so clip-free rendering pays nothing.
+    ClipReset {
+        /// Whether the plane resets to "everything visible" (armed) or to the
+        /// disarmed zero state.
+        visible: bool,
+    },
     /// Set the render target (screen or image).
     SetRenderTarget(RenderTarget),
     /// Clear a rectangle with the specified color.
@@ -81,6 +94,9 @@ pub enum CommandType {
 #[derive(Debug)]
 pub struct Command {
     pub(crate) cmd_type: CommandType,
+    // Whether the persistent stencil clip (Canvas::clip_path) applies to this
+    // command's fragments. Set centrally when the command is appended.
+    pub(crate) clip_active: bool,
     pub(crate) drawables: Vec<Drawable>,
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
@@ -94,6 +110,7 @@ impl Command {
     pub fn new(flavor: CommandType) -> Self {
         Self {
             cmd_type: flavor,
+            clip_active: false,
             drawables: Vec::new(),
             triangles_verts: None,
             image: None,
