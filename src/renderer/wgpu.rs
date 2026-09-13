@@ -1411,11 +1411,7 @@ fn clip_fill(
     render_pass_builder: &mut RenderPassBuilder<'_>,
     images: &mut ImageStore<Image>,
 ) {
-    let stencil_params = Params {
-        stroke_thr: -1.0,
-        shader_type: ShaderType::Stencil,
-        ..Params::default()
-    };
+    let stencil_params = Params::stencil();
 
     // Winding, only where the clip bit is currently set; bit 7 protected.
     pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1535,11 +1531,7 @@ fn clip_reset(
     images: &mut ImageStore<Image>,
     visible: bool,
 ) {
-    let stencil_params = Params {
-        stroke_thr: -1.0,
-        shader_type: ShaderType::Stencil,
-        ..Params::default()
-    };
+    let stencil_params = Params::stencil();
     pipeline_and_bindgroup_mapper.update_renderpass(
         render_pass_builder,
         None,

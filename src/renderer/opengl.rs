@@ -1037,19 +1037,11 @@ impl Renderer for OpenGl {
                     self.render_filtered_image(images, cmd, target_image, filter)
                 }
                 CommandType::ClipFill => {
-                    let stencil_params = Params {
-                        stroke_thr: -1.0,
-                        shader_type: ShaderType::Stencil,
-                        ..Params::default()
-                    };
+                    let stencil_params = Params::stencil();
                     self.clip_fill(images, &cmd, &stencil_params);
                 }
                 CommandType::ClipReset { visible } => {
-                    let stencil_params = Params {
-                        stroke_thr: -1.0,
-                        shader_type: ShaderType::Stencil,
-                        ..Params::default()
-                    };
+                    let stencil_params = Params::stencil();
                     self.clip_reset(images, &cmd, &stencil_params, visible);
                 }
             }

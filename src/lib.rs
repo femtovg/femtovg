@@ -360,10 +360,10 @@ pub struct Canvas<T: Renderer> {
     transients: TransientPool,
     // Open layers from begin_layer(), innermost last.
     layers: Vec<LayerRecord>,
-    // The active clip_path() stack (innermost last) and the render target it
-    // was armed on; commands to other targets are not clipped.
+    // The active clip_path() stack, innermost last. Each entry lives on the
+    // stencil plane of the render target it was taken on and gates only
+    // draws into that target.
     clip_stack: Vec<ClipEntry>,
-    clip_target: RenderTarget,
 }
 
 #[derive(Clone, Debug)]
@@ -371,6 +371,7 @@ struct ClipEntry {
     path: Path,
     fill_rule: FillRule,
     transform: Transform2D,
+    target: RenderTarget,
 }
 
 /// Effects applied to a layer when [`Canvas::end_layer`] composites it back.
@@ -559,7 +560,6 @@ where
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             layers: Vec::new(),
             clip_stack: Vec::new(),
-            clip_target: RenderTarget::Screen,
         };
 
         canvas.save();
@@ -592,7 +592,6 @@ where
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             layers: Vec::new(),
             clip_stack: Vec::new(),
-            clip_target: RenderTarget::Screen,
         };
 
         canvas.save();
@@ -629,7 +628,7 @@ where
         // undefined after a resize), so an active clip would test a blank
         // plane and draw nothing. Re-arm it from the logical clip stack, which
         // survives the resize like the rest of the state.
-        if !self.clip_stack.is_empty() && self.clip_target == RenderTarget::Screen {
+        if self.clip_stack.iter().any(|entry| entry.target == RenderTarget::Screen) {
             self.replay_clip_stack();
         }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
@@ -668,6 +667,12 @@ where
     }
 
     /// Clears the rectangle area defined by left upper corner (x,y), width and height with the provided color.
+    ///
+    /// This is a raw clear of device pixels: the transform, the scissor and
+    /// any [`clip_path`](Self::clip_path) do not apply. A Canvas 2D
+    /// `clearRect`, which the transform and clip do affect, is a fill of the
+    /// rect with an opaque paint under
+    /// [`CompositeOperation::DestinationOut`].
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
         let mut cmd = Command::new(CommandType::ClearRect { color });
         cmd.composite_operation = self.state().composite_operation;
@@ -760,10 +765,7 @@ where
             self.reset();
         }
         let depth = self.state().clip_depth;
-        if self.clip_stack.len() > depth {
-            self.clip_stack.truncate(depth);
-            self.replay_clip_stack();
-        }
+        self.pop_clips_to(depth);
     }
 
     /// Resets current state to default values. Does not affect the state stack.
@@ -789,10 +791,30 @@ where
             clip_depth: inherited_depth,
             ..State::default()
         };
-        if self.clip_stack.len() > inherited_depth {
-            self.clip_stack.truncate(inherited_depth);
+        self.pop_clips_to(inherited_depth);
+    }
+
+    /// Drops the clips above `depth` and, when any of them gated the current
+    /// render target, re-establishes that target's plane from the survivors.
+    /// Clips of other targets need no replay: draws elsewhere never touched
+    /// their planes, and a popped layer-store clip goes with its store.
+    fn pop_clips_to(&mut self, depth: usize) {
+        if self.clip_stack.len() <= depth {
+            return;
+        }
+        let target = self.current_render_target;
+        let popped_here = self.clip_stack[depth..].iter().any(|entry| entry.target == target);
+        self.clip_stack.truncate(depth);
+        if popped_here {
             self.replay_clip_stack();
         }
+    }
+
+    /// Whether the stencil clip gates draws into the current render target:
+    /// some clip on the stack was taken on it.
+    fn clip_active(&self) -> bool {
+        let target = self.current_render_target;
+        self.clip_stack.iter().any(|entry| entry.target == target)
     }
 
     /// Saves the current state before calling the callback and restores it afterwards
@@ -908,11 +930,16 @@ where
 
     fn append_cmd(&mut self, cmd: Command) {
         let mut cmd = cmd;
+        // Stencil bookkeeping commands and target switches carry no fragments
+        // to gate; clear_rect is a raw clear that neither backend clips.
         if !matches!(
             cmd.cmd_type,
-            CommandType::ClipFill | CommandType::ClipReset { .. } | CommandType::SetRenderTarget(_)
+            CommandType::ClipFill
+                | CommandType::ClipReset { .. }
+                | CommandType::SetRenderTarget(_)
+                | CommandType::ClearRect { .. }
         ) {
-            cmd.clip_active = !self.clip_stack.is_empty() && self.current_render_target == self.clip_target;
+            cmd.clip_active = self.clip_active();
         }
         self.commands.push(cmd);
     }
@@ -1669,11 +1696,18 @@ where
 
     /// Intersects the current clip region with `path` under the current
     /// transform, using `fill_rule` as the clip-rule - Canvas 2D `clip()` /
-    /// SVG `clip-path` semantics. Subsequent drawing on this render target is
-    /// limited to the intersection of every active clip. `save()` /
-    /// [`restore`](Self::restore) scope clips like the rest of the state:
-    /// restoring pops the clips taken since the matching save and replays the
-    /// survivors.
+    /// SVG `clip-path` semantics. Subsequent drawing into the current render
+    /// target is limited to the intersection of every clip taken on it. A
+    /// clip taken while drawing into a layer store or an image target lives
+    /// on that target's stencil plane and gates only draws into it, while
+    /// the clips of the target underneath keep gating what is composited
+    /// back onto it. `save()` / [`restore`](Self::restore) scope clips like
+    /// the rest of the state: restoring pops the clips taken since the
+    /// matching save and replays the survivors.
+    ///
+    /// [`clear_rect`](Self::clear_rect) is a raw clear and is not clipped; a
+    /// Canvas 2D `clearRect` under a clip is a fill of the rect with an
+    /// opaque paint under [`CompositeOperation::DestinationOut`].
     ///
     /// The clip lives in a reserved bit of the stencil attachment both
     /// backends already carry for concave fills, so it costs no textures, no
@@ -1685,12 +1719,10 @@ where
     /// are hard (single-sample); antialiased clip boundaries are a documented
     /// follow-up.
     pub fn clip_path(&mut self, path: &Path, fill_rule: FillRule) {
-        if self.clip_stack.is_empty() {
-            self.clip_target = self.current_render_target;
+        let target = self.current_render_target;
+        if !self.clip_active() {
+            // The first clip on this target arms its plane.
             self.emit_clip_reset(true);
-        } else if self.current_render_target != self.clip_target {
-            // One clip context per target: ignore rather than corrupt.
-            return;
         }
         let transform = self.state().transform;
         self.emit_clip_fill(path, fill_rule, &transform);
@@ -1698,34 +1730,50 @@ where
             path: path.clone(),
             fill_rule,
             transform,
+            target,
         });
         self.state_mut().clip_depth = self.clip_stack.len();
     }
 
-    /// Re-establishes the stencil clip plane after entries were popped:
-    /// disarm entirely when none survive, otherwise reset to visible and
-    /// re-intersect the survivors (a few stencil-only draws, no color work).
+    /// Re-establishes the current render target's stencil clip plane from
+    /// the stack: disarmed when no clip on it survives, otherwise reset to
+    /// visible and re-intersected with the survivors (a few stencil-only
+    /// draws, no color work).
     fn replay_clip_stack(&mut self) {
-        if self.clip_stack.is_empty() {
+        let target = self.current_render_target;
+        let entries: Vec<ClipEntry> = self
+            .clip_stack
+            .iter()
+            .filter(|entry| entry.target == target)
+            .cloned()
+            .collect();
+        if entries.is_empty() {
             self.emit_clip_reset(false);
             return;
         }
         self.emit_clip_reset(true);
-        let entries = self.clip_stack.clone();
         for entry in &entries {
             self.emit_clip_fill(&entry.path, entry.fill_rule, &entry.transform);
         }
     }
 
-    fn emit_clip_reset(&mut self, visible: bool) {
-        let mut cmd = Command::new(CommandType::ClipReset { visible });
+    /// Pushes a triangle strip over the whole current render target and
+    /// returns its vertex range: the stencil quads that arm, disarm and
+    /// resolve the clip plane must reach every pixel of the target, which
+    /// for a layer store is the store, not the canvas.
+    fn push_target_quad(&mut self) -> (usize, usize) {
         let offset = self.verts.len();
-        let (w, h) = (self.width as f32, self.height as f32);
+        let (w, h) = self.render_target_size();
         self.verts.push(Vertex::new(0.0, h, 0.5, 1.0));
         self.verts.push(Vertex::new(w, h, 0.5, 1.0));
         self.verts.push(Vertex::new(0.0, 0.0, 0.5, 1.0));
         self.verts.push(Vertex::new(w, 0.0, 0.5, 1.0));
-        cmd.triangles_verts = Some((offset, 4));
+        (offset, 4)
+    }
+
+    fn emit_clip_reset(&mut self, visible: bool) {
+        let mut cmd = Command::new(CommandType::ClipReset { visible });
+        cmd.triangles_verts = Some(self.push_target_quad());
         self.append_cmd(cmd);
     }
 
@@ -1749,18 +1797,10 @@ where
             cmd.drawables.push(drawable);
         }
 
-        // Resolve quad over the path bounds, padded a pixel for the raster
-        // edge. Quad 1 must reach every pixel whose clip bit may clear -
-        // which is the WHOLE previously-visible region, not just the new
-        // path's bounds - so it spans the canvas.
-        let (w, h) = (self.width as f32, self.height as f32);
-        let quad = self.verts.len();
-        self.verts.push(Vertex::new(0.0, h, 0.5, 1.0));
-        self.verts.push(Vertex::new(w, h, 0.5, 1.0));
-        self.verts.push(Vertex::new(0.0, 0.0, 0.5, 1.0));
-        self.verts.push(Vertex::new(w, 0.0, 0.5, 1.0));
-        cmd.triangles_verts = Some((quad, 4));
-
+        // The resolve quads must reach every pixel whose clip bit may clear -
+        // the WHOLE previously-visible region, not just the new path's
+        // bounds - so they span the target.
+        cmd.triangles_verts = Some(self.push_target_quad());
         self.append_cmd(cmd);
     }
 
@@ -2039,7 +2079,7 @@ where
             // The unclipped blit bypasses the stencil clip plane (the #292
             // rounded-scissor precedent): route clipped blits through the
             // normal masked path.
-            self.clip_stack.is_empty() || self.current_render_target != self.clip_target,
+            !self.clip_active(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
@@ -2065,11 +2105,7 @@ where
 
             CommandType::ConvexFill { params }
         } else {
-            let stencil_params = Params {
-                stroke_thr: -1.0,
-                shader_type: ShaderType::Stencil,
-                ..Params::default()
-            };
+            let stencil_params = Params::stencil();
 
             let fill_params = Params::new(
                 &self.images,

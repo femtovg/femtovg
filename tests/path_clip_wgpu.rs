@@ -304,6 +304,148 @@ fn image_blit_respects_the_clip() {
     assert_eq!(px(&out, 6, 6), WHITE, "blit clipped outside the circle");
 }
 
+/// The nested-clip scenario BabylonNative pinned on its Canvas2D polyfill
+/// (BabylonJS/BabylonNative#1872): a translated child clip intersects the
+/// parent instead of replacing it, a disjoint child clips everything out,
+/// and restores bring back the parent and then the unclipped state.
+#[test]
+fn nested_translated_and_disjoint_clips_keep_parent_bounds() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    for translated in [false, true] {
+        let out = render(&device, &queue, |canvas| {
+            let rect = |x: f32, y: f32, w: f32, h: f32| {
+                let mut p = Path::new();
+                p.rect(x, y, w, h);
+                p
+            };
+            let fill = |canvas: &mut Canvas<WGPURenderer>, x: f32, w: f32, rgb: [u8; 3]| {
+                canvas.fill_path(
+                    &rect(x, 0.0, w, 64.0),
+                    &Paint::color(Color::rgb(rgb[0], rgb[1], rgb[2])),
+                );
+            };
+            canvas.save();
+            canvas.clip_path(&rect(8.0, 0.0, 24.0, 64.0), FillRule::NonZero); // parent 8..32
+
+            canvas.save();
+            if translated {
+                canvas.translate(16.0, 0.0);
+            }
+            canvas.clip_path(&rect(0.0, 0.0, 64.0, 64.0), FillRule::NonZero); // child: 0..64 or 16..80
+            fill(canvas, -16.0, 96.0, RED);
+            canvas.restore();
+
+            fill(canvas, 24.0, 16.0, [0, 255, 0]); // parent alone: 24..32 of it
+            canvas.save();
+            canvas.clip_path(&rect(40.0, 0.0, 16.0, 64.0), FillRule::NonZero); // disjoint from the parent
+            fill(canvas, 0.0, 64.0, [255, 0, 255]);
+            canvas.restore();
+            canvas.restore();
+
+            fill(canvas, 40.0, 8.0, [0, 0, 255]); // unclipped again
+        });
+        let at = |x: u32| px(&out, x, 32);
+        assert_eq!(at(4), WHITE, "translated={translated}: outside the parent");
+        assert_eq!(
+            at(12),
+            if translated { WHITE } else { RED },
+            "translated={translated}: child boundary"
+        );
+        assert_eq!(at(20), RED, "translated={translated}: inside the intersection");
+        assert_eq!(at(28), [0, 255, 0], "translated={translated}: restored parent");
+        assert_eq!(at(36), WHITE, "translated={translated}: outside the restored parent");
+        assert_eq!(at(44), [0, 0, 255], "translated={translated}: restored unclipped state");
+        assert_eq!(at(52), WHITE, "translated={translated}: disjoint clip painted nothing");
+        assert_eq!(at(60), WHITE, "translated={translated}: outside every fill");
+    }
+}
+
+/// A clip taken inside a layer lives on the layer's store: it gates the
+/// layer's content, and the clip underneath still gates the composite.
+#[test]
+fn a_clip_inside_a_layer_clips_its_content() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        canvas.save();
+        let mut left = Path::new();
+        left.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&left, FillRule::NonZero);
+        assert!(canvas.begin_layer(&femtovg::LayerEffects::new().with_opacity(1.0)));
+        let mut band = Path::new();
+        band.rect(0.0, 16.0, 64.0, 32.0);
+        canvas.clip_path(&band, FillRule::NonZero);
+        full_red_rect(canvas);
+        canvas.end_layer();
+        canvas.restore();
+        let mut p = Path::new();
+        p.rect(40.0, 40.0, 16.0, 16.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 255)));
+    });
+    assert_eq!(px(&out, 16, 32), RED, "inside both clips");
+    assert_eq!(
+        px(&out, 16, 8),
+        WHITE,
+        "above the band: the clip inside the layer applied"
+    );
+    assert_eq!(
+        px(&out, 48, 32),
+        WHITE,
+        "right half: the outer clip gated the composite"
+    );
+    assert_eq!(
+        px(&out, 48, 48),
+        [0, 0, 255],
+        "after end_layer and restore, draws are unclipped"
+    );
+}
+
+/// `clear_rect` is a raw clear: the clip does not apply to it (documented),
+/// while the Canvas 2D `clearRect` form - an opaque DestinationOut fill -
+/// clears only inside the clip.
+#[test]
+fn clear_rect_is_unclipped_and_destination_out_is_the_clipped_clear() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        full_red_rect(canvas);
+        let mut band = Path::new();
+        band.rect(8.0, 0.0, 24.0, 64.0);
+        canvas.clip_path(&band, FillRule::NonZero);
+        canvas.clear_rect(0, 0, W, H, Color::white());
+    });
+    assert_eq!(px(&out, 48, 32), WHITE, "clear_rect cleared outside the clip too");
+    let out = render(&device, &queue, |canvas| {
+        full_red_rect(canvas);
+        let mut band = Path::new();
+        band.rect(8.0, 0.0, 24.0, 64.0);
+        canvas.clip_path(&band, FillRule::NonZero);
+        // Canvas clearRect ignores globalAlpha, composite operation, shadows
+        // and filters: the recipe pins the state it needs.
+        canvas.set_global_alpha(1.0);
+        canvas.global_composite_operation(femtovg::CompositeOperation::DestinationOut);
+        full_red_rect(canvas);
+    });
+    let inside = ((32 * W + 16) * 4) as usize;
+    assert_eq!(
+        &out[inside..inside + 4],
+        &[0, 0, 0, 0],
+        "inside the clip the DestinationOut fill cleared to transparent"
+    );
+    assert_eq!(
+        px(&out, 48, 32),
+        RED,
+        "outside the clip the DestinationOut fill changed nothing"
+    );
+}
+
 fn output_texture_sized(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("clip resize test target"),

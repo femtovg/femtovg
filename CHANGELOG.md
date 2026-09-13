@@ -24,7 +24,10 @@ All notable changes to this project will be documented in this file.
   path under the current transform - Canvas 2D `clip()` and SVG `clip-path`
   with `clip-rule` - and is scoped by `save()`/`restore()`. Clips use a bit of
   the stencil buffer both backends already have, so they add no textures or
-  render passes. Clip edges are not antialiased yet.
+  render passes; a clip taken while drawing into a layer lives on the layer's
+  store and gates its content, while the clips underneath gate the composite.
+  `clear_rect()` stays a raw clear the clip does not affect. Clip edges are not
+  antialiased yet.
 - Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
   a mask image placed in device space, using either its luminance times alpha
   (SVG `mask`'s default `mask-type`, via the new
