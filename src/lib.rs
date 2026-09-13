@@ -5367,6 +5367,100 @@ fn shadow_passes_reuse_their_images() {
     assert_eq!(canvas.transients.images.len(), 0);
 }
 
+/// A stroke thinner than the fringe is drawn at fringe width with its alpha
+/// scaled by the width ratio itself - the linear coverage Skia's hairline
+/// path applies - not by its square, the nanovg heuristic that left a 0.4 px
+/// line at 16% (`tests/hairline_stroke_wgpu.rs` measures the rendered
+/// coverage). The scale is applied to the paint before the `Params` are
+/// built, so pinning it on the recorded command holds for every backend.
+#[test]
+fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
+    /// The stroke `Params` recorded for a horizontal white line of
+    /// `line_width` user units on a canvas at `dpi`, drawn as a stencilled
+    /// stroke (the default) or a plain one.
+    fn stroke_params(line_width: f32, dpi: f32, stencil: bool) -> Params {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(100, 100, dpi);
+
+        let mut path = Path::new();
+        path.move_to(10.0, 50.0);
+        path.line_to(90.0, 50.0);
+        let paint = Paint::color(Color::white())
+            .with_line_width(line_width)
+            .with_anti_alias(true)
+            .with_stencil_strokes(stencil);
+        canvas.stroke_path(&path, &paint);
+        canvas.flush_to_output(());
+
+        let params = recorded
+            .borrow()
+            .iter()
+            .find_map(|cmd| match &cmd.cmd_type {
+                CommandType::Stroke { params } => Some(*params),
+                CommandType::StencilStroke { params1, params2 } => {
+                    // Both passes of a stencilled stroke carry the same paint.
+                    assert_eq!(params1.inner_col, params2.inner_col);
+                    Some(*params1)
+                }
+                _ => None,
+            })
+            .expect("expected a stroke command");
+        params
+    }
+
+    let thin = stroke_params(0.4, 1.0, true);
+    let thick = stroke_params(0.8, 1.0, true);
+
+    // `inner_col` is the premultiplied paint colour, so white carries the
+    // scaled alpha in every channel.
+    assert!(
+        (thin.inner_col[3] - 0.4).abs() < 1e-6,
+        "0.4 px stroke recorded alpha {}, expected 0.4 (the squared scale gave 0.16)",
+        thin.inner_col[3]
+    );
+    assert!(
+        thin.inner_col[..3].iter().all(|c| (c - 0.4).abs() < 1e-6),
+        "premultiplied colour {:?} does not carry the scaled alpha",
+        thin.inner_col
+    );
+    assert!(
+        (thick.inner_col[3] - 0.8).abs() < 1e-6,
+        "0.8 px stroke recorded alpha {}, expected 0.8",
+        thick.inner_col[3]
+    );
+    let ratio = thick.inner_col[3] / thin.inner_col[3];
+    assert!(
+        (ratio - 2.0).abs() < 1e-6,
+        "0.8 px / 0.4 px alpha ratio {ratio}, expected 2 (the squared scale gave 4)"
+    );
+
+    // Both are widened to the fringe: the geometry carries no trace of the
+    // requested width, only the alpha does.
+    assert_eq!(thin.stroke_mult, 1.0);
+    assert_eq!(thick.stroke_mult, 1.0);
+
+    // The ratio is against the fringe (one device pixel), not one user unit:
+    // at 2x DPI the fringe is half a unit, so a 0.25-unit line is half a pixel.
+    let hidpi = stroke_params(0.25, 2.0, true);
+    assert!(
+        (hidpi.inner_col[3] - 0.5).abs() < 1e-6,
+        "0.25-unit stroke at 2x DPI recorded alpha {}, expected 0.5",
+        hidpi.inner_col[3]
+    );
+
+    // A plain (non-stencilled) stroke goes through the same scale.
+    assert!(
+        (stroke_params(0.4, 1.0, false).inner_col[3] - 0.4).abs() < 1e-6,
+        "plain 0.4 px stroke did not record alpha 0.4"
+    );
+
+    // A stroke at the fringe or wider keeps its full alpha.
+    assert_eq!(stroke_params(1.0, 1.0, true).inner_col[3], 1.0);
+    assert_eq!(stroke_params(3.0, 1.0, true).inner_col[3], 1.0);
+}
+
 /// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables
 /// removed, so the fallback metric paths can be exercised on real assets.
 #[cfg(all(test, feature = "textlayout"))]
