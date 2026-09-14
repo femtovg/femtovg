@@ -1780,7 +1780,7 @@ where
     fn emit_clip_fill(&mut self, path: &Path, fill_rule: FillRule, transform: &Transform2D) {
         let mut path_cache = path.cache(transform, self.tess_tol, self.dist_tol);
         // No fringe: the clip edge is a hard stencil edge.
-        path_cache.expand_fill(0.0, LineJoin::Miter, 2.4);
+        path_cache.expand_fill(0.0, LineJoin::Miter, 2.4, fill_rule);
 
         let mut cmd = Command::new(CommandType::ClipFill);
         cmd.fill_rule = fill_rule;
