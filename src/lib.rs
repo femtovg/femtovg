@@ -1641,7 +1641,7 @@ where
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
         let fringe_width = if anti_alias { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4);
+        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
 
         // Detect if this path fill is in fact just an unclipped image copy
 

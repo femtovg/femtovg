@@ -10,6 +10,15 @@ All notable changes to this project will be documented in this file.
   and what both browsers render. Fine detail drawn with sub-pixel strokes
   (hatching, iris lines, thin outlines at small zoom) was visibly lighter than
   in a browser before.
+- Fixed filled paths landing a pixel too wide when the contour runs clockwise.
+  The antialiasing fringe is extruded along each point's miter vector, whose
+  direction follows the order the points are in, so a clockwise contour pushed
+  it outward instead of inward - `Path::rect()` and `Path::circle()` emit
+  counter-clockwise and were exact, while an SVG arc with `sweep = 1`, or any
+  imported path wound the other way, was a pixel fat all round. Fills now cover
+  the same pixels either way, and the authored winding still selects holes for
+  `FillRule::NonZero`. This also takes most of the over-inking out of thin
+  filled shapes, which were paying the same pixel on both edges.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single
@@ -41,8 +50,11 @@ All notable changes to this project will be documented in this file.
   that changes the size, and `reset()`, discard open layers as a Canvas 2D
   reset does. A layer opened under a non-invertible transform draws nothing,
   as in Canvas 2D. The web-platform-tests layer suite is ported where the API
-  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` rule, and what SVG `feDropShadow` on a group means) and resets inside the layer, so children are not each shadowed on their own.
-  A layer's backing images return to a pool at `end_layer()` and the next
+  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at 
+  `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` 
+  rule, and what SVG `feDropShadow` on a group means) and resets inside the layer,
+  so children are not each shadowed on their own.
+- A layer's backing images return to a pool at `end_layer()` and the next
   layer of the same size takes them (commands run in order, so this needs no
   synchronization; store sizes round up to 64 px so siblings with different
   blur reaches share one), as do filter-chain scratches and shadow coverage; a
