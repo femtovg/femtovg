@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
+  by the square of the device width (a nanovg heuristic), so a 0.2 px line
+  carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
+  a 0.5 px line is 50% - which is the coverage Skia's hairline path puts down
+  and what both browsers render. Fine detail drawn with sub-pixel strokes
+  (hatching, iris lines, thin outlines at small zoom) was visibly lighter than
+  in a browser before.
 - Fixed filled paths landing a pixel too wide when the contour runs clockwise.
   The antialiasing fringe is extruded along each point's miter vector, whose
   direction follows the order the points are in, so a clockwise contour pushed
@@ -43,8 +50,11 @@ All notable changes to this project will be documented in this file.
   that changes the size, and `reset()`, discard open layers as a Canvas 2D
   reset does. A layer opened under a non-invertible transform draws nothing,
   as in Canvas 2D. The web-platform-tests layer suite is ported where the API
-  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` rule, and what SVG `feDropShadow` on a group means) and resets inside the layer, so children are not each shadowed on their own.
-  A layer's backing images return to a pool at `end_layer()` and the next
+  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at 
+  `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` 
+  rule, and what SVG `feDropShadow` on a group means) and resets inside the layer,
+  so children are not each shadowed on their own.
+- A layer's backing images return to a pool at `end_layer()` and the next
   layer of the same size takes them (commands run in order, so this needs no
   synchronization; store sizes round up to 64 px so siblings with different
   blur reaches share one), as do filter-chain scratches and shadow coverage; a
