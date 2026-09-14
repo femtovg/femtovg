@@ -1298,14 +1298,14 @@ mod tests {
 
         let upright = Transform2D::identity();
         let mut cache = PathCache::new(path.verbs(), &upright, 0.25, 0.01);
-        cache.expand_fill(0.0, LineJoin::Miter, 10.0);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
         let rect = cache.path_fill_is_rect().expect("an upright rect");
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (10.0, 20.0, 30.0, 40.0));
 
         // y' = 100 - y: the rect lands at y in 40..80; x' = -x: at x in -40..-10.
         let mirrored = Transform2D::new(-1.0, 0.0, 0.0, -1.0, 0.0, 100.0);
         let mut cache = PathCache::new(path.verbs(), &mirrored, 0.25, 0.01);
-        cache.expand_fill(0.0, LineJoin::Miter, 10.0);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
         let rect = cache.path_fill_is_rect().expect("a mirrored rect is still a rect");
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (-40.0, 40.0, 30.0, 40.0));
     }
