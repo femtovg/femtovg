@@ -1258,7 +1258,8 @@ where
     /// layers share one pooled store. Content outside that padded rect does
     /// not survive into the layer, mirroring SVG's filter-region behavior.
     /// A rotated or rounded scissor cannot be captured as a rect; the layer
-    /// then spans the whole canvas and the scissor keeps clipping normally.
+    /// then spans the whole canvas and the scissor keeps clipping normally,
+    /// moved into the store with the content when the blur reach pads it.
     ///
     /// Inside the layer, `global_alpha` resets to 1 (the outer alpha folds
     /// into the composite), the composite operation resets to source-over,
@@ -1407,7 +1408,15 @@ where
         layer_transform.premultiply(&state.transform);
         self.enter_offscreen_state(layer_transform);
         if keep_scissor {
-            self.state_mut().scissor = state.scissor;
+            // The kept scissor clips per fragment in the pixel space of the
+            // target drawn into, which is now the store, so it shifts with
+            // the content: its transform maps the clip's local space to the
+            // outer target, and the store's (0, 0) is that target's (minx,
+            // miny). Extent and radius are unchanged by a pure translation.
+            let mut scissor = state.scissor;
+            scissor.transform = Transform2D::translation(-minx, -miny);
+            scissor.transform.premultiply(&state.scissor.transform);
+            self.state_mut().scissor = scissor;
         }
         true
     }
@@ -3475,6 +3484,43 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
     let params = first_draw_params(&commands);
     assert_eq!(params.glyph_texture_type, 0);
     assert_approx_eq(params.scissor_radius, 10.0);
+}
+
+/// A rounded scissor kept across `begin_layer` clips per fragment in the
+/// store's pixel space, so it must move with the content when the blur reach
+/// pads the store: the draw inside records the scissor centered at the root
+/// center shifted by the store origin, extent and radius unchanged. Without
+/// padding nothing moves.
+#[test]
+fn a_kept_scissor_follows_the_content_into_a_padded_layer() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    // Sigma 2 pads the store by ceil(3 * 2) + 2 = 8 px per side, so the
+    // store's (0, 0) is root (-8, -8); no filter leaves it at root (0, 0).
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let plain = LayerEffects::new();
+    for (effects, origin, center) in [(&blur, (-8.0, -8.0), (38.0, 28.0)), (&plain, (0.0, 0.0), (30.0, 20.0))] {
+        canvas.save();
+        canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 5.0); // centered on root (30, 20)
+        assert!(canvas.begin_layer(effects));
+        assert_eq!(canvas.layers.last().unwrap().origin, origin);
+        fill_rect_with_current_scissor(&mut canvas);
+        canvas.end_layer();
+        canvas.restore();
+
+        let commands = recorded_commands.borrow();
+        let params = first_draw_params(&commands);
+        // scissor_mat is the inverse of the scissor transform: it maps the
+        // store pixel at `center` to the clip's local origin.
+        let expected = Transform2D::translation(center.0, center.1).inverse().to_mat3x4();
+        assert_eq!(params.scissor_mat, expected, "store origin {origin:?}");
+        assert_eq!(params.scissor_ext, [20.0, 10.0]);
+        assert_approx_eq(params.scissor_radius, 5.0);
+    }
 }
 
 #[cfg(feature = "textlayout")]

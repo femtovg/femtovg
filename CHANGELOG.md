@@ -43,7 +43,10 @@ All notable changes to this project will be documented in this file.
   chain. The offscreen image is sized to the current scissor rect (under any
   axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
   blur reach of the whole chain (successive blurs compound in quadrature),
-  not the whole canvas or render target. `begin_layer()` returns whether the
+  not the whole canvas or render target. A rounded or rotated scissor keeps
+  clipping inside the layer and moves with the content into the blur-padded
+  store, so a blurred layer is clipped where the scissor was set, not shifted
+  by the padding. `begin_layer()` returns whether the
   layer captured: `false` means it passed through with its effects dropped -
   over the transient budget, past the backend's texture limit
   (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate

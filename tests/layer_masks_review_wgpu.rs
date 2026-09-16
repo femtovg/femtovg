@@ -3,7 +3,8 @@
 //! one, a nested layer's mask rect is root device space at any depth, a
 //! reset inside a masked layer must return every image the layer held,
 //! `LayerEffects::default()` must mean what `LayerEffects::new()` means, a
-//! rounded scissor must clip a blurred layer where it was set, and a layer
+//! rounded or rotated scissor must clip a blurred layer where it was set,
+//! moving with the content into the padded store, and a layer
 //! admitted by `begin_layer` must apply the filter it declared. Skips without
 //! a GPU adapter.
 #![cfg(feature = "wgpu")]
@@ -375,6 +376,57 @@ fn default_layer_effects_composite_at_full_opacity() {
     assert!(is_red(c), "default effects alone show the layer, got {c:?}");
 }
 
+/// The blur reach used in the scissored-layer tests: sigma 2 pads the store
+/// by 8 px per side, so a scissor left in root coordinates shows up shifted.
+fn blur() -> LayerEffects {
+    LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }])
+}
+
+/// A rounded scissor: device 8..56 on each axis.
+fn rounded_clip(canvas: &mut Canvas<WGPURenderer>) {
+    canvas.rounded_scissor(8.0, 8.0, 48.0, 48.0, 8.0);
+}
+
+/// A scissor rotated 45 degrees about the canvas center: a diamond whose
+/// left and right corners sit at device x 3.7 and 60.3 on the middle row.
+fn rotated_clip(canvas: &mut Canvas<WGPURenderer>) {
+    canvas.translate(32.0, 32.0);
+    canvas.rotate(std::f32::consts::FRAC_PI_4);
+    canvas.scissor(-20.0, -20.0, 40.0, 40.0);
+    canvas.reset_transform();
+}
+
+/// Renders a full-canvas red fill inside a layer with `effects` under the
+/// scissor `clip` sets, and checks the clip is where it was set: red six
+/// pixels inside its left and right edges on the middle row, white outside
+/// its left edge. A scissor that stayed in root coordinates inside a padded
+/// store shifts the clip up and left by the padding, and the right edge
+/// comes out white while the left stays red.
+fn scissor_clips_layer_where_it_was_set(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    clip: fn(&mut Canvas<WGPURenderer>),
+    effects: &LayerEffects,
+) {
+    let out = render(device, queue, |canvas| {
+        clip(canvas);
+        assert!(canvas.begin_layer(effects));
+        fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
+        canvas.end_layer();
+    });
+    let left = px(&out, 14, 32);
+    let right = px(&out, 50, 32);
+    let profile: Vec<(u32, u8)> = (0..W).step_by(2).map(|x| (x, px(&out, x, 32)[1])).collect();
+    eprintln!("middle row, (x, green) - 0 is solid red, 255 white: {profile:?}");
+    assert!(is_red(left), "inside the left edge of the clip, got {left:?}");
+    assert!(is_red(right), "inside the right edge of the clip, got {right:?}");
+    assert_eq!(
+        px(&out, 0, 32),
+        [255, 255, 255],
+        "outside the clip nothing of the layer shows"
+    );
+}
+
 /// A rounded scissor set before a blurred layer clips the layer where it was
 /// set: the blur's padding moves the content into the store, and the
 /// scissor must move with it, so both edges of the clip come out alike.
@@ -384,24 +436,30 @@ fn a_rounded_scissor_clips_a_blurred_layer_where_it_was_set() {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
-    let out = render(&device, &queue, |canvas| {
-        canvas.rounded_scissor(8.0, 8.0, 48.0, 48.0, 8.0); // device 8..56 each axis
-        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }])));
-        fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
-        canvas.end_layer();
-    });
-    // Six pixels (three sigma) inside each edge of the clip, on its middle row.
-    let left = px(&out, 14, 32);
-    let right = px(&out, 50, 32);
-    let profile: Vec<(u32, u8)> = (0..W).step_by(2).map(|x| (x, px(&out, x, 32)[1])).collect();
-    eprintln!("middle row, (x, green) - 0 is solid red, 255 white: {profile:?}");
-    assert!(is_red(left), "inside the left edge of the clip, got {left:?}");
-    assert!(is_red(right), "inside the right edge of the clip, got {right:?}");
-    assert_eq!(
-        px(&out, 4, 32),
-        [255, 255, 255],
-        "outside the clip nothing of the layer shows"
-    );
+    scissor_clips_layer_where_it_was_set(&device, &queue, rounded_clip, &blur());
+}
+
+/// A rotated scissor has no device rect either, so it is kept across
+/// `begin_layer` the same way and must move into the padded store too.
+#[test]
+fn a_rotated_scissor_clips_a_blurred_layer_where_it_was_set() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    scissor_clips_layer_where_it_was_set(&device, &queue, rotated_clip, &blur());
+}
+
+/// Without a blur the store is not padded and nothing moves: the same clips
+/// hold on an unfiltered layer.
+#[test]
+fn a_rounded_or_rotated_scissor_clips_an_unfiltered_layer_where_it_was_set() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    scissor_clips_layer_where_it_was_set(&device, &queue, rounded_clip, &LayerEffects::new());
+    scissor_clips_layer_where_it_was_set(&device, &queue, rotated_clip, &LayerEffects::new());
 }
 
 /// A layer `begin_layer` admits applies every effect it declared: with a
