@@ -43,10 +43,12 @@ All notable changes to this project will be documented in this file.
   chain. The offscreen image is sized to the current scissor rect (under any
   axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
   blur reach of the whole chain (successive blurs compound in quadrature),
-  not the whole canvas or render target. A rounded or rotated scissor keeps
-  clipping inside the layer and moves with the content into the blur-padded
-  store, so a blurred layer is clipped where the scissor was set, not shifted
-  by the padding. `begin_layer()` returns whether the
+  not the whole canvas or render target. A rounded or rotated scissor clips
+  the layer's composite once, after its filters, where it was set - a blur
+  samples content past the clip edge, as SVG's `clip-path` over a filtered
+  group does - instead of also clipping the draws inside the layer (which
+  squared the edge coverage and, in a blur-padded store, landed in the wrong
+  place). `begin_layer()` returns whether the
   layer captured: `false` means it passed through with its effects dropped -
   over the transient budget, past the backend's texture limit
   (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate
@@ -66,7 +68,9 @@ All notable changes to this project will be documented in this file.
   256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
   through (`begin_layer()` returns `false` - a layer reserves every image its
   effects draw through, a filter chain's result and scratches included, with
-  its store, so it is admitted whole or not at all), `filter_image_chain()`
+  its store, so it is admitted whole or not at all; each open filtered level
+  holds its result and scratches for its whole life, so nesting filtered
+  layers costs their sum), `filter_image_chain()`
   returns `ErrorKind::TransientImageBudgetExceeded`, and shadows are skipped
   rather than allocate. Shadow coverage rounds to 8 px, not the layers' 64,
   since shadows are many and small.

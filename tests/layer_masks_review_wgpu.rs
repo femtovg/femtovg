@@ -397,16 +397,21 @@ fn rotated_clip(canvas: &mut Canvas<WGPURenderer>) {
 }
 
 /// Renders a full-canvas red fill inside a layer with `effects` under the
-/// scissor `clip` sets, and checks the clip is where it was set: red six
-/// pixels inside its left and right edges on the middle row, white outside
-/// its left edge. A scissor that stayed in root coordinates inside a padded
-/// store shifts the clip up and left by the padding, and the right edge
-/// comes out white while the left stays red.
+/// scissor `clip` sets, and checks the clip is where it was set and applied
+/// to the layer's result: solid red one pixel inside its left and right
+/// edges on the middle row (`inside`), white outside (`outside`). Chrome and
+/// Firefox clip a filtered group after its filter, so a blur inside the clip
+/// samples the red past the edge and the first pixel inside stays solid; a
+/// clip applied to the content before the blur would fade it, and a scissor
+/// left in root coordinates inside a padded store would shift the clip up
+/// and left by the padding.
 fn scissor_clips_layer_where_it_was_set(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     clip: fn(&mut Canvas<WGPURenderer>),
     effects: &LayerEffects,
+    inside: (u32, u32),
+    outside: u32,
 ) {
     let out = render(device, queue, |canvas| {
         clip(canvas);
@@ -414,18 +419,31 @@ fn scissor_clips_layer_where_it_was_set(
         fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
         canvas.end_layer();
     });
-    let left = px(&out, 14, 32);
-    let right = px(&out, 50, 32);
+    let left = px(&out, inside.0, 32);
+    let right = px(&out, inside.1, 32);
     let profile: Vec<(u32, u8)> = (0..W).step_by(2).map(|x| (x, px(&out, x, 32)[1])).collect();
     eprintln!("middle row, (x, green) - 0 is solid red, 255 white: {profile:?}");
-    assert!(is_red(left), "inside the left edge of the clip, got {left:?}");
-    assert!(is_red(right), "inside the right edge of the clip, got {right:?}");
     assert_eq!(
-        px(&out, 0, 32),
+        left,
+        [255, 0, 0],
+        "one pixel inside the left edge of the clip is solid red"
+    );
+    assert_eq!(
+        right,
+        [255, 0, 0],
+        "one pixel inside the right edge of the clip is solid red"
+    );
+    assert_eq!(
+        px(&out, outside, 32),
         [255, 255, 255],
         "outside the clip nothing of the layer shows"
     );
 }
+
+/// Device 8..56: one pixel inside each edge on the middle row, and outside.
+const ROUNDED_SAMPLES: ((u32, u32), u32) = ((9, 54), 4);
+/// The diamond's middle-row edges sit near 4.2 and 59.8: two pixels inside.
+const ROTATED_SAMPLES: ((u32, u32), u32) = ((6, 58), 1);
 
 /// A rounded scissor set before a blurred layer clips the layer where it was
 /// set: the blur's padding moves the content into the store, and the
@@ -436,7 +454,14 @@ fn a_rounded_scissor_clips_a_blurred_layer_where_it_was_set() {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
-    scissor_clips_layer_where_it_was_set(&device, &queue, rounded_clip, &blur());
+    scissor_clips_layer_where_it_was_set(
+        &device,
+        &queue,
+        rounded_clip,
+        &blur(),
+        ROUNDED_SAMPLES.0,
+        ROUNDED_SAMPLES.1,
+    );
 }
 
 /// A rotated scissor has no device rect either, so it is kept across
@@ -447,7 +472,14 @@ fn a_rotated_scissor_clips_a_blurred_layer_where_it_was_set() {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
-    scissor_clips_layer_where_it_was_set(&device, &queue, rotated_clip, &blur());
+    scissor_clips_layer_where_it_was_set(
+        &device,
+        &queue,
+        rotated_clip,
+        &blur(),
+        ROTATED_SAMPLES.0,
+        ROTATED_SAMPLES.1,
+    );
 }
 
 /// Without a blur the store is not padded and nothing moves: the same clips
@@ -458,8 +490,88 @@ fn a_rounded_or_rotated_scissor_clips_an_unfiltered_layer_where_it_was_set() {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
-    scissor_clips_layer_where_it_was_set(&device, &queue, rounded_clip, &LayerEffects::new());
-    scissor_clips_layer_where_it_was_set(&device, &queue, rotated_clip, &LayerEffects::new());
+    let plain = LayerEffects::new();
+    scissor_clips_layer_where_it_was_set(
+        &device,
+        &queue,
+        rounded_clip,
+        &plain,
+        ROUNDED_SAMPLES.0,
+        ROUNDED_SAMPLES.1,
+    );
+    scissor_clips_layer_where_it_was_set(
+        &device,
+        &queue,
+        rotated_clip,
+        &plain,
+        ROTATED_SAMPLES.0,
+        ROTATED_SAMPLES.1,
+    );
+}
+
+/// A rounded scissor's antialiased edge is covered once through a layer, as
+/// it is for a direct fill: a clip that applied inside the layer and again at
+/// the composite would square the half-covered edge pixel to a quarter.
+#[test]
+fn a_rounded_scissor_edge_is_covered_once_through_a_layer() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let half_covered_edge = |canvas: &mut Canvas<WGPURenderer>| canvas.rounded_scissor(8.5, 8.0, 47.0, 48.0, 8.0);
+    let direct = render(&device, &queue, |canvas| {
+        half_covered_edge(canvas);
+        fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
+    });
+    let layered = render(&device, &queue, |canvas| {
+        half_covered_edge(canvas);
+        assert!(canvas.begin_layer(&LayerEffects::new()));
+        fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
+        canvas.end_layer();
+    });
+    let (d, l) = (px(&direct, 8, 32), px(&layered, 8, 32));
+    assert!(
+        d[1] > 100 && d[1] < 156,
+        "the direct fill half-covers the edge pixel, got {d:?}"
+    );
+    assert!(
+        (d[1] as i32 - l[1] as i32).abs() <= 3,
+        "the layer covers the edge pixel once, like the direct fill: direct {d:?}, layered {l:?}"
+    );
+}
+
+/// A blurred layer's reserved result and scratches survive a flush in the
+/// middle of the layer, like a mask's coverage: drawing continues and the
+/// blur still applies at `end_layer`.
+#[test]
+fn a_blurred_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let (mut canvas, target) = white_canvas(&device, &queue);
+    assert!(canvas.begin_layer(&blur()));
+    fill_rect(&mut canvas, 0.0, 0.0, 32.0, H as f32, Color::rgb(255, 0, 0));
+    queue.submit(canvas.flush_to_output(&target));
+    fill_rect(&mut canvas, 32.0, 0.0, 32.0, H as f32, Color::rgb(0, 0, 255));
+    canvas.end_layer();
+    queue.submit(canvas.flush_to_output(&target));
+    let out = readback(&device, &queue, &target);
+    let seam = px(&out, 32, 32);
+    assert_eq!(
+        px(&out, 8, 32),
+        [255, 0, 0],
+        "the half drawn before the flush is in the layer"
+    );
+    assert_eq!(
+        px(&out, 56, 32),
+        [0, 0, 255],
+        "the half drawn after the flush is in the layer"
+    );
+    assert!(
+        seam[0] > 40 && seam[2] > 40,
+        "the blur mixes red and blue at the seam, got {seam:?}"
+    );
 }
 
 /// A layer `begin_layer` admits applies every effect it declared: with a

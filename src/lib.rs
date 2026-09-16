@@ -1148,10 +1148,13 @@ where
     }
 
     /// Bytes currently held by transient images - layer backings, filter-chain
-    /// scratches and shadow coverage. Transients live until the next flush and
-    /// are reused within the frame, so just before a flush this is the frame's
-    /// peak: the figure to size [`set_transient_image_budget`](Self::set_transient_image_budget)
-    /// against.
+    /// scratches and shadow coverage. A transient lives until the next flush
+    /// and is reused within the frame, so just before a flush this is the
+    /// frame's peak: the figure to size
+    /// [`set_transient_image_budget`](Self::set_transient_image_budget)
+    /// against. An open layer's images (its store, a mask's coverage, a
+    /// chain's result and scratches) stay held across a flush and return to
+    /// the pool when the layer ends or is discarded.
     pub fn transient_image_bytes(&self) -> usize {
         self.transients.bytes()
     }
@@ -1162,8 +1165,9 @@ where
     /// `bytes` (default 256 MiB). Within a frame a layer's images are reused
     /// by the next layer of the same size once its composite is recorded, so
     /// what counts against the cap is the deepest nesting, not the number of
-    /// layers: at 1080p a viewport-sized layer is 4.7 MB and a blurred one four
-    /// times that, so a frame of hundreds of sibling layers holds a few tens of
+    /// layers: at 1080p a viewport-sized layer is 4.7 MB and a blurred one three
+    /// times that (its capture, its result and one scratch; the blur's
+    /// horizontal-pass buffer is the renderer's own, outside the pool), so a frame of hundreds of sibling layers holds a few tens of
     /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
     /// the layer passes through with its effects dropped - a layer reserves
     /// every image its effects draw through with its store, so it is
@@ -1211,9 +1215,10 @@ where
     /// uniformity; blur-only callers who want the single-pass form can call
     /// `filter_image` directly.
     ///
-    /// Returns [`ErrorKind::TransientImageBudgetExceeded`] when the scratches
-    /// the chain needs cannot be acquired within the transient budget: no
-    /// pass runs and `target_image` is left as it was. A layer's chain never
+    /// Returns [`ErrorKind::ImageIdNotFound`] when `source_image` is not an
+    /// image, and [`ErrorKind::TransientImageBudgetExceeded`] when the
+    /// scratches the chain needs cannot be acquired within the transient
+    /// budget; either way no pass runs and `target_image` is left as it was. A layer's chain never
     /// stops here - its scratches are reserved at
     /// [`begin_layer`](Self::begin_layer) with the layer's store.
     ///
@@ -1306,8 +1311,11 @@ where
     /// layers share one pooled store. Content outside that padded rect does
     /// not survive into the layer, mirroring SVG's filter-region behavior.
     /// A rotated or rounded scissor cannot be captured as a rect; the layer
-    /// then spans the whole canvas and the scissor keeps clipping normally,
-    /// moved into the store with the content when the blur reach pads it.
+    /// then spans the whole canvas. Whatever its shape, the scissor clips the
+    /// layer's result once, at the composite, after the filters: a blur
+    /// samples content past the clip edge, as SVG's `clip-path` over a
+    /// filtered group and Canvas 2D's clip under `ctx.filter` do, and an
+    /// antialiased edge is covered once, not squared.
     ///
     /// Inside the layer, `global_alpha` resets to 1 (the outer alpha folds
     /// into the composite), the composite operation resets to source-over,
@@ -1328,7 +1336,10 @@ where
     /// returns to the pool the filter chain and shadow passes draw from too.
     /// A Gaussian blur's horizontal-pass buffer is the renderer's own for the
     /// pass's duration, outside the pool and the budget, so it is not
-    /// reserved. When the store or any reserved image cannot be allocated
+    /// reserved; nor is the group shadow the composite casts under the outer
+    /// shadow state, which is canvas state rather than an effect - its
+    /// coverage is acquired at `end_layer` and skipped past the budget like
+    /// any shadow. When the store or any reserved image cannot be allocated
     /// (over the transient budget, past the texture limit, degenerate or
     /// absurd bounds), the layer degrades to a pass-through as a whole:
     /// drawing continues on the current target, `end_layer` only rebalances
@@ -1394,11 +1405,14 @@ where
             0.0
         };
 
-        let (keep_scissor, rect) = match state.scissor.device_bounds(canvas_w, canvas_h) {
-            Some(rect) => (false, rect),
-            // Rounded/rotated scissors clip per fragment inside the layer.
-            None => (true, Rect::new(0.0, 0.0, canvas_w, canvas_h)),
-        };
+        // A rounded or rotated scissor has no device rect: the store spans
+        // the canvas and the scissor applies once, at the composite, after
+        // the filters - SVG's clip-path over a filtered group and Canvas 2D's
+        // clip under `ctx.filter` both clip the result, not the input.
+        let rect = state
+            .scissor
+            .device_bounds(canvas_w, canvas_h)
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, canvas_w, canvas_h));
         let minx = (rect.x - pad).floor().max(-pad);
         let miny = (rect.y - pad).floor().max(-pad);
         let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
@@ -1476,17 +1490,6 @@ where
         let mut layer_transform = Transform2D::translation(-minx, -miny);
         layer_transform.premultiply(&state.transform);
         self.enter_offscreen_state(layer_transform);
-        if keep_scissor {
-            // The kept scissor clips per fragment in the pixel space of the
-            // target drawn into, which is now the store, so it shifts with
-            // the content: its transform maps the clip's local space to the
-            // outer target, and the store's (0, 0) is that target's (minx,
-            // miny). Extent and radius are unchanged by a pure translation.
-            let mut scissor = state.scissor;
-            scissor.transform = Transform2D::translation(-minx, -miny);
-            scissor.transform.premultiply(&state.scissor.transform);
-            self.state_mut().scissor = scissor;
-        }
         true
     }
 
@@ -3565,40 +3568,51 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
     assert_approx_eq(params.scissor_radius, 10.0);
 }
 
-/// A rounded scissor kept across `begin_layer` clips per fragment in the
-/// store's pixel space, so it must move with the content when the blur reach
-/// pads the store: the draw inside records the scissor centered at the root
-/// center shifted by the store origin, extent and radius unchanged. Without
-/// padding nothing moves.
+/// A rounded scissor set before `begin_layer` is not applied to the draws
+/// inside the layer - padded store or not - and clips the composite once,
+/// where it was set: the draw inside records no scissor, and the composite
+/// carries the scissor centered at the root center, extent and radius as set.
 #[test]
-fn a_kept_scissor_follows_the_content_into_a_padded_layer() {
+fn a_rounded_scissor_clips_a_layer_once_at_its_composite() {
     use crate::ImageFilter;
     let renderer = RecordingRenderer::default();
     let recorded_commands = renderer.last_commands.clone();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(100, 100, 1.0);
 
-    // Sigma 2 pads the store by ceil(3 * 2) + 2 = 8 px per side, so the
-    // store's (0, 0) is root (-8, -8); no filter leaves it at root (0, 0).
+    // Sigma 2 pads the store by ceil(3 * 2) + 2 = 8 px per side; no filter
+    // leaves the store at the root origin. Neither may clip the inside.
     let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
     let plain = LayerEffects::new();
-    for (effects, origin, center) in [(&blur, (-8.0, -8.0), (38.0, 28.0)), (&plain, (0.0, 0.0), (30.0, 20.0))] {
+    for (effects, origin) in [(&blur, (-8.0, -8.0)), (&plain, (0.0, 0.0))] {
         canvas.save();
         canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 5.0); // centered on root (30, 20)
         assert!(canvas.begin_layer(effects));
         assert_eq!(canvas.layers.last().unwrap().origin, origin);
         fill_rect_with_current_scissor(&mut canvas);
+        {
+            let commands = recorded_commands.borrow();
+            let params = first_draw_params(&commands);
+            assert_eq!(
+                params.scissor_ext,
+                [1.0, 1.0],
+                "no scissor inside the layer, store origin {origin:?}"
+            );
+        }
         canvas.end_layer();
+        canvas.flush_to_output(());
+        {
+            let commands = recorded_commands.borrow();
+            let params = first_draw_params(&commands);
+            let expected = Transform2D::translation(30.0, 20.0).inverse().to_mat3x4();
+            assert_eq!(
+                params.scissor_mat, expected,
+                "the composite is clipped where the scissor was set"
+            );
+            assert_eq!(params.scissor_ext, [20.0, 10.0]);
+            assert_approx_eq(params.scissor_radius, 5.0);
+        }
         canvas.restore();
-
-        let commands = recorded_commands.borrow();
-        let params = first_draw_params(&commands);
-        // scissor_mat is the inverse of the scissor transform: it maps the
-        // store pixel at `center` to the clip's local origin.
-        let expected = Transform2D::translation(center.0, center.1).inverse().to_mat3x4();
-        assert_eq!(params.scissor_mat, expected, "store origin {origin:?}");
-        assert_eq!(params.scissor_ext, [20.0, 10.0]);
-        assert_approx_eq(params.scissor_radius, 5.0);
     }
 }
 
@@ -5610,7 +5624,8 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         (&[ImageFilter::brightness(0.0)], 2, 64),
         // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
         (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 3, 128),
-        // brightness(2) cannot fold, so four passes: two scratches.
+        // A blur never folds with a color matrix, so brightness, blur and
+        // invert are three passes plus the parity identity: four, two scratches.
         (
             &[
                 ImageFilter::brightness(2.0),
