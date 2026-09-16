@@ -5598,6 +5598,46 @@ fn masked_siblings_reuse_mask_transients() {
     assert_eq!(canvas.transients.images.len(), 0);
 }
 
+/// A reset or a resize inside a masked layer returns everything the layer
+/// held - the capture and the mask's two coverage images - not only the
+/// capture: under a budget of exactly those three, the next masked layer
+/// takes them back from the pool instead of being refused a fourth.
+#[test]
+fn a_discarded_masked_layer_returns_its_coverage_images() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
+    let luminance = LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0);
+    for what in ["reset", "resize"] {
+        assert!(canvas.begin_layer(&luminance), "{what}: the first masked layer fits");
+        assert_eq!(canvas.transients.images.len(), 3);
+        match what {
+            "reset" => canvas.reset(),
+            _ => {
+                canvas.set_size(128, 64, 1.0);
+                canvas.set_size(64, 64, 1.0);
+            }
+        }
+        assert!(canvas.layers.is_empty(), "{what}: the open layer is discarded");
+        assert_eq!(
+            canvas.transients.free.len(),
+            3,
+            "{what}: capture, normalized mask and converted mask all return"
+        );
+        assert!(
+            canvas.begin_layer(&luminance),
+            "{what}: the next masked layer takes them back"
+        );
+        assert_eq!(canvas.transients.images.len(), 3, "{what}: no fourth image");
+        assert!(canvas.transients.free.is_empty());
+        canvas.end_layer();
+    }
+}
+
 /// A masked layer whose coverage images do not fit the budget passes through
 /// as a whole - `begin_layer` says so - instead of capturing and then
 /// compositing unmasked at end_layer.
