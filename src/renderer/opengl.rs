@@ -679,7 +679,7 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
-    fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color) {
+    fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color, keep_clip: bool) {
         unsafe {
             self.context.enable(glow::SCISSOR_TEST);
             self.context.scissor(
@@ -690,12 +690,15 @@ impl OpenGl {
             );
             self.context.clear_color(color.r, color.g, color.b, color.a);
             // The stencil carries the clip plane in bit 7 (armed and disarmed
-            // by the ClipReset quads) and the winding scratch in the rest.
-            // Clear only the winding bits: a clip must survive the clear,
-            // while a winding count a cover pass missed (a fan vertex pushed
-            // past the cover quad at a cusp) must not leak into the next
-            // frame's fills. glClear honours the stencil write mask.
-            self.context.stencil_mask(0x7f);
+            // by the ClipReset quads) and the winding scratch in the rest. A
+            // winding count a cover pass missed (a fan vertex pushed past the
+            // cover quad at a cusp) must not leak into the next frame's
+            // fills, so the stencil is cleared with the color. With a clip
+            // armed on this target only the winding bits go, through the
+            // write mask glClear honours; without one the whole stencil is
+            // cleared, which a tiler does as a tile clear where a masked
+            // stencil clear costs a full-target quad (Mesa's state tracker).
+            self.context.stencil_mask(if keep_clip { 0x7f } else { 0xff });
             self.context.clear_stencil(0);
             self.context.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
             self.context.stencil_mask(0xff);
@@ -807,12 +810,14 @@ impl OpenGl {
 
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
+        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
             source_image_info.width() as _,
             source_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
         self.triangles(images, &cmd, &params);
 
@@ -864,12 +869,14 @@ impl OpenGl {
         self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
         self.main_program().set_view(self.view);
 
+        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
             source_image_info.width() as _,
             source_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
 
         self.triangles(images, &cmd, &blur_params);
@@ -877,12 +884,14 @@ impl OpenGl {
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
 
+        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
             source_image_info.width() as _,
             source_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
 
         blur_params.image_blur_filter_direction = [0.0, 1.0];
@@ -1024,13 +1033,13 @@ impl Renderer for OpenGl {
                     ref params2,
                 } => self.stencil_stroke(images, &cmd, params1, params2),
                 CommandType::Triangles { ref params } => self.triangles(images, &cmd, params),
-                CommandType::ClearRect { color } => {
+                CommandType::ClearRect { color, keep_clip } => {
                     if let Some((start, _)) = cmd.triangles_verts {
                         let x = verts[start].x as _;
                         let y = verts[start].y as _;
                         let width = verts[start + 1].x as u32 - x;
                         let height = verts[start + 1].y as u32 - y;
-                        self.clear_rect(x, y, width, height, color);
+                        self.clear_rect(x, y, width, height, color, keep_clip);
                     }
                 }
                 CommandType::SetRenderTarget(target) => {

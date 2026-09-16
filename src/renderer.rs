@@ -51,6 +51,10 @@ pub enum CommandType {
     ClearRect {
         /// Color to fill the rectangle with.
         color: Color,
+        /// A clip is armed on the target: clear only the stencil's winding
+        /// bits so the clip plane (bit 7) survives. Otherwise the whole
+        /// stencil is cleared, the tile clear a tiler does for free.
+        keep_clip: bool,
     },
     /// Fill a convex shape.
     ConvexFill {

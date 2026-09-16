@@ -614,11 +614,12 @@ impl Renderer for WGPURenderer {
                         }
                     }
                 }
-                super::CommandType::ClearRect { color } => {
+                super::CommandType::ClearRect { color, keep_clip } => {
                     clear_rect(
                         images,
                         color,
                         &command,
+                        keep_clip,
                         &mut pipeline_and_bindgroup_mapper,
                         &mut render_pass_builder,
                     );
@@ -1612,6 +1613,7 @@ fn clear_rect(
     images: &mut ImageStore<Image>,
     color: crate::Color,
     command: &super::Command,
+    keep_clip: bool,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
 ) {
@@ -1642,10 +1644,10 @@ fn clear_rect(
                 },
             }),
             wgpu::PrimitiveTopology::TriangleList,
-            // Zero the winding bits under the cleared rect and leave the clip
-            // plane (bit 7) alone, as the GL backend's masked stencil clear
-            // does: a winding count a cover pass missed must not leak into
-            // the next frame's fills.
+            // Zero the stencil under the cleared rect, as the GL backend's
+            // stencil clear does: a winding count a cover pass missed must
+            // not leak into the next frame's fills. With a clip armed on the
+            // target the clip plane (bit 7) is left alone.
             StencilTest::Enabled {
                 stencil_state: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
@@ -1661,7 +1663,7 @@ fn clear_rect(
                         pass_op: wgpu::StencilOperation::Zero,
                     },
                     read_mask: 0xff,
-                    write_mask: 0x7f,
+                    write_mask: if keep_clip { 0x7f } else { 0xff },
                 },
                 stencil_reference: 0,
             },

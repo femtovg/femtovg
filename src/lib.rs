@@ -672,9 +672,19 @@ where
     /// any [`clip_path`](Self::clip_path) do not apply. A Canvas 2D
     /// `clearRect`, which the transform and clip do affect, is a fill of the
     /// rect with an opaque paint under
-    /// [`CompositeOperation::DestinationOut`].
+    /// [`CompositeOperation::DestinationOut`]. The stencil under the rect is
+    /// cleared with the color so nothing a fill left behind reaches the next
+    /// frame; a clip armed on the target survives it (only the winding bits
+    /// are cleared then, at the cost of a full-target quad on a tiler).
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
-        let mut cmd = Command::new(CommandType::ClearRect { color });
+        // A clip armed on this target must survive the clear; without one
+        // the whole stencil can go, which is a plain tile clear on a tiler
+        // where a masked stencil clear is a full-target quad.
+        let keep_clip = self
+            .clip_stack
+            .iter()
+            .any(|entry| entry.target == self.current_render_target);
+        let mut cmd = Command::new(CommandType::ClearRect { color, keep_clip });
         cmd.composite_operation = self.state().composite_operation;
 
         let x0 = x as f32;
@@ -3621,6 +3631,66 @@ fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
     path.rect(0.0, 0.0, 100.0, 100.0);
     canvas.fill_path(&path, &Paint::color(Color::white()));
     canvas.flush_to_output(());
+}
+
+/// `clear_rect` clears the whole stencil unless a clip is armed on the
+/// target it clears, when only the winding bits may go: the command carries
+/// that decision so a tiler takes its tile clear whenever it can.
+#[test]
+fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let keep_clips = |canvas: &mut Canvas<RecordingRenderer>| -> Vec<bool> {
+        canvas.flush_to_output(());
+        let commands = recorded_commands.borrow();
+        commands
+            .iter()
+            .filter_map(|cmd| match cmd.cmd_type {
+                CommandType::ClearRect { keep_clip, .. } => Some(keep_clip),
+                _ => None,
+            })
+            .collect()
+    };
+
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "no clip: the whole stencil is cleared"
+    );
+
+    let mut clip = Path::new();
+    clip.rect(10.0, 10.0, 50.0, 50.0);
+    canvas.save();
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![true],
+        "a clip on the screen survives the clear"
+    );
+
+    let image = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    canvas.clear_rect(0, 0, 64, 64, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "the screen's clip does not gate an image target"
+    );
+    canvas.set_render_target(RenderTarget::Screen);
+    canvas.restore();
+
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "the clip is popped: the whole stencil is cleared again"
+    );
 }
 
 #[test]
