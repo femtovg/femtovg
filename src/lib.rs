@@ -486,6 +486,19 @@ struct LayerRecord {
     outer_alpha: f32,
 }
 
+impl LayerRecord {
+    /// Every transient the layer holds - its capture and the mask's coverage
+    /// images - which is what a flush keeps live and what `end_layer` or a
+    /// discard returns to the pool.
+    fn images(&self) -> impl Iterator<Item = ImageId> {
+        let mask = self.mask_images;
+        self.image
+            .into_iter()
+            .chain(mask.map(|images| images.normalized))
+            .chain(mask.and_then(|images| images.converted))
+    }
+}
+
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
 /// where `offset` is the line center relative to the run baseline in +y-down
 /// user space. This is the single source of decoration geometry: the painter
@@ -597,7 +610,7 @@ where
             // A resize invalidates the device-space bounds of every open
             // layer: discard them, as a Canvas 2D reset discards pending layers
             // (WPT 2d.layer.reset). Their draws so far are dropped and their
-            // stores return to the pool.
+            // images return to the pool.
             self.discard_open_layers();
         }
         // The renderer starts the stream on the screen; the tracked target
@@ -623,13 +636,13 @@ where
     }
 
     /// Drops every open layer without compositing it: the state stack
-    /// rebalances, the stores return to the pool and drawing continues on
-    /// the target that was current before the outermost layer.
+    /// rebalances, the layers' images return to the pool and drawing
+    /// continues on the target that was current before the outermost layer.
     fn discard_open_layers(&mut self) {
         let mut outermost_target = None;
         while let Some(record) = self.layers.pop() {
             self.restore();
-            if let Some(image) = record.image {
+            for image in record.images() {
                 self.release_transient_image(image);
             }
             outermost_target = Some(record.previous_target);
@@ -1410,10 +1423,7 @@ where
 
         let alpha = record.outer_alpha * record.effects.opacity;
         if alpha <= 0.0 {
-            self.release_layer_images(image, source);
-            if let Some(images) = record.mask_images {
-                self.release_mask_images(images);
-            }
+            self.release_layer_images(&record, source);
             return;
         }
         let (minx, miny) = record.origin;
@@ -1447,14 +1457,17 @@ where
 
         // The composite that reads the layer is recorded; its images can back
         // the next layer of this size.
-        self.release_layer_images(image, source);
+        self.release_layer_images(&record, source);
     }
 
-    /// Returns a finished layer's capture and, when different, its filtered
-    /// result to the transient pool.
-    fn release_layer_images(&mut self, capture: ImageId, source: ImageId) {
-        self.release_transient_image(capture);
-        if source != capture {
+    /// Returns a finished layer's images to the transient pool: everything
+    /// the record holds and, when different from the capture, its filtered
+    /// result `source`. Every command that reads them has been recorded.
+    fn release_layer_images(&mut self, record: &LayerRecord, source: ImageId) {
+        for image in record.images() {
+            self.release_transient_image(image);
+        }
+        if record.image != Some(source) {
             self.release_transient_image(source);
         }
     }
@@ -1511,13 +1524,6 @@ where
             },
         };
         Some(MaskImages { normalized, converted })
-    }
-
-    fn release_mask_images(&mut self, images: MaskImages) {
-        self.release_transient_image(images.normalized);
-        if let Some(converted) = images.converted {
-            self.release_transient_image(converted);
-        }
     }
 
     /// Multiplies `layer`'s alpha by the mask's coverage, in layer space,
@@ -1601,9 +1607,6 @@ where
 
         self.restore();
         self.set_render_target(previous_target);
-        // The draws that read the coverage are recorded; the next masked
-        // layer of this size draws its mask into the same images.
-        self.release_mask_images(images);
     }
 
     // Transforms
@@ -2383,11 +2386,13 @@ where
         }
     }
 
-    /// Deletes the frame's transient images, except the stores of layers still
-    /// open across the flush: their draws so far already live there and the
-    /// ones still to come must land in the same image.
+    /// Deletes the frame's transient images, except those of layers still
+    /// open across the flush: a layer's draws so far already live in its
+    /// capture and the ones still to come must land in the same image, and
+    /// its mask draws through the coverage images reserved for it at
+    /// `end_layer`.
     fn release_transient_images(&mut self) {
-        let held: Vec<ImageId> = self.layers.iter().filter_map(|layer| layer.image).collect();
+        let held: Vec<ImageId> = self.layers.iter().flat_map(LayerRecord::images).collect();
         self.transients.release_all(&mut self.images, &mut self.renderer, &held);
     }
 

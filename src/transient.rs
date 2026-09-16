@@ -104,7 +104,7 @@ impl TransientPool {
         self.free.push(id);
     }
 
-    /// Deletes every transient except those in `held` (the stores of layers
+    /// Deletes every transient except those in `held` (the images of layers
     /// still open across the flush), which stay live and in use.
     pub(crate) fn release_all<T: Renderer>(
         &mut self,

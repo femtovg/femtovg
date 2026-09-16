@@ -717,18 +717,25 @@ fn output_texture(device: &wgpu::Device) -> wgpu::Texture {
 /// A flush in the middle of an open layer must not release the layer's
 /// backing image or lose the redirect into it: draws before and after the
 /// flush both belong to the layer and composite with its opacity at end_layer.
-#[test]
-fn open_layer_survives_a_flush() {
-    let Some((device, queue)) = headless_device() else {
-        eprintln!("skipping: no wgpu adapter available");
-        return;
-    };
-    let target = output_texture(&device);
+/// A masked layer keeps its mask's coverage images across the flush as well,
+/// so both draws composite through the mask.
+fn layer_survives_a_flush(device: &wgpu::Device, queue: &wgpu::Queue, mask: Option<femtovg::MaskKind>) {
+    let target = output_texture(device);
     let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(W, H, 1.0);
     canvas.clear_rect(0, 0, W, H, Color::white());
-    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.8)));
+    let mut effects = LayerEffects::new().with_opacity(0.8);
+    if let Some(kind) = mask {
+        // White over the top half: the bottom half of the layer is masked out.
+        let image = mask_from_draw(&mut canvas, |canvas| {
+            let mut top = Path::new();
+            top.rect(0.0, 0.0, W as f32, 32.0);
+            canvas.fill_path(&top, &Paint::color(Color::white()));
+        });
+        effects = effects.with_mask(image, kind, 0.0, 0.0, W as f32, H as f32);
+    }
+    assert!(canvas.begin_layer(&effects));
     let mut red = Path::new();
     red.rect(0.0, 0.0, 32.0, 64.0);
     canvas.fill_path(&red, &Paint::color(Color::rgb(255, 0, 0)));
@@ -741,18 +748,109 @@ fn open_layer_survives_a_flush() {
     canvas.fill_path(&blue, &Paint::color(Color::rgb(0, 0, 255)));
     canvas.end_layer();
     queue.submit(canvas.flush_to_output(&target));
-    let out = readback(&device, &queue, &target);
+    let out = readback(device, queue, &target);
     // 0.8 red over white = (255, 51, 51); 0.8 blue over white = (51, 51, 255).
-    let r = px(&out, 16, 32);
-    let b = px(&out, 48, 32);
+    let r = px(&out, 16, 16);
+    let b = px(&out, 48, 16);
     assert!(
         close(r[0], 255) && close(r[1], 51) && close(r[2], 51),
-        "draw before the flush must survive in the layer, got {r:?}"
+        "{mask:?}: draw before the flush must survive in the layer, got {r:?}"
     );
     assert!(
         close(b[0], 51) && close(b[1], 51) && close(b[2], 255),
-        "draw after the flush must still land in the layer, got {b:?}"
+        "{mask:?}: draw after the flush must still land in the layer, got {b:?}"
     );
+    // The bottom half fades like the top without a mask and is hidden with one.
+    let r = px(&out, 16, 48);
+    let b = px(&out, 48, 48);
+    if mask.is_some() {
+        assert_eq!(
+            r,
+            [255, 255, 255],
+            "{mask:?}: the mask must hide the bottom of the draw before the flush"
+        );
+        assert_eq!(
+            b,
+            [255, 255, 255],
+            "{mask:?}: the mask must hide the bottom of the draw after the flush"
+        );
+    } else {
+        assert!(
+            close(r[0], 255) && close(r[1], 51) && close(r[2], 51),
+            "the bottom of the draw before the flush must fade like its top, got {r:?}"
+        );
+        assert!(
+            close(b[0], 51) && close(b[1], 51) && close(b[2], 255),
+            "the bottom of the draw after the flush must fade like its top, got {b:?}"
+        );
+    }
+}
+
+#[test]
+fn open_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, None);
+}
+
+#[test]
+fn open_alpha_masked_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, Some(femtovg::MaskKind::Alpha));
+}
+
+#[test]
+fn open_luminance_masked_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, Some(femtovg::MaskKind::Luminance));
+}
+
+/// A reset inside a masked layer returns every image the layer held - the
+/// capture and the mask's coverage images - so under a budget of exactly one
+/// masked layer's images the next masked layer still captures and masks.
+#[test]
+fn a_reset_inside_a_masked_layer_returns_its_images_to_the_budget() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let mut admitted = None;
+    let out = render(&device, &queue, |canvas| {
+        // Capture, normalized mask and converted mask: what a luminance mask holds.
+        canvas.set_transient_image_budget(3 * (W as usize) * (H as usize) * 4);
+        let mask = mask_from_draw(canvas, |canvas| {
+            let mut top = Path::new();
+            top.rect(0.0, 0.0, W as f32, 32.0);
+            canvas.fill_path(&top, &Paint::color(Color::white()));
+        });
+        let effects = LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, W as f32, H as f32);
+        assert!(canvas.begin_layer(&effects), "the first masked layer fits the budget");
+        canvas.reset();
+        canvas.clear_rect(0, 0, W, H, Color::white());
+        admitted = Some(canvas.begin_layer(&effects));
+        red_rect(canvas, 0.0, 0.0, W as f32, H as f32);
+        canvas.end_layer();
+    });
+    assert_eq!(
+        admitted,
+        Some(true),
+        "the discarded layer's images must be free for the next masked layer"
+    );
+    let shown = px(&out, 32, 16);
+    let hidden = px(&out, 32, 48);
+    assert!(
+        close(shown[0], 255) && close(shown[1], 0) && close(shown[2], 0),
+        "the mask's white half must show the layer, got {shown:?}"
+    );
+    assert_eq!(hidden, [255, 255, 255], "the mask's uncovered half must hide the layer");
 }
 
 /// Past the transient budget a layer degrades to pass-through (its draws
