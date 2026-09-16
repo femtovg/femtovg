@@ -363,9 +363,9 @@ pub struct Canvas<T: Renderer> {
 /// Declared up front at [`Canvas::begin_layer`] - like Canvas 2D's
 /// `beginLayer(filter)` proposal - so the layer's backing store can be sized
 /// for the effects (a blur needs kernel-reach padding). Construct with
-/// [`LayerEffects::new`] and the builder methods; more effect kinds can be
-/// added without breaking callers.
-#[derive(Clone, Debug, Default)]
+/// [`LayerEffects::new`] (what `Default` gives too) and the builder methods;
+/// more effect kinds can be added without breaking callers.
+#[derive(Clone, Debug)]
 pub struct LayerEffects {
     opacity: f32,
     filters: Vec<ImageFilter>,
@@ -402,7 +402,7 @@ struct LayerMask {
 }
 
 impl LayerEffects {
-    /// No-op effects: full opacity, no filters.
+    /// No-op effects: full opacity, no filters, no mask.
     pub fn new() -> Self {
         Self {
             opacity: 1.0,
@@ -465,6 +465,15 @@ impl LayerEffects {
             height,
         });
         self
+    }
+}
+
+// Hand-written so the default is `new()`'s no-op effects: a derived Default
+// would zero the opacity and make `LayerEffects::default()` a layer that
+// composites nothing.
+impl Default for LayerEffects {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -5736,6 +5745,21 @@ fn a_masked_layer_without_room_for_its_coverage_passes_through() {
     canvas.set_transient_image_budget(3 * 64 * 64 * 4);
     assert!(canvas.begin_layer(&luminance), "three images fit three images' worth");
     canvas.end_layer();
+}
+
+/// `LayerEffects::default()` is the no-op effects `new()` describes, field by
+/// field: full opacity, no filters, no mask. A derived Default would zero the
+/// opacity, and `end_layer` composites nothing at alpha 0.
+#[test]
+fn default_layer_effects_are_the_no_op_effects_new_describes() {
+    let default = LayerEffects::default();
+    let new = LayerEffects::new();
+    assert_eq!(default.opacity, 1.0);
+    assert_eq!(default.opacity, new.opacity);
+    assert!(default.filters.is_empty());
+    assert!(new.filters.is_empty());
+    assert!(default.mask.is_none());
+    assert!(new.mask.is_none());
 }
 
 /// Shadows draw through the pool too: the coverage and blurred images of one
