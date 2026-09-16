@@ -1,11 +1,11 @@
 //! Headless GPU tests pinning the layer-mask gaps raised in review of the
 //! mask work: a masked layer must survive a mid-layer flush like an unmasked
-//! one, a nested layer's mask rect is root device space, a reset inside a
-//! masked layer must return every image the layer held, `LayerEffects::
-//! default()` must mean what `LayerEffects::new()` means, a rounded scissor
-//! must clip a blurred layer where it was set, and a layer admitted by
-//! `begin_layer` must apply the filter it declared. Skips without a GPU
-//! adapter.
+//! one, a nested layer's mask rect is root device space at any depth, a
+//! reset inside a masked layer must return every image the layer held,
+//! `LayerEffects::default()` must mean what `LayerEffects::new()` means, a
+//! rounded scissor must clip a blurred layer where it was set, and a layer
+//! admitted by `begin_layer` must apply the filter it declared. Skips without
+//! a GPU adapter.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
@@ -235,6 +235,52 @@ fn a_nested_layers_mask_rect_is_root_device_space() {
             outside,
             [255, 255, 255],
             "{kind:?}: root x = 40 lies outside the mask's white band, got {outside:?}"
+        );
+    }
+}
+
+/// Two enclosing captures shift the inner store twice, and the mask's
+/// placement backs out both, not the innermost origin alone: with the outer
+/// layer captured from root x = 16 and a middle one from root x = 24 (x = 8
+/// of the outer store), a mask covering root x = 24..40 keeps the inner
+/// layer's red there and nowhere else.
+#[test]
+fn a_mask_rect_stays_root_device_space_under_two_enclosing_layers() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let mut outcomes = Vec::new();
+    for kind in [MaskKind::Alpha, MaskKind::Luminance] {
+        let out = render(&device, &queue, |canvas| {
+            // White over root x = 24..40, full height.
+            let mask = white_mask(canvas, (24.0, 0.0, 16.0, H as f32));
+            let effects = full_mask(mask, kind);
+            // The outer capture starts at root (16, 0); inside it device
+            // space is shifted by -16, so the middle capture starts at
+            // root (24, 0), which is (8, 0) of the outer store.
+            canvas.scissor(16.0, 0.0, 48.0, H as f32);
+            assert!(canvas.begin_layer(&LayerEffects::new()));
+            canvas.scissor(24.0, 0.0, 40.0, H as f32);
+            assert!(canvas.begin_layer(&LayerEffects::new()));
+            assert!(canvas.begin_layer(&effects));
+            fill_rect(canvas, 0.0, 0.0, W as f32, H as f32, Color::rgb(255, 0, 0));
+            canvas.end_layer();
+            canvas.end_layer();
+            canvas.end_layer();
+        });
+        outcomes.push((kind, px(&out, 28, 32), px(&out, 48, 32)));
+    }
+    eprintln!("(mask kind, root x = 28, root x = 48): {outcomes:?}");
+    for (kind, inside, outside) in outcomes {
+        assert!(
+            is_red(inside),
+            "{kind:?}: root x = 28 lies under the mask's white band, got {inside:?}"
+        );
+        assert_eq!(
+            outside,
+            [255, 255, 255],
+            "{kind:?}: root x = 48 lies outside the mask's white band, got {outside:?}"
         );
     }
 }

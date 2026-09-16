@@ -442,7 +442,10 @@ impl LayerEffects {
     /// mask-type, computed on the mask's sRGB values as SVG's default
     /// `color-interpolation` has it. Applied after the filter chain, SVG's
     /// order for a group carrying both `filter` and `mask`. Pixels the mask
-    /// rect does not cover are fully masked out.
+    /// rect does not cover are fully masked out. The rect stays root device
+    /// space - the space of the target the outermost open layer draws on -
+    /// however deep the masked layer nests: an enclosing layer's capture
+    /// origin does not shift it.
     ///
     /// The mask image is borrowed, not owned: render mask content into your
     /// own image (upload or render target - its `ImageFlags` orientation is
@@ -479,7 +482,14 @@ struct LayerRecord {
     // as a whole, never composites unmasked.
     mask_images: Option<MaskImages>,
     previous_target: RenderTarget,
+    // Where the store lands on the previous target: the composite's origin,
+    // in that target's device space.
     origin: (f32, f32),
+    // Root device coordinates of the store's (0, 0): `origin` plus the shift
+    // of every enclosing capture. A pass-through layer draws on the enclosing
+    // target unchanged and carries that target's root origin along. A mask
+    // rect is root device space, so it is placed against this, not `origin`.
+    root_origin: (f32, f32),
     width: usize,
     height: usize,
     effects: LayerEffects,
@@ -1263,6 +1273,10 @@ where
         // render target of another size (a layer opened while rendering to
         // an offscreen larger than the canvas must capture all of it).
         let (canvas_w, canvas_h) = self.render_target_size();
+        // Root device coordinates of that target's (0, 0): its own when no
+        // layer is open, else the enclosing layer's store origin in root
+        // space - which a pass-through enclosing layer inherits unchanged.
+        let root = self.layers.last().map_or((0.0, 0.0), |layer| layer.root_origin);
 
         // A layer opened under a non-invertible transform is not rasterizable
         // at all - not even for draws that set a valid transform inside it
@@ -1279,6 +1293,7 @@ where
                 mask_images: None,
                 previous_target: self.current_render_target,
                 origin: (0.0, 0.0),
+                root_origin: root,
                 width: void,
                 height: void,
                 effects: effects.clone(),
@@ -1356,6 +1371,10 @@ where
             mask_images,
             previous_target: self.current_render_target,
             origin: (minx, miny),
+            root_origin: match image {
+                Some(_) => (root.0 + minx, root.1 + miny),
+                None => root,
+            },
             width,
             height,
             effects: effects.clone(),
@@ -1545,7 +1564,10 @@ where
         layer_is_filtered: bool,
     ) {
         let (width, height) = (record.width as f32, record.height as f32);
-        let (minx, miny) = record.origin;
+        // The mask rect is root device space and the store's (0, 0) sits at
+        // the record's root origin - every enclosing capture's shift
+        // included - not at the local origin the composite lands on.
+        let (minx, miny) = record.root_origin;
         let previous_target = self.current_render_target;
         self.save();
 
@@ -5513,6 +5535,54 @@ fn layer_bounds_follow_a_scaled_scissor() {
     let record = canvas.layers.last().unwrap();
     assert_eq!((record.width, record.height), (128, 128));
     assert_eq!(record.origin, (100.0, 50.0));
+    canvas.end_layer();
+    canvas.restore();
+}
+
+/// A layer's root origin accumulates the shift of every enclosing capture -
+/// what places a root-device-space mask rect at any depth - while its local
+/// origin stays the composite's: an outer capture from (16, 8) and a middle
+/// one from (24, 16), which is (8, 8) of the outer store, put the inner
+/// store's (0, 0) at root (24, 16). A pass-through layer draws on the
+/// enclosing target unchanged, so it carries that target's root origin along
+/// rather than adding the origin of the store it never got.
+#[test]
+fn nested_layers_accumulate_their_root_origin() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    // Three 64 x 64 stores: the deepest nesting below.
+    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
+    let origins = |canvas: &Canvas<RecordingRenderer>| {
+        let record = canvas.layers.last().unwrap();
+        (record.origin, record.root_origin)
+    };
+    canvas.save();
+    canvas.scissor(16.0, 8.0, 48.0, 56.0);
+    assert!(canvas.begin_layer(&LayerEffects::new()));
+    assert_eq!(origins(&canvas), ((16.0, 8.0), (16.0, 8.0)));
+    // Device space inside the capture is shifted by (-16, -8).
+    canvas.scissor(24.0, 16.0, 40.0, 48.0);
+    assert!(canvas.begin_layer(&LayerEffects::new()));
+    assert_eq!(origins(&canvas), ((8.0, 8.0), (24.0, 16.0)));
+    assert!(canvas.begin_layer(&LayerEffects::new()));
+    assert_eq!(origins(&canvas), ((0.0, 0.0), (24.0, 16.0)));
+    canvas.end_layer();
+    canvas.end_layer();
+
+    // Over the whole outer store, a blurred middle layer wants a 128 x 128
+    // store the budget refuses: it passes through at its padded origin
+    // without shifting anything, and the layer inside it still captures
+    // against the outer store.
+    canvas.reset_scissor();
+    let blur = ImageFilter::GaussianBlur { sigma: 4.0 };
+    assert!(!canvas.begin_layer(&LayerEffects::new().with_filters(&[blur])));
+    assert_eq!(origins(&canvas), ((-14.0, -14.0), (16.0, 8.0)));
+    assert!(canvas.begin_layer(&LayerEffects::new()));
+    assert_eq!(origins(&canvas), ((0.0, 0.0), (16.0, 8.0)));
+    canvas.end_layer();
+    canvas.end_layer();
     canvas.end_layer();
     canvas.restore();
 }
