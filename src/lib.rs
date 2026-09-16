@@ -362,7 +362,10 @@ pub struct Canvas<T: Renderer> {
 ///
 /// Declared up front at [`Canvas::begin_layer`] - like Canvas 2D's
 /// `beginLayer(filter)` proposal - so the layer's backing store can be sized
-/// for the effects (a blur needs kernel-reach padding). Construct with
+/// for the effects (a blur needs kernel-reach padding) and every image they
+/// draw through reserved with it: a layer is admitted with its whole
+/// declaration or passes through (`begin_layer` returns `false`), never
+/// with some of its effects dropped. Construct with
 /// [`LayerEffects::new`] (what `Default` gives too) and the builder methods;
 /// more effect kinds can be added without breaking callers.
 #[derive(Clone, Debug)]
@@ -388,6 +391,15 @@ pub enum MaskKind {
 struct MaskImages {
     normalized: ImageId,
     converted: Option<ImageId>,
+}
+
+/// The transients a filter chain draws through: its result, and the
+/// scratches its passes ping-pong between - none for a single pass, one for
+/// two, two beyond (see [`Canvas::filter_image_chain`]).
+#[derive(Clone, Copy, Debug)]
+struct FilterImages {
+    target: ImageId,
+    scratch: [Option<ImageId>; 2],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -428,7 +440,11 @@ impl LayerEffects {
     /// Sets an image-filter chain applied to the captured layer before it is
     /// composited, executing through
     /// [`filter_image_chain`](Canvas::filter_image_chain) - runs of color
-    /// matrices still fold to one pass.
+    /// matrices still fold to one pass. The chain's result and scratches are
+    /// reserved at [`begin_layer`](Canvas::begin_layer) with the layer's
+    /// store, so a filtered layer the transient budget cannot fit passes
+    /// through as a whole (`begin_layer` returns `false`) rather than
+    /// composite unfiltered.
     #[must_use]
     pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
         self.filters = filters.to_vec();
@@ -486,10 +502,12 @@ struct LayerRecord {
     // degenerate): draws went to the previous target unchanged and end_layer
     // only rebalances state.
     image: Option<ImageId>,
-    // The mask's coverage images, reserved with the store: a masked layer
-    // either captures with everything its composite needs or passes through
-    // as a whole, never composites unmasked.
+    // The mask's coverage images and the filter chain's result and
+    // scratches, reserved with the store: a layer either captures with
+    // everything its composite needs or passes through as a whole, never
+    // composites unmasked or unfiltered.
     mask_images: Option<MaskImages>,
+    filter_images: Option<FilterImages>,
     previous_target: RenderTarget,
     // Where the store lands on the previous target: the composite's origin,
     // in that target's device space.
@@ -506,16 +524,53 @@ struct LayerRecord {
 }
 
 impl LayerRecord {
-    /// Every transient the layer holds - its capture and the mask's coverage
-    /// images - which is what a flush keeps live and what `end_layer` or a
-    /// discard returns to the pool.
+    /// Every transient the layer holds - its capture, the mask's coverage
+    /// images and the filter chain's - which is what a flush keeps live and
+    /// what `end_layer` or a discard returns to the pool.
     fn images(&self) -> impl Iterator<Item = ImageId> {
         let mask = self.mask_images;
+        let filter = self.filter_images;
         self.image
             .into_iter()
             .chain(mask.map(|images| images.normalized))
             .chain(mask.and_then(|images| images.converted))
+            .chain(filter.map(|images| images.target))
+            .chain(
+                filter
+                    .map_or([None, None], |images| images.scratch)
+                    .into_iter()
+                    .flatten(),
+            )
     }
+}
+
+/// The passes a filter list runs as: runs of adjacent color matrices folded
+/// where that is exact ([`ImageFilter::fold_with`]), plus an identity pass
+/// when the flip count comes out even, so every chain shape leaves storage
+/// flipped once - which makes the empty list a copy. Never empty. What
+/// [`Canvas::filter_image_chain`] executes and what a layer's scratch
+/// reservation is sized from, so the two cannot disagree.
+fn filter_passes(filters: &[ImageFilter]) -> Vec<ImageFilter> {
+    // The capacity covers the worst case (nothing folds) plus the parity
+    // pass, so the list never reallocates; ImageFilter is Copy, so building
+    // it never deep-copies anything.
+    let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len() + 1);
+    for filter in filters {
+        if let Some(prev) = passes.last_mut() {
+            if let Some(folded) = prev.fold_with(*filter) {
+                *prev = folded;
+                continue;
+            }
+        }
+        passes.push(*filter);
+    }
+    // A color-matrix pass flips the image (the render-target convention),
+    // the two-pass Gaussian blur preserves it.
+    let flips = passes.iter().filter(|f| f.flips_output()).count();
+    if flips % 2 == 0 {
+        passes.push(ImageFilter::identity());
+    }
+    passes
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -1110,11 +1165,11 @@ where
     /// layers: at 1080p a viewport-sized layer is 4.7 MB and a blurred one four
     /// times that, so a frame of hundreds of sibling layers holds a few tens of
     /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
-    /// the layer passes through with its effects dropped,
+    /// the layer passes through with its effects dropped - a layer reserves
+    /// every image its effects draw through with its store, so it is
+    /// admitted whole or not at all -
     /// [`filter_image_chain`](Self::filter_image_chain) returns
-    /// [`ErrorKind::TransientImageBudgetExceeded`], shadows are skipped and
-    /// a masked layer, which reserves its coverage images with its store,
-    /// passes through as a whole;
+    /// [`ErrorKind::TransientImageBudgetExceeded`] and shadows are skipped;
     /// [`transient_image_bytes`](Self::transient_image_bytes) reports what a
     /// frame actually held.
     ///
@@ -1156,10 +1211,11 @@ where
     /// uniformity; blur-only callers who want the single-pass form can call
     /// `filter_image` directly.
     ///
-    /// Returns [`ErrorKind::TransientImageBudgetExceeded`] when a scratch
-    /// cannot be acquired within the transient budget: the chain stops before
-    /// the pass that needs it and `target_image` is left as it was. A layer
-    /// then composites its unfiltered capture instead.
+    /// Returns [`ErrorKind::TransientImageBudgetExceeded`] when the scratches
+    /// the chain needs cannot be acquired within the transient budget: no
+    /// pass runs and `target_image` is left as it was. A layer's chain never
+    /// stops here - its scratches are reserved at
+    /// [`begin_layer`](Self::begin_layer) with the layer's store.
     ///
     /// The chain borrows `source_image` and `target_image` without taking
     /// ownership - both may be caller-managed or acquired transients (a layer
@@ -1173,74 +1229,66 @@ where
         filters: &[ImageFilter],
         source_image: ImageId,
     ) -> Result<(), ErrorKind> {
-        // Fold adjacent color matrices; the folded run costs one pass. The
-        // capacity covers the worst case (nothing folds) plus the possible
-        // parity pass below, so the list never reallocates; ImageFilter is
-        // Copy, so building it never deep-copies anything.
-        let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len() + 1);
-        for filter in filters {
-            if let Some(prev) = passes.last_mut() {
-                if let Some(folded) = prev.fold_with(*filter) {
-                    *prev = folded;
-                    continue;
+        let passes = filter_passes(filters);
+        let (width, height) = self.image_size(source_image)?;
+        let scratch = self.acquire_filter_scratches(width, height, passes.len())?;
+        self.run_filter_passes(target_image, &passes, source_image, scratch);
+        Ok(())
+    }
+
+    /// Acquires the scratches a chain of `passes` ping-pongs between: none
+    /// for a single pass, which writes its target directly, one for two, two
+    /// beyond, whatever the chain's length. Scratches hold premultiplied
+    /// filter output; the flag keeps every consumer (filter passes and
+    /// composites) reading them under the same alpha convention - without it,
+    /// semi-transparent content is premultiplied a second time at each read
+    /// and darkens per pass. Holds nothing on failure.
+    fn acquire_filter_scratches(
+        &mut self,
+        width: usize,
+        height: usize,
+        passes: usize,
+    ) -> Result<[Option<ImageId>; 2], ErrorKind> {
+        let mut scratch = [None, None];
+        for i in 0..passes.saturating_sub(1).min(2) {
+            match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
+                Ok(id) => scratch[i] = Some(id),
+                Err(err) => {
+                    for id in scratch.into_iter().flatten() {
+                        self.release_transient_image(id);
+                    }
+                    return Err(err);
                 }
             }
-            passes.push(*filter);
         }
+        Ok(scratch)
+    }
 
-        // Orientation parity: a color-matrix pass flips the image (the
-        // render-target convention), the two-pass Gaussian blur preserves it.
-        // Appending an identity matrix when the flip count is even pins the
-        // documented flipped-storage contract for every chain shape - and
-        // makes the empty list a copy.
-        let flips = passes.iter().filter(|f| f.flips_output()).count();
-        if flips % 2 == 0 {
-            passes.push(ImageFilter::identity());
-        }
-
-        // Ping-pong between at most two scratches regardless of chain length;
-        // a single pass allocates none and writes the target directly.
-        let mut scratch: [Option<ImageId>; 2] = [None, None];
+    /// Runs `passes` (a [`filter_passes`] plan) from `source_image` into
+    /// `target_image`, ping-ponging through the `scratch` images acquired for
+    /// that plan, and releases them once the chain is recorded: they are free
+    /// for the next chain (or layer) of this size.
+    fn run_filter_passes(
+        &mut self,
+        target_image: ImageId,
+        passes: &[ImageFilter],
+        source_image: ImageId,
+        scratch: [Option<ImageId>; 2],
+    ) {
         let mut src = source_image;
         let last = passes.len() - 1;
-        let mut outcome = Ok(());
         for (i, filter) in passes.iter().enumerate() {
             let dst = if i == last {
                 target_image
             } else {
-                match scratch[i % 2] {
-                    Some(id) => id,
-                    None => {
-                        // Scratches hold premultiplied filter output; the flag
-                        // keeps every consumer (filter passes and composites)
-                        // reading them under the same alpha convention. Without
-                        // it, semi-transparent content is premultiplied a second
-                        // time at each read and darkens per pass.
-                        let acquired = self.image_size(source_image).and_then(|(width, height)| {
-                            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED)
-                        });
-                        match acquired {
-                            Ok(id) => {
-                                scratch[i % 2] = Some(id);
-                                id
-                            }
-                            Err(err) => {
-                                outcome = Err(err);
-                                break;
-                            }
-                        }
-                    }
-                }
+                scratch[i % 2].expect("a scratch was acquired for every pass but the last")
             };
             self.filter_image(dst, *filter, src);
             src = dst;
         }
-        // Whatever ran has been recorded; the scratches are free for the next
-        // chain (or layer) of this size.
         for id in scratch.into_iter().flatten() {
             self.release_transient_image(id);
         }
-        outcome
     }
 
     /// Opens a layer: subsequent drawing is captured into a transient
@@ -1269,13 +1317,22 @@ where
     /// shadow set before `begin_layer` is cast once by the whole group - the
     /// Canvas 2D `beginLayer()` rule for its layer rendering attributes, and
     /// what SVG's `feDropShadow` on a `<g>` means. Set the shadow state
-    /// again inside the layer to shadow individual draws as well. Layers nest;
-    /// each level costs one transient image (plus one more if filtered),
-    /// released at the next flush through the same pool seam the filter
-    /// chain and shadow passes use. When the backing store cannot be
-    /// allocated (degenerate or absurd bounds), the layer degrades to a
-    /// pass-through: drawing continues on the current target and `end_layer`
-    /// only rebalances state.
+    /// again inside the layer to shadow individual draws as well.
+    ///
+    /// Every image the effects draw through at `end_layer` is reserved here
+    /// with the backing store, so `true` promises the whole declaration: the
+    /// capture, a mask's coverage images (one, two for a luminance mask) and
+    /// a filter chain's result plus the scratches its passes ping-pong
+    /// between (none for a single pass, one for two, two beyond). Layers
+    /// nest; each open level holds that set until its `end_layer`, when it
+    /// returns to the pool the filter chain and shadow passes draw from too.
+    /// A Gaussian blur's horizontal-pass buffer is the renderer's own for the
+    /// pass's duration, outside the pool and the budget, so it is not
+    /// reserved. When the store or any reserved image cannot be allocated
+    /// (over the transient budget, past the texture limit, degenerate or
+    /// absurd bounds), the layer degrades to a pass-through as a whole:
+    /// drawing continues on the current target, `end_layer` only rebalances
+    /// state and no declared effect is applied - never only some of them.
     #[must_use = "false means a pass-through layer: its effects are not applied"]
     pub fn begin_layer(&mut self, effects: &LayerEffects) -> bool {
         let state = *self.state();
@@ -1301,6 +1358,7 @@ where
             self.layers.push(LayerRecord {
                 image,
                 mask_images: None,
+                filter_images: None,
                 previous_target: self.current_render_target,
                 origin: (0.0, 0.0),
                 root_origin: root,
@@ -1360,36 +1418,47 @@ where
                 .ok()
         };
 
-        // The mask is applied at end_layer, so its coverage images are
-        // reserved here with the store: a layer that could not get them then
-        // would have to composite unmasked, and the return value promises no
-        // effect is dropped silently.
-        let mask_images = match (image, &effects.mask) {
-            (Some(_), Some(mask)) => self.reserve_mask_images(width, height, mask.kind),
-            _ => None,
-        };
-        let image = match (image, effects.mask.is_some() && mask_images.is_none()) {
-            (Some(image), true) => {
-                self.release_transient_image(image);
-                None
-            }
-            (image, _) => image,
-        };
-
-        self.layers.push(LayerRecord {
+        // The effects are applied at end_layer, so every image they draw
+        // through is reserved here with the store - the mask's coverage
+        // images, then the filter chain's result and scratches. A layer that
+        // could not get one of them then would have to composite unmasked or
+        // unfiltered, and the return value promises no declared effect is
+        // dropped silently: short of any, the layer passes through as a
+        // whole and returns everything it took.
+        let mut record = LayerRecord {
             image,
-            mask_images,
+            mask_images: None,
+            filter_images: None,
             previous_target: self.current_render_target,
             origin: (minx, miny),
-            root_origin: match image {
-                Some(_) => (root.0 + minx, root.1 + miny),
-                None => root,
-            },
+            root_origin: root,
             width,
             height,
             effects: effects.clone(),
             outer_alpha: state.alpha,
-        });
+        };
+        if image.is_some() {
+            record.mask_images = effects
+                .mask
+                .and_then(|mask| self.reserve_mask_images(width, height, mask.kind));
+            let mask_reserved = effects.mask.is_none() || record.mask_images.is_some();
+            if mask_reserved && !effects.filters.is_empty() {
+                record.filter_images = self.reserve_filter_images(width, height, &effects.filters);
+            }
+            let chain_reserved = effects.filters.is_empty() || record.filter_images.is_some();
+            if mask_reserved && chain_reserved {
+                record.root_origin = (root.0 + minx, root.1 + miny);
+            } else {
+                for held in record.images() {
+                    self.release_transient_image(held);
+                }
+                record.image = None;
+                record.mask_images = None;
+                record.filter_images = None;
+            }
+        }
+        let image = record.image;
+        self.layers.push(record);
 
         self.save();
         let Some(image) = image else {
@@ -1426,7 +1495,7 @@ where
     /// effects, honoring the outer scissor and composite operation.
     /// Unbalanced calls are ignored.
     pub fn end_layer(&mut self) {
-        let Some(record) = self.layers.pop() else {
+        let Some(mut record) = self.layers.pop() else {
             return;
         };
         self.restore();
@@ -1435,27 +1504,19 @@ where
             return; // pass-through layer: nothing captured
         };
 
-        // Run the filter chain, if any. Orientation bookkeeping per the chain
-        // contract: the capture holds flipped storage; the chain flips
-        // storage-parity exactly once, so the filtered result is stored
-        // upright and must be sampled WITHOUT the FLIP_Y flag the raw capture
-        // needs.
-        let source = if record.effects.filters.is_empty() {
-            image
-        } else {
-            match self.acquire_transient_image(record.width, record.height, ImageFlags::PREMULTIPLIED) {
-                Ok(filtered) => match self.filter_image_chain(filtered, &record.effects.filters, image) {
-                    Ok(()) => filtered,
-                    // No budget for the chain's scratches: composite the
-                    // unfiltered capture rather than a blank result.
-                    Err(_) => {
-                        self.release_transient_image(filtered);
-                        image
-                    }
-                },
-                // Degrade to the unfiltered layer rather than dropping content.
-                Err(_) => image,
+        // Run the filter chain, if any, through the images reserved for it at
+        // begin_layer: the chain releases the scratches, the result goes back
+        // with the composite. Orientation bookkeeping per the chain contract:
+        // the capture holds flipped storage; the chain flips storage-parity
+        // exactly once, so the filtered result is stored upright and must be
+        // sampled WITHOUT the FLIP_Y flag the raw capture needs.
+        let source = match record.filter_images.take() {
+            Some(FilterImages { target, scratch }) => {
+                let passes = filter_passes(&record.effects.filters);
+                self.run_filter_passes(target, &passes, image, scratch);
+                target
             }
+            None => image,
         };
 
         let alpha = record.outer_alpha * record.effects.opacity;
@@ -1561,6 +1622,24 @@ where
             },
         };
         Some(MaskImages { normalized, converted })
+    }
+
+    /// Acquires a filter chain's transients for a layer store of
+    /// `width` x `height`: the result, which the chain stores upright and the
+    /// composite samples without FLIP_Y, and the scratches its pass plan
+    /// needs, sized like the capture the chain reads. `None`, holding
+    /// nothing, when the budget cannot fit them.
+    fn reserve_filter_images(&mut self, width: usize, height: usize, filters: &[ImageFilter]) -> Option<FilterImages> {
+        let target = self
+            .acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED)
+            .ok()?;
+        match self.acquire_filter_scratches(width, height, filter_passes(filters).len()) {
+            Ok(scratch) => Some(FilterImages { target, scratch }),
+            Err(_) => {
+                self.release_transient_image(target);
+                None
+            }
+        }
     }
 
     /// Multiplies `layer`'s alpha by the mask's coverage, in layer space,
@@ -2429,8 +2508,8 @@ where
     /// Deletes the frame's transient images, except those of layers still
     /// open across the flush: a layer's draws so far already live in its
     /// capture and the ones still to come must land in the same image, and
-    /// its mask draws through the coverage images reserved for it at
-    /// `end_layer`.
+    /// its effects draw at `end_layer` through the images reserved for them
+    /// with it.
     fn release_transient_images(&mut self) {
         let held: Vec<ImageId> = self.layers.iter().flat_map(LayerRecord::images).collect();
         self.transients.release_all(&mut self.images, &mut self.renderer, &held);
@@ -5475,30 +5554,108 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
 }
 
 /// A budget that fits a blurred layer's capture and filtered target but not
-/// the chain's scratch composites the unfiltered capture, not a blank image:
-/// the chain reports the exhausted budget and the layer degrades to it.
+/// the chain's scratch admits no layer at all: the chain's images are
+/// reserved with the store, so `begin_layer` reports pass-through and holds
+/// nothing, rather than composite the unfiltered capture behind a `true`.
+/// One scratch more and the same layer captures, holds all three images
+/// from `begin_layer` on, and composites the filtered result.
 #[test]
-fn a_chain_without_scratch_budget_degrades_to_the_capture() {
+fn a_layer_short_of_its_chain_scratch_budget_passes_through() {
     use crate::ImageFilter;
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(128, 128, 1.0);
     let padded = 192 * 192 * 4; // 144 x 144 padded, rounded
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
     canvas.set_transient_image_budget(2 * padded);
-    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }])));
-    let capture = canvas.layers.last().unwrap().image.unwrap();
+    assert!(!canvas.begin_layer(&blur));
+    assert!(canvas.layers.last().unwrap().image.is_none());
+    assert_eq!(
+        canvas.transients.free.len(),
+        canvas.transients.images.len(),
+        "a refused layer returns every image it took"
+    );
     canvas.end_layer();
-    // The composite command samples the capture (FLIP_Y), not the filtered
-    // target; the target was freed back to the pool unused.
+
+    canvas.set_transient_image_budget(3 * padded);
+    assert!(canvas.begin_layer(&blur));
+    let target = canvas.layers.last().unwrap().filter_images.unwrap().target;
+    assert_eq!(canvas.transients.images.len(), 3);
+    assert_eq!(
+        canvas.transients.free.len(),
+        0,
+        "the chain's images are held from begin_layer"
+    );
+    canvas.end_layer();
+    // The composite samples the filtered result, not the capture.
     let composite = canvas
         .commands
         .iter()
         .rev()
         .find(|c| c.image.is_some())
         .expect("a composite was recorded");
-    assert_eq!(composite.image, Some(capture));
-    assert_eq!(canvas.transients.images.len(), 2);
-    assert_eq!(canvas.transients.free.len(), 2);
+    assert_eq!(composite.image, Some(target));
+    assert_eq!(canvas.transients.free.len(), 3);
+}
+
+/// A filtered layer's reservation is sized by its pass plan: the result plus
+/// none, one or two scratches for a chain of one, two or more passes - the
+/// scratches `filter_image_chain` would ping-pong through - and a budget one
+/// image short of that plan refuses the layer whole.
+#[test]
+fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
+    use crate::ImageFilter;
+    let cases: [(&[ImageFilter], usize, usize); 3] = [
+        // One color pass: the result only. No blur, so the store is the canvas.
+        (&[ImageFilter::brightness(0.0)], 2, 64),
+        // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
+        (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 3, 128),
+        // brightness(2) cannot fold, so four passes: two scratches.
+        (
+            &[
+                ImageFilter::brightness(2.0),
+                ImageFilter::GaussianBlur { sigma: 1.0 },
+                ImageFilter::invert(1.0),
+            ],
+            4,
+            128,
+        ),
+    ];
+    for (filters, images, store) in cases {
+        let renderer = RecordingRenderer::default();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        let effects = LayerEffects::new().with_filters(filters);
+        let bytes = store * store * 4;
+
+        canvas.set_transient_image_budget(images * bytes);
+        assert!(canvas.begin_layer(&effects), "{filters:?}: {images} images fit");
+        assert_eq!(canvas.transients.images.len(), images, "{filters:?}");
+        assert_eq!(
+            canvas.transients.free.len(),
+            0,
+            "{filters:?}: all held from begin_layer"
+        );
+        canvas.end_layer();
+        assert_eq!(
+            canvas.transients.free.len(),
+            images,
+            "{filters:?}: all returned at end_layer"
+        );
+
+        canvas.flush_to_output(());
+        canvas.set_transient_image_budget((images - 1) * bytes);
+        assert!(
+            !canvas.begin_layer(&effects),
+            "{filters:?}: one image short refuses the layer"
+        );
+        assert_eq!(
+            canvas.transients.free.len(),
+            canvas.transients.images.len(),
+            "{filters:?}"
+        );
+        canvas.end_layer();
+    }
 }
 
 /// A frame boundary at the same size keeps an open layer capturing (WPT

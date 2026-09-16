@@ -64,11 +64,12 @@ All notable changes to this project will be documented in this file.
   would fill 256 MiB, while real artwork opens hundreds per frame.
   `Canvas::set_transient_image_budget()` caps what is held at once (default
   256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
-  through (`begin_layer()` returns `false`), `filter_image_chain()` returns
-  `ErrorKind::TransientImageBudgetExceeded` and a layer whose chain cannot run
-  composites its unfiltered capture, and shadows are skipped rather than
-  allocate. Shadow coverage rounds to 8 px, not the layers' 64, since shadows
-  are many and small.
+  through (`begin_layer()` returns `false` - a layer reserves every image its
+  effects draw through, a filter chain's result and scratches included, with
+  its store, so it is admitted whole or not at all), `filter_image_chain()`
+  returns `ErrorKind::TransientImageBudgetExceeded`, and shadows are skipped
+  rather than allocate. Shadow coverage rounds to 8 px, not the layers' 64,
+  since shadows are many and small.
 - Fixed two-stop gradients fading a transparent stop through the wrong colors:
   the stop's own color was discarded, so `transparent` to blue turned a plain
   light blue instead of darkening, and transparent red to blue lost its red.
