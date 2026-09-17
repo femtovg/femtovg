@@ -421,7 +421,8 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
 
     for (var i: f32 = 1.0; i <= 24.0; i += 1.) {
         // Work around GLES 2.0 limitation of only allowing constant loop indices by
-        // breaking here. Sigma is clamped to 8 on the Rust side and the kernel reaches
+        // breaking here. Each pass's sigma is bounded to 8 on the Rust side (a larger
+        // blur is split into passes that compose to it) and the kernel reaches
         // +/-3*sigma, so the tap count never exceeds this 24-iteration bound.
         if (i >= sampleCount) {
             break;

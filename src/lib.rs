@@ -544,28 +544,106 @@ impl LayerRecord {
     }
 }
 
+/// The largest standard deviation a blur chain, a layer filter or a shadow
+/// renders; above it the sigma is clamped. A cost guard: the split below
+/// runs `(sigma / 8)^2` passes of two full-size draws each, so this is 256
+/// passes - sigma 128 device pixels is a CSS `blur(40px)` at a 3x device
+/// pixel ratio, and reaches 386 px - and an absurd or non-finite sigma
+/// cannot plan an unbounded pass count. Browsers stop at Skia's `kMaxSigma`
+/// of 532 (SkBlurImageFilter.cpp, a 1000 px box kernel), which they reach by
+/// downscaling or running-sum box blurs, not by pass count; that path is
+/// femtovg/femtovg#325's.
+const MAX_CHAIN_BLUR_SIGMA: f32 = 128.0;
+
+/// The standard deviation a chain renders for a requested `sigma`: `None`
+/// for a degenerate one (zero, negative, NaN), which the coefficient
+/// sanitization renders as a copy, else the value clamped to
+/// [`MAX_CHAIN_BLUR_SIGMA`]. The one place the pass split and the store
+/// padding read a blur's sigma, so the passes a chain runs and the reach a
+/// layer or shadow pads for cannot disagree.
+fn chain_blur_sigma(sigma: f32) -> Option<f32> {
+    (sigma > 0.0).then(|| sigma.min(MAX_CHAIN_BLUR_SIGMA))
+}
+
+/// How a Gaussian blur of `sigma` runs within the shader's per-pass bound
+/// ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per pass)`. Gaussians
+/// compose in quadrature - k passes of sigma s blur like one pass of
+/// s * sqrt(k) - so a sigma above the bound B is exactly k = ceil((sigma / B)^2)
+/// passes of sigma / sqrt(k), each at most B: sigma 16 is four passes of 8,
+/// sigma 23 nine of 23/3. A sigma within the bound, or a degenerate one, is
+/// one pass with the value untouched, so small blurs render exactly as they
+/// did before the split existed. The cost is quadratic in sigma (each pass is
+/// two full-size draws), which is what the ceiling above bounds.
+/// The blur padding a store of `extent` px can afford under the backend's
+/// texture `limit`, given that stores round up to `granularity`: the full
+/// `pad` when it fits, else what leaves the rounded store within the limit,
+/// never negative. A layer or shadow at the limit then captures with its
+/// reach truncated at the store edge rather than passing through.
+fn bounded_pad(pad: f32, extent: f32, limit: usize, granularity: usize) -> f32 {
+    if pad <= 0.0 {
+        return 0.0;
+    }
+    let room = limit as f32 - extent.ceil() - granularity as f32;
+    pad.min((room * 0.5).floor().max(0.0))
+}
+
+fn blur_passes(sigma: f32) -> (usize, f32) {
+    let bound = renderer::MAX_BLUR_SIGMA;
+    match chain_blur_sigma(sigma) {
+        Some(sigma) if sigma > bound => {
+            let ratio = sigma / bound;
+            let passes = (ratio * ratio).ceil() as usize;
+            (passes, sigma / (passes as f32).sqrt())
+        }
+        _ => (1, sigma),
+    }
+}
+
 /// The passes a filter list runs as: runs of adjacent color matrices folded
-/// where that is exact ([`ImageFilter::fold_with`]), plus an identity pass
-/// when the flip count comes out even, so every chain shape leaves storage
-/// flipped once - which makes the empty list a copy. Never empty. What
-/// [`Canvas::filter_image_chain`] executes and what a layer's scratch
-/// reservation is sized from, so the two cannot disagree.
+/// where that is exact ([`ImageFilter::fold_with`]), each Gaussian blur
+/// above the shader's per-pass bound split into the passes that compose to
+/// it ([`blur_passes`]), plus an identity pass when the flip count comes out
+/// even, so every chain shape leaves storage flipped once - which makes the
+/// empty list a copy. Never empty. What [`Canvas::filter_image_chain`]
+/// executes and what a layer's scratch reservation is sized from, so the two
+/// cannot disagree.
 fn filter_passes(filters: &[ImageFilter]) -> Vec<ImageFilter> {
-    // The capacity covers the worst case (nothing folds) plus the parity
-    // pass, so the list never reallocates; ImageFilter is Copy, so building
-    // it never deep-copies anything.
-    let mut passes: Vec<ImageFilter> = Vec::with_capacity(filters.len() + 1);
+    // Fold first, split second: a blur never folds today, but the split
+    // passes are adjacent blurs, and expanding after the fold keeps them
+    // from being folded back should a fold of blurs ever exist. ImageFilter
+    // is Copy, so neither list deep-copies anything.
+    let mut folded: Vec<ImageFilter> = Vec::with_capacity(filters.len());
     for filter in filters {
-        if let Some(prev) = passes.last_mut() {
-            if let Some(folded) = prev.fold_with(*filter) {
-                *prev = folded;
+        if let Some(prev) = folded.last_mut() {
+            if let Some(merged) = prev.fold_with(*filter) {
+                *prev = merged;
                 continue;
             }
         }
-        passes.push(*filter);
+        folded.push(*filter);
+    }
+    // The capacity covers every split pass plus the parity pass, so the list
+    // never reallocates.
+    let count: usize = folded
+        .iter()
+        .map(|f| match f {
+            ImageFilter::GaussianBlur { sigma } => blur_passes(*sigma).0,
+            _ => 1,
+        })
+        .sum();
+    let mut passes: Vec<ImageFilter> = Vec::with_capacity(count + 1);
+    for filter in folded {
+        match filter {
+            ImageFilter::GaussianBlur { sigma } => {
+                let (count, sigma) = blur_passes(sigma);
+                passes.extend(std::iter::repeat_n(ImageFilter::GaussianBlur { sigma }, count));
+            }
+            other => passes.push(other),
+        }
     }
     // A color-matrix pass flips the image (the render-target convention),
-    // the two-pass Gaussian blur preserves it.
+    // the two-pass Gaussian blur preserves it - however many of them a
+    // split adds, the parity is the unsplit chain's.
     let flips = passes.iter().filter(|f| f.flips_output()).count();
     if flips % 2 == 0 {
         passes.push(ImageFilter::identity());
@@ -879,11 +957,16 @@ where
     /// deviation is `shadowBlur / 2`, expressed in output (device) pixels. The
     /// default is `0` (no blur). Negative or non-finite values are ignored.
     ///
-    /// Known limitation: the blur shader caps its kernel reach at +/-24 px (a
-    /// GLES 2.0 constraint on loop bounds). This covers the full +/-3 sigma for
-    /// `shadowBlur` <= 16, which matches reference browsers exactly; larger values
-    /// render marginally tighter than spec (about 94% of the target sigma at
-    /// `shadowBlur` 24).
+    /// One blur shader pass covers a standard deviation of 8 device pixels
+    /// (`shadowBlur` 16; its kernel reach is bounded at +/-24 px, a GLES 2.0
+    /// constraint on loop bounds). A larger blur runs as several passes that
+    /// compose to the requested sigma, the way a filter chain's blur does
+    /// (see [`filter_image_chain`](Self::filter_image_chain)), with the
+    /// shadow's offscreen padded by the full reach, so `shadowBlur` 40 spreads
+    /// like the browsers' sigma 20 rather than a sigma-8 one; the pass count
+    /// grows with the square of the sigma, up to a sigma of 128 (`shadowBlur`
+    /// 256), and each pass's kernel stops at 2.875 sigma, so the composed
+    /// blur lands within 2 % of the requested sigma.
     pub fn set_shadow_blur(&mut self, blur: f32) {
         if blur.is_finite() && blur >= 0.0 {
             self.state_mut().shadow_blur = blur;
@@ -1093,6 +1176,13 @@ where
     ///
     /// The filtering does not take any transformation set on the Canvas into account nor does it
     /// change the current rendering target.
+    ///
+    /// This is one shader pass, and a Gaussian blur pass renders a standard
+    /// deviation of at most 8 device pixels (the shader's kernel is bounded
+    /// at 24 taps per side, a GLES 2.0 loop constraint): a larger `sigma` is
+    /// clamped to 8 here. For a blur above that use
+    /// [`filter_image_chain`](Self::filter_image_chain), which splits it
+    /// into passes that compose to the requested sigma.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
         let Ok((image_width, image_height)) = self.image_size(source_image) else {
             return;
@@ -1167,7 +1257,9 @@ where
     /// what counts against the cap is the deepest nesting, not the number of
     /// layers: at 1080p a viewport-sized layer is 4.7 MB and a blurred one three
     /// times that (its capture, its result and one scratch; the blur's
-    /// horizontal-pass buffer is the renderer's own, outside the pool), so a frame of hundreds of sibling layers holds a few tens of
+    /// horizontal-pass buffer is the renderer's own, outside the pool) - four
+    /// times, each padded by the blur's full reach, once the blur is above
+    /// sigma 8 and runs as several passes - so a frame of hundreds of sibling layers holds a few tens of
     /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
     /// the layer passes through with its effects dropped - a layer reserves
     /// every image its effects draw through with its store, so it is
@@ -1195,14 +1287,21 @@ where
     /// one GPU pass - as long as each matrix but the last stays within [0, 1];
     /// one that can overflow (`brightness(>1)`, `contrast`, `sepia`) keeps its
     /// own pass so its clamp still happens, matching how browsers clamp per
-    /// filter function. Passes that do not fold ping-pong between at most two
+    /// filter function. A Gaussian blur whose standard deviation is above the
+    /// 8 device pixels one shader pass covers runs as `ceil((sigma / 8)^2)`
+    /// passes of `sigma / sqrt(passes)`: Gaussians compose in quadrature, so
+    /// four passes of sigma 8 are exactly one blur of sigma 16, and nine of
+    /// 23/3 one of 23 - the full reach, where the single-pass
+    /// [`filter_image`](Self::filter_image) would clamp to 8. The pass count
+    /// grows with the square of the sigma, so sigma is capped at 128 (256
+    /// passes). Passes that do not fold ping-pong between at most two
     /// transient scratch images sized like the source; a blur pass allocates
     /// one more full-size buffer of its own for its duration, so peak transient
     /// memory is twice the source image, or three times across a blur - bounded
-    /// regardless of chain length either way. The scratches are freed at the
-    /// next flush. All color work is in unpremultiplied sRGB with output
-    /// clamped to [0, 1] per pass, so an alpha-amplifying matrix feeding a blur
-    /// cannot blow out later passes.
+    /// regardless of chain length or pass count either way. The scratches are
+    /// freed at the next flush. All color work is in unpremultiplied sRGB with
+    /// output clamped to [0, 1] per pass, so an alpha-amplifying matrix feeding
+    /// a blur cannot blow out later passes.
     ///
     /// The target ends up in the same orientation convention as a single
     /// color-matrix [`filter_image`](Self::filter_image) call: content stored
@@ -1308,8 +1407,18 @@ where
     /// scissor rect (the natural memory bound - set a scissor before opening
     /// a layer to keep it small) padded by the blur kernel reach when the
     /// chain contains Gaussian blurs, rounded up to 64 px per axis so sibling
-    /// layers share one pooled store. Content outside that padded rect does
-    /// not survive into the layer, mirroring SVG's filter-region behavior.
+    /// layers share one pooled store; the pad is bounded by the backend's
+    /// texture limit, so a layer at the limit blurs with its reach truncated
+    /// at the store edge rather than passing through. The reach is the chain's true one,
+    /// 3 sigma + 2 per side with the sigmas of several blurs summed in
+    /// quadrature, not the 8 px one shader pass covers: a blur above that
+    /// runs as several passes (see
+    /// [`filter_image_chain`](Self::filter_image_chain)),
+    /// so a big blur pads its store by its full reach and pays for it in
+    /// memory (sigma 23 adds 71 px per side, a fifth more bytes on a 1080p
+    /// store, for each of the capture, the result and two scratches).
+    /// Content outside that padded rect does not survive
+    /// into the layer, mirroring SVG's filter-region behavior.
     /// A rotated or rounded scissor cannot be captured as a rect; the layer
     /// then spans the whole canvas. Whatever its shape, the scissor clips the
     /// layer's result once, at the composite, after the filters: a blur
@@ -1386,15 +1495,17 @@ where
             return image.is_some();
         }
 
-        // Blur reach padding: 3 sigma covers >99.7% of the kernel, each sigma
-        // clamped to the in-shader bound. Successive Gaussians compound in
+        // Blur reach padding: 3 sigma covers >99.7% of the kernel. The sigma
+        // is each blur's true one (the chain runs a blur above the shader's
+        // per-pass bound as passes that compose to it, so its reach is real),
+        // clamped only at the chain ceiling. Successive Gaussians compound in
         // quadrature - n blurs of sigma reach like one of sigma * sqrt(n) - so
         // the reach of a chain is the root of the sum of squares.
         let sigma_sq: f32 = effects
             .filters
             .iter()
             .filter_map(|f| match f {
-                ImageFilter::GaussianBlur { sigma } if sigma.is_finite() && *sigma > 0.0 => Some(sigma.min(8.0)),
+                ImageFilter::GaussianBlur { sigma } => chain_blur_sigma(*sigma),
                 _ => None,
             })
             .map(|sigma| sigma * sigma)
@@ -1413,6 +1524,16 @@ where
             .scissor
             .device_bounds(canvas_w, canvas_h)
             .unwrap_or_else(|| Rect::new(0.0, 0.0, canvas_w, canvas_h));
+        // The true reach can push a full-width store past the backend's
+        // texture limit (2048 px on a VideoCore IV); bound the pad so the
+        // layer still captures with its reach truncated at the store edge,
+        // instead of passing through with every effect dropped.
+        let pad = bounded_pad(
+            pad,
+            rect.w.max(rect.h),
+            self.renderer.max_texture_size(),
+            transient::LAYER_GRANULARITY,
+        );
         let minx = (rect.x - pad).floor().max(-pad);
         let miny = (rect.y - pad).floor().max(-pad);
         let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
@@ -2348,11 +2469,13 @@ where
     /// `CompositeOperation::SourceIn`, which masks the shadow color by the source's
     /// alpha. The result carries `shadowColor.rgb` with alpha
     /// `source.alpha * shadowColor.a` per pixel. That image is then
-    /// Gaussian-blurred via the existing `filter_image` path (standard deviation
-    /// `shadowBlur / 2`) and finally composited back into the current render
-    /// target, translated by the device-space shadow offset and drawn *under* the
-    /// actual shape. The current scissor, global alpha and composite operation are
-    /// honored when compositing.
+    /// Gaussian-blurred (standard deviation `shadowBlur / 2`) through the
+    /// chain planner's split ([`blur_passes`]): a sigma above the shader's
+    /// per-pass bound runs as the passes that compose to it, ping-ponging
+    /// between the coverage image and the blurred one, and finally composited
+    /// back into the current render target, translated by the device-space
+    /// shadow offset and drawn *under* the actual shape. The current scissor,
+    /// global alpha and composite operation are honored when compositing.
     ///
     /// `draw_coverage` is expected to issue the shape's normal draw command(s) with
     /// its real paint; the canvas transform in effect during the call already maps
@@ -2380,7 +2503,18 @@ where
 
         // Pad the offscreen image for the blur kernel reach (~3 sigma covers
         // >99.7% of the Gaussian) plus a fringe pixel for antialiased edges.
-        let pad = (sigma.min(8.0) * 3.0).ceil() + 2.0;
+        // The reach is the true sigma's: the blur below runs as as many
+        // passes as it takes to compose to it.
+        let reach = chain_blur_sigma(sigma).unwrap_or(0.0);
+        let pad = (reach * 3.0).ceil() + 2.0;
+        // Bounded like a layer's: a shadow whose padded coverage would pass
+        // the texture limit keeps its coverage and loses reach at the edge.
+        let pad = bounded_pad(
+            pad,
+            (shape_bounds.maxx - shape_bounds.minx).max(shape_bounds.maxy - shape_bounds.miny),
+            self.renderer.max_texture_size(),
+            transient::SHADOW_GRANULARITY,
+        );
 
         // Coverage is rendered at the shape's own location; the offset is applied
         // later when compositing, so the offscreen only needs to bound the shape.
@@ -2473,10 +2607,21 @@ where
         self.restore();
 
         // Blur the coverage into the second offscreen image; a sharp shadow (no
-        // blur image allocated) composites the coverage directly.
+        // blur image allocated) composites the coverage directly. A sigma above
+        // the shader's per-pass bound is the planner's k passes of sigma /
+        // sqrt(k), ping-ponging between the two images (each pass reads one
+        // and writes the other through the renderer's own horizontal buffer),
+        // so the result sits in the blurred image after an odd count and back
+        // in the coverage image after an even one.
         let source_image = if let Some(blurred_image) = blurred_image {
-            self.filter_image(blurred_image, ImageFilter::GaussianBlur { sigma }, coverage_image);
-            blurred_image
+            let (passes, pass_sigma) = blur_passes(sigma);
+            let mut src = coverage_image;
+            let mut dst = blurred_image;
+            for _ in 0..passes {
+                self.filter_image(dst, ImageFilter::GaussianBlur { sigma: pass_sigma }, src);
+                std::mem::swap(&mut src, &mut dst);
+            }
+            src
         } else {
             coverage_image
         };
@@ -4234,45 +4379,68 @@ fn opaque_shadow_emits_offscreen_blur_pass() {
     );
 }
 
-/// Known limitation: the blur shader uses the true (spec) Gaussian weights but
-/// caps the kernel *reach* (tap count) at +/-24 px, because GLES 2.0 forbids
-/// non-constant loop bounds (see `render_gaussian_blur` in the OpenGL backend and
-/// `gaussian_blur_filter` in the wgpu backend). The reach covers the full +/-3
-/// sigma for sigma <= 8 (`shadowBlur` <= 16), so those blurs match the reference
-/// renderers exactly. For larger `shadowBlur` the reach is below 3 sigma, so the
-/// blur renders marginally tighter than spec (about 94% of the target sigma at
-/// `shadowBlur` 24). femtovg still records the un-clamped, spec-correct sigma
-/// (`shadowBlur / 2`) in the draw command; this test documents that.
+/// A shadow blur above what one shader pass covers (sigma 8, the 24-tap
+/// GLES 2.0 loop) runs as the planner's quadrature passes: `shadowBlur` 40 is
+/// sigma 20, seven passes of 20 / sqrt(7) whose squares sum back to 400,
+/// ping-ponging between the coverage and blurred images, and the composite
+/// reads the image the odd count leaves the result in. The offscreen pads by
+/// the true reach, 62 px per side, not the 26 of the per-pass bound.
 #[test]
-fn large_shadow_blur_records_unclamped_spec_sigma() {
+fn a_large_shadow_blur_runs_as_quadrature_passes() {
     use renderer::CommandType;
 
     let renderer = RecordingRenderer::default();
     let recorded = renderer.last_commands.clone();
     let mut canvas = Canvas::new(renderer).unwrap();
-    canvas.set_size(100, 100, 1.0);
+    canvas.set_size(300, 300, 1.0);
 
-    // shadowBlur 40 => spec sigma 20, well past the renderers' 8.0 clamp.
     canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
     canvas.set_shadow_blur(40.0);
 
     let mut path = Path::new();
-    path.rect(40.0, 40.0, 20.0, 20.0);
-    canvas.fill_path(&path, &Paint::color(Color::rgb(255, 0, 0)));
+    path.rect(100.0, 100.0, 20.0, 20.0);
+    let mut paint = Paint::color(Color::rgb(255, 0, 0));
+    paint.set_anti_alias(false);
+    canvas.fill_path(&path, &paint);
+    // The coverage and blurred images: 20 + 2 * 62 = 144 px square (shadow
+    // images round to 8), where the per-pass bound padded 72.
+    assert_eq!(canvas.transients.images.len(), 2);
+    for &id in &canvas.transients.images {
+        assert_eq!(canvas.image_size(id).unwrap(), (144, 144));
+    }
     canvas.flush_to_output(());
 
     let commands = recorded.borrow();
-    let sigma = commands.iter().find_map(|c| match c.cmd_type {
-        CommandType::RenderFilteredImage {
-            filter: ImageFilter::GaussianBlur { sigma },
-            ..
-        } => Some(sigma),
-        _ => None,
-    });
+    let passes: Vec<(ImageId, ImageId, f32)> = commands
+        .iter()
+        .filter_map(|c| match c.cmd_type {
+            CommandType::RenderFilteredImage {
+                target_image,
+                filter: ImageFilter::GaussianBlur { sigma },
+            } => Some((c.image.expect("a blur reads an image"), target_image, sigma)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(passes.len(), 7);
+    for (_, _, sigma) in &passes {
+        assert!((sigma - 20.0 / 7f32.sqrt()).abs() < 1e-5, "{sigma}");
+    }
+    let composed: f32 = passes.iter().map(|(_, _, s)| s * s).sum::<f32>().sqrt();
+    assert!((composed - 20.0).abs() < 1e-3, "{composed}");
+    for window in passes.windows(2) {
+        let ((src, dst, _), (next_src, next_dst, _)) = (window[0], window[1]);
+        assert_eq!((next_src, next_dst), (dst, src), "passes ping-pong");
+    }
+    let (_, last_target, _) = passes[6];
+    let composite = commands
+        .iter()
+        .rev()
+        .find(|c| c.image.is_some() && !matches!(c.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .expect("the shadow composite");
     assert_eq!(
-        sigma,
-        Some(20.0),
-        "the command must carry the unclamped spec sigma (blur/2); the 8.0 clamp is a renderer-side limitation"
+        composite.image,
+        Some(last_target),
+        "the composite reads the seventh pass's target"
     );
 }
 
@@ -5624,11 +5792,14 @@ fn a_layer_short_of_its_chain_scratch_budget_passes_through() {
 #[test]
 fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     use crate::ImageFilter;
-    let cases: [(&[ImageFilter], usize, usize); 3] = [
+    let cases: [(&[ImageFilter], usize, usize); 4] = [
         // One color pass: the result only. No blur, so the store is the canvas.
         (&[ImageFilter::brightness(0.0)], 2, 64),
         // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
         (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 3, 128),
+        // A blur above the per-pass bound is four passes plus parity: two
+        // scratches, and the store pads by the true reach, 50 px, to 192.
+        (&[ImageFilter::GaussianBlur { sigma: 16.0 }], 4, 192),
         // A blur never folds with a color matrix, so brightness, blur and
         // invert are three passes plus the parity identity: four, two scratches.
         (
@@ -5750,6 +5921,181 @@ fn chained_blurs_pad_in_quadrature() {
     assert_eq!((record.width, record.height), (256, 256));
     canvas.end_layer();
     canvas.restore();
+}
+
+/// A blur within the shader's per-pass bound is one pass with its sigma
+/// untouched, plus the parity identity - the plan it always had, so small
+/// blurs render exactly as before the split existed. A degenerate sigma is
+/// one pass too, for the coefficient sanitization to copy through.
+#[test]
+fn a_blur_within_the_shader_bound_stays_one_pass() {
+    use crate::ImageFilter;
+    for sigma in [0.5, 3.0, 8.0] {
+        let passes = filter_passes(&[ImageFilter::GaussianBlur { sigma }]);
+        assert_eq!(passes.len(), 2, "sigma {sigma}: one blur pass and the parity identity");
+        assert!(
+            matches!(passes[0], ImageFilter::GaussianBlur { sigma: s } if s == sigma),
+            "{:?}",
+            passes[0]
+        );
+        assert!(matches!(passes[1], ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX));
+    }
+    assert_eq!(blur_passes(8.0), (1, 8.0));
+    assert_eq!(blur_passes(0.0), (1, 0.0));
+    assert_eq!(blur_passes(-1.0).0, 1);
+    assert_eq!(blur_passes(f32::NAN).0, 1);
+}
+
+/// Gaussians compose in quadrature, so a blur above the bound B = 8 is
+/// exactly k = ceil((sigma / B)^2) passes of sigma / sqrt(k): 16 is four of
+/// 8, 23 is nine of 23/3, every pass within the bound and their squares
+/// summing back to the requested sigma's. The ceiling keeps the plan finite
+/// for an absurd sigma.
+#[test]
+fn a_blur_above_the_bound_splits_into_quadrature_passes() {
+    use crate::ImageFilter;
+    let blur_sigmas = |filters: &[ImageFilter]| -> Vec<f32> {
+        filter_passes(filters)
+            .iter()
+            .filter_map(|f| match f {
+                ImageFilter::GaussianBlur { sigma } => Some(*sigma),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(blur_sigmas(&[ImageFilter::GaussianBlur { sigma: 16.0 }]), vec![8.0; 4]);
+    let nine = blur_sigmas(&[ImageFilter::GaussianBlur { sigma: 23.0 }]);
+    assert_eq!(nine.len(), 9);
+    for sigma in &nine {
+        assert!((sigma - 23.0 / 3.0).abs() < 1e-5, "{sigma}");
+        assert!(*sigma <= renderer::MAX_BLUR_SIGMA);
+    }
+    let composed: f32 = nine.iter().map(|s| s * s).sum::<f32>().sqrt();
+    assert!((composed - 23.0).abs() < 1e-4, "{composed}");
+    // Just past the bound: two passes, neither above it.
+    let (passes, sigma) = blur_passes(8.5);
+    assert_eq!(passes, 2);
+    assert!((sigma - 8.5 / 2f32.sqrt()).abs() < 1e-5);
+    // The ceiling bounds the plan: an infinite sigma is 128's 256 passes,
+    // not 2^56 of them.
+    assert_eq!(blur_passes(f32::INFINITY), blur_passes(128.0));
+    assert_eq!(blur_passes(128.0), (256, 8.0));
+    assert_eq!(blur_passes(1e9), blur_passes(128.0));
+}
+
+/// The split changes the pass count, not the chain's shape: a blur pass
+/// preserves the flip, so [blur 16] ends with the parity identity like
+/// [blur 8] does and [blur 16, brightness] does not, like [blur 8,
+/// brightness]; and every chain ping-pongs through the same scratch pair -
+/// min(2, passes - 1) of them, however many passes a split adds.
+#[test]
+fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
+    use crate::ImageFilter;
+    let ends_with_identity = |filters: &[ImageFilter]| {
+        matches!(
+            filter_passes(filters).last(),
+            Some(ImageFilter::ColorMatrix { matrix }) if *matrix == ImageFilter::IDENTITY_MATRIX
+        )
+    };
+    let small = ImageFilter::GaussianBlur { sigma: 8.0 };
+    let big = ImageFilter::GaussianBlur { sigma: 16.0 };
+    let bright = ImageFilter::brightness(1.2);
+    assert!(ends_with_identity(&[small]) && ends_with_identity(&[big]));
+    assert!(!ends_with_identity(&[small, bright]) && !ends_with_identity(&[big, bright]));
+    assert_eq!(filter_passes(&[big, bright]).len(), 5);
+
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    for filters in [&[big][..], &[big, bright], &[big, bright, big]] {
+        let scratch = canvas
+            .acquire_filter_scratches(64, 64, filter_passes(filters).len())
+            .unwrap();
+        assert_eq!(scratch.iter().flatten().count(), 2, "{filters:?}: one scratch pair");
+        for id in scratch.into_iter().flatten() {
+            canvas.release_transient_image(id);
+        }
+    }
+    assert_eq!(canvas.transients.images.len(), 2, "the pair is reused across plans");
+}
+
+/// A layer pads its store by the blur's true reach, 3 sigma + 2 per side,
+/// since the chain now renders it: sigma 16 pads 50 px where the per-pass
+/// bound padded 26, and two of them compound to sqrt(512) = 22.6, 70 px.
+#[test]
+fn a_layer_pads_by_the_true_blur_reach() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(800, 600, 1.0);
+    canvas.save();
+    canvas.scissor(100.0, 50.0, 200.0, 200.0);
+    for (sigma, pad, store) in [(8.0, 26.0, 256), (16.0, 50.0, 320), (23.0, 71.0, 384)] {
+        let blur = ImageFilter::GaussianBlur { sigma };
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur])));
+        let record = canvas.layers.last().unwrap();
+        assert_eq!(record.origin, (100.0 - pad, 50.0 - pad), "sigma {sigma}");
+        // 200 + 2 * pad, rounded up to 64.
+        assert_eq!((record.width, record.height), (store, store), "sigma {sigma}");
+        canvas.end_layer();
+    }
+    let blur = ImageFilter::GaussianBlur { sigma: 16.0 };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur, blur])));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (30.0, -20.0));
+    assert_eq!((record.width, record.height), (384, 384));
+    canvas.end_layer();
+    canvas.restore();
+}
+
+/// A layer whose true blur reach would pad its store past the backend's
+/// texture limit still captures: the pad shrinks to what the limit leaves,
+/// so the blur loses reach at the store edge instead of the layer passing
+/// through with every effect dropped.
+#[test]
+fn a_layer_at_the_texture_limit_keeps_its_blur_with_a_bounded_pad() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer {
+        max_texture_size: 2048,
+        ..RecordingRenderer::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1920, 1080, 1.0);
+    // Sigma 40 wants 122 px of pad: 2164 px wide, past the limit.
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 40.0 }]);
+    assert!(
+        canvas.begin_layer(&blur),
+        "the layer captures instead of passing through"
+    );
+    let record = canvas.layers.last().unwrap();
+    assert!(record.image.is_some());
+    assert!(
+        record.width <= 2048 && record.height <= 2048,
+        "store {}x{}",
+        record.width,
+        record.height
+    );
+    // Pad 32 (what a 1920 px span leaves under 2048 with a 64 px rounding
+    // margin): 1984 wide, within the limit.
+    assert_eq!(record.width, 1984, "the store uses what the limit leaves");
+    canvas.end_layer();
+
+    // The same blur on a small scissor keeps its full reach.
+    canvas.scissor(100.0, 100.0, 200.0, 200.0);
+    assert!(canvas.begin_layer(&blur));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (100.0 - 122.0, 100.0 - 122.0));
+    canvas.end_layer();
+}
+
+/// The pad rule alone: the full pad when it fits, what the rounded store can
+/// afford when it does not, never negative.
+#[test]
+fn a_bounded_pad_never_pushes_a_store_past_the_limit() {
+    assert_eq!(bounded_pad(122.0, 1920.0, 2048, 64), 32.0);
+    assert_eq!(bounded_pad(122.0, 200.0, 2048, 64), 122.0);
+    assert_eq!(bounded_pad(122.0, 2048.0, 2048, 64), 0.0);
+    assert_eq!(bounded_pad(0.0, 1920.0, 2048, 64), 0.0);
 }
 
 /// A scissor set under a scale still bounds the layer - every canvas drawn
