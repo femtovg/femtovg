@@ -694,14 +694,18 @@ impl Renderer for WGPURenderer {
                         };
                         gaussian_blur_filter(&mut pass, blur, command, sigma, target_image);
                     }
-                    crate::ImageFilter::ColorMatrix { matrix } => {
+                    single_pass => {
+                        let target_info = images.get(target_image).unwrap().info;
+                        let (shader_type, slots) = single_pass
+                            .single_pass(target_info.width() as f32, target_info.height() as f32)
+                            .expect("every filter but the Gaussian blur runs as one pass");
                         let mut pass = FilterPass {
                             images,
                             current_render_target: &mut current_render_target,
                             render_pass_builder: &mut render_pass_builder,
                             pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                         };
-                        color_matrix_filter(&mut pass, command, matrix, target_image);
+                        single_pass_filter(&mut pass, command, shader_type, slots, target_image);
                     }
                 },
             }
@@ -1027,10 +1031,13 @@ fn gaussian_blur_filter(
 
 /// Single-pass color-matrix filter: sample the source once and apply the 4x5
 /// matrix. Mirrors `gaussian_blur_filter` but without the intermediate texture.
-fn color_matrix_filter(
+/// Runs a one-pass filter (color matrix, turbulence, transfer) over the
+/// command's quad into `target_image`, sampling the command's image.
+fn single_pass_filter(
     pass: &mut FilterPass<'_, '_>,
     command: super::Command,
-    matrix: [f32; 20],
+    shader_type: ShaderType,
+    slots: [f32; 20],
     target_image: ImageId,
 ) {
     let FilterPass {
@@ -1066,11 +1073,15 @@ fn color_matrix_filter(
         0.,
         0.,
     );
-    params.shader_type = ShaderType::FilterImageColorMatrix;
-    // The 4x5 matrix rides the dead scissor/paint-mat slots during the filter
-    // pass (see `renderColorMatrix` in the shader) — no uniform-array growth.
-    params.scissor_mat.copy_from_slice(&matrix[..12]);
-    params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+    let target_info = images.get(target_image).unwrap().info;
+    params.shader_type = shader_type;
+    // The filter's parameters ride the dead scissor/paint-mat slots during the
+    // pass (see `ImageFilter::single_pass`) — no uniform-array growth.
+    params.scissor_mat.copy_from_slice(&slots[..12]);
+    params.paint_mat[..8].copy_from_slice(&slots[12..20]);
+    // A generating pass binds its lookup table as the image, so the output
+    // extent comes from the target rather than from what is sampled.
+    params.extent = [target_info.width() as f32, target_info.height() as f32];
 
     render_pass_builder.set_render_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
