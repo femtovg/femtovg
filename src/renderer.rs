@@ -293,15 +293,26 @@ impl ShaderType {
     }
 }
 
+/// The largest standard deviation one Gaussian blur pass renders. The
+/// fragment shader's blur loop is bounded at 24 taps per side (GLES 2.0 needs
+/// a constant loop bound) and the kernel reaches 3 sigma, so a pass covers
+/// sigma 8 exactly and no more. A blur above it is not clamped away: the chain
+/// planner (`filter_passes` in lib.rs) runs it as several passes of at most
+/// this sigma, which compose in quadrature to the requested one. The
+/// coefficients below and the shader's tap count agree on this value.
+pub(crate) const MAX_BLUR_SIGMA: f32 = 8.0;
+
 /// Gaussian blur coefficients for `sigma`, sanitized the same way for every
 /// backend. Sigma 0 (or negative / NaN) would divide the coefficient by zero
-/// and blank the output instead of passing the image through, and a huge sigma
-/// must clamp to the bound the fragment shader's loop uses (GLES 2.0 needs a
-/// constant loop bound) so the coefficients and the iteration count agree.
-/// Near-zero renders as a visually exact copy. Returns the three coefficients
-/// and the sanitized sigma the shader must be given.
+/// and blank the output instead of passing the image through, and a sigma
+/// above [`MAX_BLUR_SIGMA`] must clamp to the bound the fragment shader's loop
+/// uses so the coefficients and the iteration count agree - a single
+/// `filter_image` pass renders such a sigma at the bound; a chain, a layer
+/// filter or a shadow blur splits it into passes first and never sends one
+/// above it. Near-zero renders as a visually exact copy. Returns the three
+/// coefficients and the sanitized sigma the shader must be given.
 pub(crate) fn gaussian_blur_coefficients(sigma: f32) -> ([f32; 3], f32) {
-    let sigma = if sigma > 0.0 { sigma.min(8.0) } else { 1e-3 };
+    let sigma = if sigma > 0.0 { sigma.min(MAX_BLUR_SIGMA) } else { 1e-3 };
     let x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
     let y = f32::exp(-0.5 / (sigma * sigma));
     ([x, y, y * y], sigma)

@@ -3,6 +3,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed Gaussian blurs with a standard deviation above 8 device pixels
+  rendering narrower than requested. One blur shader pass covers sigma 8 (its
+  kernel is bounded at 24 taps per side, a GLES 2.0 loop constraint) and the
+  sigma was clamped to that, so a layer filter, a `filter_image_chain()` blur
+  or a shadow past it - an SVG `feGaussianBlur stdDeviation="2.38"` on a
+  48-unit icon shown at 200 px and 2.35x zoom is sigma 23 - blurred like sigma
+  8. Gaussians compose in quadrature, so such a blur now runs as
+  `ceil((sigma / 8)^2)` passes of `sigma / sqrt(passes)` through the chain's
+  existing scratch ping-pong (sigma 16 is four passes of 8, sigma 23 nine of
+  23/3), and layer stores and shadow coverage pad by the true reach, 3 sigma +
+  2 per side, so a big blur costs memory in proportion; the pass count grows
+  with the square of the sigma and is capped at 256 (sigma 128). Blurs of
+  sigma 8 and below are the single pass they were, bit for bit, and the
+  single-pass `filter_image()` keeps the clamp. The Google Workspace icon at
+  2.35x zoom went from 4.43% of pixels off against Chromium 131 (3.02%
+  structural: a ribbon along the blurred edge) to 0.06% (0.00%). The wgpu
+  backend now keeps one horizontal blur buffer per size instead of creating a
+  texture per pass, which held every pass's buffer until the frame's submit
+  retired.
 - Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
   by the square of the device width (a nanovg heuristic), so a 0.2 px line
   carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
