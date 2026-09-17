@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
+  above 8 device pixels) coming out narrower than requested. A layer filter, a
+  filter chain or a shadow blurred past that limit now runs as several passes
+  that compose to the requested width, and its offscreen padding follows the
+  true reach; blurs within the limit render exactly as before. The wgpu backend
+  also reuses one blur buffer across passes instead of allocating one per pass.
+  Fixes the Google Workspace SVG icon, amongst several others.
 - Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
   by the square of the device width (a nanovg heuristic), so a 0.2 px line
   carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
@@ -19,6 +26,18 @@ All notable changes to this project will be documented in this file.
   the same pixels either way, and the authored winding still selects holes for
   `FillRule::NonZero`. This also takes most of the over-inking out of thin
   filled shapes, which were paying the same pixel on both edges.
+- Added `ImageFilter::Turbulence`, the SVG `feTurbulence` primitive, generated on
+  the GPU from the SVG 1.1 reference algorithm - the same Park-Miller generator
+  and Perlin lattice Chromium and Firefox run, so a seed gives a browser's noise.
+  The lattice is uploaded once per seed as a 512 KB texture with the spec's two
+  dependent permutation lookups pre-composed, so every fetch is addressed
+  straight from the pixel (the shape tile-based mobile GPUs pipeline) at eight
+  fetches per octave for all four channels; the last four seeds stay cached. A
+  `transform` maps noise space onto the output so the pattern scales with the
+  content, and `stitchTiles` is supported. Added `ImageFilter::LinearRgbToSrgb`
+  and `SrgbToLinearRgb`, the sRGB transfer curve as a pass, so a chain can run
+  in linearRGB the way SVG filters do by default and hand back what a browser
+  displays; an adjacent pair folds away.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single

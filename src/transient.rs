@@ -43,6 +43,10 @@ pub(crate) fn round_up(n: usize, granularity: usize) -> usize {
 pub(crate) struct TransientPool {
     /// Every live transient, deleted at the flush.
     pub(crate) images: Vec<ImageId>,
+    // Images the canvas owns elsewhere (a turbulence lattice cache) and
+    // hands over for deletion at the next flush, once the commands recorded
+    // against them have run; never counted against the budget.
+    pub(crate) retired: Vec<ImageId>,
     /// Transients whose last consumer command has been recorded; a subset of
     /// `images`, taken by the next acquire of the same size and flags.
     pub(crate) free: Vec<ImageId>,
@@ -55,6 +59,7 @@ impl TransientPool {
     pub(crate) fn new(budget: usize) -> Self {
         Self {
             images: Vec::new(),
+            retired: Vec::new(),
             free: Vec::new(),
             bytes: 0,
             budget,
@@ -100,6 +105,12 @@ impl TransientPool {
     /// Returns an image to the pool once every command that reads it has
     /// been recorded. Whoever takes it next must clear or fully overwrite it,
     /// as layers and filter passes do.
+    /// Hands an image the canvas no longer wants to the pool for deletion at
+    /// the next flush; it was never acquired here, so it is not accounted.
+    pub(crate) fn retire(&mut self, id: ImageId) {
+        self.retired.push(id);
+    }
+
     pub(crate) fn release(&mut self, id: ImageId) {
         debug_assert!(self.images.contains(&id), "released image is not a transient");
         debug_assert!(!self.free.contains(&id), "transient released twice");
@@ -125,6 +136,9 @@ impl TransientPool {
             }
         }
         self.images = kept;
+        for id in std::mem::take(&mut self.retired) {
+            images.remove(renderer, id);
+        }
     }
 }
 

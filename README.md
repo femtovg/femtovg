@@ -46,7 +46,7 @@ Run with `cargo run --example text`
 * [x] Fill rules - EvenOdd/NonZero
 * [x] Rectangle scissoring (with rounded corners) and arbitrary-path clipping (Canvas 2D clip / SVG clip-path, nonzero and evenodd)
 * [x] Composition modes (SourceOver, SourceIn, SourceOut, Atop, etc..)
-* [x] Image filters - gaussian blur and color matrices (the CSS filter functions), chained in a single call
+* [x] Image filters - gaussian blur, color matrices (the CSS filter functions), Perlin turbulence (SVG `feTurbulence`) and the sRGB transfer curve, chained in a single call
 * [x] Layers - group capture with declared opacity and layer filters (Canvas 2D beginLayer/endLayer, SVG group effects)
 * [x] Layer masks - luminance and alpha (SVG mask / mask-type)
 * [x] Global alpha
