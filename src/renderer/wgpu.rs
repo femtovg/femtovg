@@ -682,28 +682,26 @@ impl Renderer for WGPURenderer {
                 }
                 super::CommandType::RenderFilteredImage { target_image, filter } => match filter {
                     crate::ImageFilter::GaussianBlur { sigma } => {
-                        gaussian_blur_filter(
-                            &self.device,
-                            &mut self.blur_horizontal_buffer,
-                            &mut current_render_target,
+                        let mut pass = FilterPass {
                             images,
-                            command,
-                            sigma,
-                            &mut render_pass_builder,
-                            &mut pipeline_and_bindgroup_mapper,
-                            target_image,
-                        );
+                            current_render_target: &mut current_render_target,
+                            render_pass_builder: &mut render_pass_builder,
+                            pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                        };
+                        let blur = BlurBuffers {
+                            device: &self.device,
+                            horizontal: &mut self.blur_horizontal_buffer,
+                        };
+                        gaussian_blur_filter(&mut pass, blur, command, sigma, target_image);
                     }
                     crate::ImageFilter::ColorMatrix { matrix } => {
-                        color_matrix_filter(
-                            &mut current_render_target,
+                        let mut pass = FilterPass {
                             images,
-                            command,
-                            matrix,
-                            &mut render_pass_builder,
-                            &mut pipeline_and_bindgroup_mapper,
-                            target_image,
-                        );
+                            current_render_target: &mut current_render_target,
+                            render_pass_builder: &mut render_pass_builder,
+                            pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                        };
+                        color_matrix_filter(&mut pass, command, matrix, target_image);
                     }
                 },
             }
@@ -870,18 +868,61 @@ impl Renderer for WGPURenderer {
 /// `WGPURenderer::blur_horizontal_buffer`); consecutive passes of a split
 /// blur write it, read it, write it again, and the render passes wgpu records
 /// in order keep those hazards apart.
-#[allow(clippy::too_many_arguments)]
+/// The render-loop state an image-filter pass draws through: the images,
+/// the target it must restore when done, the open pass builder and the
+/// pipeline mapper.
+struct FilterPass<'a, 'b> {
+    images: &'a mut ImageStore<Image>,
+    current_render_target: &'a mut RenderTarget,
+    render_pass_builder: &'a mut RenderPassBuilder<'b>,
+    pipeline_and_bindgroup_mapper: &'a mut CommandToPipelineAndBindGroupMapper,
+}
+
+impl FilterPass<'_, '_> {
+    /// Points the pass builder back at `target`, the render target that was
+    /// current before the filter drew into its own, and records it.
+    fn restore_target(&mut self, target: RenderTarget) {
+        *self.current_render_target = target;
+        match target {
+            RenderTarget::Screen => {
+                self.render_pass_builder.set_render_target_screen();
+            }
+            RenderTarget::Image(image_id) => {
+                self.render_pass_builder
+                    .set_render_target_image(self.images, image_id, wgpu::LoadOp::Load);
+            }
+        }
+    }
+}
+
+/// What the Gaussian blur owns on the renderer: the device that creates its
+/// horizontal-pass buffer and the buffer itself, kept across passes.
+struct BlurBuffers<'a> {
+    device: &'a wgpu::Device,
+    horizontal: &'a mut Option<wgpu::Texture>,
+}
+
 fn gaussian_blur_filter(
-    device: &wgpu::Device,
-    horizontal_blur_buffer: &mut Option<wgpu::Texture>,
-    current_render_target: &mut RenderTarget,
-    images: &mut ImageStore<Image>,
+    pass: &mut FilterPass<'_, '_>,
+    blur: BlurBuffers<'_>,
     command: super::Command,
     sigma: f32,
-    render_pass_builder: &mut RenderPassBuilder<'_>,
-    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     target_image: ImageId,
 ) {
+    let FilterPass {
+        images,
+        current_render_target,
+        render_pass_builder,
+        pipeline_and_bindgroup_mapper,
+    } = pass;
+    let images: &mut ImageStore<Image> = images;
+    let current_render_target: &mut RenderTarget = current_render_target;
+    let render_pass_builder: &mut RenderPassBuilder<'_> = render_pass_builder;
+    let pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper = pipeline_and_bindgroup_mapper;
+    let BlurBuffers {
+        device,
+        horizontal: horizontal_blur_buffer,
+    } = blur;
     let blend_state = blend_state(&command).into();
 
     let previous_render_target = *current_render_target;
@@ -981,29 +1022,27 @@ fn gaussian_blur_filter(
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 
-    *current_render_target = previous_render_target;
-    match *current_render_target {
-        RenderTarget::Screen => {
-            render_pass_builder.set_render_target_screen();
-        }
-        RenderTarget::Image(image_id) => {
-            render_pass_builder.set_render_target_image(images, image_id, wgpu::LoadOp::Load);
-        }
-    }
+    pass.restore_target(previous_render_target);
 }
 
 /// Single-pass color-matrix filter: sample the source once and apply the 4x5
 /// matrix. Mirrors `gaussian_blur_filter` but without the intermediate texture.
-#[allow(clippy::too_many_arguments)]
 fn color_matrix_filter(
-    current_render_target: &mut RenderTarget,
-    images: &mut ImageStore<Image>,
+    pass: &mut FilterPass<'_, '_>,
     command: super::Command,
     matrix: [f32; 20],
-    render_pass_builder: &mut RenderPassBuilder<'_>,
-    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     target_image: ImageId,
 ) {
+    let FilterPass {
+        images,
+        current_render_target,
+        render_pass_builder,
+        pipeline_and_bindgroup_mapper,
+    } = pass;
+    let images: &mut ImageStore<Image> = images;
+    let current_render_target: &mut RenderTarget = current_render_target;
+    let render_pass_builder: &mut RenderPassBuilder<'_> = render_pass_builder;
+    let pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper = pipeline_and_bindgroup_mapper;
     let blend_state = blend_state(&command).into();
     let previous_render_target = *current_render_target;
 
@@ -1050,15 +1089,7 @@ fn color_matrix_filter(
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 
-    *current_render_target = previous_render_target;
-    match *current_render_target {
-        RenderTarget::Screen => {
-            render_pass_builder.set_render_target_screen();
-        }
-        RenderTarget::Image(image_id) => {
-            render_pass_builder.set_render_target_image(images, image_id, wgpu::LoadOp::Load);
-        }
-    }
+    pass.restore_target(previous_render_target);
 }
 
 fn triangles(
