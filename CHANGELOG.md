@@ -36,13 +36,26 @@ All notable changes to this project will be documented in this file.
   ramp was left transparent (or holding stale texture data) instead of the last
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
+  a mask image placed in device space, using either its luminance times alpha
+  (SVG `mask`'s default `mask-type`, via the new
+  `ImageFilter::luminance_to_alpha()`) or its alpha. Masks apply after the
+  layer's filters, as in SVG, and reserve their coverage images with the
+  layer's store, so a masked layer the transient budget cannot fit passes
+  through as a whole (`begin_layer()` returns `false`) rather than composite
+  unmasked.
 - Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
   offscreen image and composite it back with `LayerEffects` - group opacity, so
   overlapping shapes fade as one like an SVG group, and/or an image-filter
   chain. The offscreen image is sized to the current scissor rect (under any
   axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
   blur reach of the whole chain (successive blurs compound in quadrature),
-  not the whole canvas or render target. `begin_layer()` returns whether the
+  not the whole canvas or render target. A rounded or rotated scissor clips
+  the layer's composite once, after its filters, where it was set - a blur
+  samples content past the clip edge, as SVG's `clip-path` over a filtered
+  group does - instead of also clipping the draws inside the layer (which
+  squared the edge coverage and, in a blur-padded store, landed in the wrong
+  place). `begin_layer()` returns whether the
   layer captured: `false` means it passed through with its effects dropped -
   over the transient budget, past the backend's texture limit
   (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate
@@ -63,11 +76,14 @@ All notable changes to this project will be documented in this file.
   would fill 256 MiB, while real artwork opens hundreds per frame.
   `Canvas::set_transient_image_budget()` caps what is held at once (default
   256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
-  through (`begin_layer()` returns `false`), `filter_image_chain()` returns
-  `ErrorKind::TransientImageBudgetExceeded` and a layer whose chain cannot run
-  composites its unfiltered capture, and shadows are skipped rather than
-  allocate. Shadow coverage rounds to 8 px, not the layers' 64, since shadows
-  are many and small.
+  through (`begin_layer()` returns `false` - a layer reserves every image its
+  effects draw through, a filter chain's result and scratches included, with
+  its store, so it is admitted whole or not at all; each open filtered level
+  holds its result and scratches for its whole life, so nesting filtered
+  layers costs their sum), `filter_image_chain()`
+  returns `ErrorKind::TransientImageBudgetExceeded`, and shadows are skipped
+  rather than allocate. Shadow coverage rounds to 8 px, not the layers' 64,
+  since shadows are many and small.
 - Fixed two-stop gradients fading a transparent stop through the wrong colors:
   the stop's own color was discarded, so `transparent` to blue turned a plain
   light blue instead of darkening, and transparent red to blue lost its red.
