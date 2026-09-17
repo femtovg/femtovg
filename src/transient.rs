@@ -1,7 +1,9 @@
 //! The pool of transient offscreen images: layer backing stores, filtered
 //! results, filter-chain scratches and shadow coverage.
 //!
-//! Every transient lives until the next flush, when all of them are deleted.
+//! A transient lives until the next flush, when every one not held by an open
+//! layer is deleted; a layer's images stay across the flush and return to the
+//! pool when the layer ends or is discarded.
 //! Between a release and that flush an image is free for the next acquire of
 //! the same size and flags, so a frame's peak transient memory is what is
 //! live at once - nesting depth times layer size - not the sum over every
@@ -104,7 +106,7 @@ impl TransientPool {
         self.free.push(id);
     }
 
-    /// Deletes every transient except those in `held` (the stores of layers
+    /// Deletes every transient except those in `held` (the images of layers
     /// still open across the flush), which stay live and in use.
     pub(crate) fn release_all<T: Renderer>(
         &mut self,
