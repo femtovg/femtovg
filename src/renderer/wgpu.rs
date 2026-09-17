@@ -274,6 +274,12 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
+    // The Gaussian blur's horizontal-pass buffer, kept across passes and
+    // frames and replaced only when a blur needs another size or format. A
+    // texture created inside a command stream lives until that submit
+    // retires, so allocating one per pass held every pass's buffer at once -
+    // a blur split into k passes held k store-sized textures.
+    blur_horizontal_buffer: Option<wgpu::Texture>,
 
     bind_group_layout: wgpu::BindGroupLayout,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
@@ -483,6 +489,7 @@ impl WGPURenderer {
             vertex_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
+            blur_horizontal_buffer: None,
             bind_group_layout,
             viewport_bind_group_layout,
             pipeline_layout,
@@ -677,6 +684,7 @@ impl Renderer for WGPURenderer {
                     crate::ImageFilter::GaussianBlur { sigma } => {
                         gaussian_blur_filter(
                             &self.device,
+                            &mut self.blur_horizontal_buffer,
                             &mut current_render_target,
                             images,
                             command,
@@ -856,8 +864,16 @@ impl Renderer for WGPURenderer {
     }
 }
 
+/// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
+/// into the renderer's kept horizontal buffer, then vertical into the target.
+/// The buffer is reused across passes and frames (see
+/// `WGPURenderer::blur_horizontal_buffer`); consecutive passes of a split
+/// blur write it, read it, write it again, and the render passes wgpu records
+/// in order keep those hazards apart.
+#[allow(clippy::too_many_arguments)]
 fn gaussian_blur_filter(
     device: &wgpu::Device,
+    horizontal_blur_buffer: &mut Option<wgpu::Texture>,
     current_render_target: &mut RenderTarget,
     images: &mut ImageStore<Image>,
     command: super::Command,
@@ -899,24 +915,31 @@ fn gaussian_blur_filter(
     blur_params.image_blur_filter_direction = [1.0, 0.0];
     blur_params.image_blur_filter_sigma = sigma;
 
-    let horizontal_blur_buffer = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("blur horizontal"),
-        size: wgpu::Extent3d {
-            width: source_image.info.width() as _,
-            height: source_image.info.height() as _,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: match source_image.info.format() {
-            crate::PixelFormat::Rgb8 => wgpu::TextureFormat::Rgba8Unorm,
-            crate::PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
-            crate::PixelFormat::Gray8 => wgpu::TextureFormat::R8Unorm,
-        },
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
+    let size = wgpu::Extent3d {
+        width: source_image.info.width() as _,
+        height: source_image.info.height() as _,
+        depth_or_array_layers: 1,
+    };
+    let format = match source_image.info.format() {
+        crate::PixelFormat::Rgb8 => wgpu::TextureFormat::Rgba8Unorm,
+        crate::PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
+        crate::PixelFormat::Gray8 => wgpu::TextureFormat::R8Unorm,
+    };
+    let horizontal_blur_buffer = match horizontal_blur_buffer {
+        Some(texture) if texture.size() == size && texture.format() == format => texture.clone(),
+        kept => kept
+            .insert(device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("blur horizontal"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            }))
+            .clone(),
+    };
 
     render_pass_builder.set_render_target_texture(
         &horizontal_blur_buffer,
