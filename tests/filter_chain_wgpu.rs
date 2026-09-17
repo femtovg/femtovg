@@ -133,7 +133,7 @@ fn run_chain(
 ) -> Vec<u8> {
     let (mut canvas, source, target) = setup(device, queue, source_pixels);
     let filtered = filter_target(&mut canvas);
-    canvas.filter_image_chain(filtered, chain, source);
+    canvas.filter_image_chain(filtered, chain, source).unwrap();
     finish_and_read(device, queue, canvas, filtered, &target)
 }
 

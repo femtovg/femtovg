@@ -1,0 +1,1043 @@
+//! Headless GPU tests for layer capture and effects (`Canvas::begin_layer` /
+//! `end_layer`): group opacity must fade the layer as one image (no
+//! double-blending of overlapping children), filtered layers must not mirror
+//! (the FLIP_Y storage-parity bookkeeping), declared blurs must actually
+//! spread, nesting must multiply opacities, and the composite must honor the
+//! outer scissor. Skips without a GPU adapter.
+#![cfg(feature = "wgpu")]
+
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFilter, LayerEffects, Paint, Path};
+
+mod common;
+use common::headless_device;
+
+const W: u32 = 64;
+const H: u32 = 64;
+
+fn render(device: &wgpu::Device, queue: &wgpu::Queue, draw: impl FnOnce(&mut Canvas<WGPURenderer>)) -> Vec<u8> {
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("layer test target"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    let mut canvas = Canvas::new(renderer).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    canvas.clear_rect(0, 0, W, H, Color::white());
+
+    draw(&mut canvas);
+
+    let commands = canvas.flush_to_output(&target);
+    queue.submit(commands);
+
+    let unpadded = W * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded = unpadded.div_ceil(align) * align;
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (padded * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(enc.finish()));
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mapped = slice.get_mapped_range().expect("readback");
+    let mut out = vec![0u8; (unpadded * H) as usize];
+    for row in 0..H as usize {
+        let src = row * padded as usize;
+        let dst = row * unpadded as usize;
+        out[dst..dst + unpadded as usize].copy_from_slice(&mapped[src..src + unpadded as usize]);
+    }
+    out
+}
+
+fn px(buf: &[u8], x: u32, y: u32) -> [u8; 3] {
+    let i = ((y * W + x) * 4) as usize;
+    [buf[i], buf[i + 1], buf[i + 2]]
+}
+
+fn close(a: u8, b: i32) -> bool {
+    (a as i32 - b).abs() <= 6
+}
+
+fn red_rect(canvas: &mut Canvas<WGPURenderer>, x: f32, y: f32, w: f32, h: f32) {
+    let mut p = Path::new();
+    p.rect(x, y, w, h);
+    canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+}
+
+/// Group opacity fades the layer as ONE image: where two opaque children
+/// overlap, the composite shows the same 50% red as where only one child
+/// painted - not the doubled coverage per-draw alpha produces.
+#[test]
+fn group_opacity_does_not_double_blend() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let layered = render(&device, &queue, |canvas| {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        red_rect(canvas, 8.0, 8.0, 32.0, 32.0);
+        red_rect(canvas, 24.0, 24.0, 32.0, 32.0); // overlaps the first
+        canvas.end_layer();
+    });
+    let single = px(&layered, 12, 12); // covered by one child
+    let overlap = px(&layered, 32, 32); // covered by both children
+    assert!(
+        close(single[0], 255) && close(single[1], 127),
+        "single coverage should be 50% red over white, got {single:?}"
+    );
+    assert_eq!(
+        overlap, single,
+        "overlap must not double-blend: layer opacity fades the group as one image"
+    );
+
+    // Control: per-draw alpha DOES double-blend, proving the layer differs.
+    let per_draw = render(&device, &queue, |canvas| {
+        canvas.set_global_alpha(0.5);
+        red_rect(canvas, 8.0, 8.0, 32.0, 32.0);
+        red_rect(canvas, 24.0, 24.0, 32.0, 32.0);
+    });
+    let overlap_pd = px(&per_draw, 32, 32);
+    assert!(
+        overlap_pd[1] < 96,
+        "per-draw alpha overlap should be darker than 50%, got {overlap_pd:?}"
+    );
+}
+
+/// A filtered layer must come out upright: the capture holds flipped storage
+/// and the chain flips parity once, so the composite samples the filtered
+/// result without FLIP_Y. Red-on-top must stay on top.
+#[test]
+fn filtered_layer_is_not_mirrored() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::brightness(1.0)])));
+        red_rect(canvas, 0.0, 0.0, 64.0, 24.0);
+        let mut p = Path::new();
+        p.rect(0.0, 40.0, 64.0, 24.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 255)));
+        canvas.end_layer();
+    });
+    let top = px(&out, 32, 8);
+    let bottom = px(&out, 32, 56);
+    assert!(
+        close(top[0], 255) && close(top[2], 0),
+        "top should stay red, got {top:?}"
+    );
+    assert!(
+        close(bottom[2], 255) && close(bottom[0], 0),
+        "bottom should stay blue, got {bottom:?} - a swap means the filtered layer mirrored"
+    );
+}
+
+/// A blur declared at begin_layer actually spreads: a hard edge inside the
+/// layer softens, and content near the scissor edge keeps its blur reach
+/// thanks to the declared-filter padding.
+#[test]
+fn declared_blur_applies_and_pads() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let blurred = render(&device, &queue, |canvas| {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 3.0 }])));
+        red_rect(canvas, 16.0, 16.0, 32.0, 32.0);
+        canvas.end_layer();
+    });
+    // Just outside the rect edge: a hard edge leaves it white, a blur tints it.
+    let outside = px(&blurred, 52, 32);
+    assert!(
+        outside[1] < 250,
+        "blur should reach past the rect edge, got {outside:?}"
+    );
+    // Center stays red.
+    let center = px(&blurred, 32, 32);
+    assert!(close(center[0], 255), "center should stay red-ish, got {center:?}");
+}
+
+/// Nested layers multiply their opacities; the composite of the inner layer
+/// happens inside the outer capture.
+#[test]
+fn nested_layers_multiply_opacity() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        red_rect(canvas, 8.0, 8.0, 48.0, 48.0);
+        canvas.end_layer();
+        canvas.end_layer();
+    });
+    let center = px(&out, 32, 32);
+    // 25% red over white: r=255, g=b=191.
+    assert!(
+        close(center[0], 255) && close(center[1], 191),
+        "nested 0.5 x 0.5 should show 25% red, got {center:?}"
+    );
+}
+
+/// The composite honors the scissor in effect at begin_layer: layer content
+/// cannot escape it, even though the layer itself resets the scissor inside.
+#[test]
+fn layer_composite_honors_outer_scissor() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        canvas.save();
+        canvas.scissor(16.0, 16.0, 24.0, 24.0);
+        assert!(canvas.begin_layer(&LayerEffects::new()));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0); // fills well past the scissor
+        canvas.end_layer();
+        canvas.restore();
+    });
+    assert!(
+        close(px(&out, 20, 20)[0], 255) && close(px(&out, 20, 20)[1], 0),
+        "inside the scissor should be red"
+    );
+    assert_eq!(px(&out, 50, 50), [255, 255, 255], "outside the scissor must stay white");
+}
+
+fn circle_mask_image(canvas: &mut Canvas<WGPURenderer>) -> femtovg::ImageId {
+    // White circle on transparent: full luminance coverage inside, none outside.
+    let mask = canvas
+        .create_image_empty(
+            48,
+            48,
+            femtovg::PixelFormat::Rgba8,
+            femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+        )
+        .unwrap();
+    canvas.save();
+    canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+    canvas.clear_rect(0, 0, 48, 48, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+    canvas.reset_transform();
+    let mut p = Path::new();
+    p.circle(24.0, 24.0, 20.0);
+    canvas.fill_path(&p, &Paint::color(Color::white()));
+    canvas.set_render_target(femtovg::RenderTarget::Screen);
+    canvas.restore();
+    mask
+}
+
+/// A luminance mask shows the layer inside its white region and hides it
+/// outside (uncovered pixels mask out fully) - SVG mask semantics.
+#[test]
+fn luminance_mask_gates_the_layer() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        let mask = circle_mask_image(canvas);
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            8.0,
+            8.0,
+            48.0,
+            48.0
+        )));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+        canvas.end_layer();
+    });
+    let inside = px(&out, 32, 32); // circle centre (mask at 8..56)
+    let outside_circle = px(&out, 12, 12); // inside mask rect, outside circle
+    let outside_rect = px(&out, 60, 60); // outside the mask rect entirely
+    assert!(
+        close(inside[0], 255) && close(inside[1], 0),
+        "inside the mask circle the layer shows, got {inside:?}"
+    );
+    assert_eq!(
+        outside_circle,
+        [255, 255, 255],
+        "outside the circle the layer is masked out"
+    );
+    assert_eq!(
+        outside_rect,
+        [255, 255, 255],
+        "beyond the mask rect the layer is masked out"
+    );
+}
+
+/// A black region of a luminance mask hides content even though its alpha is
+/// opaque - proving coverage is luminance, not alpha.
+#[test]
+fn luminance_mask_uses_luminance_not_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // Opaque half-white / half-black mask.
+        let mask = canvas
+            .create_image_empty(
+                64,
+                64,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, 64, 64, Color::black());
+        canvas.reset_transform();
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.fill_path(&p, &Paint::color(Color::white()));
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            0.0,
+            0.0,
+            64.0,
+            64.0
+        )));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+        canvas.end_layer();
+    });
+    assert!(
+        close(px(&out, 16, 32)[0], 255) && close(px(&out, 16, 32)[1], 0),
+        "white mask half shows the layer"
+    );
+    assert_eq!(
+        px(&out, 48, 32),
+        [255, 255, 255],
+        "black (but opaque) mask half hides the layer - luminance, not alpha"
+    );
+}
+
+/// Masking a FILTERED layer keeps both the mask and the content upright -
+/// the storage-parity flag selection for the filtered case.
+#[test]
+fn masked_filtered_layer_keeps_orientation() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // Mask: white on the TOP half only.
+        let mask = canvas
+            .create_image_empty(
+                64,
+                64,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, 64, 64, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        canvas.reset_transform();
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, 64.0, 32.0);
+        canvas.fill_path(&p, &Paint::color(Color::white()));
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        assert!(canvas.begin_layer(
+            &LayerEffects::new()
+                .with_filters(&[ImageFilter::brightness(1.0)])
+                .with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0),
+        ));
+        // Red on top, blue on bottom.
+        red_rect(canvas, 0.0, 0.0, 64.0, 32.0);
+        let mut p = Path::new();
+        p.rect(0.0, 32.0, 64.0, 32.0);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 255)));
+        canvas.end_layer();
+    });
+    let top = px(&out, 32, 12);
+    let bottom = px(&out, 32, 52);
+    assert!(
+        close(top[0], 255) && close(top[2], 0),
+        "top-half mask over a filtered layer must show the RED top, got {top:?}"
+    );
+    assert_eq!(
+        bottom,
+        [255, 255, 255],
+        "bottom must be masked out, got {bottom:?} - blue here means the mask or content mirrored"
+    );
+}
+
+/// A luminance mask's coverage is luminance x alpha (SVG mask semantics):
+/// white fading to transparent must fade the layer out, not hold it at
+/// full coverage the way a straight luminanceToAlpha conversion would.
+/// Regression for background-noodles-left-dark.svg, whose white->transparent
+/// gradient mask was ignored entirely.
+#[test]
+fn luminance_mask_multiplies_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        canvas.clear_rect(0, 0, W, H, Color::white());
+
+        // Canvas-sized white->transparent vertical fade, captured mid-frame
+        // the way SVG integrations rasterize <mask> content.
+        let mask = canvas
+            .create_image_empty(
+                W as usize,
+                H as usize,
+                femtovg::PixelFormat::Rgba8,
+                femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.save();
+        canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+        canvas.clear_rect(0, 0, W, H, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+        canvas.reset_transform();
+        let mut r = Path::new();
+        r.rect(0.0, 0.0, W as f32, H as f32);
+        let fade = Paint::linear_gradient(
+            0.0,
+            0.0,
+            0.0,
+            H as f32,
+            Color::white(),
+            Color::rgbaf(1.0, 1.0, 1.0, 0.0),
+        );
+        canvas.fill_path(&r, &fade);
+        canvas.set_render_target(femtovg::RenderTarget::Screen);
+        canvas.restore();
+
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            0.0,
+            0.0,
+            W as f32,
+            H as f32,
+        )));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.end_layer();
+    });
+    // Top row: coverage ~1 -> red survives.
+    assert!(
+        close(px(&out, 32, 1)[0], 255) && close(px(&out, 32, 1)[1], 0),
+        "top should stay red, got {:?}",
+        px(&out, 32, 1)
+    );
+    // Midpoint: coverage ~0.5 -> half red over white.
+    let mid = px(&out, 32, H / 2);
+    assert!(
+        (mid[1] as i32 - 128).abs() <= 12 && close(mid[0], 255),
+        "midpoint should be half-faded red, got {mid:?}"
+    );
+    // Bottom row: coverage ~0 -> white shows through.
+    let bottom = px(&out, 32, H - 1);
+    assert!(bottom[1] > 240, "bottom should fade to white, got {bottom:?}");
+}
+
+/// Draws `draw` into a fresh 64x64 render-target image and hands it back as
+/// a mask: the way an SVG integration rasterizes `<mask>` content.
+fn mask_from_draw(canvas: &mut Canvas<WGPURenderer>, draw: impl FnOnce(&mut Canvas<WGPURenderer>)) -> femtovg::ImageId {
+    let mask = canvas
+        .create_image_empty(
+            64,
+            64,
+            femtovg::PixelFormat::Rgba8,
+            femtovg::ImageFlags::PREMULTIPLIED | femtovg::ImageFlags::FLIP_Y,
+        )
+        .unwrap();
+    canvas.save();
+    canvas.set_render_target(femtovg::RenderTarget::Image(mask));
+    canvas.clear_rect(0, 0, 64, 64, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+    canvas.reset_transform();
+    draw(canvas);
+    canvas.set_render_target(femtovg::RenderTarget::Screen);
+    canvas.restore();
+    mask
+}
+
+/// The two mask kinds read opposite things from the same mask: an opaque
+/// black half keeps the layer under an alpha mask and hides it under a
+/// luminance mask; a transparent half does the reverse.
+#[test]
+fn alpha_mask_reads_alpha_and_luminance_mask_reads_luminance() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    for (kind, left_shows) in [(femtovg::MaskKind::Alpha, true), (femtovg::MaskKind::Luminance, false)] {
+        let out = render(&device, &queue, |canvas| {
+            // Left half opaque black, right half transparent.
+            let mask = mask_from_draw(canvas, |c| {
+                let mut p = Path::new();
+                p.rect(0.0, 0.0, 32.0, 64.0);
+                c.fill_path(&p, &Paint::color(Color::black()));
+            });
+            assert!(canvas.begin_layer(&LayerEffects::new().with_mask(mask, kind, 0.0, 0.0, 64.0, 64.0)));
+            red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+            canvas.end_layer();
+        });
+        let left = px(&out, 16, 32);
+        let right = px(&out, 48, 32);
+        if left_shows {
+            assert!(
+                close(left[0], 255) && close(left[1], 0),
+                "{kind:?}: opaque black keeps the layer, got {left:?}"
+            );
+        } else {
+            assert_eq!(left, [255, 255, 255], "{kind:?}: black hides the layer, got {left:?}");
+        }
+        assert_eq!(
+            right,
+            [255, 255, 255],
+            "{kind:?}: transparent hides the layer, got {right:?}"
+        );
+    }
+}
+
+/// An uploaded mask (no FLIP_Y: row 0 is the top) lands upright too - the
+/// normalization draw honors whatever orientation the mask image declares.
+#[test]
+fn uploaded_mask_is_upright() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // Top half white, bottom half transparent, straight from memory.
+        let mut buf = vec![femtovg::rgb::RGBA8::new(0, 0, 0, 0); 64 * 64];
+        for p in buf.iter_mut().take(64 * 32) {
+            *p = femtovg::rgb::RGBA8::new(255, 255, 255, 255);
+        }
+        let mask = canvas
+            .create_image(
+                femtovg::imgref::Img::new(buf.as_slice(), 64, 64),
+                femtovg::ImageFlags::empty(),
+            )
+            .unwrap();
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            0.0,
+            0.0,
+            64.0,
+            64.0
+        )));
+        red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+        canvas.end_layer();
+    });
+    let top = px(&out, 32, 12);
+    let bottom = px(&out, 32, 52);
+    assert!(
+        close(top[0], 255) && close(top[1], 0),
+        "white top keeps the layer, got {top:?}"
+    );
+    assert_eq!(
+        bottom,
+        [255, 255, 255],
+        "transparent bottom hides it, got {bottom:?} - red means the upload mirrored"
+    );
+}
+
+/// The mask rect is device space and stays put under a device-pixel-ratio
+/// scale: with scale(2) and a scissor, the store is bounded by the scaled
+/// scissor and the mask lands where its device rect says.
+#[test]
+fn mask_placement_is_device_space_under_a_scale() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // White on the top 24 rows of a 48-px mask placed at device (8, 8).
+        let mask = mask_from_draw(canvas, |c| {
+            let mut p = Path::new();
+            p.rect(0.0, 0.0, 48.0, 24.0);
+            c.fill_path(&p, &Paint::color(Color::white()));
+        });
+        canvas.scale(2.0, 2.0);
+        canvas.scissor(4.0, 4.0, 24.0, 24.0); // device (8, 8) .. (56, 56)
+        assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+            mask,
+            femtovg::MaskKind::Luminance,
+            8.0,
+            8.0,
+            48.0,
+            48.0
+        )));
+        red_rect(canvas, 0.0, 0.0, 32.0, 32.0); // device 0 .. 64
+        canvas.end_layer();
+    });
+    let upper = px(&out, 32, 20); // in the scissor, under the mask's white rows
+    let lower = px(&out, 32, 44); // in the scissor, under the mask's transparent rows
+    let outside = px(&out, 4, 4); // outside the scissor
+    assert!(
+        close(upper[0], 255) && close(upper[1], 0),
+        "masked-in region under scale, got {upper:?}"
+    );
+    assert_eq!(lower, [255, 255, 255], "masked-out region under scale, got {lower:?}");
+    assert_eq!(outside, [255, 255, 255], "outside the scaled scissor, got {outside:?}");
+}
+
+/// Luminance coverage uses the Rec. 709 weights on the mask's own color: a
+/// solid green mask keeps 71.5 % of a red layer over white, a solid blue one
+/// 7.2 %, so the green channel carries the weight, not an equal average.
+#[test]
+fn luminance_mask_weights_are_rec709() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    for (color, coverage) in [(Color::rgb(0, 255, 0), 0.7152f32), (Color::rgb(0, 0, 255), 0.0722f32)] {
+        let out = render(&device, &queue, |canvas| {
+            let mask = mask_from_draw(canvas, |c| c.clear_rect(0, 0, 64, 64, color));
+            assert!(canvas.begin_layer(&LayerEffects::new().with_mask(
+                mask,
+                femtovg::MaskKind::Luminance,
+                0.0,
+                0.0,
+                64.0,
+                64.0
+            )));
+            red_rect(canvas, 0.0, 0.0, 64.0, 64.0);
+            canvas.end_layer();
+        });
+        let c = px(&out, 32, 32);
+        let expected = (255.0 * (1.0 - coverage)).round() as i32;
+        assert!(
+            close(c[0], 255) && close(c[1], expected) && close(c[2], expected),
+            "coverage {coverage} of red over white should read (255, {expected}, {expected}), got {c:?}"
+        );
+    }
+}
+
+fn readback(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture) -> Vec<u8> {
+    let unpadded = W * 4;
+    let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (padded * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(enc.finish()));
+    let slice = buffer.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let mapped = slice.get_mapped_range().unwrap();
+    let mut out = vec![0u8; (W * H * 4) as usize];
+    for y in 0..H as usize {
+        let s = y * padded as usize;
+        let d = y * (W * 4) as usize;
+        out[d..d + (W * 4) as usize].copy_from_slice(&mapped[s..s + (W * 4) as usize]);
+    }
+    out
+}
+
+fn output_texture(device: &wgpu::Device) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("layer flush test target"),
+        size: wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    })
+}
+
+/// A flush in the middle of an open layer must not release the layer's
+/// backing image or lose the redirect into it: draws before and after the
+/// flush both belong to the layer and composite with its opacity at end_layer.
+/// A masked layer keeps its mask's coverage images across the flush as well,
+/// so both draws composite through the mask.
+fn layer_survives_a_flush(device: &wgpu::Device, queue: &wgpu::Queue, mask: Option<femtovg::MaskKind>) {
+    let target = output_texture(device);
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    let mut canvas = Canvas::new(renderer).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    canvas.clear_rect(0, 0, W, H, Color::white());
+    let mut effects = LayerEffects::new().with_opacity(0.8);
+    if let Some(kind) = mask {
+        // White over the top half: the bottom half of the layer is masked out.
+        let image = mask_from_draw(&mut canvas, |canvas| {
+            let mut top = Path::new();
+            top.rect(0.0, 0.0, W as f32, 32.0);
+            canvas.fill_path(&top, &Paint::color(Color::white()));
+        });
+        effects = effects.with_mask(image, kind, 0.0, 0.0, W as f32, H as f32);
+    }
+    assert!(canvas.begin_layer(&effects));
+    let mut red = Path::new();
+    red.rect(0.0, 0.0, 32.0, 64.0);
+    canvas.fill_path(&red, &Paint::color(Color::rgb(255, 0, 0)));
+    queue.submit(canvas.flush_to_output(&target));
+    // Every example starts its frame with set_size: the open layer must
+    // keep capturing through it (WPT 2d.layer.flush-on-frame-presentation).
+    canvas.set_size(W, H, 1.0);
+    let mut blue = Path::new();
+    blue.rect(32.0, 0.0, 32.0, 64.0);
+    canvas.fill_path(&blue, &Paint::color(Color::rgb(0, 0, 255)));
+    canvas.end_layer();
+    queue.submit(canvas.flush_to_output(&target));
+    let out = readback(device, queue, &target);
+    // 0.8 red over white = (255, 51, 51); 0.8 blue over white = (51, 51, 255).
+    let r = px(&out, 16, 16);
+    let b = px(&out, 48, 16);
+    assert!(
+        close(r[0], 255) && close(r[1], 51) && close(r[2], 51),
+        "{mask:?}: draw before the flush must survive in the layer, got {r:?}"
+    );
+    assert!(
+        close(b[0], 51) && close(b[1], 51) && close(b[2], 255),
+        "{mask:?}: draw after the flush must still land in the layer, got {b:?}"
+    );
+    // The bottom half fades like the top without a mask and is hidden with one.
+    let r = px(&out, 16, 48);
+    let b = px(&out, 48, 48);
+    if mask.is_some() {
+        assert_eq!(
+            r,
+            [255, 255, 255],
+            "{mask:?}: the mask must hide the bottom of the draw before the flush"
+        );
+        assert_eq!(
+            b,
+            [255, 255, 255],
+            "{mask:?}: the mask must hide the bottom of the draw after the flush"
+        );
+    } else {
+        assert!(
+            close(r[0], 255) && close(r[1], 51) && close(r[2], 51),
+            "the bottom of the draw before the flush must fade like its top, got {r:?}"
+        );
+        assert!(
+            close(b[0], 51) && close(b[1], 51) && close(b[2], 255),
+            "the bottom of the draw after the flush must fade like its top, got {b:?}"
+        );
+    }
+}
+
+#[test]
+fn open_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, None);
+}
+
+#[test]
+fn open_alpha_masked_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, Some(femtovg::MaskKind::Alpha));
+}
+
+#[test]
+fn open_luminance_masked_layer_survives_a_flush() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    layer_survives_a_flush(&device, &queue, Some(femtovg::MaskKind::Luminance));
+}
+
+/// A reset inside a masked layer returns every image the layer held - the
+/// capture and the mask's coverage images - so under a budget of exactly one
+/// masked layer's images the next masked layer still captures and masks.
+#[test]
+fn a_reset_inside_a_masked_layer_returns_its_images_to_the_budget() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let mut admitted = None;
+    let out = render(&device, &queue, |canvas| {
+        // Capture, normalized mask and converted mask: what a luminance mask holds.
+        canvas.set_transient_image_budget(3 * (W as usize) * (H as usize) * 4);
+        let mask = mask_from_draw(canvas, |canvas| {
+            let mut top = Path::new();
+            top.rect(0.0, 0.0, W as f32, 32.0);
+            canvas.fill_path(&top, &Paint::color(Color::white()));
+        });
+        let effects = LayerEffects::new().with_mask(mask, femtovg::MaskKind::Luminance, 0.0, 0.0, W as f32, H as f32);
+        assert!(canvas.begin_layer(&effects), "the first masked layer fits the budget");
+        canvas.reset();
+        canvas.clear_rect(0, 0, W, H, Color::white());
+        admitted = Some(canvas.begin_layer(&effects));
+        red_rect(canvas, 0.0, 0.0, W as f32, H as f32);
+        canvas.end_layer();
+    });
+    assert_eq!(
+        admitted,
+        Some(true),
+        "the discarded layer's images must be free for the next masked layer"
+    );
+    let shown = px(&out, 32, 16);
+    let hidden = px(&out, 32, 48);
+    assert!(
+        close(shown[0], 255) && close(shown[1], 0) && close(shown[2], 0),
+        "the mask's white half must show the layer, got {shown:?}"
+    );
+    assert_eq!(hidden, [255, 255, 255], "the mask's uncovered half must hide the layer");
+}
+
+/// Past the transient budget a layer degrades to pass-through (its draws
+/// still appear, unfaded) instead of allocating, and releasing at flush
+/// returns the budget.
+#[test]
+fn layers_degrade_past_the_transient_budget() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        canvas.set_transient_image_budget(1024); // far below one 64x64 RGBA8 layer
+        assert!(
+            !canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)),
+            "over budget must report pass-through"
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.end_layer();
+    });
+    let c = px(&out, 32, 32);
+    assert!(
+        close(c[0], 255) && close(c[1], 0),
+        "over budget, the layer passes through and draws unfaded; got {c:?}"
+    );
+    let out = render(&device, &queue, |canvas| {
+        canvas.set_transient_image_budget(64 * 64 * 4); // exactly one layer
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.end_layer();
+    });
+    let c = px(&out, 32, 32);
+    assert!(
+        close(c[0], 255) && close(c[1], 128),
+        "within budget the layer applies its opacity; got {c:?}"
+    );
+}
+
+fn black_disc(canvas: &mut Canvas<WGPURenderer>, cx: f32, cy: f32, r: f32) {
+    let mut p = Path::new();
+    p.circle(cx, cy, r);
+    canvas.fill_path(&p, &Paint::color(Color::rgb(0, 0, 0)));
+}
+
+/// Two overlapping discs under a half-transparent shadow, cast 20px below.
+/// Returns the pixel where both discs' shadows would land (28,44) and one
+/// where only the first disc's would (17,44). Neither is under a disc.
+fn shadowed_overlap(device: &wgpu::Device, queue: &wgpu::Queue, shadow_set: &str) -> ([u8; 3], [u8; 3]) {
+    let buf = render(device, queue, |canvas| {
+        let mut bg = Path::new();
+        bg.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&bg, &Paint::color(Color::rgb(255, 255, 255)));
+        let set_shadow = |c: &mut Canvas<WGPURenderer>| {
+            c.set_shadow_color(Color::rgbaf(0.0, 0.0, 0.0, 0.5));
+            c.set_shadow_blur(0.0);
+            c.set_shadow_offset(0.0, 20.0);
+        };
+        if shadow_set == "before" {
+            set_shadow(canvas);
+        }
+        assert!(canvas.begin_layer(&LayerEffects::new()));
+        if shadow_set == "inside" {
+            set_shadow(canvas);
+        }
+        black_disc(canvas, 24.0, 24.0, 10.0);
+        black_disc(canvas, 32.0, 24.0, 10.0);
+        canvas.end_layer();
+    });
+    (px(&buf, 28, 44), px(&buf, 17, 44))
+}
+
+/// A shadow in effect at begin_layer is cast ONCE by the layer's result, the
+/// way Canvas 2D's beginLayer applies its shadow to the layer and SVG's
+/// feDropShadow applies to a filtered group. Where the two discs' shadows
+/// coincide the pixel is the same 50% grey as where only one disc's shadow
+/// falls: the layer's coverage is the union, so it cannot darken twice.
+/// (Per-draw shadows would give 25% there, and if the shadow state also leaked
+/// into the layer's draws the layer would cast a third time, 12.5%.)
+#[test]
+fn a_layer_casts_its_shadow_once() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (both, one) = shadowed_overlap(&device, &queue, "before");
+    assert!(
+        close(both[0], 128),
+        "overlap of the two shadows: {both:?}, want ~128 (one 50% shadow)"
+    );
+    assert!(close(one[0], 128), "single shadow: {one:?}, want ~128");
+}
+
+/// Inside the layer the shadow state resets, so the children do not each
+/// cast their own; setting it again inside is how to shadow individual draws,
+/// and then the overlap does compound.
+#[test]
+fn shadow_set_inside_a_layer_shadows_each_draw() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (both, one) = shadowed_overlap(&device, &queue, "inside");
+    assert!(
+        close(both[0], 64),
+        "two per-draw shadows compounding: {both:?}, want ~64"
+    );
+    assert!(close(one[0], 128), "single per-draw shadow: {one:?}, want ~128");
+}
+
+/// No shadow anywhere: the control for the two above.
+#[test]
+fn a_layer_without_shadow_state_casts_none() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (both, one) = shadowed_overlap(&device, &queue, "none");
+    assert!(
+        close(both[0], 255) && close(one[0], 255),
+        "unexpected shadow: {both:?} {one:?}"
+    );
+}
+
+/// Sibling layers reuse one backing store, and each reuse starts from a
+/// cleared image: the second layer's composite carries none of the first
+/// layer's content, and a budget that fits a single blurred layer's images
+/// renders a frame of forty blurred layers with every blur and opacity
+/// applied - what a 1080p portrait of a few hundred layers needs.
+#[test]
+fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        // One blurred layer's worth: capture, filtered target, chain scratch,
+        // each padded by the blur reach (3 * 2 + 2 = 8 px each side).
+        let padded = 128 * 128 * 4; // 80 x 80 padded, rounded up to the 64 px store granularity
+                                    // ...plus the first, unblurred layer's unpadded store, a different
+                                    // size the blurred siblings cannot reuse.
+        canvas.set_transient_image_budget(3 * padded + (W as usize) * (H as usize) * 4);
+        canvas.clear_rect(0, 0, W, H, Color::white());
+
+        // First layer: a red rect on the left, faded to 50%.
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        red_rect(canvas, 0.0, 0.0, 24.0, H as f32);
+        canvas.end_layer();
+
+        // Forty more blurred siblings drawing a green rect on the right; each
+        // reuses the images of the previous one. If a reused store were not
+        // cleared, the red rect would ride along and darken the left side.
+        for _ in 0..40 {
+            assert!(canvas.begin_layer(
+                &LayerEffects::new()
+                    .with_opacity(0.5)
+                    .with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]),
+            ));
+            let mut p = Path::new();
+            p.rect(40.0, 0.0, 24.0, H as f32);
+            canvas.fill_path(&p, &Paint::color(Color::rgb(0, 255, 0)));
+            canvas.end_layer();
+        }
+    });
+    // Left: red at 50% over white, once - not forty-one times.
+    let left = px(&out, 12, 32);
+    assert!(
+        close(left[0], 255) && close(left[1], 128) && close(left[2], 128),
+        "left should be the first layer's 50% red only; got {left:?}"
+    );
+    // Right: forty 50% green layers compound; the centre of the rect converges
+    // to green, and the blur softens its edge (a pixel just outside the rect
+    // picks up green it would not without the blur).
+    let right = px(&out, 52, 32);
+    assert!(
+        close(right[0], 0) && close(right[1], 255),
+        "right should converge to green; got {right:?}"
+    );
+    let edge = px(&out, 37, 32);
+    assert!(
+        edge[0] < 250 && edge[1] > 200,
+        "blur should reach outside the rect; got {edge:?}"
+    );
+    // Between: white, untouched by either layer.
+    let gap = px(&out, 32, 32);
+    assert!(
+        close(gap[0], 255) && close(gap[1], 255),
+        "gap should stay white; got {gap:?}"
+    );
+}
