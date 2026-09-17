@@ -574,6 +574,19 @@ fn chain_blur_sigma(sigma: f32) -> Option<f32> {
 /// one pass with the value untouched, so small blurs render exactly as they
 /// did before the split existed. The cost is quadratic in sigma (each pass is
 /// two full-size draws), which is what the ceiling above bounds.
+/// The blur padding a store of `extent` px can afford under the backend's
+/// texture `limit`, given that stores round up to `granularity`: the full
+/// `pad` when it fits, else what leaves the rounded store within the limit,
+/// never negative. A layer or shadow at the limit then captures with its
+/// reach truncated at the store edge rather than passing through.
+fn bounded_pad(pad: f32, extent: f32, limit: usize, granularity: usize) -> f32 {
+    if pad <= 0.0 {
+        return 0.0;
+    }
+    let room = limit as f32 - extent.ceil() - granularity as f32;
+    pad.min((room * 0.5).floor().max(0.0))
+}
+
 fn blur_passes(sigma: f32) -> (usize, f32) {
     let bound = renderer::MAX_BLUR_SIGMA;
     match chain_blur_sigma(sigma) {
@@ -951,7 +964,9 @@ where
     /// (see [`filter_image_chain`](Self::filter_image_chain)), with the
     /// shadow's offscreen padded by the full reach, so `shadowBlur` 40 spreads
     /// like the browsers' sigma 20 rather than a sigma-8 one; the pass count
-    /// grows with the square of the sigma.
+    /// grows with the square of the sigma, up to a sigma of 128 (`shadowBlur`
+    /// 256), and each pass's kernel stops at 2.875 sigma, so the composed
+    /// blur lands within 2 % of the requested sigma.
     pub fn set_shadow_blur(&mut self, blur: f32) {
         if blur.is_finite() && blur >= 0.0 {
             self.state_mut().shadow_blur = blur;
@@ -1392,7 +1407,9 @@ where
     /// scissor rect (the natural memory bound - set a scissor before opening
     /// a layer to keep it small) padded by the blur kernel reach when the
     /// chain contains Gaussian blurs, rounded up to 64 px per axis so sibling
-    /// layers share one pooled store. The reach is the chain's true one,
+    /// layers share one pooled store; the pad is bounded by the backend's
+    /// texture limit, so a layer at the limit blurs with its reach truncated
+    /// at the store edge rather than passing through. The reach is the chain's true one,
     /// 3 sigma + 2 per side with the sigmas of several blurs summed in
     /// quadrature, not the 8 px one shader pass covers: a blur above that
     /// runs as several passes (see
@@ -1507,6 +1524,16 @@ where
             .scissor
             .device_bounds(canvas_w, canvas_h)
             .unwrap_or_else(|| Rect::new(0.0, 0.0, canvas_w, canvas_h));
+        // The true reach can push a full-width store past the backend's
+        // texture limit (2048 px on a VideoCore IV); bound the pad so the
+        // layer still captures with its reach truncated at the store edge,
+        // instead of passing through with every effect dropped.
+        let pad = bounded_pad(
+            pad,
+            rect.w.max(rect.h),
+            self.renderer.max_texture_size(),
+            transient::LAYER_GRANULARITY,
+        );
         let minx = (rect.x - pad).floor().max(-pad);
         let miny = (rect.y - pad).floor().max(-pad);
         let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
@@ -2480,6 +2507,14 @@ where
         // passes as it takes to compose to it.
         let reach = chain_blur_sigma(sigma).unwrap_or(0.0);
         let pad = (reach * 3.0).ceil() + 2.0;
+        // Bounded like a layer's: a shadow whose padded coverage would pass
+        // the texture limit keeps its coverage and loses reach at the edge.
+        let pad = bounded_pad(
+            pad,
+            (shape_bounds.maxx - shape_bounds.minx).max(shape_bounds.maxy - shape_bounds.miny),
+            self.renderer.max_texture_size(),
+            transient::SHADOW_GRANULARITY,
+        );
 
         // Coverage is rendered at the shape's own location; the offset is applied
         // later when compositing, so the offscreen only needs to bound the shape.
@@ -6011,6 +6046,56 @@ fn a_layer_pads_by_the_true_blur_reach() {
     assert_eq!((record.width, record.height), (384, 384));
     canvas.end_layer();
     canvas.restore();
+}
+
+/// A layer whose true blur reach would pad its store past the backend's
+/// texture limit still captures: the pad shrinks to what the limit leaves,
+/// so the blur loses reach at the store edge instead of the layer passing
+/// through with every effect dropped.
+#[test]
+fn a_layer_at_the_texture_limit_keeps_its_blur_with_a_bounded_pad() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer {
+        max_texture_size: 2048,
+        ..RecordingRenderer::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1920, 1080, 1.0);
+    // Sigma 40 wants 122 px of pad: 2164 px wide, past the limit.
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 40.0 }]);
+    assert!(
+        canvas.begin_layer(&blur),
+        "the layer captures instead of passing through"
+    );
+    let record = canvas.layers.last().unwrap();
+    assert!(record.image.is_some());
+    assert!(
+        record.width <= 2048 && record.height <= 2048,
+        "store {}x{}",
+        record.width,
+        record.height
+    );
+    // Pad 32 (what a 1920 px span leaves under 2048 with a 64 px rounding
+    // margin): 1984 wide, within the limit.
+    assert_eq!(record.width, 1984, "the store uses what the limit leaves");
+    canvas.end_layer();
+
+    // The same blur on a small scissor keeps its full reach.
+    canvas.scissor(100.0, 100.0, 200.0, 200.0);
+    assert!(canvas.begin_layer(&blur));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (100.0 - 122.0, 100.0 - 122.0));
+    canvas.end_layer();
+}
+
+/// The pad rule alone: the full pad when it fits, what the rounded store can
+/// afford when it does not, never negative.
+#[test]
+fn a_bounded_pad_never_pushes_a_store_past_the_limit() {
+    assert_eq!(bounded_pad(122.0, 1920.0, 2048, 64), 32.0);
+    assert_eq!(bounded_pad(122.0, 200.0, 2048, 64), 122.0);
+    assert_eq!(bounded_pad(122.0, 2048.0, 2048, 64), 0.0);
+    assert_eq!(bounded_pad(0.0, 1920.0, 2048, 64), 0.0);
 }
 
 /// A scissor set under a scale still bounds the layer - every canvas drawn
