@@ -342,8 +342,16 @@ impl<T> ImageStore<T> {
 #[non_exhaustive]
 pub enum ImageFilter {
     /// Applies a Gaussian blur filter with the specified standard deviation.
+    ///
+    /// One shader pass covers a standard deviation of at most 8 device
+    /// pixels: `Canvas::filter_image` clamps a larger one to 8, while
+    /// `Canvas::filter_image_chain`, a layer filter and a shadow blur split
+    /// it into passes that compose to the requested value (Gaussians add in
+    /// quadrature), up to a sigma of 128.
     GaussianBlur {
-        /// The standard deviation of the Gaussian blur filter.
+        /// The standard deviation of the Gaussian blur filter, in device
+        /// pixels. Zero, negative or non-finite values leave the image
+        /// unchanged.
         sigma: f32,
     },
     /// Applies a 4x5 color matrix, the operation behind SVG `feColorMatrix` and

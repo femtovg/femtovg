@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
+  above 8 device pixels) coming out narrower than requested. A layer filter, a
+  filter chain or a shadow blurred past that limit now runs as several passes
+  that compose to the requested width, and its offscreen padding follows the
+  true reach; blurs within the limit render exactly as before. The wgpu backend
+  also reuses one blur buffer across passes instead of allocating one per pass.
+  Fixes the Google Workspace SVG icon, amongst several others.
 - Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
   by the square of the device width (a nanovg heuristic), so a 0.2 px line
   carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
