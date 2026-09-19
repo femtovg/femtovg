@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed unused-code warnings when building without the default features (for
+  example `--no-default-features --features wgpu`): imports and helpers used
+  only by `textlayout`, `swash` or `image-loading` are now gated on them.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes

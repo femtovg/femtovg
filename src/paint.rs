@@ -94,11 +94,13 @@ impl FontVariations {
     }
 
     /// Returns true if no variation axes are set.
+    #[cfg(any(feature = "textlayout", feature = "swash"))]
     pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Iterates over all set (tag, value) pairs.
+    #[cfg(any(feature = "textlayout", feature = "swash"))]
     pub(crate) fn iter(&self) -> impl Iterator<Item = (u32, f32)> + '_ {
         self.entries[..self.len as usize].iter().copied()
     }
