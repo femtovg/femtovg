@@ -88,6 +88,7 @@ impl Params {
                 height,
                 angle,
                 tint,
+                transform: image_transform,
             } => {
                 let Some(image_info) = images.info(*id) else {
                     return params;
@@ -103,6 +104,7 @@ impl Params {
 
                 let mut transform = Transform2D::rotation(*angle);
                 transform.translate(*cx, *cy);
+                transform *= *image_transform;
                 transform *= *global_transform;
 
                 if image_info.flags().contains(ImageFlags::FLIP_Y) {

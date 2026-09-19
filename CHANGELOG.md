@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `Paint::set_image_transform` / `with_image_transform`: an image
+  paint can now carry a full affine transform from its own coordinate space
+  into user space, applied before the canvas transform - the image
+  counterpart of `set_gradient_transform`, and what SVG `patternTransform`
+  and Canvas 2D `CanvasPattern.setTransform` need. Together with
+  `ImageFlags::REPEAT_X | REPEAT_Y` it draws sheared or non-uniformly scaled
+  repeating patterns, which the centre/size/angle parameters of
+  `Paint::image` cannot express.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes
