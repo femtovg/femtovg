@@ -652,3 +652,138 @@ fn reset_keeps_the_clips_of_outer_levels() {
     );
     assert_eq!(px(&out, 48, 48), [0, 0, 255], "after both restores nothing is clipped");
 }
+
+/// Renders `draw` into a 64x64 image target, then blits that image to the
+/// screen unclipped so `px` reads the image's pixels.
+fn render_via_image(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>, femtovg::ImageId),
+) -> Vec<u8> {
+    render(device, queue, |canvas| {
+        let image = canvas
+            .create_image_empty(
+                64,
+                64,
+                PixelFormat::Rgba8,
+                ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.set_render_target(RenderTarget::Image(image));
+        canvas.clear_rect(0, 0, 64, 64, Color::white());
+        draw(canvas, image);
+        canvas.set_render_target(RenderTarget::Screen);
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, 64.0, 64.0);
+        let mut paint = Paint::image(image, 0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+        paint.set_anti_alias(false);
+        canvas.fill_path(&p, &paint);
+    })
+}
+
+/// A clip popped by `restore()` while another target is current must still
+/// come off its own target: an image clipped to its left half, then to a
+/// middle band inside a save level, restored with the screen current, is
+/// clipped to the left half alone when drawing into it resumes.
+#[test]
+fn restore_with_another_target_current_reconciles_the_image_clip() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render_via_image(&device, &queue, |canvas, image| {
+        let mut left = Path::new();
+        left.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&left, FillRule::NonZero);
+        canvas.save();
+        let mut band = Path::new();
+        band.rect(16.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&band, FillRule::NonZero);
+        canvas.set_render_target(RenderTarget::Screen);
+        canvas.restore();
+        canvas.set_render_target(RenderTarget::Image(image));
+        full_red_rect(canvas);
+    });
+    assert_eq!(
+        px(&out, 8, 32),
+        RED,
+        "inside the surviving clip, outside the popped one"
+    );
+    assert_eq!(px(&out, 24, 32), RED, "inside both clips");
+    assert_eq!(px(&out, 40, 32), WHITE, "outside the surviving clip");
+}
+
+/// The same with the roles swapped: the screen's inner clip is popped while
+/// an image is the current target.
+#[test]
+fn restore_with_an_image_current_reconciles_the_screen_clip() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render(&device, &queue, |canvas| {
+        let image = canvas
+            .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
+            .unwrap();
+        let mut left = Path::new();
+        left.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&left, FillRule::NonZero);
+        canvas.save();
+        let mut band = Path::new();
+        band.rect(16.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&band, FillRule::NonZero);
+        canvas.set_render_target(RenderTarget::Image(image));
+        canvas.restore();
+        canvas.set_render_target(RenderTarget::Screen);
+        full_red_rect(canvas);
+    });
+    assert_eq!(
+        px(&out, 8, 32),
+        RED,
+        "inside the surviving clip, outside the popped one"
+    );
+    assert_eq!(px(&out, 24, 32), RED, "inside both clips");
+    assert_eq!(px(&out, 40, 32), WHITE, "outside the surviving clip");
+}
+
+/// When the last clip of an image is popped while the screen is current, the
+/// image's plane must be disarmed too: a later concave fill into it, which
+/// counts winding in the stencil, must not read the old clip region as
+/// coverage and paint its bounding box there.
+#[test]
+fn last_clip_popped_with_another_target_current_disarms_the_image_plane() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let out = render_via_image(&device, &queue, |canvas, image| {
+        canvas.save();
+        let mut left = Path::new();
+        left.rect(0.0, 0.0, 32.0, 64.0);
+        canvas.clip_path(&left, FillRule::NonZero);
+        canvas.set_render_target(RenderTarget::Screen);
+        canvas.restore();
+        canvas.set_render_target(RenderTarget::Image(image));
+
+        // Self-intersecting bowtie spanning the whole image: concave path.
+        let mut bowtie = Path::new();
+        bowtie.move_to(4.0, 8.0);
+        bowtie.line_to(60.0, 56.0);
+        bowtie.line_to(60.0, 8.0);
+        bowtie.line_to(4.0, 56.0);
+        bowtie.close();
+        canvas.fill_path(&bowtie, &red());
+    });
+    assert_eq!(px(&out, 12, 30), RED, "bowtie interior on the left");
+    assert_eq!(px(&out, 52, 30), RED, "bowtie interior on the right: no clip is active");
+    assert_eq!(
+        px(&out, 28, 10),
+        WHITE,
+        "outside the bowtie, inside the old clip region"
+    );
+    assert_eq!(
+        px(&out, 36, 10),
+        WHITE,
+        "outside the bowtie, outside the old clip region"
+    );
+}

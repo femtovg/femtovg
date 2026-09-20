@@ -370,6 +370,10 @@ pub struct Canvas<T: Renderer> {
     // stencil plane of the render target it was taken on and gates only
     // draws into that target.
     clip_stack: Vec<ClipEntry>,
+    // Targets whose plane no longer matches the stack: a clip of theirs was
+    // popped while another target was current. Replayed when they next
+    // become the render target.
+    stale_clip_planes: Vec<RenderTarget>,
 }
 
 #[derive(Clone, Debug)]
@@ -732,6 +736,7 @@ where
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
+            stale_clip_planes: Vec::new(),
         };
 
         canvas.save();
@@ -765,6 +770,7 @@ where
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
+            stale_clip_planes: Vec::new(),
         };
 
         canvas.save();
@@ -801,7 +807,9 @@ where
         // undefined after a resize), so an active clip would test a blank
         // plane and draw nothing. Re-arm it from the logical clip stack, which
         // survives the resize like the rest of the state.
-        if self.clip_stack.iter().any(|entry| entry.target == RenderTarget::Screen) {
+        if self.take_stale_clip_plane(RenderTarget::Screen)
+            || self.clip_stack.iter().any(|entry| entry.target == RenderTarget::Screen)
+        {
             self.replay_clip_stack();
         }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
@@ -977,19 +985,38 @@ where
         self.pop_clips_to(inherited_depth);
     }
 
-    /// Drops the clips above `depth` and, when any of them gated the current
-    /// render target, re-establishes that target's plane from the survivors.
-    /// Clips of other targets need no replay: draws elsewhere never touched
-    /// their planes, and a popped layer-store clip goes with its store.
+    /// Drops the clips above `depth` and brings the planes they gated back in
+    /// line with the survivors: the current render target's now, any other
+    /// target's when it next becomes current (a `restore()` after a
+    /// `set_render_target` pops a clip whose plane cannot be redrawn from
+    /// here).
     fn pop_clips_to(&mut self, depth: usize) {
         if self.clip_stack.len() <= depth {
             return;
         }
-        let target = self.current_render_target;
-        let popped_here = self.clip_stack[depth..].iter().any(|entry| entry.target == target);
-        self.clip_stack.truncate(depth);
-        if popped_here {
+        let current = self.current_render_target;
+        let mut replay_current = false;
+        for entry in self.clip_stack.drain(depth..) {
+            if entry.target == current {
+                replay_current = true;
+            } else if !self.stale_clip_planes.contains(&entry.target) {
+                self.stale_clip_planes.push(entry.target);
+            }
+        }
+        if replay_current {
             self.replay_clip_stack();
+        }
+    }
+
+    /// Clears `target`'s stale mark and reports whether it had one: its
+    /// plane must then be replayed before anything is drawn into it.
+    fn take_stale_clip_plane(&mut self, target: RenderTarget) -> bool {
+        match self.stale_clip_planes.iter().position(|&stale| stale == target) {
+            Some(index) => {
+                self.stale_clip_planes.swap_remove(index);
+                true
+            }
+            None => false,
         }
     }
 
@@ -1114,18 +1141,25 @@ where
             self.append_cmd(Command::new(CommandType::SetRenderTarget(target)));
             self.current_render_target = target;
         }
+        // A clip of this target popped while another target was current
+        // left its plane holding the old intersection.
+        if self.take_stale_clip_plane(target) {
+            self.replay_clip_stack();
+        }
     }
 
     fn append_cmd(&mut self, cmd: Command) {
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
-        // to gate; clear_rect is a raw clear that neither backend clips.
+        // to gate; clear_rect is a raw clear that neither backend clips; a
+        // filter pass draws into its own target image, not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
                 | CommandType::ClipReset { .. }
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
+                | CommandType::RenderFilteredImage { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }
@@ -1372,6 +1406,9 @@ where
     /// Returns a transient image to the pool once every command that reads it
     /// has been recorded.
     fn release_transient_image(&mut self, id: ImageId) {
+        // The pool may hand the image to the next layer; a stale plane of a
+        // discarded layer's store must not follow it there.
+        self.take_stale_clip_plane(RenderTarget::Image(id));
         self.transients.release(id);
     }
 
@@ -1990,34 +2027,34 @@ where
         self.set_render_target(previous_target);
     }
 
-    /// Intersects the current clip region with `path` under the current
-    /// transform, using `fill_rule` as the clip-rule - Canvas 2D `clip()` /
-    /// SVG `clip-path` semantics. Subsequent drawing into the current render
-    /// target is limited to the intersection of every clip taken on it. A
-    /// clip taken while drawing into a layer store or an image target lives
-    /// on that target's stencil plane and gates only draws into it, while
-    /// the clips of the target underneath keep gating what is composited
-    /// back onto it. `save()` / [`restore`](Self::restore) scope clips like
-    /// the rest of the state: restoring pops the clips taken since the
-    /// matching save and replays the survivors.
+    /// Intersects the clip region with `path` under the current transform,
+    /// with `fill_rule` as the clip-rule: Canvas 2D `clip()`, SVG `clip-path`
+    /// and `clip-rule`. Drawing after this call is limited to the
+    /// intersection of every clip taken on the current render target.
     ///
-    /// [`clear_rect`](Self::clear_rect) is a raw clear and is not clipped; a
-    /// Canvas 2D `clearRect` under a clip is a fill of the rect with an
-    /// opaque paint under [`CompositeOperation::DestinationOut`].
+    /// Clip edges are not antialiased: unlike a fill or stroke edge, a pixel
+    /// is either inside the clip or outside it.
     ///
-    /// The clip lives in a reserved bit of the stencil attachment both
-    /// backends already carry for concave fills, so it costs no textures, no
-    /// allocations, and no render-pass breaks: winding for the clip path is
-    /// accumulated only where the previous clip bit is set (nesting
-    /// intersects for free) and two bounded quads resolve the new bit.
-    /// Clip-free rendering is untouched - the plane is armed by the first
-    /// `clip_path` and disarmed when the last clip is restored. Clip edges
-    /// are hard (single-sample); antialiased clip boundaries are a documented
-    /// follow-up.
+    /// Clips are part of the saved state - [`restore`](Self::restore) drops
+    /// the clips taken since the matching [`save`](Self::save) - and belong
+    /// to the render target they were taken on: a clip on the canvas still
+    /// applies when a layer opened on it is composited back, and a clip taken
+    /// inside a layer or while rendering into an image gates only that layer
+    /// or image.
+    ///
+    /// [`clear_rect`](Self::clear_rect) is not clipped; a Canvas 2D
+    /// `clearRect` under a clip is a fill of the rect with an opaque paint
+    /// under [`CompositeOperation::DestinationOut`].
     pub fn clip_path(&mut self, path: &Path, fill_rule: FillRule) {
+        // The clip lives in a reserved bit of the stencil attachment both
+        // backends carry for concave fills (no textures, no allocations, no
+        // render-pass breaks): winding for the clip path accumulates only
+        // where the previous clip bit is set, so nesting intersects, and two
+        // target-sized quads resolve the new bit. The first clip on a target
+        // arms its plane, popping the last one disarms it; clip-free
+        // rendering is untouched.
         let target = self.current_render_target;
         if !self.clip_active() {
-            // The first clip on this target arms its plane.
             self.emit_clip_reset(true);
         }
         let transform = self.state().transform;
@@ -4638,6 +4675,48 @@ fn transparent_shadow_emits_no_offscreen_work() {
             .any(|c| matches!(c.cmd_type, CommandType::SetRenderTarget(RenderTarget::Image(_)))),
         "transparent shadow must not allocate an offscreen render target"
     );
+}
+
+/// A filter pass draws into its own target image, never into the target a
+/// clip gates, so it must be recorded ungated under an active clip: a backend
+/// that stencil-tests it (OpenGL) would otherwise test the filter quad against
+/// the target image's blank plane and drop the whole pass - every layer
+/// filter and every blurred shadow drawn under a clip.
+#[test]
+fn filter_passes_are_not_gated_by_the_active_clip() {
+    use renderer::CommandType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let source = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 50.0, 50.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.filter_image(target, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+    let mut path = Path::new();
+    path.rect(10.0, 10.0, 30.0, 30.0);
+    canvas.fill_path(&path, &Paint::color(Color::rgb(255, 0, 0)));
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let filter = commands
+        .iter()
+        .find(|c| matches!(c.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .expect("the filter pass is recorded");
+    assert!(!filter.clip_active, "a filter pass is not gated by the clip");
+    let fill = commands
+        .iter()
+        .find(|c| matches!(c.cmd_type, CommandType::ConvexFill { .. }))
+        .expect("the fill is recorded");
+    assert!(fill.clip_active, "the fill under the clip is gated");
 }
 
 /// With an opaque shadow color and a non-zero blur, filling a path must emit the
