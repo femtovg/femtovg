@@ -1,5 +1,6 @@
 use fnv::FnvHashMap;
 use std::cell::{Ref, RefCell};
+#[cfg(any(feature = "textlayout", feature = "swash"))]
 use std::collections::hash_map::Entry;
 use std::fmt;
 #[cfg(all(feature = "swash", not(feature = "textlayout")))]
@@ -59,6 +60,8 @@ pub struct Glyph {
 pub enum GlyphRendering<'a> {
     RenderAsPath(Ref<'a, Path>),
     #[cfg(feature = "image-loading")]
+    // Color glyph images come from font rasterization, which needs textlayout.
+    #[cfg_attr(not(feature = "textlayout"), allow(dead_code))]
     RenderAsImage(image::DynamicImage),
 }
 
@@ -66,6 +69,7 @@ pub enum GlyphRendering<'a> {
 struct FontFlags(u8);
 
 impl FontFlags {
+    #[cfg(any(feature = "textlayout", feature = "swash"))]
     fn new(regular: bool, italic: bool, bold: bool, oblique: bool, variable: bool) -> Self {
         let mut flags = 0;
         if regular {

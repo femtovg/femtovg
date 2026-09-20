@@ -22,7 +22,9 @@ extern crate serde;
 
 #[cfg(feature = "textlayout")]
 use std::ops::Range;
-use std::{cell::RefCell, path::Path as FilePath, rc::Rc};
+#[cfg(any(feature = "image-loading", feature = "textlayout"))]
+use std::path::Path as FilePath;
+use std::{cell::RefCell, rc::Rc};
 
 use imgref::ImgVec;
 use rgb::RGBA8;
@@ -3484,6 +3486,7 @@ where
         self.verts.extend_from_slice(verts);
     }
 
+    #[cfg(feature = "textlayout")]
     fn font_scale(&self) -> f32 {
         let avg_scale = self.state().transform.average_scale();
 
