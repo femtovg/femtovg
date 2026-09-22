@@ -843,7 +843,6 @@ impl OpenGl {
 
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
-        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
@@ -867,8 +866,7 @@ impl OpenGl {
     ) {
         let original_render_target = self.current_render_target;
 
-        // The filtering happens in two passes, first a horizontal blur and then the vertial blur. The
-        // first pass therefore renders into an intermediate, temporarily allocated texture.
+        // The filtering happens in two passes through the canvas-owned scratch.
 
         let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
 
@@ -898,11 +896,12 @@ impl OpenGl {
         blur_params.image_blur_filter_direction = [1.0, 0.0];
         blur_params.image_blur_filter_sigma = sigma;
 
-        let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
+        let horizontal_blur_buffer = cmd
+            .filter_scratch
+            .expect("a Gaussian blur has a reserved scratch image");
         self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
         self.main_program().set_view(self.view);
 
-        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
@@ -917,7 +916,6 @@ impl OpenGl {
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
 
-        // A renderer-owned scratch texture carries no clip plane.
         self.clear_rect(
             0,
             0,
@@ -928,12 +926,13 @@ impl OpenGl {
         );
 
         blur_params.image_blur_filter_direction = [0.0, 1.0];
+        // The horizontal pass stored premultiplied RGBA regardless of the
+        // source image's format or premultiplication flag.
+        blur_params.tex_type = 0.0;
 
         cmd.image = Some(horizontal_blur_buffer);
 
         self.triangles(images, &cmd, &blur_params);
-
-        images.remove(self, horizontal_blur_buffer);
 
         // restore previous render target and view
         self.set_target(images, original_render_target);
@@ -1147,6 +1146,10 @@ impl Renderer for OpenGl {
         self.max_texture_size
     }
 
+    fn transient_image_cost(&self, info: ImageInfo) -> usize {
+        opengl_transient_image_cost(info)
+    }
+
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         //let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
         let w = self.view[0] as usize;
@@ -1188,6 +1191,18 @@ impl Renderer for OpenGl {
     }
 }
 
+fn opengl_transient_image_cost(info: ImageInfo) -> usize {
+    let color_bytes: usize = match info.format() {
+        crate::PixelFormat::Gray8 => 1,
+        crate::PixelFormat::Rgb8 | crate::PixelFormat::Rgba8 => 4,
+    };
+    // Color plus the target's Stencil8 attachment. Gaussian blur scratch is
+    // a separate transient image and is charged independently.
+    info.width()
+        .saturating_mul(info.height())
+        .saturating_mul(color_bytes + 1)
+}
+
 impl SurfacelessRenderer for OpenGl {
     fn render_surfaceless(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
         self.render((), images, verts, commands)
@@ -1207,5 +1222,23 @@ impl Drop for OpenGl {
                 self.context.delete_buffer(vert_buff);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod transient_cost_tests {
+    use super::opengl_transient_image_cost;
+    use crate::{ImageFlags, ImageInfo, PixelFormat};
+
+    #[test]
+    fn charges_color_and_stencil() {
+        let pixels = 1242 * 2688;
+        let rgba = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgba8);
+        let rgb = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgb8);
+        let gray = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Gray8);
+
+        assert_eq!(opengl_transient_image_cost(rgba), pixels * 5);
+        assert_eq!(opengl_transient_image_cost(rgb), pixels * 5);
+        assert_eq!(opengl_transient_image_cost(gray), pixels * 2);
     }
 }

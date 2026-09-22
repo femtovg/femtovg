@@ -274,13 +274,6 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
-    // The Gaussian blur's horizontal-pass buffer, kept across passes and
-    // frames and replaced only when a blur needs another size or format. A
-    // texture created inside a command stream lives until that submit
-    // retires, so allocating one per pass held every pass's buffer at once -
-    // a blur split into k passes held k store-sized textures.
-    blur_horizontal_buffer: Option<wgpu::Texture>,
-
     bind_group_layout: wgpu::BindGroupLayout,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
@@ -489,7 +482,6 @@ impl WGPURenderer {
             vertex_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
-            blur_horizontal_buffer: None,
             bind_group_layout,
             viewport_bind_group_layout,
             pipeline_layout,
@@ -607,7 +599,6 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
-
         for command in commands {
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
@@ -706,11 +697,7 @@ impl Renderer for WGPURenderer {
                             render_pass_builder: &mut render_pass_builder,
                             pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                         };
-                        let blur = BlurBuffers {
-                            device: &self.device,
-                            horizontal: &mut self.blur_horizontal_buffer,
-                        };
-                        gaussian_blur_filter(&mut pass, blur, command, sigma, target_image);
+                        gaussian_blur_filter(&mut pass, command, sigma, target_image);
                     }
                     single_pass => {
                         let target_info = images.get(target_image).unwrap().info;
@@ -879,17 +866,47 @@ impl Renderer for WGPURenderer {
         self.device.limits().max_texture_dimension_2d as usize
     }
 
+    fn transient_image_cost(&self, info: crate::ImageInfo) -> usize {
+        wgpu_transient_image_cost(info)
+    }
+
     fn screenshot(&mut self) -> Result<imgref::ImgVec<rgb::RGBA8>, crate::ErrorKind> {
         return Err(crate::ErrorKind::UnsupportedOperation);
     }
 }
 
+fn wgpu_transient_image_cost(info: crate::ImageInfo) -> usize {
+    let color_bytes = match info.format() {
+        crate::PixelFormat::Gray8 => 1,
+        crate::PixelFormat::Rgb8 | crate::PixelFormat::Rgba8 => 4,
+    };
+    // Color plus the target's Stencil8 attachment. Gaussian blur scratch is
+    // a separate transient image and is charged independently.
+    info.width()
+        .saturating_mul(info.height())
+        .saturating_mul(color_bytes + 1)
+}
+
+#[cfg(test)]
+mod transient_cost_tests {
+    use super::wgpu_transient_image_cost;
+    use crate::{ImageFlags, ImageInfo, PixelFormat};
+
+    #[test]
+    fn charges_color_and_stencil() {
+        let pixels = 1242 * 2688;
+        let rgba = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgba8);
+        let rgb = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgb8);
+        let gray = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Gray8);
+
+        assert_eq!(wgpu_transient_image_cost(rgba), pixels * 5);
+        assert_eq!(wgpu_transient_image_cost(rgb), pixels * 5);
+        assert_eq!(wgpu_transient_image_cost(gray), pixels * 2);
+    }
+}
+
 /// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
-/// into the renderer's kept horizontal buffer, then vertical into the target.
-/// The buffer is reused across passes and frames (see
-/// `WGPURenderer::blur_horizontal_buffer`); consecutive passes of a split
-/// blur write it, read it, write it again, and the render passes wgpu records
-/// in order keep those hazards apart.
+/// into its reserved transient scratch, then vertical into the target.
 /// The render-loop state an image-filter pass draws through: the images,
 /// the target it must restore when done, the open pass builder and the
 /// pipeline mapper.
@@ -917,20 +934,7 @@ impl FilterPass<'_, '_> {
     }
 }
 
-/// What the Gaussian blur owns on the renderer: the device that creates its
-/// horizontal-pass buffer and the buffer itself, kept across passes.
-struct BlurBuffers<'a> {
-    device: &'a wgpu::Device,
-    horizontal: &'a mut Option<wgpu::Texture>,
-}
-
-fn gaussian_blur_filter(
-    pass: &mut FilterPass<'_, '_>,
-    blur: BlurBuffers<'_>,
-    command: super::Command,
-    sigma: f32,
-    target_image: ImageId,
-) {
+fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, sigma: f32, target_image: ImageId) {
     let FilterPass {
         images,
         current_render_target,
@@ -941,10 +945,6 @@ fn gaussian_blur_filter(
     let current_render_target: &mut RenderTarget = current_render_target;
     let render_pass_builder: &mut RenderPassBuilder<'_> = render_pass_builder;
     let pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper = pipeline_and_bindgroup_mapper;
-    let BlurBuffers {
-        device,
-        horizontal: horizontal_blur_buffer,
-    } = blur;
     let blend_state = blend_state(&command).into();
 
     let previous_render_target = *current_render_target;
@@ -978,35 +978,12 @@ fn gaussian_blur_filter(
     blur_params.image_blur_filter_direction = [1.0, 0.0];
     blur_params.image_blur_filter_sigma = sigma;
 
-    let size = wgpu::Extent3d {
-        width: source_image.info.width() as _,
-        height: source_image.info.height() as _,
-        depth_or_array_layers: 1,
-    };
-    let format = match source_image.info.format() {
-        crate::PixelFormat::Rgb8 => wgpu::TextureFormat::Rgba8Unorm,
-        crate::PixelFormat::Rgba8 => wgpu::TextureFormat::Rgba8Unorm,
-        crate::PixelFormat::Gray8 => wgpu::TextureFormat::R8Unorm,
-    };
-    let horizontal_blur_buffer = match horizontal_blur_buffer {
-        Some(texture) if texture.size() == size && texture.format() == format => texture.clone(),
-        kept => kept
-            .insert(device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("blur horizontal"),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            }))
-            .clone(),
-    };
-
-    render_pass_builder.set_render_target_texture(
-        &horizontal_blur_buffer,
-        None,
+    let horizontal_blur_buffer = command
+        .filter_scratch
+        .expect("a Gaussian blur has a reserved scratch image");
+    render_pass_builder.set_filter_target_image(
+        images,
+        horizontal_blur_buffer,
         wgpu::LoadOp::Clear(wgpu::Color::default()),
     );
 
@@ -1019,15 +996,18 @@ fn gaussian_blur_filter(
             Some(wgpu::Face::Back),
             &blur_params,
             images,
-            command.image.map(ImageOrTexture::Image),
+            command.image,
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 
-    render_pass_builder.set_render_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
+    render_pass_builder.set_filter_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
     blur_params.image_blur_filter_direction = [0.0, 1.0];
+    // The horizontal pass stored premultiplied RGBA regardless of the source
+    // image's format or premultiplication flag.
+    blur_params.tex_type = 0.0;
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1038,7 +1018,7 @@ fn gaussian_blur_filter(
             Some(wgpu::Face::Back),
             &blur_params,
             images,
-            Some(ImageOrTexture::Texture(horizontal_blur_buffer)),
+            Some(horizontal_blur_buffer),
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1101,7 +1081,7 @@ fn single_pass_filter(
     // extent comes from the target rather than from what is sampled.
     params.extent = [target_info.width() as f32, target_info.height() as f32];
 
-    render_pass_builder.set_render_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
+    render_pass_builder.set_filter_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1112,7 +1092,7 @@ fn single_pass_filter(
             Some(wgpu::Face::Back),
             &params,
             images,
-            command.image.map(ImageOrTexture::Image),
+            command.image,
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1139,7 +1119,7 @@ fn triangles(
         Some(wgpu::Face::Back),
         params,
         images,
-        command.image.map(ImageOrTexture::Image),
+        command.image,
         command.glyph_texture,
     );
     render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1193,7 +1173,7 @@ fn stencil_stroke(
         Some(wgpu::Face::Back),
         &params2,
         images,
-        command.image.map(ImageOrTexture::Image),
+        command.image,
         command.glyph_texture,
     );
 
@@ -1231,7 +1211,7 @@ fn stencil_stroke(
         Some(wgpu::Face::Back),
         &params1,
         images,
-        command.image.map(ImageOrTexture::Image),
+        command.image,
         command.glyph_texture,
     );
 
@@ -1270,7 +1250,7 @@ fn stencil_stroke(
         Some(wgpu::Face::Back),
         &params1,
         images,
-        command.image.map(ImageOrTexture::Image),
+        command.image,
         command.glyph_texture,
     );
 
@@ -1300,7 +1280,7 @@ fn stroke(
             Some(wgpu::Face::Back),
             &params,
             images,
-            command.image.map(ImageOrTexture::Image),
+            command.image,
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1404,7 +1384,7 @@ fn concave_fill(
                 Some(wgpu::Face::Back),
                 fill_params,
                 images,
-                command.image.map(ImageOrTexture::Image),
+                command.image,
                 command.glyph_texture,
             );
 
@@ -1462,7 +1442,7 @@ fn concave_fill(
             Some(wgpu::Face::Back),
             fill_params,
             images,
-            command.image.map(ImageOrTexture::Image),
+            command.image,
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1651,7 +1631,7 @@ fn convex_fill(
                 Some(wgpu::Face::Back),
                 params,
                 images,
-                command.image.map(ImageOrTexture::Image),
+                command.image,
                 command.glyph_texture,
             );
             render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1666,7 +1646,7 @@ fn convex_fill(
                 Some(wgpu::Face::Back),
                 params,
                 images,
-                command.image.map(ImageOrTexture::Image),
+                command.image,
                 command.glyph_texture,
             );
             render_pass_builder.draw(start as u32..(start + count) as u32);
@@ -1895,14 +1875,8 @@ impl PipelineState {
 }
 
 #[derive(Clone, PartialEq)]
-enum ImageOrTexture {
-    Image(ImageId),
-    Texture(wgpu::Texture),
-}
-
-#[derive(Clone, PartialEq)]
 struct BindGroupState {
-    image: Option<ImageOrTexture>,
+    image: Option<ImageId>,
     glyph_texture: GlyphTexture,
 }
 
@@ -1926,7 +1900,7 @@ impl BindGroupState {
         let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
-            self.glyph_texture.image_id().map(ImageOrTexture::Image).as_ref(),
+            self.glyph_texture.image_id().as_ref(),
             empty_texture_view,
             sampler_cache,
         );
@@ -2064,15 +2038,12 @@ impl<'a> RenderPassBuilder<'a> {
     fn create_binding_resource_and_sampler(
         device: &wgpu::Device,
         images: &ImageStore<Image>,
-        image: Option<&ImageOrTexture>,
+        image: Option<&ImageId>,
         empty_texture_view: &wgpu::TextureView,
         sampler_cache: &RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>,
     ) -> (OwnedBindingResource, wgpu::Sampler) {
         let flags = image
-            .and_then(|image_or_texture| match image_or_texture {
-                ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| img.info.flags()),
-                _ => None,
-            })
+            .and_then(|image_id| images.get(*image_id).map(|img| img.info.flags()))
             .unwrap_or_else(crate::ImageFlags::empty);
 
         let filter_mode = if flags.contains(crate::ImageFlags::NEAREST) {
@@ -2105,16 +2076,13 @@ impl<'a> RenderPassBuilder<'a> {
             .clone();
 
         let binding_resource = image
-            .and_then(|image_or_texture| match image_or_texture {
-                ImageOrTexture::Image(image_id) => images.get(*image_id).map(|img| match &img.texture {
+            .and_then(|image_id| {
+                images.get(*image_id).map(|img| match &img.texture {
                     Texture::Internal(texture) => {
                         OwnedBindingResource::TextureView(texture.create_view(&Default::default()))
                     }
                     Texture::External(texture) => OwnedBindingResource::ExternalTexture(texture.clone()),
-                }),
-                ImageOrTexture::Texture(texture) => Some(OwnedBindingResource::TextureView(
-                    texture.create_view(&Default::default()),
-                )),
+                })
             })
             .unwrap_or_else(|| OwnedBindingResource::TextureView(empty_texture_view.clone()));
 
@@ -2167,6 +2135,18 @@ impl<'a> RenderPassBuilder<'a> {
                 .clone();
 
             self.set_render_target_texture(&texture.clone(), Some(stencil_buffer), load);
+        }
+    }
+
+    fn set_filter_target_image(
+        &mut self,
+        images: &ImageStore<Image>,
+        image_id: ImageId,
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) {
+        let image = images.get(image_id).unwrap();
+        if let Texture::Internal(texture) = &image.texture {
+            self.set_render_target_texture(texture, None, load);
         }
     }
 
@@ -2282,7 +2262,7 @@ impl CommandToPipelineAndBindGroupMapper {
         cull_mode: Option<wgpu::Face>,
         params: &Params,
         images: &'a ImageStore<Image>,
-        image: Option<ImageOrTexture>,
+        image: Option<ImageId>,
         glyph_texture: GlyphTexture,
     ) {
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();

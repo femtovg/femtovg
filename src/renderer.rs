@@ -34,7 +34,7 @@ pub struct Drawable {
 pub enum CommandType {
     /// Intersects the persistent stencil clip with a path: the drawables carry
     /// the winding fan triangles and `triangles_verts` the resolve quad over
-    /// the path bounds. `fill_rule` is the clip-rule.
+    /// the previously visible clip bounds. `fill_rule` is the clip-rule.
     ClipFill,
     /// Rewrites the persistent stencil clip with a full-canvas quad
     /// (`triangles_verts`): `visible: true` arms the clip plane (everything
@@ -104,6 +104,7 @@ pub struct Command {
     pub(crate) drawables: Vec<Drawable>,
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
+    pub(crate) filter_scratch: Option<ImageId>,
     pub(crate) glyph_texture: GlyphTexture,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
@@ -118,6 +119,7 @@ impl Command {
             drawables: Vec::new(),
             triangles_verts: None,
             image: None,
+            filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
@@ -126,7 +128,7 @@ impl Command {
 }
 
 /// Represents different render targets (screen or image).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub enum RenderTarget {
     /// Render to the screen.
     Screen,
@@ -207,6 +209,20 @@ pub trait Renderer {
     /// (Raspberry Pi Zero through 3) reports 2048.
     fn max_texture_size(&self) -> usize {
         8192
+    }
+
+    /// Backend allocation charged when the transient pool creates `info`.
+    /// Renderers override this for attachments or scratch reserved alongside
+    /// pooled images.
+    fn transient_image_cost(&self, info: ImageInfo) -> usize {
+        let bytes_per_pixel = match info.format() {
+            crate::PixelFormat::Gray8 => 1,
+            crate::PixelFormat::Rgb8 => 3,
+            crate::PixelFormat::Rgba8 => 4,
+        };
+        info.width()
+            .saturating_mul(info.height())
+            .saturating_mul(bytes_per_pixel)
     }
 }
 

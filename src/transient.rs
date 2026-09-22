@@ -15,11 +15,56 @@
 use crate::image::ImageStore;
 use crate::renderer::Renderer;
 use crate::{ErrorKind, ImageFlags, ImageId, ImageInfo, PixelFormat};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Default)]
+pub(crate) struct FreeImages {
+    by_info: HashMap<ImageInfo, Vec<ImageId>>,
+    ids: HashSet<ImageId>,
+}
+
+impl FreeImages {
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    fn contains(&self, id: &ImageId) -> bool {
+        self.ids.contains(id)
+    }
+
+    fn insert(&mut self, info: ImageInfo, id: ImageId) {
+        let inserted = self.ids.insert(id);
+        debug_assert!(inserted, "transient released twice");
+        self.by_info.entry(info).or_default().push(id);
+    }
+
+    fn take_exact(&mut self, info: ImageInfo) -> Option<ImageId> {
+        let bucket = self.by_info.get_mut(&info)?;
+        let id = bucket.pop()?;
+        let empty = bucket.is_empty();
+        self.ids.remove(&id);
+        if empty {
+            self.by_info.remove(&info);
+        }
+        Some(id)
+    }
+
+    fn clear(&mut self) {
+        self.by_info.clear();
+        self.ids.clear();
+    }
+}
 
 /// Default cap on live transient memory. A Raspberry Pi Zero's GPU share is
 /// 64-128 MB in total, so integrations targeting it set a smaller budget; see
 /// [`crate::Canvas::set_transient_image_budget`].
-pub(crate) const DEFAULT_BUDGET: usize = 256 * 1024 * 1024;
+pub(crate) const DEFAULT_BUDGET: usize = 128 * 1024 * 1024;
 
 /// Layer stores round up to this many pixels per axis. Sibling layers whose
 /// scissors or blur reaches differ by a few pixels then request the same
@@ -36,21 +81,35 @@ pub(crate) const LAYER_GRANULARITY: usize = 64;
 pub(crate) const SHADOW_GRANULARITY: usize = 8;
 
 pub(crate) fn round_up(n: usize, granularity: usize) -> usize {
-    n.div_ceil(granularity) * granularity
+    debug_assert_ne!(granularity, 0);
+    n.checked_add(granularity - 1)
+        .and_then(|n| n.checked_div(granularity))
+        .and_then(|n| n.checked_mul(granularity))
+        .unwrap_or(usize::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::round_up;
+
+    #[test]
+    fn round_up_saturates_instead_of_wrapping() {
+        assert_eq!(round_up(65, 64), 128);
+        assert_eq!(round_up(usize::MAX, 64), usize::MAX);
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct TransientPool {
     /// Every live transient, deleted at the flush.
     pub(crate) images: Vec<ImageId>,
-    // Images the canvas owns elsewhere (a turbulence lattice cache) and
-    // hands over for deletion at the next flush, once the commands recorded
-    // against them have run; never counted against the budget.
-    pub(crate) retired: Vec<ImageId>,
     /// Transients whose last consumer command has been recorded; a subset of
     /// `images`, taken by the next acquire of the same size and flags.
-    pub(crate) free: Vec<ImageId>,
-    /// Bytes held by `images`, against `budget`.
+    pub(crate) free: FreeImages,
+    /// Images already referenced by a recorded command in this frame. A
+    /// failed reservation may delete only images absent from this set.
+    recorded: HashSet<ImageId>,
+    /// Backend-estimated allocation charged for `images`.
     bytes: usize,
     budget: usize,
 }
@@ -59,8 +118,8 @@ impl TransientPool {
     pub(crate) fn new(budget: usize) -> Self {
         Self {
             images: Vec::new(),
-            retired: Vec::new(),
-            free: Vec::new(),
+            free: FreeImages::default(),
+            recorded: HashSet::new(),
             bytes: 0,
             budget,
         }
@@ -84,37 +143,70 @@ impl TransientPool {
         height: usize,
         flags: ImageFlags,
     ) -> Result<ImageId, ErrorKind> {
-        let reusable = self.free.iter().position(|&id| {
-            images
-                .info(id)
-                .is_some_and(|info| info.width() == width && info.height() == height && info.flags() == flags)
-        });
-        if let Some(at) = reusable {
-            return Ok(self.free.swap_remove(at));
-        }
-        let bytes = width.saturating_mul(height).saturating_mul(4);
-        if self.bytes.saturating_add(bytes) > self.budget {
+        self.acquire_reserving(images, renderer, width, height, flags, 0)
+    }
+
+    pub(crate) fn acquire_reserving<T: Renderer>(
+        &mut self,
+        images: &mut ImageStore<T::Image>,
+        renderer: &mut T,
+        width: usize,
+        height: usize,
+        flags: ImageFlags,
+        headroom: usize,
+    ) -> Result<ImageId, ErrorKind> {
+        let info = ImageInfo::new(flags, width, height, PixelFormat::Rgba8);
+        if self.bytes.saturating_add(headroom) > self.budget {
             return Err(ErrorKind::TransientImageBudgetExceeded);
         }
-        let id = images.alloc(renderer, ImageInfo::new(flags, width, height, PixelFormat::Rgba8))?;
+        if let Some(id) = self.free.take_exact(info) {
+            return Ok(id);
+        }
+        self.allocate(images, renderer, info, headroom)
+    }
+
+    fn allocate<T: Renderer>(
+        &mut self,
+        images: &mut ImageStore<T::Image>,
+        renderer: &mut T,
+        info: ImageInfo,
+        headroom: usize,
+    ) -> Result<ImageId, ErrorKind> {
+        let bytes = renderer.transient_image_cost(info);
+        if self.bytes.saturating_add(bytes).saturating_add(headroom) > self.budget {
+            return Err(ErrorKind::TransientImageBudgetExceeded);
+        }
+        let id = images.alloc(renderer, info)?;
         self.bytes = self.bytes.saturating_add(bytes);
         self.images.push(id);
         Ok(id)
     }
 
     /// Returns an image to the pool once every command that reads it has
-    /// been recorded. Whoever takes it next must clear or fully overwrite it,
-    /// as layers and filter passes do.
-    /// Hands an image the canvas no longer wants to the pool for deletion at
-    /// the next flush; it was never acquired here, so it is not accounted.
-    pub(crate) fn retire(&mut self, id: ImageId) {
-        self.retired.push(id);
-    }
-
-    pub(crate) fn release(&mut self, id: ImageId) {
+    /// been recorded. Whoever takes it next must clear or overwrite it.
+    pub(crate) fn release<I>(&mut self, images: &ImageStore<I>, id: ImageId) {
         debug_assert!(self.images.contains(&id), "released image is not a transient");
         debug_assert!(!self.free.contains(&id), "transient released twice");
-        self.free.push(id);
+        self.recorded.insert(id);
+        self.free
+            .insert(images.info(id).expect("a transient has image info"), id);
+    }
+
+    /// Rolls back an admission that recorded no commands. A fresh image can
+    /// be deleted immediately; a reused one may still back an earlier command.
+    pub(crate) fn rollback<T: Renderer>(&mut self, images: &mut ImageStore<T::Image>, renderer: &mut T, id: ImageId) {
+        debug_assert!(self.images.contains(&id), "rolled back image is not a transient");
+        debug_assert!(!self.free.contains(&id), "transient rolled back twice");
+        if self.recorded.contains(&id) {
+            self.free
+                .insert(images.info(id).expect("a transient has image info"), id);
+            return;
+        }
+        if let Some(at) = self.images.iter().position(|&image| image == id) {
+            self.images.swap_remove(at);
+            self.bytes = self.bytes.saturating_sub(image_cost(images, renderer, id));
+            images.remove(renderer, id);
+        }
     }
 
     /// Deletes every transient except those in `held` (the images of layers
@@ -126,33 +218,25 @@ impl TransientPool {
         held: &[ImageId],
     ) {
         self.free.clear();
+        let held: HashSet<ImageId> = held.iter().copied().collect();
         let mut kept = Vec::new();
         for id in std::mem::take(&mut self.images) {
             if held.contains(&id) {
                 kept.push(id);
             } else {
-                self.bytes = self.bytes.saturating_sub(image_bytes(images, id));
+                self.bytes = self.bytes.saturating_sub(image_cost(images, renderer, id));
+                self.recorded.remove(&id);
                 images.remove(renderer, id);
             }
         }
         self.images = kept;
-        for id in std::mem::take(&mut self.retired) {
-            images.remove(renderer, id);
-        }
     }
 }
 
-/// Bytes an image occupies, for the accounting.
-fn image_bytes<I>(images: &ImageStore<I>, id: ImageId) -> usize {
+/// Backend-estimated allocation charged for an image.
+fn image_cost<I, R: Renderer<Image = I>>(images: &ImageStore<I>, renderer: &R, id: ImageId) -> usize {
     images
         .info(id)
-        .map(|info| {
-            let bpp = match info.format() {
-                PixelFormat::Gray8 => 1,
-                PixelFormat::Rgb8 => 3,
-                PixelFormat::Rgba8 => 4,
-            };
-            info.width() * info.height() * bpp
-        })
+        .map(|info| renderer.transient_image_cost(info))
         .unwrap_or(0)
 }

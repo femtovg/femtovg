@@ -32,7 +32,9 @@ fn chained_center(device: &wgpu::Device, queue: &wgpu::Queue, src: Color, filter
                 ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y | ImageFlags::NEAREST,
             )
             .expect("target image");
-        canvas.filter_image_chain(target, filters, source);
+        canvas
+            .filter_image_chain(target, filters, source)
+            .expect("filter chain");
 
         let mut p = Path::new();
         p.rect(0.0, 0.0, W as f32, H as f32);

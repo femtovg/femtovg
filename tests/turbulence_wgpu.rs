@@ -332,7 +332,9 @@ fn render_chain(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, filt
                 ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y | ImageFlags::NEAREST,
             )
             .expect("target image");
-        canvas.filter_image_chain(target, filters, source);
+        canvas
+            .filter_image_chain(target, filters, source)
+            .expect("filter chain");
         let mut p = Path::new();
         p.rect(0.0, 0.0, w as f32, h as f32);
         canvas.fill_path(&p, &Paint::image(target, 0.0, 0.0, w as f32, h as f32, 0.0, 1.0));
