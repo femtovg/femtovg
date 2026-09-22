@@ -4266,6 +4266,8 @@ pub struct RecordingRenderer {
     pub fail_image_allocations: bool,
     /// Number of image allocation attempts.
     pub image_allocation_attempts: usize,
+    /// Number of backend images released.
+    pub image_deletion_count: usize,
 }
 
 #[cfg(test)]
@@ -4323,7 +4325,9 @@ impl Renderer for RecordingRenderer {
         data.check_update(&image.info, x, y)
     }
 
-    fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {}
+    fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {
+        self.image_deletion_count += 1;
+    }
 
     fn screenshot(&mut self) -> Result<imgref::ImgVec<rgb::RGBA8>, ErrorKind> {
         Ok(imgref::ImgVec::new(Vec::new(), 0, 0))
@@ -4652,6 +4656,7 @@ fn reallocating_an_image_marks_its_clip_plane_for_replay() {
     canvas
         .realloc_image(image, 48, 32, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
+    assert_eq!(canvas.renderer.image_deletion_count, 1);
     assert!(canvas.clip_planes[&RenderTarget::Image(image)].dirty);
     canvas.fill_path(&clip, &Paint::color(Color::white()));
     assert!(!canvas.clip_planes[&RenderTarget::Image(image)].dirty);
@@ -4659,6 +4664,22 @@ fn reallocating_an_image_marks_its_clip_plane_for_replay() {
         .commands
         .iter()
         .any(|command| matches!(command.cmd_type, CommandType::ClipFill)));
+}
+
+#[test]
+fn failed_image_reallocation_preserves_the_existing_image() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    let image = canvas
+        .create_image_empty(32, 24, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.renderer.fail_image_allocations = true;
+
+    assert!(canvas
+        .realloc_image(image, 64, 48, PixelFormat::Rgba8, ImageFlags::empty())
+        .is_err());
+    let info = canvas.image_info(image).unwrap();
+    assert_eq!((info.width(), info.height()), (32, 24));
+    assert_eq!(canvas.renderer.image_deletion_count, 0);
 }
 
 #[test]
