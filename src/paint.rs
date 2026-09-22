@@ -275,6 +275,11 @@ pub enum PaintFlavor {
         height: f32,
         angle: f32,
         tint: Color,
+        /// Maps the image pattern's own coordinate system into user space,
+        /// the role SVG's `patternTransform` plays. Applied before the
+        /// canvas transform, so a pattern can be sheared or scaled on its
+        /// two axes without the shape following it.
+        transform: Transform2D,
     },
     LinearGradient {
         start: Position,
@@ -607,6 +612,7 @@ impl Paint {
             height,
             angle,
             tint: Color::rgbaf(1.0, 1.0, 1.0, alpha),
+            transform: Transform2D::identity(),
         })
     }
 
@@ -620,6 +626,7 @@ impl Paint {
             height,
             angle,
             tint,
+            transform: Transform2D::identity(),
         })
     }
 
@@ -1605,6 +1612,28 @@ impl Paint {
     #[must_use]
     pub fn with_gradient_transform(mut self, transform: Transform2D) -> Self {
         self.set_gradient_transform(transform);
+        self
+    }
+
+    /// Sets the transform that maps an image paint's own coordinate system
+    /// (the rectangle given to [`Paint::image`]) into user space, the role
+    /// SVG's `patternTransform` and Canvas 2D's `CanvasPattern.setTransform`
+    /// play. It is applied before the canvas transform, so the pattern can
+    /// be sheared or given different scales on its two axes without the
+    /// shape following it. Combined with an image created with
+    /// [`ImageFlags::REPEAT_X`](crate::ImageFlags::REPEAT_X) and
+    /// [`ImageFlags::REPEAT_Y`](crate::ImageFlags::REPEAT_Y) this gives a
+    /// fully transformed repeating pattern. Has no effect on other paints.
+    pub fn set_image_transform(&mut self, transform: Transform2D) {
+        if let PaintFlavor::Image { transform: t, .. } = &mut self.flavor {
+            *t = transform;
+        }
+    }
+
+    /// Builder form of [`Paint::set_image_transform`].
+    #[must_use]
+    pub fn with_image_transform(mut self, transform: Transform2D) -> Self {
+        self.set_image_transform(transform);
         self
     }
 
