@@ -385,7 +385,6 @@ pub struct Canvas<T: Renderer> {
 #[derive(Debug)]
 struct ClipGeometry {
     vertices: Box<[Vertex]>,
-    contour_lengths: Box<[usize]>,
 }
 
 #[derive(Debug)]
@@ -2379,14 +2378,12 @@ where
         self.reconcile_current_clip_plane();
         let target = self.current_render_target;
         let transform = self.state().transform;
-        let (vertices, contour_lengths, bounds) = {
+        let (vertices, bounds) = {
             let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
-            let (vertices, contour_lengths) = path_cache.stencil_fans();
-            (vertices, contour_lengths, path_cache.bounds)
+            (path_cache.winding_triangles(), path_cache.bounds)
         };
         let geometry = Rc::new(ClipGeometry {
             vertices: vertices.into_boxed_slice(),
-            contour_lengths: contour_lengths.into_boxed_slice(),
         });
         let target_rect = self.render_target_rect();
         let path_rect = Self::clip_bounds(bounds, target_rect);
@@ -2507,15 +2504,11 @@ where
         let mut cmd = Command::new(CommandType::ClipFill);
         cmd.fill_rule = fill_rule;
 
-        let mut offset = self.verts.len();
+        let offset = self.verts.len();
         self.verts.extend_from_slice(&geometry.vertices);
-        cmd.drawables.reserve_exact(geometry.contour_lengths.len());
-        for &len in &geometry.contour_lengths {
+        if !geometry.vertices.is_empty() {
             let mut drawable = Drawable::default();
-            if len != 0 {
-                drawable.fill_verts = Some((offset, len));
-                offset += len;
-            }
+            drawable.fill_verts = Some((offset, geometry.vertices.len()));
             cmd.drawables.push(drawable);
         }
 
@@ -4583,6 +4576,27 @@ fn nested_clip_resolve_is_bounded_by_the_outer_clip() {
     let resolve = &canvas.verts[resolve_start..resolve_start + resolve_len];
     assert!(resolve.iter().all(|vertex| (9.0..=41.0).contains(&vertex.x)));
     assert!(resolve.iter().all(|vertex| (19.0..=61.0).contains(&vertex.y)));
+}
+
+#[test]
+fn many_contour_clip_uses_one_winding_drawable() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut clip = Path::new();
+    for inset in 0..256 {
+        let inset = inset as f32 * 0.01;
+        clip.rect(inset, inset, 10.0, 10.0);
+    }
+
+    canvas.clip_path(&clip, FillRule::NonZero);
+
+    let command = canvas
+        .commands
+        .iter()
+        .find(|command| matches!(command.cmd_type, CommandType::ClipFill))
+        .unwrap();
+    assert_eq!(command.drawables.len(), 1);
+    assert_eq!(command.drawables[0].fill_verts.map(|(_, len)| len), Some(256 * 6));
 }
 
 #[test]

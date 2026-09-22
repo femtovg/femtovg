@@ -282,13 +282,15 @@ impl PathCache {
         cache
     }
 
-    pub(crate) fn stencil_fans(&self) -> (Vec<Vertex>, Vec<usize>) {
+    /// Emits independent triangle-list fans whose signed coverage can be
+    /// accumulated in the stencil buffer to recover the path's winding. The
+    /// contours share one vertex list without introducing triangles between
+    /// them.
+    pub(crate) fn winding_triangles(&self) -> Vec<Vertex> {
         let mut vertices = Vec::new();
-        let mut contour_lengths = Vec::with_capacity(self.contours.len());
 
         for contour in &self.contours {
             let points = &self.points[contour.point_range.clone()];
-            let start = vertices.len();
             if let Some((&center, tail)) = points.split_first() {
                 vertices.extend(tail.windows(2).flat_map(|edge| {
                     [
@@ -298,10 +300,9 @@ impl PathCache {
                     ]
                 }));
             }
-            contour_lengths.push(vertices.len() - start);
         }
 
-        (vertices, contour_lengths)
+        vertices
     }
 
     fn add_contour(&mut self) {
@@ -1333,7 +1334,7 @@ mod tests {
     }
 
     #[test]
-    fn stencil_fans_do_not_classify_contour_nesting() {
+    fn winding_triangles_do_not_classify_contour_nesting() {
         let mut path = Path::new();
         for inset in 0..256 {
             let inset = inset as f32 * 0.01;
@@ -1341,10 +1342,9 @@ mod tests {
         }
 
         let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
-        let (vertices, contour_lengths) = cache.stencil_fans();
+        let vertices = cache.winding_triangles();
 
         assert!(cache.contour_sides.is_none());
-        assert_eq!(contour_lengths, vec![6; 256]);
         assert_eq!(vertices.len(), 256 * 6);
     }
 }

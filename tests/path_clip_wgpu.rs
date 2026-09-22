@@ -213,6 +213,61 @@ fn evenodd_clip_rule_respects_holes() {
     assert_eq!(px(&out, 4, 4), WHITE, "outside the donut is clipped");
 }
 
+/// Replaying a cached multi-contour clip preserves signed winding for
+/// concave and self-intersecting contours under both fill rules.
+#[test]
+fn complex_multi_contour_clip_replays_for_both_fill_rules() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    for fill_rule in [FillRule::NonZero, FillRule::EvenOdd] {
+        let out = render(&device, &queue, |canvas| {
+            let mut clip = Path::new();
+
+            // Concave L.
+            clip.move_to(4.0, 4.0);
+            clip.line_to(28.0, 4.0);
+            clip.line_to(28.0, 12.0);
+            clip.line_to(12.0, 12.0);
+            clip.line_to(12.0, 28.0);
+            clip.line_to(4.0, 28.0);
+            clip.close();
+
+            // Self-intersecting bowtie.
+            clip.move_to(36.0, 4.0);
+            clip.line_to(60.0, 28.0);
+            clip.line_to(60.0, 4.0);
+            clip.line_to(36.0, 28.0);
+            clip.close();
+
+            // Two coincident contours distinguish nonzero from even-odd.
+            clip.rect(4.0, 36.0, 24.0, 24.0);
+            clip.rect(4.0, 36.0, 24.0, 24.0);
+            canvas.clip_path(&clip, fill_rule);
+
+            // Pop a child clip so the next draw rebuilds the surviving clip
+            // from its cached triangle list.
+            canvas.save();
+            let mut child = Path::new();
+            child.rect(0.0, 0.0, 1.0, 1.0);
+            canvas.clip_path(&child, FillRule::NonZero);
+            canvas.restore();
+            full_red_rect(canvas);
+        });
+
+        assert_eq!(px(&out, 8, 8), RED, "{fill_rule:?}: concave arm");
+        assert_eq!(px(&out, 24, 24), WHITE, "{fill_rule:?}: concave cutout");
+        assert_eq!(px(&out, 56, 12), RED, "{fill_rule:?}: self-intersecting lobe");
+        assert_eq!(
+            px(&out, 16, 48),
+            if fill_rule == FillRule::NonZero { RED } else { WHITE },
+            "{fill_rule:?}: coincident contours",
+        );
+    }
+}
+
 /// A self-intersecting concave fill inside a clip: the winding bits and the
 /// clip bit share the stencil without corrupting each other.
 #[test]
