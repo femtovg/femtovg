@@ -730,9 +730,16 @@ impl Renderer for WGPURenderer {
 
         let command_buffer = encoder.finish();
 
-        self.pipeline_cache
-            .borrow_mut()
-            .retain(|_, cached_pipeline| std::mem::replace(&mut cached_pipeline.accessed, false));
+        // A canvas may flush several times in one frame (glyph atlas uploads,
+        // filtered layers, then the screen pass). Evicting every pipeline not
+        // touched by the last flush made the next pass recreate it, which is
+        // especially visible while scrolling text. Keep the normal cache
+        // resident and sweep only when an unusual number of pipeline states
+        // has accumulated.
+        let mut pipeline_cache = self.pipeline_cache.borrow_mut();
+        if pipeline_cache.len() > 64 {
+            pipeline_cache.retain(|_, cached_pipeline| std::mem::replace(&mut cached_pipeline.accessed, false));
+        }
 
         Some(command_buffer)
     }

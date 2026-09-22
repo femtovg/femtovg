@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the wgpu backend recreating render pipelines every frame when a canvas
+  flushes more than once per frame (glyph atlas uploads, filtered layers, then
+  the screen pass). Each flush used to evict every pipeline the previous flush
+  had not touched; the cache now sweeps unused pipelines only once it holds
+  more than 64 states.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes
