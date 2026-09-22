@@ -374,7 +374,6 @@ pub struct Canvas<T: Renderer> {
     // `turbulence::LATTICE_CACHE_CAPACITY`; an evicted one is deleted after
     // the next flush so a command already recorded against it still runs.
     turbulence_lattices: Vec<(i32, ImageId)>,
-    turbulence_uploads: usize,
     // The active clip_path() stack, innermost last. Each entry lives on the
     // stencil plane of the render target it was taken on and gates only
     // draws into that target.
@@ -785,7 +784,6 @@ where
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
-            turbulence_uploads: 0,
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
         };
@@ -823,7 +821,6 @@ where
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
-            turbulence_uploads: 0,
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
         };
@@ -970,7 +967,6 @@ where
         );
         self.verts.clear();
         self.release_pending_images();
-        self.turbulence_uploads = 0;
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
         self.release_transient_images();
@@ -1451,8 +1447,7 @@ where
     ///
     /// [`ImageFilter::Turbulence`] reads nothing from `source_image` - it only takes the output
     /// size from it - and keeps a small per-seed cache of lattice textures (512 KB each, the
-    /// last four seeds used) alive across flushes. At most eight new lattices
-    /// are uploaded per command stream; further misses reuse the newest one.
+    /// last four seeds used) alive across flushes.
     /// Unsafe in-place sampling filters, over-budget work and a blur that
     /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
@@ -1574,19 +1569,8 @@ where
             self.turbulence_lattices.push(entry);
             return Ok(entry.1);
         }
-        if self.turbulence_uploads >= turbulence::MAX_LATTICE_UPLOADS_PER_STREAM {
-            return self
-                .turbulence_lattices
-                .last()
-                .map(|(_, id)| *id)
-                .ok_or(ErrorKind::TransientImageBudgetExceeded);
-        }
-        self.turbulence_uploads += 1;
         let texels = turbulence::lattice_texels(seed);
-        let id = match self.create_image(turbulence::lattice_source(&texels), turbulence::lattice_flags()) {
-            Ok(id) => id,
-            Err(err) => return self.turbulence_lattices.last().map(|(_, id)| *id).ok_or(err),
-        };
+        let id = self.create_image(turbulence::lattice_source(&texels), turbulence::lattice_flags())?;
         self.turbulence_lattices.push((seed, id));
         if self.turbulence_lattices.len() > turbulence::LATTICE_CACHE_CAPACITY {
             let (_, evicted) = self.turbulence_lattices.remove(0);
@@ -4215,7 +4199,6 @@ where
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
         self.release_pending_images();
-        self.turbulence_uploads = 0;
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
         self.release_transient_images();
@@ -6652,53 +6635,16 @@ fn turbulence_lattice_cache_is_bounded() {
     assert!(canvas.images.info(evicted).is_none());
     assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
 
-    // Distinct seeds in one command stream cannot grow deferred textures or
-    // CPU lattice generation without bound. A miss past the upload cap uses
-    // the newest valid lattice so every filter pass still writes its output.
-    for seed in 100..=100 + turbulence::MAX_LATTICE_UPLOADS_PER_STREAM as i32 {
+    for seed in 100..109 {
         canvas.filter_image(dst, noise(seed), src);
     }
-    assert_eq!(canvas.turbulence_uploads, turbulence::MAX_LATTICE_UPLOADS_PER_STREAM);
-    assert_eq!(
-        canvas.pending_image_deletions.len(),
-        turbulence::MAX_LATTICE_UPLOADS_PER_STREAM
-    );
-    let filter_commands: Vec<_> = canvas
+    let lattice_ids: HashSet<_> = canvas
         .commands
         .iter()
         .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .filter_map(|command| command.image)
         .collect();
-    assert_eq!(filter_commands.len(), turbulence::MAX_LATTICE_UPLOADS_PER_STREAM + 1);
-    assert_eq!(
-        filter_commands.last().unwrap().image,
-        Some(canvas.turbulence_lattices.last().unwrap().1)
-    );
-
-    canvas.flush_to_output(());
-    assert_eq!(canvas.turbulence_uploads, 0);
-    assert!(canvas.pending_image_deletions.is_empty());
-    canvas.filter_image(dst, noise(1_000), src);
-    assert_eq!(canvas.turbulence_uploads, 1);
-
-    canvas.flush_to_output(());
-    canvas.renderer.fail_image_allocations = true;
-    let attempts = canvas.renderer.image_allocation_attempts;
-    let misses = turbulence::MAX_LATTICE_UPLOADS_PER_STREAM + 5;
-    for seed in 2_000..2_000 + misses as i32 {
-        canvas.filter_image(dst, noise(seed), src);
-    }
-    assert_eq!(
-        canvas.renderer.image_allocation_attempts - attempts,
-        turbulence::MAX_LATTICE_UPLOADS_PER_STREAM
-    );
-    assert_eq!(
-        canvas
-            .commands
-            .iter()
-            .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
-            .count(),
-        misses
-    );
+    assert_eq!(lattice_ids.len(), 9);
 }
 
 /// Layer backing stores are bounded by the scissor rect plus declared blur

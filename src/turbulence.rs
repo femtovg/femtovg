@@ -33,10 +33,6 @@ pub(crate) const LATTICE_HEIGHT: usize = 256;
 /// this many uploads before evicting, so a handful of static seeds stay put.
 pub(crate) const LATTICE_CACHE_CAPACITY: usize = 4;
 
-/// Bounds CPU generation and deferred texture lifetime within one command
-/// stream. Further misses reuse the most recent valid lattice.
-pub(crate) const MAX_LATTICE_UPLOADS_PER_STREAM: usize = 2 * LATTICE_CACHE_CAPACITY;
-
 /// Octaves past this one are not summed. Octave `n` contributes at most
 /// `1 / 2^n`, so everything skipped changes the sum by less than half of an
 /// 8-bit step, and GLES 2.0 needs a constant loop bound to unroll against.
