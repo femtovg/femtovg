@@ -288,8 +288,9 @@ impl<T> ImageStore<T> {
     ) -> Result<(), ErrorKind> {
         if let Some(old) = self.0.get_mut(id.0) {
             let new = renderer.alloc_image(info)?;
+            let previous = std::mem::replace(&mut old.1, new);
             old.0 = info;
-            old.1 = new;
+            renderer.delete_image(previous, id);
             Ok(())
         } else {
             Err(ErrorKind::ImageIdNotFound)

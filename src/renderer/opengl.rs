@@ -322,7 +322,109 @@ impl OpenGl {
         }
     }
 
+    /// Enables the persistent-clip stencil test for plain (non-stencil)
+    /// draws: pass only where the clip bit (0x80) is set. The winding bits
+    /// stay untouched (write mask 0).
+    fn begin_clip_guard(&self, active: bool) {
+        if !active {
+            return;
+        }
+        unsafe {
+            self.context.enable(glow::STENCIL_TEST);
+            self.context.stencil_mask(0x00);
+            self.context.stencil_func(glow::EQUAL, 0x80, 0x80);
+            self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
+        }
+    }
+
+    fn end_clip_guard(&self, active: bool) {
+        if !active {
+            return;
+        }
+        unsafe {
+            self.context.stencil_mask(0xff);
+            self.context.disable(glow::STENCIL_TEST);
+        }
+    }
+
+    /// Intersects the stencil clip with the command's path: winding
+    /// accumulates only where the current clip bit is set (so nesting
+    /// intersects for free), then one quad clears the clip bit wherever no
+    /// winding arrived and a second clears the winding bits.
+    fn clip_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, stencil_paint: &Params) {
+        self.set_uniforms(images, stencil_paint, None, GlyphTexture::None);
+        unsafe {
+            self.context.enable(glow::STENCIL_TEST);
+            self.context.color_mask(false, false, false, false);
+
+            // Winding, gated on the current clip bit; bit 7 is write-protected.
+            self.context.stencil_mask(0x7f);
+            self.context.stencil_func(glow::EQUAL, 0x80, 0x80);
+            self.context
+                .stencil_op_separate(glow::FRONT, glow::KEEP, glow::KEEP, glow::INCR_WRAP);
+            self.context
+                .stencil_op_separate(glow::BACK, glow::KEEP, glow::KEEP, glow::DECR_WRAP);
+            self.context.disable(glow::CULL_FACE);
+        }
+        for drawable in &cmd.drawables {
+            if let Some((start, count)) = drawable.fill_verts {
+                unsafe {
+                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
+                }
+            }
+        }
+        unsafe {
+            self.context.enable(glow::CULL_FACE);
+
+            let winding_mask = match cmd.fill_rule {
+                FillRule::NonZero => 0xff,
+                FillRule::EvenOdd => 0x81,
+            };
+            if let Some((start, count)) = cmd.triangles_verts {
+                // Quad 1: clip bit set but no winding -> outside the new clip.
+                self.context.stencil_mask(0x80);
+                self.context.stencil_func(glow::EQUAL, 0x80, winding_mask);
+                self.context.stencil_op(glow::KEEP, glow::KEEP, glow::ZERO);
+                self.context
+                    .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
+
+                // Quad 2: clear the winding bits.
+                self.context.stencil_mask(0x7f);
+                self.context.stencil_func(glow::ALWAYS, 0x0, 0xff);
+                self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
+                self.context
+                    .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
+            }
+
+            self.context.stencil_mask(0xff);
+            self.context.color_mask(true, true, true, true);
+            self.context.disable(glow::STENCIL_TEST);
+        }
+        self.check_error("clip_fill");
+    }
+
+    /// Resets the stencil clip to "everything visible" (0x80 everywhere).
+    fn clip_reset(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, stencil_paint: &Params, visible: bool) {
+        self.set_uniforms(images, stencil_paint, None, GlyphTexture::None);
+        unsafe {
+            self.context.enable(glow::STENCIL_TEST);
+            self.context.color_mask(false, false, false, false);
+            self.context.stencil_mask(0xff);
+            self.context
+                .stencil_func(glow::ALWAYS, if visible { 0x80 } else { 0x00 }, 0xff);
+            self.context.stencil_op(glow::REPLACE, glow::REPLACE, glow::REPLACE);
+            if let Some((start, count)) = cmd.triangles_verts {
+                self.context
+                    .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
+            }
+            self.context.color_mask(true, true, true, true);
+            self.context.disable(glow::STENCIL_TEST);
+        }
+        self.check_error("clip_reset");
+    }
+
     fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
+        self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
@@ -340,6 +442,7 @@ impl OpenGl {
             }
         }
 
+        self.end_clip_guard(cmd.clip_active);
         self.check_error("convex_fill");
     }
 
@@ -350,10 +453,17 @@ impl OpenGl {
         stencil_paint: &Params,
         fill_paint: &Params,
     ) {
+        let clip = cmd.clip_active;
         unsafe {
             self.context.enable(glow::STENCIL_TEST);
-            self.context.stencil_mask(0xff);
-            self.context.stencil_func(glow::ALWAYS, 0, 0xff);
+            if clip {
+                // Winding accumulates only inside the clip; bit 7 is protected.
+                self.context.stencil_mask(0x7f);
+                self.context.stencil_func(glow::EQUAL, 0x80, 0x80);
+            } else {
+                self.context.stencil_mask(0xff);
+                self.context.stencil_func(glow::ALWAYS, 0, 0xff);
+            }
             self.context.color_mask(false, false, false, false);
             //glow::DepthMask(glow::FALSE);
         }
@@ -387,9 +497,12 @@ impl OpenGl {
 
         if self.antialias {
             unsafe {
-                match cmd.fill_rule {
-                    FillRule::NonZero => self.context.stencil_func(glow::EQUAL, 0x0, 0xff),
-                    FillRule::EvenOdd => self.context.stencil_func(glow::EQUAL, 0x0, 0x1),
+                match (clip, cmd.fill_rule) {
+                    (false, FillRule::NonZero) => self.context.stencil_func(glow::EQUAL, 0x0, 0xff),
+                    (false, FillRule::EvenOdd) => self.context.stencil_func(glow::EQUAL, 0x0, 0x1),
+                    // Fringe where the clip bit is set and no winding arrived.
+                    (true, FillRule::NonZero) => self.context.stencil_func(glow::EQUAL, 0x80, 0xff),
+                    (true, FillRule::EvenOdd) => self.context.stencil_func(glow::EQUAL, 0x80, 0x81),
                 }
 
                 self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
@@ -407,9 +520,19 @@ impl OpenGl {
         }
 
         unsafe {
-            match cmd.fill_rule {
-                FillRule::NonZero => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0xff),
-                FillRule::EvenOdd => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0x1),
+            match (clip, cmd.fill_rule) {
+                (false, FillRule::NonZero) => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0xff),
+                (false, FillRule::EvenOdd) => self.context.stencil_func(glow::NOTEQUAL, 0x0, 0x1),
+                // Cover where winding arrived: only in-clip pixels can hold
+                // winding, and 0x80|w > 0x80 exactly when w != 0. LESS passes
+                // when ref < stencil, and the ops below (ZERO, masked to the
+                // winding bits) clear the winding while protecting the clip
+                // bit.
+                (true, FillRule::NonZero) => self.context.stencil_func(glow::LESS, 0x80, 0xff),
+                (true, FillRule::EvenOdd) => self.context.stencil_func(glow::LESS, 0x80, 0x81),
+            }
+            if clip {
+                self.context.stencil_mask(0x7f);
             }
 
             self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
@@ -419,6 +542,7 @@ impl OpenGl {
                     .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
             }
 
+            self.context.stencil_mask(0xff);
             self.context.disable(glow::STENCIL_TEST);
         }
 
@@ -426,6 +550,7 @@ impl OpenGl {
     }
 
     fn stroke(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
+        self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         for drawable in &cmd.drawables {
@@ -437,16 +562,24 @@ impl OpenGl {
             }
         }
 
+        self.end_clip_guard(cmd.clip_active);
         self.check_error("stroke");
     }
 
     fn stencil_stroke(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint1: &Params, paint2: &Params) {
         unsafe {
             self.context.enable(glow::STENCIL_TEST);
-            self.context.stencil_mask(0xff);
 
-            // Fill the stroke base without overlap
-            self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            // Fill the stroke base without overlap; with a clip active the
+            // untouched in-clip value is 0x80 rather than 0, and the counter
+            // increments stay inside the winding bits.
+            if cmd.clip_active {
+                self.context.stencil_mask(0x7f);
+                self.context.stencil_func(glow::EQUAL, 0x80, 0xff);
+            } else {
+                self.context.stencil_mask(0xff);
+                self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            }
             self.context.stencil_op(glow::KEEP, glow::KEEP, glow::INCR);
         }
 
@@ -465,7 +598,11 @@ impl OpenGl {
         self.set_uniforms(images, paint1, cmd.image, cmd.glyph_texture);
 
         unsafe {
-            self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            if cmd.clip_active {
+                self.context.stencil_func(glow::EQUAL, 0x80, 0xff);
+            } else {
+                self.context.stencil_func(glow::EQUAL, 0x0, 0xff);
+            }
             self.context.stencil_op(glow::KEEP, glow::KEEP, glow::KEEP);
         }
 
@@ -479,8 +616,11 @@ impl OpenGl {
         }
 
         unsafe {
-            // Clear stencil buffer.
+            // Clear the stroke counters (the clip bit is write-protected).
             self.context.color_mask(false, false, false, false);
+            if cmd.clip_active {
+                self.context.stencil_mask(0x7f);
+            }
             self.context.stencil_func(glow::ALWAYS, 0x0, 0xff);
             self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
         }
@@ -496,6 +636,7 @@ impl OpenGl {
 
         unsafe {
             self.context.color_mask(true, true, true, true);
+            self.context.stencil_mask(0xff);
             self.context.disable(glow::STENCIL_TEST);
         }
 
@@ -503,6 +644,7 @@ impl OpenGl {
     }
 
     fn triangles(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, paint: &Params) {
+        self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, paint, cmd.image, cmd.glyph_texture);
 
         if let Some((start, count)) = cmd.triangles_verts {
@@ -511,6 +653,7 @@ impl OpenGl {
             }
         }
 
+        self.end_clip_guard(cmd.clip_active);
         self.check_error("triangles");
     }
 
@@ -556,7 +699,7 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
-    fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color) {
+    fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color, keep_clip: bool) {
         unsafe {
             self.context.enable(glow::SCISSOR_TEST);
             self.context.scissor(
@@ -566,7 +709,19 @@ impl OpenGl {
                 height as i32,
             );
             self.context.clear_color(color.r, color.g, color.b, color.a);
+            // The stencil carries the clip plane in bit 7 (armed and disarmed
+            // by the ClipReset quads) and the winding scratch in the rest. A
+            // winding count a cover pass missed (a fan vertex pushed past the
+            // cover quad at a cusp) must not leak into the next frame's
+            // fills, so the stencil is cleared with the color. With a clip
+            // armed on this target only the winding bits go, through the
+            // write mask glClear honours; without one the whole stencil is
+            // cleared, which a tiler does as a tile clear where a masked
+            // stencil clear costs a full-target quad (Mesa's state tracker).
+            self.context.stencil_mask(if keep_clip { 0x7f } else { 0xff });
+            self.context.clear_stencil(0);
             self.context.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
+            self.context.stencil_mask(0xff);
             self.context.disable(glow::SCISSOR_TEST);
         }
     }
@@ -694,6 +849,7 @@ impl OpenGl {
             target_image_info.width() as _,
             target_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
         self.triangles(images, &cmd, &params);
 
@@ -710,8 +866,7 @@ impl OpenGl {
     ) {
         let original_render_target = self.current_render_target;
 
-        // The filtering happens in two passes, first a horizontal blur and then the vertial blur. The
-        // first pass therefore renders into an intermediate, temporarily allocated texture.
+        // The filtering happens in two passes through the canvas-owned scratch.
 
         let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
 
@@ -741,7 +896,9 @@ impl OpenGl {
         blur_params.image_blur_filter_direction = [1.0, 0.0];
         blur_params.image_blur_filter_sigma = sigma;
 
-        let horizontal_blur_buffer = images.alloc(self, source_image_info).unwrap();
+        let horizontal_blur_buffer = cmd
+            .filter_scratch
+            .expect("a Gaussian blur has a reserved scratch image");
         self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
         self.main_program().set_view(self.view);
 
@@ -751,6 +908,7 @@ impl OpenGl {
             source_image_info.width() as _,
             source_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
 
         self.triangles(images, &cmd, &blur_params);
@@ -764,15 +922,17 @@ impl OpenGl {
             source_image_info.width() as _,
             source_image_info.height() as _,
             Color::rgbaf(0., 0., 0., 0.),
+            false,
         );
 
         blur_params.image_blur_filter_direction = [0.0, 1.0];
+        // The horizontal pass stored premultiplied RGBA regardless of the
+        // source image's format or premultiplication flag.
+        blur_params.tex_type = 0.0;
 
         cmd.image = Some(horizontal_blur_buffer);
 
         self.triangles(images, &cmd, &blur_params);
-
-        images.remove(self, horizontal_blur_buffer);
 
         // restore previous render target and view
         self.set_target(images, original_render_target);
@@ -905,13 +1065,13 @@ impl Renderer for OpenGl {
                     ref params2,
                 } => self.stencil_stroke(images, &cmd, params1, params2),
                 CommandType::Triangles { ref params } => self.triangles(images, &cmd, params),
-                CommandType::ClearRect { color } => {
+                CommandType::ClearRect { color, keep_clip } => {
                     if let Some((start, _)) = cmd.triangles_verts {
                         let x = verts[start].x as _;
                         let y = verts[start].y as _;
                         let width = verts[start + 1].x as u32 - x;
                         let height = verts[start + 1].y as u32 - y;
-                        self.clear_rect(x, y, width, height, color);
+                        self.clear_rect(x, y, width, height, color, keep_clip);
                     }
                 }
                 CommandType::SetRenderTarget(target) => {
@@ -920,6 +1080,14 @@ impl Renderer for OpenGl {
                 }
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
+                }
+                CommandType::ClipFill => {
+                    let stencil_params = Params::stencil();
+                    self.clip_fill(images, &cmd, &stencil_params);
+                }
+                CommandType::ClipReset { visible } => {
+                    let stencil_params = Params::stencil();
+                    self.clip_reset(images, &cmd, &stencil_params, visible);
                 }
             }
         }
@@ -978,6 +1146,10 @@ impl Renderer for OpenGl {
         self.max_texture_size
     }
 
+    fn transient_image_cost(&self, info: ImageInfo) -> usize {
+        opengl_transient_image_cost(info)
+    }
+
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
         //let mut image = image::RgbaImage::new(self.view[0] as u32, self.view[1] as u32);
         let w = self.view[0] as usize;
@@ -1019,6 +1191,18 @@ impl Renderer for OpenGl {
     }
 }
 
+fn opengl_transient_image_cost(info: ImageInfo) -> usize {
+    let color_bytes: usize = match info.format() {
+        crate::PixelFormat::Gray8 => 1,
+        crate::PixelFormat::Rgb8 | crate::PixelFormat::Rgba8 => 4,
+    };
+    // Color plus the target's Stencil8 attachment. Gaussian blur scratch is
+    // a separate transient image and is charged independently.
+    info.width()
+        .saturating_mul(info.height())
+        .saturating_mul(color_bytes + 1)
+}
+
 impl SurfacelessRenderer for OpenGl {
     fn render_surfaceless(&mut self, images: &mut ImageStore<Self::Image>, verts: &[Vertex], commands: Vec<Command>) {
         self.render((), images, verts, commands)
@@ -1038,5 +1222,23 @@ impl Drop for OpenGl {
                 self.context.delete_buffer(vert_buff);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod transient_cost_tests {
+    use super::opengl_transient_image_cost;
+    use crate::{ImageFlags, ImageInfo, PixelFormat};
+
+    #[test]
+    fn charges_color_and_stencil() {
+        let pixels = 1242 * 2688;
+        let rgba = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgba8);
+        let rgb = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Rgb8);
+        let gray = ImageInfo::new(ImageFlags::empty(), 1242, 2688, PixelFormat::Gray8);
+
+        assert_eq!(opengl_transient_image_cost(rgba), pixels * 5);
+        assert_eq!(opengl_transient_image_cost(rgb), pixels * 5);
+        assert_eq!(opengl_transient_image_cost(gray), pixels * 2);
     }
 }

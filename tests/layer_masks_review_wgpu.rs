@@ -19,7 +19,7 @@ use common::headless_device;
 
 const W: u32 = 64;
 const H: u32 = 64;
-const IMAGE_BYTES: usize = (W as usize) * (H as usize) * 4;
+const TRANSIENT_IMAGE_COST: usize = (W as usize) * (H as usize) * 5;
 
 fn output_texture(device: &wgpu::Device) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
@@ -298,7 +298,7 @@ fn masked_layer_after_discard(
     let mut admitted = None;
     let out = render(device, queue, |canvas| {
         // Capture, normalized mask, converted mask: what a luminance mask needs.
-        canvas.set_transient_image_budget(3 * IMAGE_BYTES);
+        canvas.set_transient_image_budget(4 * TRANSIENT_IMAGE_COST);
         let mask = white_mask(canvas, (0.0, 0.0, W as f32, 32.0));
         let effects = full_mask(mask, MaskKind::Luminance);
         assert!(canvas.begin_layer(&effects), "{what}: the first masked layer fits");
@@ -574,20 +574,19 @@ fn a_blurred_layer_survives_a_flush() {
     );
 }
 
-/// A layer `begin_layer` admits applies every effect it declared: with a
-/// white luminance mask and a `brightness(0)` filter, `true` means the
-/// composite is black, whatever the transient budget was.
+/// A captured layer fails closed without mask storage, preserves its masked
+/// source without filter storage, and applies both when the full plan fits.
 #[test]
-fn an_admitted_layer_applies_its_declared_filter() {
+fn a_layer_degrades_in_safe_effect_order() {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
     let mut outcomes = Vec::new();
-    for images in [3usize, 4] {
+    for images in [3usize, 4, 5] {
         let mut admitted = None;
         let out = render(&device, &queue, |canvas| {
-            canvas.set_transient_image_budget(images * IMAGE_BYTES);
+            canvas.set_transient_image_budget(images * TRANSIENT_IMAGE_COST);
             let mask = white_mask(canvas, (0.0, 0.0, W as f32, H as f32));
             let effects = full_mask(mask, MaskKind::Luminance).with_filters(&[ImageFilter::brightness(0.0)]);
             admitted = Some(canvas.begin_layer(&effects));
@@ -597,13 +596,8 @@ fn an_admitted_layer_applies_its_declared_filter() {
         outcomes.push((images, admitted.unwrap(), px(&out, 32, 32)));
     }
     eprintln!("(budget in images, begin_layer returned, centre pixel): {outcomes:?}");
-    for (images, admitted, centre) in outcomes {
-        if admitted {
-            assert_eq!(
-                centre,
-                [0, 0, 0],
-                "a {images}-image budget: begin_layer returned true, so brightness(0) applies"
-            );
-        }
-    }
+    assert_eq!(
+        outcomes,
+        vec![(3, true, [255, 255, 255]), (4, true, [255, 0, 0]), (5, true, [0, 0, 0]),]
+    );
 }

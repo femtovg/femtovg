@@ -13,6 +13,7 @@ use common::headless_device;
 
 const W: u32 = 64;
 const H: u32 = 64;
+const TRANSIENT_IMAGE_COST: usize = (W as usize) * (H as usize) * 5;
 
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, draw: impl FnOnce(&mut Canvas<WGPURenderer>)) -> Vec<u8> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -825,7 +826,7 @@ fn a_reset_inside_a_masked_layer_returns_its_images_to_the_budget() {
     let mut admitted = None;
     let out = render(&device, &queue, |canvas| {
         // Capture, normalized mask and converted mask: what a luminance mask holds.
-        canvas.set_transient_image_budget(3 * (W as usize) * (H as usize) * 4);
+        canvas.set_transient_image_budget(4 * TRANSIENT_IMAGE_COST);
         let mask = mask_from_draw(canvas, |canvas| {
             let mut top = Path::new();
             top.rect(0.0, 0.0, W as f32, 32.0);
@@ -853,9 +854,8 @@ fn a_reset_inside_a_masked_layer_returns_its_images_to_the_budget() {
     assert_eq!(hidden, [255, 255, 255], "the mask's uncovered half must hide the layer");
 }
 
-/// Past the transient budget a layer degrades to pass-through (its draws
-/// still appear, unfaded) instead of allocating, and releasing at flush
-/// returns the budget.
+/// Past the transient budget an ordinary layer draws directly while retaining
+/// its opacity as the closest allocation-free fallback.
 #[test]
 fn layers_degrade_past_the_transient_budget() {
     let Some((device, queue)) = headless_device() else {
@@ -875,11 +875,11 @@ fn layers_degrade_past_the_transient_budget() {
     });
     let c = px(&out, 32, 32);
     assert!(
-        close(c[0], 255) && close(c[1], 0),
-        "over budget, the layer passes through and draws unfaded; got {c:?}"
+        close(c[0], 255) && close(c[1], 128),
+        "over budget, the pass-through fallback retains opacity; got {c:?}"
     );
     let out = render(&device, &queue, |canvas| {
-        canvas.set_transient_image_budget(64 * 64 * 4); // exactly one layer
+        canvas.set_transient_image_budget(TRANSIENT_IMAGE_COST); // exactly one layer
         assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
         let mut p = Path::new();
         p.rect(0.0, 0.0, W as f32, H as f32);
@@ -987,12 +987,12 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
         return;
     };
     let out = render(&device, &queue, |canvas| {
-        // One blurred layer's worth: capture, filtered target, chain scratch,
-        // each padded by the blur reach (3 * 2 + 2 = 8 px each side).
-        let padded = 128 * 128 * 4; // 80 x 80 padded, rounded up to the 64 px store granularity
+        // One blurred layer's worth: capture, filtered target, chain scratch
+        // and horizontal blur scratch, each padded by the blur reach.
+        let padded = 128 * 128 * 5; // 80 x 80 padded, rounded up to the 64 px store granularity
                                     // ...plus the first, unblurred layer's unpadded store, a different
                                     // size the blurred siblings cannot reuse.
-        canvas.set_transient_image_budget(3 * padded + (W as usize) * (H as usize) * 4);
+        canvas.set_transient_image_budget(5 * padded + TRANSIENT_IMAGE_COST);
         canvas.clear_rect(0, 0, W, H, Color::white());
 
         // First layer: a red rect on the left, faded to 50%.

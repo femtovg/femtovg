@@ -30,6 +30,16 @@ pub struct Params {
 }
 
 impl Params {
+    /// The parameters of a stencil-only pass - winding accumulation, clip
+    /// arm/resolve: the stencil shader, no paint, no stroke threshold.
+    pub(crate) fn stencil() -> Self {
+        Self {
+            stroke_thr: -1.0,
+            shader_type: ShaderType::Stencil,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
         global_transform: &Transform2D,

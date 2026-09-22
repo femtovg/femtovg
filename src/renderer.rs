@@ -32,12 +32,29 @@ pub struct Drawable {
 /// Defines different types of commands that can be executed by the renderer.
 #[derive(Debug)]
 pub enum CommandType {
+    /// Intersects the persistent stencil clip with a path: the drawables carry
+    /// the winding fan triangles and `triangles_verts` the resolve quad over
+    /// the previously visible clip bounds. `fill_rule` is the clip-rule.
+    ClipFill,
+    /// Rewrites the persistent stencil clip with a full-canvas quad
+    /// (`triangles_verts`): `visible: true` arms the clip plane (everything
+    /// visible, ambient value 0x80), `false` disarms it back to the zero
+    /// ambient so clip-free rendering pays nothing.
+    ClipReset {
+        /// Whether the plane resets to "everything visible" (armed) or to the
+        /// disarmed zero state.
+        visible: bool,
+    },
     /// Set the render target (screen or image).
     SetRenderTarget(RenderTarget),
     /// Clear a rectangle with the specified color.
     ClearRect {
         /// Color to fill the rectangle with.
         color: Color,
+        /// A clip is armed on the target: clear only the stencil's winding
+        /// bits so the clip plane (bit 7) survives. Otherwise the whole
+        /// stencil is cleared, the tile clear a tiler does for free.
+        keep_clip: bool,
     },
     /// Fill a convex shape.
     ConvexFill {
@@ -81,9 +98,13 @@ pub enum CommandType {
 #[derive(Debug)]
 pub struct Command {
     pub(crate) cmd_type: CommandType,
+    // Whether the persistent stencil clip (Canvas::clip_path) applies to this
+    // command's fragments. Set centrally when the command is appended.
+    pub(crate) clip_active: bool,
     pub(crate) drawables: Vec<Drawable>,
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
+    pub(crate) filter_scratch: Option<ImageId>,
     pub(crate) glyph_texture: GlyphTexture,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
@@ -94,9 +115,11 @@ impl Command {
     pub fn new(flavor: CommandType) -> Self {
         Self {
             cmd_type: flavor,
+            clip_active: false,
             drawables: Vec::new(),
             triangles_verts: None,
             image: None,
+            filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
@@ -105,7 +128,7 @@ impl Command {
 }
 
 /// Represents different render targets (screen or image).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub enum RenderTarget {
     /// Render to the screen.
     Screen,
@@ -186,6 +209,20 @@ pub trait Renderer {
     /// (Raspberry Pi Zero through 3) reports 2048.
     fn max_texture_size(&self) -> usize {
         8192
+    }
+
+    /// Backend allocation charged when the transient pool creates `info`.
+    /// Renderers override this for attachments or scratch reserved alongside
+    /// pooled images.
+    fn transient_image_cost(&self, info: ImageInfo) -> usize {
+        let bytes_per_pixel = match info.format() {
+            crate::PixelFormat::Gray8 => 1,
+            crate::PixelFormat::Rgb8 => 3,
+            crate::PixelFormat::Rgba8 => 4,
+        };
+        info.width()
+            .saturating_mul(info.height())
+            .saturating_mul(bytes_per_pixel)
     }
 }
 

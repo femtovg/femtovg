@@ -6,7 +6,7 @@
 //! GPU adapter.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ErrorKind, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
 
 mod common;
 use common::headless_device;
@@ -173,6 +173,25 @@ fn close(a: u8, b: u8, tol: i32) -> bool {
     (a as i32 - b as i32).abs() <= tol
 }
 
+#[test]
+fn in_place_sampling_filters_are_rejected_before_gpu_submission() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let src = solid(femtovg::rgb::RGBA8::new(80, 120, 160, 255));
+    let (mut canvas, image, target) = setup(&device, &queue, &src);
+
+    canvas.filter_image(image, ImageFilter::identity(), image);
+    canvas.filter_image_chain(image, &[], image).unwrap();
+    assert!(matches!(
+        canvas.filter_image_chain(image, &[ImageFilter::brightness(0.5)], image),
+        Err(ErrorKind::RenderTargetError(_))
+    ));
+
+    let out = finish_and_read(&device, &queue, canvas, image, &target);
+    assert_eq!(px(&out, W / 2, H / 2), [80, 120, 160]);
+}
+
 /// A folded color run must render identically to running the same filters as
 /// separate `filter_image` passes - the property that lets a range-safe color
 /// run cost one pass. The two sides here execute different numbers of GPU
@@ -318,6 +337,23 @@ fn semitransparent_content_survives_chains() {
     assert!(
         close(center[0], 147, 8) && close(center[1], 217, 8) && close(center[2], 147, 8),
         "half-alpha green through a two-pass chain should stay green, got {center:?}"
+    );
+}
+
+#[test]
+fn direct_blur_converts_straight_alpha_only_on_its_first_pass() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let src = solid(femtovg::rgb::RGBA8::new(40, 180, 40, 128));
+    let (mut canvas, source, target) = setup(&device, &queue, &src);
+    let filtered = filter_target(&mut canvas);
+    canvas.filter_image(filtered, ImageFilter::GaussianBlur { sigma: 1.0 }, source);
+    let out = finish_and_read(&device, &queue, canvas, filtered, &target);
+    let center = px(&out, W / 2, H / 2);
+    assert!(
+        close(center[0], 147, 8) && close(center[1], 217, 8) && close(center[2], 147, 8),
+        "straight-alpha color was converted more than once: {center:?}"
     );
 }
 

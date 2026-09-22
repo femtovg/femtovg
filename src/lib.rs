@@ -22,7 +22,12 @@ extern crate serde;
 
 #[cfg(feature = "textlayout")]
 use std::ops::Range;
-use std::{cell::RefCell, path::Path as FilePath, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::Path as FilePath,
+    rc::Rc,
+};
 
 use imgref::ImgVec;
 use rgb::RGBA8;
@@ -309,6 +314,9 @@ struct State {
     transform: Transform2D,
     scissor: Scissor,
     alpha: f32,
+    // How many clip_path() entries this state level owns; restore() pops the
+    // clip stack back to the saved depth and marks affected planes for replay.
+    clip_depth: usize,
     // Canvas 2D drop-shadow attributes. Defaults match the HTML spec: a fully
     // transparent shadow color (which disables shadows entirely), zero blur and
     // zero offset. See `Canvas::set_shadow_color` and friends.
@@ -329,6 +337,7 @@ impl Default for State {
             shadow_color: Color::rgbaf(0.0, 0.0, 0.0, 0.0),
             shadow_blur: 0.0,
             shadow_offset: [0.0, 0.0],
+            clip_depth: 0,
         }
     }
 }
@@ -348,6 +357,7 @@ pub struct Canvas<T: Renderer> {
     commands: Vec<Command>,
     verts: Vec<Vertex>,
     images: ImageStore<T::Image>,
+    pending_image_deletions: HashSet<ImageId>,
     fringe_width: f32,
     device_px_ratio: f32,
     tess_tol: f32,
@@ -356,22 +366,48 @@ pub struct Canvas<T: Renderer> {
     // Layer backing stores, filter scratches and shadow coverage, reused
     // within the frame and deleted at the flush; see `transient.rs`.
     transients: TransientPool,
+    filter_work: u64,
+    filter_work_budget: u64,
     // Open layers from begin_layer(), innermost last.
     layers: Vec<LayerRecord>,
     // Turbulence lattice textures by seed, most recently used last. Bounded by
-    // `turbulence::LATTICE_CACHE_CAPACITY`; an evicted one is retired through
-    // the transient pool so a command already recorded against it still runs.
+    // `turbulence::LATTICE_CACHE_CAPACITY`; an evicted one is deleted after
+    // the next flush so a command already recorded against it still runs.
     turbulence_lattices: Vec<(i32, ImageId)>,
+    // The active clip_path() stack, innermost last. Each entry lives on the
+    // stencil plane of the render target it was taken on and gates only
+    // draws into that target.
+    clip_stack: Vec<ClipEntry>,
+    clip_planes: HashMap<RenderTarget, ClipPlaneState>,
+}
+
+#[derive(Debug)]
+struct ClipGeometry {
+    vertices: Box<[Vertex]>,
+}
+
+#[derive(Debug)]
+struct ClipEntry {
+    geometry: Rc<ClipGeometry>,
+    fill_rule: FillRule,
+    target: RenderTarget,
+    bounds: Bounds,
+    prior_armed: Rect,
+    armed: Rect,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct ClipPlaneState {
+    count: usize,
+    dirty: bool,
+    armed: Rect,
 }
 
 /// Effects applied to a layer when [`Canvas::end_layer`] composites it back.
 ///
 /// Declared up front at [`Canvas::begin_layer`] - like Canvas 2D's
 /// `beginLayer(filter)` proposal - so the layer's backing store can be sized
-/// for the effects (a blur needs kernel-reach padding) and every image they
-/// draw through reserved with it: a layer is admitted with its whole
-/// declaration or passes through (`begin_layer` returns `false`), never
-/// with some of its effects dropped. Construct with
+/// for the effects (a blur needs kernel-reach padding). Construct with
 /// [`LayerEffects::new`] (what `Default` gives too) and the builder methods;
 /// more effect kinds can be added without breaking callers.
 #[derive(Clone, Debug)]
@@ -399,13 +435,24 @@ struct MaskImages {
     converted: Option<ImageId>,
 }
 
-/// The transients a filter chain draws through: its result, and the
-/// scratches its passes ping-pong between - none for a single pass, one for
-/// two, two beyond (see [`Canvas::filter_image_chain`]).
+#[derive(Clone, Copy, Debug, Default)]
+struct FilterScratchImages {
+    chain: [Option<ImageId>; 2],
+    blur: Option<ImageId>,
+}
+
+impl FilterScratchImages {
+    fn images(self) -> impl Iterator<Item = ImageId> {
+        self.chain.into_iter().flatten().chain(self.blur)
+    }
+}
+
+/// The transients a filter chain draws through: its result, the pair its
+/// passes ping-pong between, and one horizontal Gaussian-blur scratch.
 #[derive(Clone, Copy, Debug)]
 struct FilterImages {
     target: ImageId,
-    scratch: [Option<ImageId>; 2],
+    scratch: FilterScratchImages,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -447,13 +494,13 @@ impl LayerEffects {
     /// composited, executing through
     /// [`filter_image_chain`](Canvas::filter_image_chain) - runs of color
     /// matrices still fold to one pass. The chain's result and scratches are
-    /// reserved at [`begin_layer`](Canvas::begin_layer) with the layer's
-    /// store, so a filtered layer the transient budget cannot fit passes
-    /// through as a whole (`begin_layer` returns `false`) rather than
-    /// composite unfiltered.
+    /// reserved at [`begin_layer`](Canvas::begin_layer) with the layer's store.
+    /// Under resource pressure a source-reading chain is omitted while group
+    /// opacity is preserved; a source-replacing turbulence chain fails closed.
     #[must_use]
     pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
-        self.filters = filters.to_vec();
+        self.filters.clear();
+        self.filters.extend(filters.iter().take(MAX_FILTER_PASSES + 1).copied());
         self
     }
 
@@ -471,11 +518,10 @@ impl LayerEffects {
     ///
     /// The mask image is borrowed, not owned: render mask content into your
     /// own image (upload or render target - its `ImageFlags` orientation is
-    /// respected) and release it on your own schedule after the flush. The
-    /// coverage images the mask draws through are reserved at
-    /// [`begin_layer`](Canvas::begin_layer) with the layer's store, so a
-    /// masked layer the transient budget cannot fit passes through as a
-    /// whole (`begin_layer` returns `false`) rather than composite unmasked.
+    /// respected). A deletion requested while the layer is open is deferred
+    /// through its composite flush. If coverage storage cannot be reserved
+    /// after the layer is captured, the capture is discarded rather than
+    /// composited unmasked.
     #[must_use]
     pub fn with_mask(mut self, image: ImageId, kind: MaskKind, x: f32, y: f32, width: f32, height: f32) -> Self {
         self.mask = Some(LayerMask {
@@ -499,21 +545,16 @@ impl Default for LayerEffects {
     }
 }
 
-/// Default cap on live transient image memory: 256 MiB, room for a handful
-/// of full-screen layers at 4K plus their filter and mask scratch.
-
 #[derive(Debug)]
 struct LayerRecord {
-    // None marks a pass-through layer (allocation failed or bounds were
-    // degenerate): draws went to the previous target unchanged and end_layer
-    // only rebalances state.
+    // None marks a layer without a capture. It either passes through or, when
+    // `discard` is set, suppresses draws that would be unsafe to expose.
     image: Option<ImageId>,
-    // The mask's coverage images and the filter chain's result and
-    // scratches, reserved with the store: a layer either captures with
-    // everything its composite needs or passes through as a whole, never
-    // composites unmasked or unfiltered.
+    // Optional effect storage reserved with the capture.
     mask_images: Option<MaskImages>,
     filter_images: Option<FilterImages>,
+    reserved_filter_work: u64,
+    discard: bool,
     previous_target: RenderTarget,
     // Where the store lands on the previous target: the composite's origin,
     // in that target's device space.
@@ -541,12 +582,7 @@ impl LayerRecord {
             .chain(mask.map(|images| images.normalized))
             .chain(mask.and_then(|images| images.converted))
             .chain(filter.map(|images| images.target))
-            .chain(
-                filter
-                    .map_or([None, None], |images| images.scratch)
-                    .into_iter()
-                    .flatten(),
-            )
+            .chain(filter.into_iter().flat_map(|images| images.scratch.images()))
     }
 }
 
@@ -605,20 +641,47 @@ fn blur_passes(sigma: f32) -> (usize, f32) {
     }
 }
 
+const MAX_FILTER_PASSES: usize = 257;
+
+const DEFAULT_FILTER_WORK_BUDGET: u64 = 4 * 1024 * 1024 * 1024;
+
+fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
+    let samples = filters.iter().fold(0u64, |total, filter| {
+        let per_pixel = match filter {
+            ImageFilter::GaussianBlur { sigma } => {
+                let sigma = if *sigma > 0.0 {
+                    sigma.min(renderer::MAX_BLUR_SIGMA)
+                } else {
+                    1e-3
+                };
+                let radius = (3.0 * sigma).ceil() as u64;
+                2 * (1 + 2 * radius.saturating_sub(1))
+            }
+            ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from((*num_octaves).min(10))).max(1),
+            _ => 1,
+        };
+        total.saturating_add(per_pixel)
+    });
+    (width as u64).saturating_mul(height as u64).saturating_mul(samples)
+}
+
 /// The passes a filter list runs as: runs of adjacent color matrices folded
 /// where that is exact ([`ImageFilter::fold_with`]), each Gaussian blur
 /// above the shader's per-pass bound split into the passes that compose to
 /// it ([`blur_passes`]), plus an identity pass when the flip count comes out
 /// even, so every chain shape leaves storage flipped once - which makes the
-/// empty list a copy. Never empty. What [`Canvas::filter_image_chain`]
-/// executes and what a layer's scratch reservation is sized from, so the two
-/// cannot disagree.
-fn filter_passes(filters: &[ImageFilter]) -> Vec<ImageFilter> {
+/// empty list a copy. The result is never empty; `None` rejects a plan above
+/// [`MAX_FILTER_PASSES`]. What [`Canvas::filter_image_chain`] executes and
+/// what a layer's scratch reservation is sized from, so the two cannot disagree.
+fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<ImageFilter>> {
+    if filters.len() > MAX_FILTER_PASSES {
+        return None;
+    }
     // Fold first, split second: a blur never folds today, but the split
     // passes are adjacent blurs, and expanding after the fold keeps them
     // from being folded back should a fold of blurs ever exist. ImageFilter
     // is Copy, so neither list deep-copies anything.
-    let mut folded: Vec<ImageFilter> = Vec::with_capacity(filters.len());
+    let mut folded: Vec<ImageFilter> = Vec::with_capacity(filters.len().min(MAX_FILTER_PASSES));
     for filter in filters {
         if let Some(prev) = folded.last_mut() {
             if let Some(merged) = prev.fold_with(*filter) {
@@ -630,13 +693,13 @@ fn filter_passes(filters: &[ImageFilter]) -> Vec<ImageFilter> {
     }
     // The capacity covers every split pass plus the parity pass, so the list
     // never reallocates.
-    let count: usize = folded
-        .iter()
-        .map(|f| match f {
+    let count = folded.iter().try_fold(0usize, |count, filter| {
+        let passes = match filter {
             ImageFilter::GaussianBlur { sigma } => blur_passes(*sigma).0,
             _ => 1,
-        })
-        .sum();
+        };
+        count.checked_add(passes).filter(|count| *count <= MAX_FILTER_PASSES)
+    })?;
     let mut passes: Vec<ImageFilter> = Vec::with_capacity(count + 1);
     for filter in folded {
         match filter {
@@ -652,9 +715,12 @@ fn filter_passes(filters: &[ImageFilter]) -> Vec<ImageFilter> {
     // split adds, the parity is the unsplit chain's.
     let flips = passes.iter().filter(|f| f.flips_output()).count();
     if flips % 2 == 0 {
+        if passes.len() == MAX_FILTER_PASSES {
+            return None;
+        }
         passes.push(ImageFilter::identity());
     }
-    passes
+    Some(passes)
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -707,14 +773,19 @@ where
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
+            pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
+            filter_work: 0,
+            filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
+            clip_stack: Vec::new(),
+            clip_planes: HashMap::new(),
         };
 
         canvas.save();
@@ -739,14 +810,19 @@ where
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
+            pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
             tess_tol: 0.25,
             dist_tol: 0.01,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
+            filter_work: 0,
+            filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             turbulence_lattices: Vec::new(),
+            clip_stack: Vec::new(),
+            clip_planes: HashMap::new(),
         };
 
         canvas.save();
@@ -777,6 +853,12 @@ where
         // follows, or a later set_render_target(Image) is skipped as a no-op.
         self.append_cmd(Command::new(CommandType::SetRenderTarget(RenderTarget::Screen)));
         self.current_render_target = RenderTarget::Screen;
+
+        if resized {
+            if let Some(plane) = self.clip_planes.get_mut(&RenderTarget::Screen) {
+                plane.dirty = true;
+            }
+        }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
             // Same size at a frame boundary: the open layer keeps capturing
             // (WPT 2d.layer.flush-on-frame-presentation).
@@ -802,6 +884,7 @@ where
         let mut outermost_target = None;
         while let Some(record) = self.layers.pop() {
             self.restore();
+            self.refund_filter_work(record.reserved_filter_work);
             for image in record.images() {
                 self.release_transient_image(image);
             }
@@ -813,8 +896,22 @@ where
     }
 
     /// Clears the rectangle area defined by left upper corner (x,y), width and height with the provided color.
+    ///
+    /// This is a raw clear of device pixels: the transform, the scissor and
+    /// any [`clip_path`](Self::clip_path) do not apply. A Canvas 2D
+    /// `clearRect`, which the transform and clip do affect, is a fill of the
+    /// rect with an opaque paint under
+    /// [`CompositeOperation::DestinationOut`]. The stencil under the rect is
+    /// cleared with the color so nothing a fill left behind reaches the next
+    /// frame; a clip armed on the target survives it (only the winding bits
+    /// are cleared then, at the cost of a full-target quad on a tiler).
     pub fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: Color) {
-        let mut cmd = Command::new(CommandType::ClearRect { color });
+        self.reconcile_current_clip_plane();
+        // A clip armed on this target must survive the clear; without one
+        // the whole stencil can go, which is a plain tile clear on a tiler
+        // where a masked stencil clear is a full-target quad.
+        let keep_clip = self.clip_active();
+        let mut cmd = Command::new(CommandType::ClearRect { color, keep_clip });
         cmd.composite_operation = self.state().composite_operation;
 
         let x0 = x as f32;
@@ -869,9 +966,11 @@ where
             std::mem::take(&mut self.commands),
         );
         self.verts.clear();
+        self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
         self.release_transient_images();
+        self.filter_work = self.layers.iter().map(|layer| layer.reserved_filter_work).sum();
         if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
@@ -895,23 +994,110 @@ where
         self.state_stack.push(state);
     }
 
-    /// Restores the previous render state
-    ///
-    /// Restoring the initial/first state will just reset it to the defaults
+    /// Restores the previous render state. An unmatched restore is ignored.
     pub fn restore(&mut self) {
-        if self.state_stack.len() > 1 {
-            self.state_stack.pop();
-        } else {
-            self.reset();
+        if self.state_stack.len() == 1 {
+            return;
         }
+        self.state_stack.pop();
+        let depth = self.state().clip_depth;
+        self.pop_clips_to(depth);
     }
 
     /// Resets current state to default values. Does not affect the state stack.
+    ///
+    /// Clips added at this state level are dropped with the rest of the
+    /// level's state; clips established by outer levels stay in force, as
+    /// they would after a `restore()`.
     pub fn reset(&mut self) {
         // A reset discards pending layers along with the state (WPT
         // 2d.layer.reset); drawing continues where the outermost one began.
         self.discard_open_layers();
-        *self.state_mut() = State::default();
+        // The clip stack is shared across state levels: this level owns the
+        // entries past the depth it inherited from its parent (none at the
+        // base level). Resetting the recorded depth without dropping those
+        // entries would leave the stencil plane clipping draws the state
+        // says are unclipped.
+        let inherited_depth = self
+            .state_stack
+            .len()
+            .checked_sub(2)
+            .map_or(0, |parent| self.state_stack[parent].clip_depth);
+        *self.state_mut() = State {
+            clip_depth: inherited_depth,
+            ..State::default()
+        };
+        self.pop_clips_to(inherited_depth);
+    }
+
+    /// Drops the clips above `depth`. Their target planes are reconciled only
+    /// when drawing resumes on them, so consecutive restores coalesce.
+    fn pop_clips_to(&mut self, depth: usize) {
+        if self.clip_stack.len() <= depth {
+            return;
+        }
+
+        let mut removed = HashMap::<RenderTarget, (usize, Rect)>::new();
+        for entry in self.clip_stack.drain(depth..) {
+            removed
+                .entry(entry.target)
+                .and_modify(|(count, _)| *count += 1)
+                .or_insert((1, entry.prior_armed));
+        }
+        for (target, (count, armed)) in removed {
+            let plane = self
+                .clip_planes
+                .get_mut(&target)
+                .expect("a clip entry has a target plane");
+            plane.count -= count;
+            plane.dirty = true;
+            plane.armed = armed;
+        }
+    }
+
+    fn reconcile_current_clip_plane(&mut self) {
+        // A suppressed layer records no current-target draws, so defer stencil
+        // repair instead of marking an unrecorded replay clean.
+        if self.commands_suppressed() {
+            return;
+        }
+        let target = self.current_render_target;
+        let dirty = self.clip_planes.get(&target).is_some_and(|plane| plane.dirty);
+        if !dirty {
+            return;
+        }
+        self.clip_planes.get_mut(&target).unwrap().dirty = false;
+        self.replay_clip_stack();
+        if self.clip_planes.get(&target).is_some_and(|plane| plane.count == 0) {
+            self.clip_planes.remove(&target);
+        }
+    }
+
+    /// Whether the stencil clip gates draws into the current render target:
+    /// some clip on the stack was taken on it.
+    fn clip_active(&self) -> bool {
+        self.clip_planes
+            .get(&self.current_render_target)
+            .is_some_and(|plane| plane.count != 0)
+    }
+
+    fn forget_clip_target(&mut self, target: RenderTarget) {
+        if !self.clip_planes.contains_key(&target) {
+            return;
+        }
+        let removed: Vec<usize> = self
+            .clip_stack
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| (entry.target == target).then_some(index))
+            .collect();
+        if !removed.is_empty() {
+            for state in &mut self.state_stack {
+                state.clip_depth -= removed.partition_point(|&index| index < state.clip_depth);
+            }
+            self.clip_stack.retain(|entry| entry.target != target);
+        }
+        self.clip_planes.remove(&target);
     }
 
     /// Saves the current state before calling the callback and restores it afterwards
@@ -1024,6 +1210,11 @@ where
 
     /// Sets a new render target. All drawing operations after this call will happen on the provided render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
+        if let RenderTarget::Image(id) = target {
+            if self.pending_image_deletions.contains(&id) || self.images.info(id).is_none() {
+                return;
+            }
+        }
         if self.current_render_target != target {
             self.append_cmd(Command::new(CommandType::SetRenderTarget(target)));
             self.current_render_target = target;
@@ -1031,7 +1222,33 @@ where
     }
 
     fn append_cmd(&mut self, cmd: Command) {
+        if self.commands_suppressed()
+            && !matches!(
+                &cmd.cmd_type,
+                CommandType::SetRenderTarget(_) | CommandType::RenderFilteredImage { .. }
+            )
+        {
+            return;
+        }
+        let mut cmd = cmd;
+        // Stencil bookkeeping commands and target switches carry no fragments
+        // to gate; clear_rect is a raw clear that neither backend clips; a
+        // filter pass draws into its own target image, not the clipped one.
+        if !matches!(
+            cmd.cmd_type,
+            CommandType::ClipFill
+                | CommandType::ClipReset { .. }
+                | CommandType::SetRenderTarget(_)
+                | CommandType::ClearRect { .. }
+                | CommandType::RenderFilteredImage { .. }
+        ) {
+            cmd.clip_active = self.clip_active();
+        }
         self.commands.push(cmd);
+    }
+
+    fn commands_suppressed(&self) -> bool {
+        self.layers.iter().any(|layer| layer.discard && layer.image.is_none())
     }
 
     // Images
@@ -1101,11 +1318,17 @@ where
 
     /// Retrieves a reference to the image with the specified ID.
     pub fn get_image(&self, id: ImageId) -> Option<&T::Image> {
+        if self.pending_image_deletions.contains(&id) {
+            return None;
+        }
         self.images.get(id)
     }
 
     /// Retrieves a mutable reference to the image with the specified ID.
     pub fn get_image_mut(&mut self, id: ImageId) -> Option<&mut T::Image> {
+        if self.pending_image_deletions.contains(&id) {
+            return None;
+        }
         self.images.get_mut(id)
     }
 
@@ -1118,8 +1341,15 @@ where
         format: PixelFormat,
         flags: ImageFlags,
     ) -> Result<(), ErrorKind> {
+        if self.pending_image_deletions.contains(&id) {
+            return Err(ErrorKind::ImageIdNotFound);
+        }
         let info = ImageInfo::new(flags, width, height, format);
-        self.images.realloc(&mut self.renderer, id, info)
+        self.images.realloc(&mut self.renderer, id, info)?;
+        if let Some(plane) = self.clip_planes.get_mut(&RenderTarget::Image(id)) {
+            plane.dirty = true;
+        }
+        Ok(())
     }
 
     /// Decode an image from file
@@ -1154,16 +1384,39 @@ where
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
+        if self.pending_image_deletions.contains(&id) {
+            return Err(ErrorKind::ImageIdNotFound);
+        }
         self.images.update(&mut self.renderer, id, src.into(), x, y)
     }
 
-    /// Deletes created image.
+    /// Deletes an image at the next flush, after earlier commands are encoded.
+    /// An open layer borrowing it as a mask keeps it through that layer's
+    /// composite and the following flush.
     pub fn delete_image(&mut self, id: ImageId) {
-        self.images.remove(&mut self.renderer, id);
+        self.defer_image_deletion(id);
+    }
+
+    fn defer_image_deletion(&mut self, id: ImageId) {
+        if self.images.info(id).is_none() || !self.pending_image_deletions.insert(id) {
+            return;
+        }
+        if self.current_render_target == RenderTarget::Image(id) {
+            self.set_render_target(RenderTarget::Screen);
+        }
+        for layer in &mut self.layers {
+            if layer.previous_target == RenderTarget::Image(id) {
+                layer.previous_target = RenderTarget::Screen;
+            }
+        }
+        self.forget_clip_target(RenderTarget::Image(id));
     }
 
     /// Returns image info
     pub fn image_info(&self, id: ImageId) -> Result<ImageInfo, ErrorKind> {
+        if self.pending_image_deletions.contains(&id) {
+            return Err(ErrorKind::ImageIdNotFound);
+        }
         if let Some(info) = self.images.info(id) {
             Ok(info)
         } else {
@@ -1195,9 +1448,70 @@ where
     /// [`ImageFilter::Turbulence`] reads nothing from `source_image` - it only takes the output
     /// size from it - and keeps a small per-seed cache of lattice textures (512 KB each, the
     /// last four seeds used) alive across flushes.
+    /// Unsafe in-place sampling filters, over-budget work and a blur that
+    /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
         let Ok((image_width, image_height)) = self.image_size(source_image) else {
             return;
+        };
+        if self.image_info(target_image).is_err() {
+            return;
+        }
+        if target_image == source_image
+            && !matches!(
+                filter,
+                ImageFilter::GaussianBlur { .. } | ImageFilter::Turbulence { .. }
+            )
+        {
+            return;
+        }
+        let work = filter_work(std::slice::from_ref(&filter), image_width, image_height);
+        if !self.reserve_filter_work(work) {
+            return;
+        }
+        let blur_scratch = if matches!(filter, ImageFilter::GaussianBlur { .. }) {
+            match self.acquire_transient_image(image_width, image_height, ImageFlags::PREMULTIPLIED) {
+                Ok(image) => Some(image),
+                Err(_) => {
+                    self.refund_filter_work(work);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch);
+        if let Some(image) = blur_scratch {
+            self.release_transient_image(image);
+        }
+        if !recorded {
+            self.refund_filter_work(work);
+        }
+    }
+
+    fn filter_image_with_scratch(
+        &mut self,
+        target_image: ImageId,
+        filter: ImageFilter,
+        source_image: ImageId,
+        blur_scratch: Option<ImageId>,
+    ) -> bool {
+        debug_assert_eq!(
+            matches!(filter, ImageFilter::GaussianBlur { .. }),
+            blur_scratch.is_some()
+        );
+        debug_assert!(
+            target_image != source_image
+                || matches!(
+                    filter,
+                    ImageFilter::GaussianBlur { .. } | ImageFilter::Turbulence { .. }
+                )
+        );
+        if let Some(scratch) = blur_scratch {
+            debug_assert!(scratch != source_image && scratch != target_image);
+        }
+        let Ok((image_width, image_height)) = self.image_size(source_image) else {
+            return false;
         };
 
         // The renderer will receive a RenderFilteredImage command with two triangles attached that
@@ -1206,12 +1520,13 @@ where
         let sampled = match filter {
             ImageFilter::Turbulence { seed, .. } => match self.turbulence_lattice(seed) {
                 Ok(lattice) => lattice,
-                Err(_) => return,
+                Err(_) => return false,
             },
             _ => source_image,
         };
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
+        cmd.filter_scratch = blur_scratch;
 
         let vertex_offset = self.verts.len();
 
@@ -1237,7 +1552,11 @@ where
 
         cmd.triangles_verts = Some((vertex_offset, 6));
 
-        self.append_cmd(cmd)
+        self.append_cmd(cmd);
+        if let Some(plane) = self.clip_planes.get_mut(&RenderTarget::Image(target_image)) {
+            plane.dirty = true;
+        }
+        true
     }
 
     /// The lattice texture for a turbulence seed, built on first use and kept
@@ -1255,9 +1574,18 @@ where
         self.turbulence_lattices.push((seed, id));
         if self.turbulence_lattices.len() > turbulence::LATTICE_CACHE_CAPACITY {
             let (_, evicted) = self.turbulence_lattices.remove(0);
-            self.transients.retire(evicted);
+            self.defer_image_deletion(evicted);
         }
         Ok(id)
+    }
+
+    fn prepare_turbulence_lattices(&mut self, filters: &[ImageFilter]) -> Result<(), ErrorKind> {
+        for filter in filters {
+            if let ImageFilter::Turbulence { seed, .. } = filter {
+                self.turbulence_lattice(*seed)?;
+            }
+        }
+        Ok(())
     }
 
     /// Acquires a transient offscreen image from the pool; see `transient.rs`.
@@ -1271,51 +1599,65 @@ where
             .acquire(&mut self.images, &mut self.renderer, width, height, flags)
     }
 
+    fn acquire_transient_image_reserving(
+        &mut self,
+        width: usize,
+        height: usize,
+        flags: ImageFlags,
+        headroom: usize,
+    ) -> Result<ImageId, ErrorKind> {
+        self.transients
+            .acquire_reserving(&mut self.images, &mut self.renderer, width, height, flags, headroom)
+    }
+
     /// Returns a transient image to the pool once every command that reads it
     /// has been recorded.
     fn release_transient_image(&mut self, id: ImageId) {
-        self.transients.release(id);
+        // The pool may hand the image to the next layer; clip state from a
+        // discarded layer's store must not follow it there.
+        self.forget_clip_target(RenderTarget::Image(id));
+        self.transients.release(&self.images, id);
     }
 
-    /// Bytes currently held by transient images - layer backings, filter-chain
-    /// scratches and shadow coverage. A transient lives until the next flush
-    /// and is reused within the frame, so just before a flush this is the
-    /// frame's peak: the figure to size
-    /// [`set_transient_image_budget`](Self::set_transient_image_budget)
-    /// against. An open layer's images (its store, a mask's coverage, a
-    /// chain's result and scratches) stay held across a flush and return to
-    /// the pool when the layer ends or is discarded.
+    /// Cancels a reservation before it records commands. Fresh images are
+    /// freed immediately; reused images remain alive for earlier commands.
+    fn rollback_transient_image(&mut self, id: ImageId) {
+        self.forget_clip_target(RenderTarget::Image(id));
+        self.transients.rollback(&mut self.images, &mut self.renderer, id);
+    }
+
+    /// Returns the backend-estimated bytes charged to the transient budget,
+    /// including conservative attachment and blur-scratch reservations. This
+    /// is an admission estimate, not a renderer-wide live-allocation counter.
     pub fn transient_image_bytes(&self) -> usize {
         self.transients.bytes()
     }
 
-    /// Caps the memory held by transient images - layer backing stores,
-    /// filtered results, filter-chain scratches, shadow coverage and mask
-    /// coverage - at
-    /// `bytes` (default 256 MiB). Within a frame a layer's images are reused
-    /// by the next layer of the same size once its composite is recorded, so
-    /// what counts against the cap is the deepest nesting, not the number of
-    /// layers: at 1080p a viewport-sized layer is 4.7 MB and a blurred one three
-    /// times that (its capture, its result and one scratch; the blur's
-    /// horizontal-pass buffer is the renderer's own, outside the pool) - four
-    /// times, each padded by the blur's full reach, once the blur is above
-    /// sigma 8 and runs as several passes - so a frame of hundreds of sibling layers holds a few tens of
-    /// MB. Past the cap [`begin_layer`](Self::begin_layer) returns `false` and
-    /// the layer passes through with its effects dropped - a layer reserves
-    /// every image its effects draw through with its store, so it is
-    /// admitted whole or not at all -
-    /// [`filter_image_chain`](Self::filter_image_chain) returns
-    /// [`ErrorKind::TransientImageBudgetExceeded`] and shadows are skipped;
-    /// [`transient_image_bytes`](Self::transient_image_bytes) reports what a
-    /// frame actually held.
-    ///
-    /// Size it to the platform: a Raspberry Pi Zero's whole GPU share is
-    /// 64-128 MB, of which a 1080p framebuffer takes 8 MB, so a budget of
-    /// 32-48 MiB there keeps layers from competing with the display - and
-    /// scissoring each group to its bounds before `begin_layer` is what keeps
-    /// the stores, and the bytes each layer moves, small on that hardware.
+    /// Caps the estimated cost admitted for transient layer, filter, mask, and
+    /// shadow images. The default is 128 MiB. Work that does not fit degrades
+    /// as documented by the operation. Smaller targets should set a
+    /// platform-appropriate value.
     pub fn set_transient_image_budget(&mut self, bytes: usize) {
         self.transients.set_budget(bytes);
+    }
+
+    /// Caps texture-sampling work recorded between flushes by filter chains,
+    /// turbulence and shadow blurs. The default is roughly 4 billion samples.
+    /// Work that does not fit degrades as documented by the operation.
+    pub fn set_filter_work_budget(&mut self, samples: u64) {
+        self.filter_work_budget = samples;
+    }
+
+    fn reserve_filter_work(&mut self, work: u64) -> bool {
+        if self.filter_work.saturating_add(work) > self.filter_work_budget {
+            return false;
+        }
+        self.filter_work = self.filter_work.saturating_add(work);
+        true
+    }
+
+    fn refund_filter_work(&mut self, work: u64) {
+        self.filter_work = self.filter_work.saturating_sub(work);
     }
 
     /// Applies a list of image filters as one chain, `filters[0]` first —
@@ -1333,10 +1675,10 @@ where
     /// four passes of sigma 8 are exactly one blur of sigma 16, and nine of
     /// 23/3 one of 23 - the full reach, where the single-pass
     /// [`filter_image`](Self::filter_image) would clamp to 8. The pass count
-    /// grows with the square of the sigma, so sigma is capped at 128 (256
-    /// passes). Passes that do not fold ping-pong between at most two
-    /// transient scratch images sized like the source; a blur pass allocates
-    /// one more full-size buffer of its own for its duration, so peak transient
+    /// grows with the square of the sigma, so sigma is capped at 128 and one
+    /// operation is capped at 257 total planned passes. Passes that do not fold ping-pong between at most two
+    /// transient scratch images sized like the source; a blur plan reserves
+    /// one more full-size horizontal scratch, so peak transient
     /// memory is twice the source image, or three times across a blur - bounded
     /// regardless of chain length or pass count either way. The scratches are
     /// freed at the next flush. All color work is in unpremultiplied sRGB with
@@ -1354,10 +1696,14 @@ where
     /// uniformity; blur-only callers who want the single-pass form can call
     /// `filter_image` directly.
     ///
-    /// Returns [`ErrorKind::ImageIdNotFound`] when `source_image` is not an
-    /// image, and [`ErrorKind::TransientImageBudgetExceeded`] when the
-    /// scratches the chain needs cannot be acquired within the transient
-    /// budget; either way no pass runs and `target_image` is left as it was. A layer's chain never
+    /// Returns [`ErrorKind::ImageIdNotFound`] when either image is missing,
+    /// [`ErrorKind::RenderTargetError`] when a single sampling pass would read
+    /// and write the same image, [`ErrorKind::FilterPassLimitExceeded`] when
+    /// the chain exceeds the per-operation pass cap,
+    /// [`ErrorKind::FilterWorkBudgetExceeded`] when it exceeds the command
+    /// stream's work budget, and [`ErrorKind::TransientImageBudgetExceeded`]
+    /// when its scratches do not fit; either way no pass runs and
+    /// `target_image` is left as it was. A layer's chain never
     /// stops here - its scratches are reserved at
     /// [`begin_layer`](Self::begin_layer) with the layer's store.
     ///
@@ -1373,10 +1719,38 @@ where
         filters: &[ImageFilter],
         source_image: ImageId,
     ) -> Result<(), ErrorKind> {
-        let passes = filter_passes(filters);
+        let passes = filter_passes(filters).ok_or(ErrorKind::FilterPassLimitExceeded)?;
         let (width, height) = self.image_size(source_image)?;
-        let scratch = self.acquire_filter_scratches(width, height, passes.len())?;
-        self.run_filter_passes(target_image, &passes, source_image, scratch);
+        self.image_info(target_image)?;
+        if target_image == source_image && filters.is_empty() {
+            return Ok(());
+        }
+        if target_image == source_image && passes.len() == 1 && !matches!(passes[0], ImageFilter::Turbulence { .. }) {
+            return Err(ErrorKind::RenderTargetError(
+                "a single-pass filter cannot read and write the same image".into(),
+            ));
+        }
+        let work = filter_work(&passes, width, height);
+        if !self.reserve_filter_work(work) {
+            return Err(ErrorKind::FilterWorkBudgetExceeded);
+        }
+        if let Err(err) = self.prepare_turbulence_lattices(&passes) {
+            self.refund_filter_work(work);
+            return Err(err);
+        }
+        let scratch = self
+            .acquire_filter_scratches(
+                width,
+                height,
+                passes.len(),
+                passes
+                    .iter()
+                    .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. })),
+                2,
+                0,
+            )
+            .inspect_err(|_| self.refund_filter_work(work))?;
+        self.run_filter_passes(target_image, &passes, source_image, scratch, false);
         Ok(())
     }
 
@@ -1392,14 +1766,28 @@ where
         width: usize,
         height: usize,
         passes: usize,
-    ) -> Result<[Option<ImageId>; 2], ErrorKind> {
-        let mut scratch = [None, None];
-        for i in 0..passes.saturating_sub(1).min(2) {
-            match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
-                Ok(id) => scratch[i] = Some(id),
+        needs_blur: bool,
+        chain_limit: usize,
+        headroom: usize,
+    ) -> Result<FilterScratchImages, ErrorKind> {
+        let mut scratch = FilterScratchImages::default();
+        for i in 0..passes.saturating_sub(1).min(chain_limit) {
+            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
+                Ok(id) => scratch.chain[i] = Some(id),
                 Err(err) => {
-                    for id in scratch.into_iter().flatten() {
-                        self.release_transient_image(id);
+                    for id in scratch.images() {
+                        self.rollback_transient_image(id);
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        if needs_blur {
+            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
+                Ok(id) => scratch.blur = Some(id),
+                Err(err) => {
+                    for id in scratch.images() {
+                        self.rollback_transient_image(id);
                     }
                     return Err(err);
                 }
@@ -1417,83 +1805,40 @@ where
         target_image: ImageId,
         passes: &[ImageFilter],
         source_image: ImageId,
-        scratch: [Option<ImageId>; 2],
+        scratch: FilterScratchImages,
+        target_as_scratch: bool,
     ) {
+        debug_assert!(!target_as_scratch || target_image != source_image);
         let mut src = source_image;
         let last = passes.len() - 1;
         for (i, filter) in passes.iter().enumerate() {
-            let dst = if i == last {
+            let dst = if i == last || (target_as_scratch && (last - i).is_multiple_of(2)) {
                 target_image
             } else {
-                scratch[i % 2].expect("a scratch was acquired for every pass but the last")
+                let index = if target_as_scratch { 0 } else { i % 2 };
+                scratch.chain[index].expect("a scratch was acquired for every pass but the last")
             };
-            self.filter_image(dst, *filter, src);
+            let blur_scratch = matches!(filter, ImageFilter::GaussianBlur { .. })
+                .then(|| scratch.blur.expect("a blur scratch was reserved"));
+            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch);
             src = dst;
         }
-        for id in scratch.into_iter().flatten() {
+        for id in scratch.images() {
             self.release_transient_image(id);
         }
     }
 
-    /// Opens a layer: subsequent drawing is captured into a transient
-    /// offscreen image instead of the current target, until the matching
-    /// [`end_layer`](Self::end_layer) composites the finished layer back with
-    /// `effects` applied - group opacity as ONE fade over the whole layer
-    /// (overlapping children do not double-blend, the SVG group-opacity /
-    /// Canvas 2D `beginLayer()` semantic) and/or an image-filter chain.
+    /// Opens a layer that [`end_layer`](Self::end_layer) composites with the
+    /// declared opacity, filters, and mask. The current scissor bounds the
+    /// capture when it is an axis-aligned rectangle; blur reach expands it.
     ///
-    /// The effects are declared here rather than at `end_layer` so the
-    /// backing store can be sized for them: the layer captures the current
-    /// scissor rect (the natural memory bound - set a scissor before opening
-    /// a layer to keep it small) padded by the blur kernel reach when the
-    /// chain contains Gaussian blurs, rounded up to 64 px per axis so sibling
-    /// layers share one pooled store; the pad is bounded by the backend's
-    /// texture limit, so a layer at the limit blurs with its reach truncated
-    /// at the store edge rather than passing through. The reach is the chain's true one,
-    /// 3 sigma + 2 per side with the sigmas of several blurs summed in
-    /// quadrature, not the 8 px one shader pass covers: a blur above that
-    /// runs as several passes (see
-    /// [`filter_image_chain`](Self::filter_image_chain)),
-    /// so a big blur pads its store by its full reach and pays for it in
-    /// memory (sigma 23 adds 71 px per side, a fifth more bytes on a 1080p
-    /// store, for each of the capture, the result and two scratches).
-    /// Content outside that padded rect does not survive
-    /// into the layer, mirroring SVG's filter-region behavior.
-    /// A rotated or rounded scissor cannot be captured as a rect; the layer
-    /// then spans the whole canvas. Whatever its shape, the scissor clips the
-    /// layer's result once, at the composite, after the filters: a blur
-    /// samples content past the clip edge, as SVG's `clip-path` over a
-    /// filtered group and Canvas 2D's clip under `ctx.filter` do, and an
-    /// antialiased edge is covered once, not squared.
-    ///
-    /// Inside the layer, `global_alpha` resets to 1 (the outer alpha folds
-    /// into the composite), the composite operation resets to source-over,
-    /// and the shadow state resets to none. All three are applied to the
-    /// layer's *result* instead: the composite honors the alpha, composite
-    /// operation, scissor and shadow in effect at `begin_layer` time, so a
-    /// shadow set before `begin_layer` is cast once by the whole group - the
-    /// Canvas 2D `beginLayer()` rule for its layer rendering attributes, and
-    /// what SVG's `feDropShadow` on a `<g>` means. Set the shadow state
-    /// again inside the layer to shadow individual draws as well.
-    ///
-    /// Every image the effects draw through at `end_layer` is reserved here
-    /// with the backing store, so `true` promises the whole declaration: the
-    /// capture, a mask's coverage images (one, two for a luminance mask) and
-    /// a filter chain's result plus the scratches its passes ping-pong
-    /// between (none for a single pass, one for two, two beyond). Layers
-    /// nest; each open level holds that set until its `end_layer`, when it
-    /// returns to the pool the filter chain and shadow passes draw from too.
-    /// A Gaussian blur's horizontal-pass buffer is the renderer's own for the
-    /// pass's duration, outside the pool and the budget, so it is not
-    /// reserved; nor is the group shadow the composite casts under the outer
-    /// shadow state, which is canvas state rather than an effect - its
-    /// coverage is acquired at `end_layer` and skipped past the budget like
-    /// any shadow. When the store or any reserved image cannot be allocated
-    /// (over the transient budget, past the texture limit, degenerate or
-    /// absurd bounds), the layer degrades to a pass-through as a whole:
-    /// drawing continues on the current target, `end_layer` only rebalances
-    /// state and no declared effect is applied - never only some of them.
-    #[must_use = "false means a pass-through layer: its effects are not applied"]
+    /// Returns `false` only when no capture fits and ordinary content passes
+    /// through. Its current alpha is scaled by the requested opacity as an
+    /// approximation; overlapping draws need a capture for true group opacity.
+    /// A `true` layer is isolated or safely suppressed. A captured layer keeps
+    /// group opacity, omits an ordinary filter if needed, and suppresses content
+    /// whose mask or source-replacing filter cannot be applied.
+    #[must_use = "false means ordinary content is using the pass-through fallback"]
     pub fn begin_layer(&mut self, effects: &LayerEffects) -> bool {
         let state = *self.state();
         // The store spans what is being drawn into: the canvas, or an image
@@ -1519,6 +1864,8 @@ where
                 image,
                 mask_images: None,
                 filter_images: None,
+                reserved_filter_work: 0,
+                discard: image.is_none(),
                 previous_target: self.current_render_target,
                 origin: (0.0, 0.0),
                 root_origin: root,
@@ -1532,7 +1879,7 @@ where
                 self.set_render_target(RenderTarget::Image(image));
                 self.clear_rect(0, 0, void as u32, void as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
             }
-            return image.is_some();
+            return true;
         }
 
         // Blur reach padding: 3 sigma covers >99.7% of the kernel. The sigma
@@ -1581,8 +1928,9 @@ where
         let width = transient::round_up((maxx - minx) as usize, transient::LAYER_GRANULARITY);
         let height = transient::round_up((maxy - miny) as usize, transient::LAYER_GRANULARITY);
 
-        // Past the backend's texture limit (2048 px on a VideoCore IV) the
-        // layer passes through rather than fail to allocate.
+        // Past the backend's texture limit (2048 px on a VideoCore IV), an
+        // ordinary layer passes through; effects that cannot safely expose
+        // their source are suppressed below.
         let limit = self.renderer.max_texture_size();
         let image = if width == 0 || height == 0 || width > limit || height > limit {
             None
@@ -1593,17 +1941,19 @@ where
                 .ok()
         };
 
-        // The effects are applied at end_layer, so every image they draw
-        // through is reserved here with the store - the mask's coverage
-        // images, then the filter chain's result and scratches. A layer that
-        // could not get one of them then would have to composite unmasked or
-        // unfiltered, and the return value promises no declared effect is
-        // dropped silently: short of any, the layer passes through as a
-        // whole and returns everything it took.
+        let fail_closed = image.is_none()
+            && (effects.mask.is_some()
+                || effects
+                    .filters
+                    .iter()
+                    .any(|filter| matches!(filter, ImageFilter::Turbulence { .. }))
+                || state.alpha * effects.opacity <= 0.0);
         let mut record = LayerRecord {
             image,
             mask_images: None,
             filter_images: None,
+            reserved_filter_work: 0,
+            discard: fail_closed,
             previous_target: self.current_render_target,
             origin: (minx, miny),
             root_origin: root,
@@ -1612,32 +1962,97 @@ where
             effects: effects.clone(),
             outer_alpha: state.alpha,
         };
-        if image.is_some() {
-            record.mask_images = effects
-                .mask
-                .and_then(|mask| self.reserve_mask_images(width, height, mask.kind));
-            let mask_reserved = effects.mask.is_none() || record.mask_images.is_some();
-            if mask_reserved && !effects.filters.is_empty() {
-                record.filter_images = self.reserve_filter_images(width, height, &effects.filters);
-            }
-            let chain_reserved = effects.filters.is_empty() || record.filter_images.is_some();
-            if mask_reserved && chain_reserved {
-                record.root_origin = (root.0 + minx, root.1 + miny);
-            } else {
-                for held in record.images() {
-                    self.release_transient_image(held);
+        if let Some(image) = image {
+            record.root_origin = (root.0 + minx, root.1 + miny);
+            let headroom = self
+                .images
+                .info(image)
+                .map(|info| self.renderer.transient_image_cost(info))
+                .unwrap_or(0);
+
+            if let Some(mask) = effects.mask {
+                let work = match mask.kind {
+                    MaskKind::Alpha => 0,
+                    MaskKind::Luminance => {
+                        filter_work(std::slice::from_ref(&ImageFilter::luminance_to_alpha()), width, height)
+                    }
+                };
+                if self.reserve_filter_work(work) {
+                    if let Some(images) = self.reserve_mask_images(width, height, mask.kind, headroom) {
+                        record.mask_images = Some(images);
+                        record.reserved_filter_work = work;
+                    } else {
+                        self.refund_filter_work(work);
+                        record.discard = true;
+                    }
+                } else {
+                    record.discard = true;
                 }
-                record.image = None;
+            }
+
+            if !record.discard && !effects.filters.is_empty() {
+                let replacing = effects
+                    .filters
+                    .iter()
+                    .any(|filter| matches!(filter, ImageFilter::Turbulence { .. }));
+                if let Some(passes) = filter_passes(&effects.filters) {
+                    let work = filter_work(&passes, width, height);
+                    if self.reserve_filter_work(work) {
+                        if let Some(images) = self.reserve_filter_images(width, height, &effects.filters, headroom) {
+                            if self.prepare_turbulence_lattices(&passes).is_ok() {
+                                record.filter_images = Some(images);
+                                record.reserved_filter_work = record.reserved_filter_work.saturating_add(work);
+                            } else {
+                                for image in std::iter::once(images.target).chain(images.scratch.images()) {
+                                    self.rollback_transient_image(image);
+                                }
+                                self.refund_filter_work(work);
+                                record.discard = replacing;
+                            }
+                        } else {
+                            self.refund_filter_work(work);
+                            record.discard = replacing;
+                        }
+                    } else {
+                        record.discard = replacing;
+                    }
+                } else {
+                    record.discard = replacing;
+                }
+            }
+
+            if record.discard {
+                let effect_images: Vec<_> = record
+                    .mask_images
+                    .into_iter()
+                    .flat_map(|images| [Some(images.normalized), images.converted])
+                    .flatten()
+                    .chain(
+                        record
+                            .filter_images
+                            .into_iter()
+                            .flat_map(|images| std::iter::once(images.target).chain(images.scratch.images())),
+                    )
+                    .collect();
+                for held in effect_images {
+                    self.rollback_transient_image(held);
+                }
+                self.refund_filter_work(record.reserved_filter_work);
                 record.mask_images = None;
                 record.filter_images = None;
+                record.reserved_filter_work = 0;
             }
         }
         let image = record.image;
+        let discard = record.discard;
         self.layers.push(record);
 
         self.save();
         let Some(image) = image else {
-            return false; // pass-through layer: keep drawing on the current target
+            if !discard {
+                self.state_mut().alpha *= effects.opacity;
+            }
+            return discard;
         };
         self.set_render_target(RenderTarget::Image(image));
         self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
@@ -1668,6 +2083,18 @@ where
             return; // pass-through layer: nothing captured
         };
 
+        if record.discard {
+            self.release_layer_images(&record, image);
+            return;
+        }
+
+        let alpha = record.outer_alpha * record.effects.opacity;
+        if alpha <= 0.0 {
+            self.refund_filter_work(record.reserved_filter_work);
+            self.release_layer_images(&record, image);
+            return;
+        }
+
         // Run the filter chain, if any, through the images reserved for it at
         // begin_layer: the chain releases the scratches, the result goes back
         // with the composite. Orientation bookkeeping per the chain contract:
@@ -1676,18 +2103,14 @@ where
         // sampled WITHOUT the FLIP_Y flag the raw capture needs.
         let source = match record.filter_images.take() {
             Some(FilterImages { target, scratch }) => {
-                let passes = filter_passes(&record.effects.filters);
-                self.run_filter_passes(target, &passes, image, scratch);
+                let passes =
+                    filter_passes(&record.effects.filters).expect("an admitted layer has a bounded filter plan");
+                self.run_filter_passes(target, &passes, image, scratch, true);
                 target
             }
             None => image,
         };
 
-        let alpha = record.outer_alpha * record.effects.opacity;
-        if alpha <= 0.0 {
-            self.release_layer_images(&record, source);
-            return;
-        }
         let (minx, miny) = record.origin;
 
         // The mask applies after the filter chain - SVG's order for a group
@@ -1771,19 +2194,27 @@ where
     /// upright through FLIP_Y like a capture, and for luminance masks the
     /// conversion target, whose color-matrix pass leaves storage upright.
     /// `None`, holding nothing, when the budget cannot fit them.
-    fn reserve_mask_images(&mut self, width: usize, height: usize, kind: MaskKind) -> Option<MaskImages> {
+    fn reserve_mask_images(
+        &mut self,
+        width: usize,
+        height: usize,
+        kind: MaskKind,
+        headroom: usize,
+    ) -> Option<MaskImages> {
         let normalized = self
-            .acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y)
+            .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y, headroom)
             .ok()?;
         let converted = match kind {
             MaskKind::Alpha => None,
-            MaskKind::Luminance => match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
-                Ok(converted) => Some(converted),
-                Err(_) => {
-                    self.release_transient_image(normalized);
-                    return None;
+            MaskKind::Luminance => {
+                match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
+                    Ok(converted) => Some(converted),
+                    Err(_) => {
+                        self.rollback_transient_image(normalized);
+                        return None;
+                    }
                 }
-            },
+            }
         };
         Some(MaskImages { normalized, converted })
     }
@@ -1793,14 +2224,26 @@ where
     /// composite samples without FLIP_Y, and the scratches its pass plan
     /// needs, sized like the capture the chain reads. `None`, holding
     /// nothing, when the budget cannot fit them.
-    fn reserve_filter_images(&mut self, width: usize, height: usize, filters: &[ImageFilter]) -> Option<FilterImages> {
+    fn reserve_filter_images(
+        &mut self,
+        width: usize,
+        height: usize,
+        filters: &[ImageFilter],
+        headroom: usize,
+    ) -> Option<FilterImages> {
+        let passes = filter_passes(filters)?;
         let target = self
-            .acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED)
+            .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
             .ok()?;
-        match self.acquire_filter_scratches(width, height, filter_passes(filters).len()) {
+        let needs_blur = passes
+            .iter()
+            .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. }));
+        // The result and chain scratches share the same storage convention,
+        // so a layer can alternate through its result and one scratch.
+        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, 1, headroom) {
             Ok(scratch) => Some(FilterImages { target, scratch }),
             Err(_) => {
-                self.release_transient_image(target);
+                self.rollback_transient_image(target);
                 None
             }
         }
@@ -1868,7 +2311,12 @@ where
 
         let coverage = match images.converted {
             Some(converted) => {
-                self.filter_image(converted, ImageFilter::luminance_to_alpha(), images.normalized);
+                let _ = self.filter_image_with_scratch(
+                    converted,
+                    ImageFilter::luminance_to_alpha(),
+                    images.normalized,
+                    None,
+                );
                 converted
             }
             None => images.normalized,
@@ -1890,6 +2338,167 @@ where
 
         self.restore();
         self.set_render_target(previous_target);
+    }
+
+    /// Intersects the clip region with `path` under the current transform,
+    /// with `fill_rule` as the clip-rule: Canvas 2D `clip()`, SVG `clip-path`
+    /// and `clip-rule`. Drawing after this call is limited to the
+    /// intersection of every clip taken on the current render target.
+    ///
+    /// Clip edges are not antialiased: unlike a fill or stroke edge, a pixel
+    /// is either inside the clip or outside it.
+    ///
+    /// Clips are part of the saved state - [`restore`](Self::restore) drops
+    /// the clips taken since the matching [`save`](Self::save) - and belong
+    /// to the render target they were taken on: a clip on the canvas still
+    /// applies when a layer opened on it is composited back, and a clip taken
+    /// inside a layer or while rendering into an image gates only that layer
+    /// or image.
+    ///
+    /// [`clear_rect`](Self::clear_rect) is not clipped; a Canvas 2D
+    /// `clearRect` under a clip is a fill of the rect with an opaque paint
+    /// under [`CompositeOperation::DestinationOut`].
+    pub fn clip_path(&mut self, path: &Path, fill_rule: FillRule) {
+        self.reconcile_current_clip_plane();
+        let target = self.current_render_target;
+        let transform = self.state().transform;
+        let (vertices, bounds) = {
+            let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+            (path_cache.winding_triangles(), path_cache.bounds)
+        };
+        let geometry = Rc::new(ClipGeometry {
+            vertices: vertices.into_boxed_slice(),
+        });
+        let target_rect = self.render_target_rect();
+        let path_rect = Self::clip_bounds(bounds, target_rect);
+        let previous_armed = self.clip_planes.get(&target).map_or(target_rect, |plane| plane.armed);
+
+        if !self.clip_active() {
+            self.emit_clip_reset(true);
+        }
+        self.emit_clip_fill(&geometry, fill_rule, previous_armed);
+        let armed = previous_armed.intersect(path_rect);
+        self.clip_stack.push(ClipEntry {
+            geometry,
+            fill_rule,
+            target,
+            bounds,
+            prior_armed: previous_armed,
+            armed,
+        });
+        let plane = self.clip_planes.entry(target).or_insert(ClipPlaneState {
+            count: 0,
+            dirty: false,
+            armed: target_rect,
+        });
+        plane.count += 1;
+        plane.armed = armed;
+        self.state_mut().clip_depth = self.clip_stack.len();
+    }
+
+    /// Re-establishes the current render target's stencil clip plane from
+    /// the stack: disarmed when no clip on it survives, otherwise reset to
+    /// visible and re-intersected with the survivors (a few stencil-only
+    /// draws, no color work).
+    fn replay_clip_stack(&mut self) {
+        let target = self.current_render_target;
+        let entries: Vec<_> = self
+            .clip_stack
+            .iter()
+            .filter(|entry| entry.target == target)
+            .map(|entry| (entry.geometry.clone(), entry.fill_rule, entry.bounds))
+            .collect();
+        if entries.is_empty() {
+            self.emit_clip_reset(false);
+            return;
+        }
+        self.emit_clip_reset(true);
+        let mut previous_armed = self.render_target_rect();
+        let target_rect = previous_armed;
+        let mut armed_values = Vec::with_capacity(entries.len());
+        for (geometry, fill_rule, bounds) in entries {
+            self.emit_clip_fill(&geometry, fill_rule, previous_armed);
+            let armed = previous_armed.intersect(Self::clip_bounds(bounds, target_rect));
+            armed_values.push((previous_armed, armed));
+            previous_armed = armed;
+        }
+        for (entry, (prior_armed, armed)) in self
+            .clip_stack
+            .iter_mut()
+            .filter(|entry| entry.target == target)
+            .zip(armed_values)
+        {
+            entry.prior_armed = prior_armed;
+            entry.armed = armed;
+        }
+        if let Some(plane) = self.clip_planes.get_mut(&target) {
+            plane.armed = previous_armed;
+        }
+    }
+
+    fn render_target_rect(&self) -> Rect {
+        let (width, height) = self.render_target_size();
+        Rect::new(0.0, 0.0, width, height)
+    }
+
+    fn clip_bounds(bounds: Bounds, target: Rect) -> Rect {
+        if ![bounds.minx, bounds.miny, bounds.maxx, bounds.maxy]
+            .into_iter()
+            .all(f32::is_finite)
+            || bounds.minx > bounds.maxx
+            || bounds.miny > bounds.maxy
+        {
+            return Rect::default();
+        }
+        Rect::new(
+            bounds.minx - 1.0,
+            bounds.miny - 1.0,
+            bounds.maxx - bounds.minx + 2.0,
+            bounds.maxy - bounds.miny + 2.0,
+        )
+        .intersect(target)
+    }
+
+    /// Pushes a triangle strip over the whole current render target and
+    /// returns its vertex range: the stencil quads that arm, disarm and
+    /// resolve the clip plane must reach every pixel of the target, which
+    /// for a layer store is the store, not the canvas.
+    fn push_target_quad(&mut self) -> (usize, usize) {
+        self.push_clip_quad(self.render_target_rect())
+    }
+
+    fn push_clip_quad(&mut self, rect: Rect) -> (usize, usize) {
+        let offset = self.verts.len();
+        let x1 = rect.x + rect.w;
+        let y1 = rect.y + rect.h;
+        self.verts.push(Vertex::new(rect.x, y1, 0.5, 1.0));
+        self.verts.push(Vertex::new(x1, y1, 0.5, 1.0));
+        self.verts.push(Vertex::new(rect.x, rect.y, 0.5, 1.0));
+        self.verts.push(Vertex::new(x1, rect.y, 0.5, 1.0));
+        (offset, 4)
+    }
+
+    fn emit_clip_reset(&mut self, visible: bool) {
+        let mut cmd = Command::new(CommandType::ClipReset { visible });
+        cmd.triangles_verts = Some(self.push_target_quad());
+        self.append_cmd(cmd);
+    }
+
+    fn emit_clip_fill(&mut self, geometry: &ClipGeometry, fill_rule: FillRule, resolve: Rect) {
+        let mut cmd = Command::new(CommandType::ClipFill);
+        cmd.fill_rule = fill_rule;
+
+        let offset = self.verts.len();
+        self.verts.extend_from_slice(&geometry.vertices);
+        if !geometry.vertices.is_empty() {
+            cmd.drawables.push(Drawable {
+                fill_verts: Some((offset, geometry.vertices.len())),
+                ..Drawable::default()
+            });
+        }
+
+        cmd.triangles_verts = Some(self.push_clip_quad(resolve));
+        self.append_cmd(cmd);
     }
 
     // Transforms
@@ -2107,6 +2716,7 @@ where
     }
 
     fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
+        self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
@@ -2160,10 +2770,14 @@ where
 
         // Detect if this path fill is in fact just an unclipped image copy
 
-        if let (Some(path_rect), Some(scissor_rect), true) = (
+        if let (Some(path_rect), Some(scissor_rect), true, true) = (
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
+            // The unclipped blit bypasses the stencil clip plane (the #292
+            // rounded-scissor precedent): route clipped blits through the
+            // normal masked path.
+            !self.clip_active(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
@@ -2189,11 +2803,7 @@ where
 
             CommandType::ConvexFill { params }
         } else {
-            let stencil_params = Params {
-                stroke_thr: -1.0,
-                shader_type: ShaderType::Stencil,
-                ..Params::default()
-            };
+            let stencil_params = Params::stencil();
 
             let fill_params = Params::new(
                 &self.images,
@@ -2299,6 +2909,7 @@ where
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
+        self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
         let transform = self.state().transform;
 
@@ -2473,7 +3084,8 @@ where
     /// cost.
     fn shadow_enabled(&self) -> bool {
         let state = self.state();
-        state.shadow_color.a > 0.0
+        state.alpha > 0.0
+            && state.shadow_color.a > 0.0
             && (state.shadow_blur != 0.0 || state.shadow_offset[0] != 0.0 || state.shadow_offset[1] != 0.0)
     }
 
@@ -2573,6 +3185,19 @@ where
             return;
         }
 
+        let blur_plan = (sigma >= 0.01).then(|| blur_passes(sigma));
+        let work = blur_plan.map_or(0, |(passes, pass_sigma)| {
+            filter_work(
+                std::slice::from_ref(&ImageFilter::GaussianBlur { sigma: pass_sigma }),
+                width,
+                height,
+            )
+            .saturating_mul(passes as u64)
+        });
+        if !self.reserve_filter_work(work) {
+            return;
+        }
+
         // Offscreen render targets store premultiplied-alpha results, so flag the
         // images as PREMULTIPLIED. Otherwise the image-sampling shader would
         // re-premultiply on composite (multiplying rgb by alpha a second time),
@@ -2593,20 +3218,30 @@ where
         // Both come from the transient pool: past the budget the shadow is
         // skipped rather than allocated, like a layer degrading.
         let Ok(coverage_image) = self.acquire_transient_image(width, height, image_flags) else {
+            self.refund_filter_work(work);
             return;
         };
         // The blur kernel divides by sigma, so a zero (or sub-pixel) blur skips
         // the filter pass entirely — and with it the second offscreen image.
-        let blurred_image = if sigma >= 0.01 {
+        let (blurred_image, blur_scratch) = if sigma >= 0.01 {
             match self.acquire_transient_image(width, height, image_flags) {
-                Ok(image) => Some(image),
+                Ok(image) => match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
+                    Ok(scratch) => (Some(image), Some(scratch)),
+                    Err(_) => {
+                        self.rollback_transient_image(image);
+                        self.rollback_transient_image(coverage_image);
+                        self.refund_filter_work(work);
+                        return;
+                    }
+                },
                 Err(_) => {
-                    self.release_transient_image(coverage_image);
+                    self.rollback_transient_image(coverage_image);
+                    self.refund_filter_work(work);
                     return;
                 }
             }
         } else {
-            None
+            (None, None)
         };
 
         let previous_target = self.current_render_target;
@@ -2650,15 +3285,20 @@ where
         // blur image allocated) composites the coverage directly. A sigma above
         // the shader's per-pass bound is the planner's k passes of sigma /
         // sqrt(k), ping-ponging between the two images (each pass reads one
-        // and writes the other through the renderer's own horizontal buffer),
+        // and writes the other through the reserved horizontal scratch),
         // so the result sits in the blurred image after an odd count and back
         // in the coverage image after an even one.
         let source_image = if let Some(blurred_image) = blurred_image {
-            let (passes, pass_sigma) = blur_passes(sigma);
+            let (passes, pass_sigma) = blur_plan.expect("a blurred image has a blur plan");
             let mut src = coverage_image;
             let mut dst = blurred_image;
             for _ in 0..passes {
-                self.filter_image(dst, ImageFilter::GaussianBlur { sigma: pass_sigma }, src);
+                let _ = self.filter_image_with_scratch(
+                    dst,
+                    ImageFilter::GaussianBlur { sigma: pass_sigma },
+                    src,
+                    blur_scratch,
+                );
                 std::mem::swap(&mut src, &mut dst);
             }
             src
@@ -2696,6 +3336,9 @@ where
         if let Some(blurred_image) = blurred_image {
             self.release_transient_image(blurred_image);
         }
+        if let Some(blur_scratch) = blur_scratch {
+            self.release_transient_image(blur_scratch);
+        }
     }
 
     /// Deletes the frame's transient images, except those of layers still
@@ -2706,6 +3349,24 @@ where
     fn release_transient_images(&mut self) {
         let held: Vec<ImageId> = self.layers.iter().flat_map(LayerRecord::images).collect();
         self.transients.release_all(&mut self.images, &mut self.renderer, &held);
+    }
+
+    fn release_pending_images(&mut self) {
+        let held_masks: HashSet<ImageId> = self
+            .layers
+            .iter()
+            .filter_map(|layer| layer.effects.mask.map(|mask| mask.image))
+            .collect();
+        let releasable: Vec<ImageId> = self
+            .pending_image_deletions
+            .iter()
+            .filter(|id| !held_masks.contains(id))
+            .copied()
+            .collect();
+        for id in releasable {
+            self.pending_image_deletions.remove(&id);
+            self.images.remove(&mut self.renderer, id);
+        }
     }
 
     /// After a flush the renderer starts the next command stream on the
@@ -2719,6 +3380,7 @@ where
     }
 
     fn render_unclipped_image_blit(&mut self, target_rect: &Rect, transform: &Transform2D, paint_flavor: &PaintFlavor) {
+        self.reconcile_current_clip_plane();
         let scissor = self.state().scissor;
 
         let mut params = Params::new(
@@ -3452,6 +4114,7 @@ where
         paint_flavor: &PaintFlavor,
         glyph_texture: GlyphTexture,
     ) {
+        self.reconcile_current_clip_plane();
         let scissor = self.state().scissor;
 
         let params = Params::new(
@@ -3535,9 +4198,11 @@ where
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
+        self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
         self.release_transient_images();
+        self.filter_work = self.layers.iter().map(|layer| layer.reserved_filter_work).sum();
         if let Some(atlas) = self.ephemeral_glyph_atlas.take() {
             atlas.clear(self);
         }
@@ -3581,6 +4246,12 @@ pub struct RecordingRenderer {
     pub last_verts: Rc<RefCell<Vec<renderer::Vertex>>>,
     /// Texture limit to report; 0 means the trait default.
     pub max_texture_size: usize,
+    /// Makes image allocation fail for resource-pressure tests.
+    pub fail_image_allocations: bool,
+    /// Number of image allocation attempts.
+    pub image_allocation_attempts: usize,
+    /// Number of backend images released.
+    pub image_deletion_count: usize,
 }
 
 #[cfg(test)]
@@ -3605,6 +4276,10 @@ impl Renderer for RecordingRenderer {
     }
 
     fn alloc_image(&mut self, info: crate::ImageInfo) -> Result<Self::Image, ErrorKind> {
+        self.image_allocation_attempts += 1;
+        if self.fail_image_allocations {
+            return Err(ErrorKind::UnknownError);
+        }
         Ok(Self::Image { info })
     }
 
@@ -3634,7 +4309,9 @@ impl Renderer for RecordingRenderer {
         data.check_update(&image.info, x, y)
     }
 
-    fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {}
+    fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {
+        self.image_deletion_count += 1;
+    }
 
     fn screenshot(&mut self) -> Result<imgref::ImgVec<rgb::RGBA8>, ErrorKind> {
         Ok(imgref::ImgVec::new(Vec::new(), 0, 0))
@@ -3740,6 +4417,286 @@ fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
     path.rect(0.0, 0.0, 100.0, 100.0);
     canvas.fill_path(&path, &Paint::color(Color::white()));
     canvas.flush_to_output(());
+}
+
+/// `clear_rect` clears the whole stencil unless a clip is armed on the
+/// target it clears, when only the winding bits may go: the command carries
+/// that decision so a tiler takes its tile clear whenever it can.
+#[test]
+fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let keep_clips = |canvas: &mut Canvas<RecordingRenderer>| -> Vec<bool> {
+        canvas.flush_to_output(());
+        let commands = recorded_commands.borrow();
+        commands
+            .iter()
+            .filter_map(|cmd| match cmd.cmd_type {
+                CommandType::ClearRect { keep_clip, .. } => Some(keep_clip),
+                _ => None,
+            })
+            .collect()
+    };
+
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "no clip: the whole stencil is cleared"
+    );
+
+    let mut clip = Path::new();
+    clip.rect(10.0, 10.0, 50.0, 50.0);
+    canvas.save();
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![true],
+        "a clip on the screen survives the clear"
+    );
+
+    let image = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    canvas.clear_rect(0, 0, 64, 64, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "the screen's clip does not gate an image target"
+    );
+    canvas.set_render_target(RenderTarget::Screen);
+    canvas.restore();
+
+    canvas.clear_rect(0, 0, 100, 100, Color::white());
+    assert_eq!(
+        keep_clips(&mut canvas),
+        vec![false],
+        "the clip is popped: the whole stencil is cleared again"
+    );
+}
+
+#[test]
+fn consecutive_clip_restores_replay_once_before_the_next_draw() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut clip = Path::new();
+    clip.rect(10.0, 10.0, 80.0, 80.0);
+
+    for _ in 0..64 {
+        canvas.save();
+        canvas.clip_path(&clip, FillRule::NonZero);
+    }
+    canvas.flush_to_output(());
+    for _ in 0..64 {
+        canvas.restore();
+    }
+    assert!(canvas.commands.is_empty());
+
+    canvas.fill_path(&clip, &Paint::color(Color::white()));
+    assert_eq!(
+        canvas
+            .commands
+            .iter()
+            .filter(|command| matches!(command.cmd_type, CommandType::ClipReset { visible: false }))
+            .count(),
+        1
+    );
+    assert!(!canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::ClipFill)));
+}
+
+#[test]
+fn same_size_set_size_does_not_replay_a_clip() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut clip = Path::new();
+    clip.rect(10.0, 10.0, 80.0, 80.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.flush_to_output(());
+
+    canvas.set_size(100, 100, 1.0);
+    assert!(!canvas
+        .commands
+        .iter()
+        .any(|command| { matches!(command.cmd_type, CommandType::ClipFill | CommandType::ClipReset { .. }) }));
+
+    canvas.set_size(120, 120, 1.0);
+    assert!(!canvas
+        .commands
+        .iter()
+        .any(|command| { matches!(command.cmd_type, CommandType::ClipFill | CommandType::ClipReset { .. }) }));
+    canvas.fill_path(&clip, &Paint::color(Color::white()));
+    assert_eq!(
+        canvas
+            .commands
+            .iter()
+            .filter(|command| matches!(command.cmd_type, CommandType::ClipFill))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn nested_clip_resolve_is_bounded_by_the_outer_clip() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut outer = Path::new();
+    outer.rect(10.0, 20.0, 30.0, 40.0);
+    let mut inner = Path::new();
+    inner.rect(15.0, 25.0, 10.0, 10.0);
+    canvas.clip_path(&outer, FillRule::NonZero);
+    canvas.clip_path(&inner, FillRule::NonZero);
+
+    let (resolve_start, resolve_len) = canvas
+        .commands
+        .iter()
+        .filter(|command| matches!(command.cmd_type, CommandType::ClipFill))
+        .nth(1)
+        .and_then(|command| command.triangles_verts)
+        .unwrap();
+    assert_eq!(resolve_len, 4);
+    let resolve = &canvas.verts[resolve_start..resolve_start + resolve_len];
+    assert!(resolve.iter().all(|vertex| (9.0..=41.0).contains(&vertex.x)));
+    assert!(resolve.iter().all(|vertex| (19.0..=61.0).contains(&vertex.y)));
+}
+
+#[test]
+fn many_contour_clip_uses_one_winding_drawable() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut clip = Path::new();
+    for inset in 0..256 {
+        let inset = inset as f32 * 0.01;
+        clip.rect(inset, inset, 10.0, 10.0);
+    }
+
+    canvas.clip_path(&clip, FillRule::NonZero);
+
+    let command = canvas
+        .commands
+        .iter()
+        .find(|command| matches!(command.cmd_type, CommandType::ClipFill))
+        .unwrap();
+    assert_eq!(command.drawables.len(), 1);
+    assert_eq!(command.drawables[0].fill_verts.map(|(_, len)| len), Some(256 * 6));
+}
+
+#[test]
+fn a_deleted_image_cannot_be_reselected_after_flush() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let image = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    canvas.delete_image(image);
+    canvas.flush_to_output(());
+
+    canvas.set_render_target(RenderTarget::Image(image));
+    assert_eq!(canvas.current_render_target, RenderTarget::Screen);
+    assert!(canvas.image_info(image).is_err());
+}
+
+#[test]
+fn an_open_layer_keeps_a_pending_mask_alive_through_its_composite() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let effects = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&effects));
+    canvas.delete_image(mask);
+    canvas.flush_to_output(());
+    assert!(canvas.images.info(mask).is_some());
+    assert!(canvas.pending_image_deletions.contains(&mask));
+
+    canvas.end_layer();
+    assert!(canvas.images.info(mask).is_some());
+    canvas.flush_to_output(());
+    assert!(canvas.images.info(mask).is_none());
+    assert!(!canvas.pending_image_deletions.contains(&mask));
+}
+
+#[test]
+fn reallocating_an_image_marks_its_clip_plane_for_replay() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let image = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 16.0, 32.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.flush_to_output(());
+
+    canvas
+        .realloc_image(image, 48, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    assert_eq!(canvas.renderer.image_deletion_count, 1);
+    assert!(canvas.clip_planes[&RenderTarget::Image(image)].dirty);
+    canvas.fill_path(&clip, &Paint::color(Color::white()));
+    assert!(!canvas.clip_planes[&RenderTarget::Image(image)].dirty);
+    assert!(canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::ClipFill)));
+}
+
+#[test]
+fn failed_image_reallocation_preserves_the_existing_image() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    let image = canvas
+        .create_image_empty(32, 24, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.renderer.fail_image_allocations = true;
+
+    assert!(canvas
+        .realloc_image(image, 64, 48, PixelFormat::Rgba8, ImageFlags::empty())
+        .is_err());
+    let info = canvas.image_info(image).unwrap();
+    assert_eq!((info.width(), info.height()), (32, 24));
+    assert_eq!(canvas.renderer.image_deletion_count, 0);
+}
+
+#[test]
+fn filtering_an_image_marks_its_clip_plane_for_replay() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let source = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(target));
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 16.0, 32.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.flush_to_output(());
+
+    canvas.filter_image(target, ImageFilter::identity(), source);
+    assert!(canvas.clip_planes[&RenderTarget::Image(target)].dirty);
+    canvas.fill_path(&clip, &Paint::color(Color::white()));
+
+    let filter = canvas
+        .commands
+        .iter()
+        .position(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .unwrap();
+    let replay = canvas
+        .commands
+        .iter()
+        .rposition(|command| matches!(command.cmd_type, CommandType::ClipFill))
+        .unwrap();
+    assert!(replay > filter);
 }
 
 #[test]
@@ -4372,6 +5329,48 @@ fn transparent_shadow_emits_no_offscreen_work() {
     );
 }
 
+/// A filter pass draws into its own target image, never into the target a
+/// clip gates, so it must be recorded ungated under an active clip: a backend
+/// that stencil-tests it (OpenGL) would otherwise test the filter quad against
+/// the target image's blank plane and drop the whole pass - every layer
+/// filter and every blurred shadow drawn under a clip.
+#[test]
+fn filter_passes_are_not_gated_by_the_active_clip() {
+    use renderer::CommandType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let source = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 50.0, 50.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.filter_image(target, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+    let mut path = Path::new();
+    path.rect(10.0, 10.0, 30.0, 30.0);
+    canvas.fill_path(&path, &Paint::color(Color::rgb(255, 0, 0)));
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let filter = commands
+        .iter()
+        .find(|c| matches!(c.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .expect("the filter pass is recorded");
+    assert!(!filter.clip_active, "a filter pass is not gated by the clip");
+    let fill = commands
+        .iter()
+        .find(|c| matches!(c.cmd_type, CommandType::ConvexFill { .. }))
+        .expect("the fill is recorded");
+    assert!(fill.clip_active, "the fill under the clip is gated");
+}
+
 /// With an opaque shadow color and a non-zero blur, filling a path must emit the
 /// offscreen shadow pass: render the coverage into an image target and run the
 /// Gaussian blur filter before the final fill.
@@ -4442,9 +5441,10 @@ fn a_large_shadow_blur_runs_as_quadrature_passes() {
     let mut paint = Paint::color(Color::rgb(255, 0, 0));
     paint.set_anti_alias(false);
     canvas.fill_path(&path, &paint);
-    // The coverage and blurred images: 20 + 2 * 62 = 144 px square (shadow
-    // images round to 8), where the per-pass bound padded 72.
-    assert_eq!(canvas.transients.images.len(), 2);
+    // The coverage, blurred and horizontal scratch images: 20 + 2 * 62 =
+    // 144 px square (shadow images round to 8), where the per-pass bound
+    // padded 72.
+    assert_eq!(canvas.transients.images.len(), 3);
     for &id in &canvas.transients.images {
         assert_eq!(canvas.image_size(id).unwrap(), (144, 144));
     }
@@ -4482,6 +5482,25 @@ fn a_large_shadow_blur_runs_as_quadrature_passes() {
         Some(last_target),
         "the composite reads the seventh pass's target"
     );
+}
+
+#[test]
+fn an_unrepresentably_large_shadow_is_skipped_without_overflow() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    canvas.set_shadow_color(Color::black());
+    canvas.set_shadow_blur(1.0);
+    let extent = f32::MAX / 2.0;
+    canvas.render_shadow(
+        Bounds {
+            minx: -extent,
+            miny: 0.0,
+            maxx: extent,
+            maxy: 1.0,
+        },
+        |_| panic!("an oversized shadow must be rejected before drawing"),
+    );
+    assert!(canvas.transients.images.is_empty());
 }
 
 /// A shadowed text run must perform exactly one run-level shadow pass, no matter
@@ -5563,9 +6582,9 @@ fn layout_stores_the_run_baseline() {
 }
 
 /// Turbulence lattices are cached per seed with a fixed capacity: a repeated
-/// seed reuses its texture, the least recently used seed is evicted through
-/// the transient pool's retired list (so a command recorded against it still
-/// runs before the delete), and a flush deletes only the evicted ones.
+/// seed reuses its texture, the least recently used seed is queued for
+/// deletion (so a command recorded against it still runs before the delete),
+/// and a flush deletes only the evicted ones.
 #[test]
 fn turbulence_lattice_cache_is_bounded() {
     use crate::{ImageFilter, TurbulenceKind};
@@ -5591,30 +6610,41 @@ fn turbulence_lattice_cache_is_bounded() {
         canvas.filter_image(dst, noise(seed), src);
     }
     assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
-    assert!(canvas.transients.retired.is_empty());
+    assert!(canvas.pending_image_deletions.is_empty());
 
     // A cache hit reorders, allocating nothing.
     canvas.filter_image(dst, noise(1), src);
     assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
     assert_eq!(canvas.turbulence_lattices.last().unwrap().0, 1);
-    assert!(canvas.transients.retired.is_empty());
+    assert!(canvas.pending_image_deletions.is_empty());
 
     // One past capacity evicts the least recently used seed (2, since 1 was
-    // just touched) into the transient list, not straight to the renderer.
+    // just touched) after the next flush, not straight from the image store.
     let evicted = canvas.turbulence_lattices[0].1;
     canvas.filter_image(dst, noise(99), src);
     assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
     assert!(canvas.turbulence_lattices.iter().all(|(s, _)| *s != 2));
-    assert_eq!(canvas.transients.retired, vec![evicted]);
+    assert!(canvas.pending_image_deletions.contains(&evicted));
     assert!(
         canvas.images.info(evicted).is_some(),
         "evicted lattice stays alive until flush"
     );
 
     canvas.flush_to_output(());
-    assert!(canvas.transients.retired.is_empty());
+    assert!(canvas.pending_image_deletions.is_empty());
     assert!(canvas.images.info(evicted).is_none());
     assert_eq!(canvas.turbulence_lattices.len(), turbulence::LATTICE_CACHE_CAPACITY);
+
+    for seed in 100..109 {
+        canvas.filter_image(dst, noise(seed), src);
+    }
+    let lattice_ids: HashSet<_> = canvas
+        .commands
+        .iter()
+        .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+        .filter_map(|command| command.image)
+        .collect();
+    assert_eq!(lattice_ids.len(), 9);
 }
 
 /// Layer backing stores are bounded by the scissor rect plus declared blur
@@ -5651,10 +6681,10 @@ fn layer_bounds_follow_the_scissor() {
 
     // Two plain layers cost one transient each (their sizes differ, so no
     // reuse); the blurred layer costs its capture, the filtered target, and
-    // the chain's single ping-pong scratch. All five are free again once
+    // the chain's single ping-pong scratch and blur scratch. All six are free again once
     // their layers have ended, and the flush deletes them.
-    assert_eq!(canvas.transients.images.len(), 5);
-    assert_eq!(canvas.transients.free.len(), 5);
+    assert_eq!(canvas.transients.images.len(), 6);
+    assert_eq!(canvas.transients.free.len(), 6);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
     assert_eq!(canvas.transients.free.len(), 0);
@@ -5732,7 +6762,8 @@ fn filter_chain_bounds_transient_images() {
         "overflow-broken folds still ping-pong between at most two scratches"
     );
 
-    // A long mixed chain (blurs break the folds) caps at two scratches.
+    // A long mixed chain (blurs break the folds) caps at two ping-pong
+    // scratches plus one horizontal blur scratch.
     let (mut canvas, src, dst) = make();
     canvas
         .filter_image_chain(
@@ -5750,13 +6781,13 @@ fn filter_chain_bounds_transient_images() {
         .unwrap();
     assert_eq!(
         canvas.transients.images.len(),
-        2,
-        "mixed chains ping-pong between exactly two scratches"
+        3,
+        "mixed chains use one scratch pair and one blur scratch"
     );
     assert_eq!(
         canvas.transients.free.len(),
-        2,
-        "a finished chain returns both scratches"
+        3,
+        "a finished chain returns all scratches"
     );
 
     // The empty chain is a single identity pass - a copy, no scratches.
@@ -5794,26 +6825,26 @@ fn sibling_layers_reuse_backing_stores() {
     canvas.end_layer();
     assert_eq!(canvas.transients.images.len(), 2);
 
-    // Blurred siblings: capture, filtered target and one chain scratch, once.
+    // Blurred siblings: capture, filtered target, one chain scratch and one
+    // horizontal blur scratch, once.
     let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
     for _ in 0..4 {
         assert!(canvas.begin_layer(&blur));
         canvas.end_layer();
     }
     let padded = 384 * 256 * 4; // 336 x 216 padded, rounded
-    assert_eq!(canvas.transients.images.len(), 2 + 3);
-    assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 3 * padded);
+    assert_eq!(canvas.transients.images.len(), 2 + 4);
+    assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 4 * padded);
 
     // Everything is free between layers, nothing after the flush.
-    assert_eq!(canvas.transients.free.len(), 5);
+    assert_eq!(canvas.transients.free.len(), 6);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
     assert_eq!(canvas.transient_image_bytes(), 0);
 }
 
-/// A budget that fits exactly one blurred layer's images (capture, filtered
-/// target, scratch) is enough for any number of sibling blurred layers: none
-/// degrades to pass-through. Before the pool, the fourth would have.
+/// One capture-sized slice stays available after a layer reserves its effect
+/// images, so a later group can still preserve group opacity.
 #[test]
 fn a_budget_for_one_layer_fits_a_frame_of_them() {
     use crate::ImageFilter;
@@ -5821,7 +6852,7 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(256, 256, 1.0);
     let padded = 320 * 320 * 4; // 272 x 272 padded, rounded
-    canvas.set_transient_image_budget(3 * padded);
+    canvas.set_transient_image_budget(5 * padded);
     let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
     for i in 0..200 {
         assert!(canvas.begin_layer(&blur));
@@ -5831,38 +6862,33 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
         );
         canvas.end_layer();
     }
-    assert_eq!(canvas.transients.images.len(), 3);
-    assert_eq!(canvas.transient_image_bytes(), 3 * padded);
+    assert_eq!(canvas.transients.images.len(), 4);
+    assert_eq!(canvas.transient_image_bytes(), 4 * padded);
 }
 
-/// A budget that fits a blurred layer's capture and filtered target but not
-/// the chain's scratch admits no layer at all: the chain's images are
-/// reserved with the store, so `begin_layer` reports pass-through and holds
-/// nothing, rather than composite the unfiltered capture behind a `true`.
-/// One scratch more and the same layer captures, holds all three images
-/// from `begin_layer` on, and composites the filtered result.
+/// A layer keeps its capture and group opacity when optional filter storage
+/// does not fit. With enough room plus capture headroom, it applies the full
+/// chain.
 #[test]
-fn a_layer_short_of_its_chain_scratch_budget_passes_through() {
+fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
     use crate::ImageFilter;
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(128, 128, 1.0);
     let padded = 192 * 192 * 4; // 144 x 144 padded, rounded
     let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
-    canvas.set_transient_image_budget(2 * padded);
-    assert!(!canvas.begin_layer(&blur));
-    assert!(canvas.layers.last().unwrap().image.is_none());
-    assert_eq!(
-        canvas.transients.free.len(),
-        canvas.transients.images.len(),
-        "a refused layer returns every image it took"
-    );
-    canvas.end_layer();
-
     canvas.set_transient_image_budget(3 * padded);
     assert!(canvas.begin_layer(&blur));
+    assert!(canvas.layers.last().unwrap().image.is_some());
+    assert!(canvas.layers.last().unwrap().filter_images.is_none());
+    assert_eq!(canvas.transients.images.len(), 1);
+    canvas.end_layer();
+
+    canvas.flush_to_output(());
+    canvas.set_transient_image_budget(5 * padded);
+    assert!(canvas.begin_layer(&blur));
     let target = canvas.layers.last().unwrap().filter_images.unwrap().target;
-    assert_eq!(canvas.transients.images.len(), 3);
+    assert_eq!(canvas.transients.images.len(), 4);
     assert_eq!(
         canvas.transients.free.len(),
         0,
@@ -5877,13 +6903,13 @@ fn a_layer_short_of_its_chain_scratch_budget_passes_through() {
         .find(|c| c.image.is_some())
         .expect("a composite was recorded");
     assert_eq!(composite.image, Some(target));
-    assert_eq!(canvas.transients.free.len(), 3);
+    assert_eq!(canvas.transients.free.len(), 4);
 }
 
-/// A filtered layer's reservation is sized by its pass plan: the result plus
-/// none, one or two scratches for a chain of one, two or more passes - the
-/// scratches `filter_image_chain` would ping-pong through - and a budget one
-/// image short of that plan refuses the layer whole.
+/// A filtered layer's reservation is sized by its pass plan: the result, one
+/// chain scratch when needed, and a blur scratch when needed. The layer's
+/// result has the same storage convention as its scratch, so longer chains
+/// can alternate through the two.
 #[test]
 fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     use crate::ImageFilter;
@@ -5891,9 +6917,9 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         // One color pass: the result only. No blur, so the store is the canvas.
         (&[ImageFilter::brightness(0.0)], 2, 64),
         // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
-        (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 3, 128),
-        // A blur above the per-pass bound is four passes plus parity: two
-        // scratches, and the store pads by the true reach, 50 px, to 192.
+        (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 4, 128),
+        // A blur above the per-pass bound is four passes plus parity, and the
+        // store pads by the true reach, 50 px, to 192.
         (&[ImageFilter::GaussianBlur { sigma: 16.0 }], 4, 192),
         // A blur never folds with a color matrix, so brightness, blur and
         // invert are three passes plus the parity identity: four, two scratches.
@@ -5914,7 +6940,7 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         let effects = LayerEffects::new().with_filters(filters);
         let bytes = store * store * 4;
 
-        canvas.set_transient_image_budget(images * bytes);
+        canvas.set_transient_image_budget((images + 1) * bytes);
         assert!(canvas.begin_layer(&effects), "{filters:?}: {images} images fit");
         assert_eq!(canvas.transients.images.len(), images, "{filters:?}");
         assert_eq!(
@@ -5930,16 +6956,9 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         );
 
         canvas.flush_to_output(());
-        canvas.set_transient_image_budget((images - 1) * bytes);
-        assert!(
-            !canvas.begin_layer(&effects),
-            "{filters:?}: one image short refuses the layer"
-        );
-        assert_eq!(
-            canvas.transients.free.len(),
-            canvas.transients.images.len(),
-            "{filters:?}"
-        );
+        canvas.set_transient_image_budget(images * bytes);
+        assert!(canvas.begin_layer(&effects), "{filters:?}: the capture still fits");
+        assert!(canvas.layers.last().unwrap().filter_images.is_none(), "{filters:?}");
         canvas.end_layer();
     }
 }
@@ -6026,7 +7045,7 @@ fn chained_blurs_pad_in_quadrature() {
 fn a_blur_within_the_shader_bound_stays_one_pass() {
     use crate::ImageFilter;
     for sigma in [0.5, 3.0, 8.0] {
-        let passes = filter_passes(&[ImageFilter::GaussianBlur { sigma }]);
+        let passes = filter_passes(&[ImageFilter::GaussianBlur { sigma }]).unwrap();
         assert_eq!(passes.len(), 2, "sigma {sigma}: one blur pass and the parity identity");
         assert!(
             matches!(passes[0], ImageFilter::GaussianBlur { sigma: s } if s == sigma),
@@ -6051,6 +7070,7 @@ fn a_blur_above_the_bound_splits_into_quadrature_passes() {
     use crate::ImageFilter;
     let blur_sigmas = |filters: &[ImageFilter]| -> Vec<f32> {
         filter_passes(filters)
+            .unwrap()
             .iter()
             .filter_map(|f| match f {
                 ImageFilter::GaussianBlur { sigma } => Some(*sigma),
@@ -6088,7 +7108,7 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
     use crate::ImageFilter;
     let ends_with_identity = |filters: &[ImageFilter]| {
         matches!(
-            filter_passes(filters).last(),
+            filter_passes(filters).unwrap().last(),
             Some(ImageFilter::ColorMatrix { matrix }) if *matrix == ImageFilter::IDENTITY_MATRIX
         )
     };
@@ -6097,21 +7117,284 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
     let bright = ImageFilter::brightness(1.2);
     assert!(ends_with_identity(&[small]) && ends_with_identity(&[big]));
     assert!(!ends_with_identity(&[small, bright]) && !ends_with_identity(&[big, bright]));
-    assert_eq!(filter_passes(&[big, bright]).len(), 5);
+    assert_eq!(filter_passes(&[big, bright]).unwrap().len(), 5);
 
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(64, 64, 1.0);
     for filters in [&[big][..], &[big, bright], &[big, bright, big]] {
         let scratch = canvas
-            .acquire_filter_scratches(64, 64, filter_passes(filters).len())
+            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, 2, 0)
             .unwrap();
-        assert_eq!(scratch.iter().flatten().count(), 2, "{filters:?}: one scratch pair");
-        for id in scratch.into_iter().flatten() {
+        assert_eq!(
+            scratch.chain.iter().flatten().count(),
+            2,
+            "{filters:?}: one scratch pair"
+        );
+        assert!(scratch.blur.is_some());
+        for id in scratch.images() {
             canvas.release_transient_image(id);
         }
     }
-    assert_eq!(canvas.transients.images.len(), 2, "the pair is reused across plans");
+    assert_eq!(
+        canvas.transients.images.len(),
+        3,
+        "the scratches are reused across plans"
+    );
+}
+
+#[test]
+fn filter_plans_bound_total_work_and_fail_layers_atomically() {
+    let max_blur = ImageFilter::GaussianBlur { sigma: 128.0 };
+    assert_eq!(filter_passes(&[max_blur]).unwrap().len(), MAX_FILTER_PASSES);
+    assert!(filter_passes(&[max_blur, max_blur]).is_none());
+
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let source = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    assert!(matches!(
+        canvas.filter_image_chain(target, &[max_blur, max_blur], source),
+        Err(ErrorKind::FilterPassLimitExceeded)
+    ));
+    assert!(!canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. })));
+
+    let effects = LayerEffects::new().with_filters(&[max_blur, max_blur]);
+    assert!(canvas.begin_layer(&effects));
+    assert!(canvas.layers.last().unwrap().image.is_some());
+    assert!(canvas.layers.last().unwrap().filter_images.is_none());
+    canvas.end_layer();
+
+    canvas.flush_to_output(());
+    let too_many = vec![ImageFilter::identity(); MAX_FILTER_PASSES + 1];
+    let effects = LayerEffects::new().with_filters(&too_many);
+    assert_eq!(effects.filters.len(), MAX_FILTER_PASSES + 1);
+    assert!(canvas.begin_layer(&effects));
+    assert!(canvas.layers.last().unwrap().filter_images.is_none());
+    canvas.end_layer();
+}
+
+#[test]
+fn filter_work_matches_shader_sampling_and_resets_at_flush() {
+    let blur = ImageFilter::GaussianBlur { sigma: 8.0 };
+    assert_eq!(filter_work(&[blur], 10, 10), 9_400);
+    let turbulence = |num_octaves| ImageFilter::Turbulence {
+        base_frequency: [0.1, 0.1],
+        num_octaves,
+        seed: 1,
+        stitch_tiles: false,
+        kind: TurbulenceKind::Turbulence,
+        transform: Transform2D::identity(),
+    };
+    assert_eq!(filter_work(&[turbulence(0)], 10, 10), 100);
+    assert_eq!(filter_work(&[turbulence(10)], 10, 10), 8_000);
+
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(16, 16, 1.0);
+    let source = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_filter_work_budget(512);
+    let color = ImageFilter::brightness(0.5);
+    canvas.filter_image_chain(target, &[color], source).unwrap();
+    canvas.filter_image_chain(target, &[color], source).unwrap();
+    assert!(matches!(
+        canvas.filter_image_chain(target, &[color], source),
+        Err(ErrorKind::FilterWorkBudgetExceeded)
+    ));
+    assert_eq!(canvas.filter_work, 512);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.filter_work, 0);
+    canvas.filter_image_chain(target, &[color], source).unwrap();
+}
+
+#[test]
+fn over_budget_layers_preserve_safe_fallbacks() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    canvas.set_filter_work_budget(0);
+
+    let color = LayerEffects::new()
+        .with_opacity(0.5)
+        .with_filters(&[ImageFilter::brightness(0.5)]);
+    assert!(canvas.begin_layer(&color));
+    assert!(canvas.layers.last().unwrap().filter_images.is_none());
+    assert!(!canvas.layers.last().unwrap().discard);
+    canvas.end_layer();
+
+    let turbulence = ImageFilter::Turbulence {
+        base_frequency: [0.1, 0.1],
+        num_octaves: 1,
+        seed: 1,
+        stitch_tiles: false,
+        kind: TurbulenceKind::Turbulence,
+        transform: Transform2D::identity(),
+    };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[turbulence])));
+    assert!(canvas.layers.last().unwrap().discard);
+    canvas.end_layer();
+}
+
+#[test]
+fn capture_failure_suppresses_masks_but_keeps_an_opacity_fallback() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_transient_image_budget(0);
+
+    let masked = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    let commands = canvas.commands.len();
+    assert!(canvas.begin_layer(&masked));
+    assert!(canvas.layers.last().unwrap().image.is_none());
+    assert!(canvas.layers.last().unwrap().discard);
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 64.0, 64.0);
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    assert_eq!(canvas.commands.len(), commands);
+    canvas.end_layer();
+
+    let faded = LayerEffects::new().with_opacity(0.5);
+    assert!(!canvas.begin_layer(&faded));
+    assert_eq!(canvas.state().alpha, 0.5);
+    canvas.end_layer();
+    assert_eq!(canvas.state().alpha, 1.0);
+}
+
+#[test]
+fn a_suppressed_layer_reissues_an_image_target_across_flush() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let target = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let mask = canvas
+        .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(target));
+    canvas.set_transient_image_budget(0);
+
+    let masked = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&masked));
+    assert!(canvas.layers.last().unwrap().discard);
+    canvas.flush_to_output(());
+    canvas.end_layer();
+
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 8.0, 8.0);
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    assert!(matches!(
+        canvas.commands.first().map(|command| &command.cmd_type),
+        Some(CommandType::SetRenderTarget(RenderTarget::Image(id))) if *id == target
+    ));
+}
+
+#[test]
+fn a_suppressed_draw_does_not_consume_a_dirty_clip_replay() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+
+    let mut outer = Path::new();
+    outer.rect(4.0, 4.0, 56.0, 56.0);
+    canvas.clip_path(&outer, FillRule::NonZero);
+    canvas.save();
+    let mut inner = Path::new();
+    inner.rect(8.0, 8.0, 32.0, 32.0);
+    canvas.clip_path(&inner, FillRule::NonZero);
+    canvas.flush_to_output(());
+    canvas.restore();
+    assert!(canvas.clip_planes[&RenderTarget::Screen].dirty);
+
+    canvas.set_transient_image_budget(0);
+    let masked = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&masked));
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 64.0, 64.0);
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    assert!(canvas.clip_planes[&RenderTarget::Screen].dirty);
+    canvas.end_layer();
+
+    canvas.fill_path(&rect, &Paint::color(Color::white()));
+    assert!(!canvas.clip_planes[&RenderTarget::Screen].dirty);
+    assert!(canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::ClipReset { visible: true })));
+    assert!(canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::ClipFill)));
+}
+
+#[test]
+fn explicit_image_filters_are_not_suppressed_with_layer_draws() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let source = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_transient_image_budget(0);
+
+    let masked = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&masked));
+    canvas.filter_image(target, ImageFilter::brightness(0.5), source);
+    assert!(canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. })));
+    canvas.end_layer();
+}
+
+#[test]
+fn open_layer_filter_work_survives_a_flush_until_recorded() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let effects = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    assert!(canvas.begin_layer(&effects));
+    let reserved = canvas.layers.last().unwrap().reserved_filter_work;
+    assert!(reserved > 0);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.filter_work, reserved);
+    canvas.end_layer();
+    assert_eq!(canvas.filter_work, reserved);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.filter_work, 0);
+}
+
+#[test]
+fn a_transparent_layer_skips_its_filter_plan() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let effects = LayerEffects::new()
+        .with_opacity(0.0)
+        .with_filters(&[ImageFilter::GaussianBlur { sigma: 128.0 }]);
+    assert!(canvas.begin_layer(&effects));
+    canvas.end_layer();
+    assert_eq!(canvas.filter_work, 0);
+    assert!(!canvas
+        .commands
+        .iter()
+        .any(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. })));
 }
 
 /// A layer pads its store by the blur's true reach, 3 sigma + 2 per side,
@@ -6226,7 +7509,7 @@ fn nested_layers_accumulate_their_root_origin() {
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(64, 64, 1.0);
     // Three 64 x 64 stores: the deepest nesting below.
-    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
+    canvas.set_transient_image_budget(4 * 64 * 64 * 4);
     let origins = |canvas: &Canvas<RecordingRenderer>| {
         let record = canvas.layers.last().unwrap();
         (record.origin, record.root_origin)
@@ -6353,7 +7636,7 @@ fn a_discarded_masked_layer_returns_its_coverage_images() {
     let mask = canvas
         .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
-    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
+    canvas.set_transient_image_budget(4 * 64 * 64 * 4);
     let luminance = LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0);
     for what in ["reset", "resize"] {
         assert!(canvas.begin_layer(&luminance), "{what}: the first masked layer fits");
@@ -6381,11 +7664,10 @@ fn a_discarded_masked_layer_returns_its_coverage_images() {
     }
 }
 
-/// A masked layer whose coverage images do not fit the budget passes through
-/// as a whole - `begin_layer` says so - instead of capturing and then
-/// compositing unmasked at end_layer.
+/// A masked layer whose coverage images do not fit captures its draws but
+/// discards them rather than revealing the group unmasked.
 #[test]
-fn a_masked_layer_without_room_for_its_coverage_passes_through() {
+fn a_masked_layer_without_room_for_its_coverage_fails_closed() {
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(64, 64, 1.0);
@@ -6395,19 +7677,20 @@ fn a_masked_layer_without_room_for_its_coverage_passes_through() {
     // Room for the capture and the normalized mask, not the luminance conversion.
     canvas.set_transient_image_budget(2 * 64 * 64 * 4);
     let luminance = LayerEffects::new().with_mask(mask, MaskKind::Luminance, 0.0, 0.0, 64.0, 64.0);
-    assert!(!canvas.begin_layer(&luminance), "no coverage, no layer");
-    assert!(canvas.layers.last().unwrap().image.is_none());
-    assert!(
-        canvas.transients.free.len() == canvas.transients.images.len(),
-        "nothing stays held"
-    );
+    assert!(canvas.begin_layer(&luminance));
+    assert!(canvas.layers.last().unwrap().image.is_some());
+    assert!(canvas.layers.last().unwrap().discard);
     canvas.end_layer();
     // The same budget fits an alpha mask, which needs no conversion.
     let alpha = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
     assert!(canvas.begin_layer(&alpha));
     canvas.end_layer();
-    canvas.set_transient_image_budget(3 * 64 * 64 * 4);
-    assert!(canvas.begin_layer(&luminance), "three images fit three images' worth");
+    canvas.set_transient_image_budget(4 * 64 * 64 * 4);
+    assert!(
+        canvas.begin_layer(&luminance),
+        "three images fit with one capture held in reserve"
+    );
+    assert!(!canvas.layers.last().unwrap().discard);
     canvas.end_layer();
 }
 
@@ -6442,10 +7725,10 @@ fn shadow_passes_reuse_their_images() {
     }
     assert_eq!(
         canvas.transients.images.len(),
-        2,
-        "five same-sized shadows allocate one coverage and one blur image"
+        3,
+        "five same-sized shadows allocate coverage, blur and horizontal scratch images"
     );
-    assert_eq!(canvas.transients.free.len(), 2);
+    assert_eq!(canvas.transients.free.len(), 3);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
 }
