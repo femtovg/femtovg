@@ -2507,9 +2507,10 @@ where
         let offset = self.verts.len();
         self.verts.extend_from_slice(&geometry.vertices);
         if !geometry.vertices.is_empty() {
-            let mut drawable = Drawable::default();
-            drawable.fill_verts = Some((offset, geometry.vertices.len()));
-            cmd.drawables.push(drawable);
+            cmd.drawables.push(Drawable {
+                fill_verts: Some((offset, geometry.vertices.len())),
+                ..Drawable::default()
+            });
         }
 
         cmd.triangles_verts = Some(self.push_clip_quad(resolve));
