@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `ImageFilter::Blend`: blends the filtered image over a second image
+  with any of the sixteen `BlendMode`s of the Compositing and Blending
+  specification (multiply, screen, overlay, ..., luminosity), the SVG
+  `feBlend` primitive. The backdrop is placed at a rect, in root device space
+  for a layer's filters, so a chain can blend a group with an image rendered
+  elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
+  portraits.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes

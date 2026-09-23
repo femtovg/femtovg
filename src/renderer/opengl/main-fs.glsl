@@ -48,6 +48,7 @@ varying vec2 fpos;
  #define SHADER_TYPE_FillImageGradientTwoPointRadial 12
  #define SHADER_TYPE_FilterImageTurbulence 13
  #define SHADER_TYPE_FilterImageTransfer 14
+ #define SHADER_TYPE_FilterImageBlend 15
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -392,6 +393,138 @@ vec4 renderTransfer() {
     return vec4(y * c.a, c.a);
 }
 
+
+// SVG feBlend: the image over the backdrop in `glyphtex`. frag[0].x is the
+// BlendMode index, frag[0].y whether the backdrop is stored the other way up
+// from the image at this pass. Both textures are premultiplied; the blend
+// function B(Cb, Cs) of the Compositing and Blending spec runs on the
+// unpremultiplied colors and the result is composited as
+// cs * (1 - ab) + cb * (1 - as) + as * ab * B, alpha as = as + ab - as * ab.
+float blendLum(vec3 c) {
+    return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+}
+
+vec3 blendClipColor(vec3 c) {
+    float l = blendLum(c);
+    float n = min(c.r, min(c.g, c.b));
+    float x = max(c.r, max(c.g, c.b));
+    vec3 o = c;
+    if (n < 0.0) {
+        o = l + (c - l) * l / (l - n);
+    }
+    if (x > 1.0) {
+        o = l + (o - l) * (1.0 - l) / (x - l);
+    }
+    return o;
+}
+
+vec3 blendSetLum(vec3 c, float l) {
+    return blendClipColor(c + (l - blendLum(c)));
+}
+
+float blendSat(vec3 c) {
+    return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+}
+
+vec3 blendSetSat(vec3 c, float s) {
+    float mn = min(c.r, min(c.g, c.b));
+    float mx = max(c.r, max(c.g, c.b));
+    if (mx > mn) {
+        return (c - mn) * s / (mx - mn);
+    }
+    return vec3(0.0);
+}
+
+float blendHardLight1(float cb, float cs) {
+    if (cs <= 0.5) {
+        return cb * 2.0 * cs;
+    }
+    float cs2 = 2.0 * cs - 1.0;
+    return cb + cs2 - cb * cs2;
+}
+
+float blendColorDodge1(float cb, float cs) {
+    if (cb <= 0.0) {
+        return 0.0;
+    }
+    if (cs >= 1.0) {
+        return 1.0;
+    }
+    return min(1.0, cb / (1.0 - cs));
+}
+
+float blendColorBurn1(float cb, float cs) {
+    if (cb >= 1.0) {
+        return 1.0;
+    }
+    if (cs <= 0.0) {
+        return 0.0;
+    }
+    return 1.0 - min(1.0, (1.0 - cb) / cs);
+}
+
+float blendSoftLight1(float cb, float cs) {
+    if (cs <= 0.5) {
+        return cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb);
+    }
+    float d = cb <= 0.25 ? ((16.0 * cb - 12.0) * cb + 4.0) * cb : sqrt(cb);
+    return cb + (2.0 * cs - 1.0) * (d - cb);
+}
+
+vec3 blendMode(int mode, vec3 cb, vec3 cs) {
+    if (mode == 0) {
+        return cs;
+    } else if (mode == 1) {
+        return cb * cs;
+    } else if (mode == 2) {
+        return cb + cs - cb * cs;
+    } else if (mode == 3) {
+        return vec3(blendHardLight1(cs.r, cb.r), blendHardLight1(cs.g, cb.g), blendHardLight1(cs.b, cb.b));
+    } else if (mode == 4) {
+        return min(cb, cs);
+    } else if (mode == 5) {
+        return max(cb, cs);
+    } else if (mode == 6) {
+        return vec3(blendColorDodge1(cb.r, cs.r), blendColorDodge1(cb.g, cs.g), blendColorDodge1(cb.b, cs.b));
+    } else if (mode == 7) {
+        return vec3(blendColorBurn1(cb.r, cs.r), blendColorBurn1(cb.g, cs.g), blendColorBurn1(cb.b, cs.b));
+    } else if (mode == 8) {
+        return vec3(blendHardLight1(cb.r, cs.r), blendHardLight1(cb.g, cs.g), blendHardLight1(cb.b, cs.b));
+    } else if (mode == 9) {
+        return vec3(blendSoftLight1(cb.r, cs.r), blendSoftLight1(cb.g, cs.g), blendSoftLight1(cb.b, cs.b));
+    } else if (mode == 10) {
+        return abs(cb - cs);
+    } else if (mode == 11) {
+        return cb + cs - 2.0 * cb * cs;
+    } else if (mode == 12) {
+        return blendSetLum(blendSetSat(cs, blendSat(cb)), blendLum(cb));
+    } else if (mode == 13) {
+        return blendSetLum(blendSetSat(cb, blendSat(cs)), blendLum(cb));
+    } else if (mode == 14) {
+        return blendSetLum(cs, blendLum(cb));
+    }
+    return blendSetLum(cb, blendLum(cs));
+}
+
+vec4 renderBlend() {
+    vec2 uv = fpos.xy / extent;
+    vec2 buv = frag[0].y > 0.5 ? vec2(uv.x, 1.0 - uv.y) : uv;
+    vec4 src = texture2D(tex, uv);
+    vec4 bd = texture2D(glyphtex, buv);
+    vec3 cs = src.rgb;
+    if (src.a > 0.0) {
+        cs = src.rgb / src.a;
+    }
+    vec3 cb = bd.rgb;
+    if (bd.a > 0.0) {
+        cb = bd.rgb / bd.a;
+    }
+    vec3 b = clamp(blendMode(int(frag[0].x), clamp(cb, 0.0, 1.0), clamp(cs, 0.0, 1.0)), 0.0, 1.0);
+    float ao = src.a + bd.a - src.a * bd.a;
+    vec3 co = src.rgb * (1.0 - bd.a) + bd.rgb * (1.0 - src.a) + src.a * bd.a * b;
+    return vec4(co, ao);
+}
+
 void main(void) {
     vec4 result;
 
@@ -441,6 +574,8 @@ void main(void) {
     result = renderTurbulence();
 #elif SELECT_SHADER == SHADER_TYPE_FilterImageTransfer
     result = renderTransfer();
+#elif SELECT_SHADER == SHADER_TYPE_FilterImageBlend
+    result = renderBlend();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
@@ -448,6 +583,7 @@ void main(void) {
     float scissor = scissorMask(fpos);
 
 #ifdef ENABLE_GLYPH_TEXTURE
+#if SELECT_SHADER != SHADER_TYPE_FilterImageBlend
     // Textured tris
     vec4 mask = texture2D(glyphtex, ftcoord);
 
@@ -460,6 +596,7 @@ void main(void) {
 
     mask *= scissor;
     result *= mask;
+#endif
 #else
 #if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage && SELECT_SHADER != SHADER_TYPE_FilterImageColorMatrix && SELECT_SHADER != SHADER_TYPE_FilterImageTurbulence && SELECT_SHADER != SHADER_TYPE_FilterImageTransfer
         // Not stencil fill

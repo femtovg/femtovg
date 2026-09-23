@@ -51,7 +51,9 @@ mod image;
 use crate::image::ImageStore;
 
 mod transient;
-pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind};
+pub use crate::image::{
+    BlendMode, ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind,
+};
 use crate::transient::TransientPool;
 
 mod turbulence;
@@ -439,11 +441,14 @@ struct MaskImages {
 struct FilterScratchImages {
     chain: [Option<ImageId>; 2],
     blur: Option<ImageId>,
+    // A blend's backdrop, placed into an image of the chain's size just
+    // before its pass; one serves every blend in the chain in turn.
+    blend: Option<ImageId>,
 }
 
 impl FilterScratchImages {
     fn images(self) -> impl Iterator<Item = ImageId> {
-        self.chain.into_iter().flatten().chain(self.blur)
+        self.chain.into_iter().flatten().chain(self.blur).chain(self.blend)
     }
 }
 
@@ -658,6 +663,8 @@ fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
                 2 * (1 + 2 * radius.saturating_sub(1))
             }
             ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from((*num_octaves).min(10))).max(1),
+            // The image and its backdrop.
+            ImageFilter::Blend { .. } => 2,
             _ => 1,
         };
         total.saturating_add(per_pixel)
@@ -1451,6 +1458,12 @@ where
     /// Unsafe in-place sampling filters, over-budget work and a blur that
     /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
+        if let ImageFilter::Blend { .. } = filter {
+            // A blend places its backdrop in a scratch first: the chain owns
+            // that, and a one-blend chain is the one pass.
+            let _ = self.filter_image_chain(target_image, std::slice::from_ref(&filter), source_image);
+            return;
+        }
         let Ok((image_width, image_height)) = self.image_size(source_image) else {
             return;
         };
@@ -1480,7 +1493,7 @@ where
         } else {
             None
         };
-        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch);
+        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None);
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -1495,11 +1508,15 @@ where
         filter: ImageFilter,
         source_image: ImageId,
         blur_scratch: Option<ImageId>,
+        // A blend's placed backdrop and whether it is stored the other way
+        // up from the source at this pass.
+        backdrop: Option<(ImageId, bool)>,
     ) -> bool {
         debug_assert_eq!(
             matches!(filter, ImageFilter::GaussianBlur { .. }),
             blur_scratch.is_some()
         );
+        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
         debug_assert!(
             target_image != source_image
                 || matches!(
@@ -1527,6 +1544,10 @@ where
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
+        if let Some((placed, upside_down)) = backdrop {
+            cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
+            cmd.filter_backdrop_flipped = upside_down;
+        }
 
         let vertex_offset = self.verts.len();
 
@@ -1730,6 +1751,11 @@ where
                 "a single-pass filter cannot read and write the same image".into(),
             ));
         }
+        for filter in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = filter {
+                self.image_info(*backdrop)?;
+            }
+        }
         let work = filter_work(&passes, width, height);
         if !self.reserve_filter_work(work) {
             return Err(ErrorKind::FilterWorkBudgetExceeded);
@@ -1746,11 +1772,12 @@ where
                 passes
                     .iter()
                     .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. })),
+                passes.iter().any(|filter| matches!(filter, ImageFilter::Blend { .. })),
                 2,
                 0,
             )
             .inspect_err(|_| self.refund_filter_work(work))?;
-        self.run_filter_passes(target_image, &passes, source_image, scratch, false);
+        self.run_filter_passes(target_image, &passes, source_image, scratch, false, (0.0, 0.0));
         Ok(())
     }
 
@@ -1767,6 +1794,7 @@ where
         height: usize,
         passes: usize,
         needs_blur: bool,
+        needs_blend: bool,
         chain_limit: usize,
         headroom: usize,
     ) -> Result<FilterScratchImages, ErrorKind> {
@@ -1793,6 +1821,17 @@ where
                 }
             }
         }
+        if needs_blend {
+            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
+                Ok(id) => scratch.blend = Some(id),
+                Err(err) => {
+                    for id in scratch.images() {
+                        self.rollback_transient_image(id);
+                    }
+                    return Err(err);
+                }
+            }
+        }
         Ok(scratch)
     }
 
@@ -1800,6 +1839,37 @@ where
     /// `target_image`, ping-ponging through the `scratch` images acquired for
     /// that plan, and releases them once the chain is recorded: they are free
     /// for the next chain (or layer) of this size.
+    /// Draws `backdrop` at `rect` into `into`, an image of the chain's size,
+    /// over transparent, so a blend pass samples it at the same pixel
+    /// coordinates as the image it filters. An ordinary draw, as a mask's
+    /// normalization is: the backdrop's own storage convention (an upload or
+    /// a render target) never enters the pass's orientation rule.
+    fn place_blend_backdrop(&mut self, into: ImageId, backdrop: ImageId, rect: (f32, f32, f32, f32)) {
+        let Some(info) = self.images.info(into) else {
+            return;
+        };
+        let previous_target = self.current_render_target;
+        self.save();
+        self.set_render_target(RenderTarget::Image(into));
+        self.clear_rect(
+            0,
+            0,
+            info.width() as u32,
+            info.height() as u32,
+            Color::rgbaf(0.0, 0.0, 0.0, 0.0),
+        );
+        self.enter_offscreen_state(Transform2D::identity());
+        let (x, y, width, height) = rect;
+        let paint = Paint::image(backdrop, x, y, width, height, 0.0, 1.0);
+        self.fill_device_rect(x, y, width, height, &paint.flavor);
+        self.restore();
+        self.set_render_target(previous_target);
+    }
+
+    /// Runs `passes` from `source_image` to `target_image` through the
+    /// scratches. `origin` is where the source's (0, 0) sits in the space a
+    /// blend's backdrop rect is given in: the layer's root origin for a
+    /// layer's chain, (0, 0) for a chain over the caller's own image.
     fn run_filter_passes(
         &mut self,
         target_image: ImageId,
@@ -1807,9 +1877,17 @@ where
         source_image: ImageId,
         scratch: FilterScratchImages,
         target_as_scratch: bool,
+        origin: (f32, f32),
     ) {
         debug_assert!(!target_as_scratch || target_image != source_image);
         let mut src = source_image;
+        // Storage orientation of `src` at each pass: a render target (FLIP_Y)
+        // holds its rows the other way up from an upload, and every pass but
+        // a blur turns the result over once.
+        let mut src_flipped = self
+            .images
+            .info(source_image)
+            .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
         let last = passes.len() - 1;
         for (i, filter) in passes.iter().enumerate() {
             let dst = if i == last || (target_as_scratch && (last - i).is_multiple_of(2)) {
@@ -1820,7 +1898,28 @@ where
             };
             let blur_scratch = matches!(filter, ImageFilter::GaussianBlur { .. })
                 .then(|| scratch.blur.expect("a blur scratch was reserved"));
-            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch);
+            let backdrop = match filter {
+                ImageFilter::Blend {
+                    backdrop,
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } => {
+                    let placed = scratch.blend.expect("a blend scratch was reserved");
+                    self.place_blend_backdrop(placed, *backdrop, (x - origin.0, y - origin.1, *width, *height));
+                    // The placement is a draw into an image: stored the way
+                    // a render target is, so upside down against an upright
+                    // source at this pass.
+                    Some((placed, !src_flipped))
+                }
+                _ => None,
+            };
+            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch, backdrop);
+            if filter.flips_output() {
+                src_flipped = !src_flipped;
+            }
             src = dst;
         }
         for id in scratch.images() {
@@ -2105,7 +2204,7 @@ where
             Some(FilterImages { target, scratch }) => {
                 let passes =
                     filter_passes(&record.effects.filters).expect("an admitted layer has a bounded filter plan");
-                self.run_filter_passes(target, &passes, image, scratch, true);
+                self.run_filter_passes(target, &passes, image, scratch, true, record.root_origin);
                 target
             }
             None => image,
@@ -2232,6 +2331,14 @@ where
         headroom: usize,
     ) -> Option<FilterImages> {
         let passes = filter_passes(filters)?;
+        let mut needs_blend = false;
+        for filter in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = filter {
+                // A blend without its backdrop has nothing to run against.
+                self.images.info(*backdrop)?;
+                needs_blend = true;
+            }
+        }
         let target = self
             .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
             .ok()?;
@@ -2240,7 +2347,7 @@ where
             .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. }));
         // The result and chain scratches share the same storage convention,
         // so a layer can alternate through its result and one scratch.
-        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, 1, headroom) {
+        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, needs_blend, 1, headroom) {
             Ok(scratch) => Some(FilterImages { target, scratch }),
             Err(_) => {
                 self.rollback_transient_image(target);
@@ -2315,6 +2422,7 @@ where
                     converted,
                     ImageFilter::luminance_to_alpha(),
                     images.normalized,
+                    None,
                     None,
                 );
                 converted
@@ -3298,6 +3406,7 @@ where
                     ImageFilter::GaussianBlur { sigma: pass_sigma },
                     src,
                     blur_scratch,
+                    None,
                 );
                 std::mem::swap(&mut src, &mut dst);
             }
@@ -6963,6 +7072,52 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     }
 }
 
+/// A blending layer reserves one more transient, the image its backdrop is
+/// placed into before the pass, and returns it with the rest at end_layer; a
+/// blend whose backdrop does not exist reserves nothing and the layer
+/// composites unfiltered.
+#[test]
+fn a_blending_layer_reserves_its_backdrop_scratch() {
+    use crate::{BlendMode, ImageFilter};
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let backdrop = canvas
+        .create_image_empty(4, 4, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let blend = ImageFilter::Blend {
+        mode: BlendMode::Multiply,
+        backdrop,
+        x: 0.0,
+        y: 0.0,
+        width: 4.0,
+        height: 4.0,
+    };
+    // One pass: capture, result and the placement scratch. Brightness then
+    // the blend is two flipping passes plus the parity identity: one chain
+    // scratch more.
+    for (filters, images) in [(vec![blend], 3), (vec![ImageFilter::brightness(2.0), blend], 4)] {
+        let effects = LayerEffects::new().with_filters(&filters);
+        assert!(canvas.begin_layer(&effects));
+        assert_eq!(canvas.transients.images.len(), images, "{filters:?}");
+        assert_eq!(canvas.transients.free.len(), 0, "{filters:?}: all held");
+        canvas.end_layer();
+        assert_eq!(canvas.transients.free.len(), images, "{filters:?}: all returned");
+        canvas.flush_to_output(());
+    }
+
+    canvas.delete_image(backdrop);
+    canvas.flush_to_output(());
+    let effects = LayerEffects::new().with_filters(&[blend]);
+    assert!(canvas.begin_layer(&effects), "the capture still opens");
+    assert!(
+        canvas.layers.last().unwrap().filter_images.is_none(),
+        "no chain images without a backdrop to blend"
+    );
+    assert_eq!(canvas.transients.images.len(), 1, "the capture only");
+    canvas.end_layer();
+}
+
 /// A frame boundary at the same size keeps an open layer capturing (WPT
 /// 2d.layer.flush-on-frame-presentation): set_size re-issues the layer's
 /// target and the tracked target agrees with the command stream - it used to
@@ -7124,7 +7279,7 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
     canvas.set_size(64, 64, 1.0);
     for filters in [&[big][..], &[big, bright], &[big, bright, big]] {
         let scratch = canvas
-            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, 2, 0)
+            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, false, 2, 0)
             .unwrap();
         assert_eq!(
             scratch.chain.iter().flatten().count(),
