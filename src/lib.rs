@@ -1989,15 +1989,17 @@ where
     }
 
     /// Opens a layer that [`end_layer`](Self::end_layer) composites with the
-    /// declared opacity, filters, and mask. The current scissor bounds the
-    /// capture when it is an axis-aligned rectangle; blur reach expands it.
+    /// declared opacity, filters, mask and blend mode. The current scissor
+    /// bounds the capture when it is an axis-aligned rectangle; blur reach
+    /// expands it.
     ///
     /// Returns `false` only when no capture fits and ordinary content passes
     /// through. Its current alpha is scaled by the requested opacity as an
     /// approximation; overlapping draws need a capture for true group opacity.
     /// A `true` layer is isolated or safely suppressed. A captured layer keeps
-    /// group opacity, omits an ordinary filter if needed, and suppresses content
-    /// whose mask or source-replacing filter cannot be applied.
+    /// group opacity, omits an ordinary filter or a blend mode if needed, and
+    /// suppresses content whose mask or source-replacing filter cannot be
+    /// applied.
     #[must_use = "false means ordinary content is using the pass-through fallback"]
     pub fn begin_layer(&mut self, effects: &LayerEffects) -> bool {
         let state = *self.state();
