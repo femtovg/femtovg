@@ -675,37 +675,45 @@ fn decoration_shares_the_single_text_shadow() {
 }
 
 /// A layer's shadow is cast by content the scissor, or the canvas, leaves
-/// out: a red rect entirely past the canvas's right edge (beyond the
-/// store's rounding too), shadowed 70 px to the left, lands its shadow
-/// inside the scissor - and stays clipped itself. With a blur the shadow
-/// softens but is still there.
+/// out (#342): a red rect entirely past the canvas's right, top or left
+/// edge - beyond the store's rounding too - shadowed 70 px back into view,
+/// lands its shadow inside the scissor and stays clipped itself. With a
+/// blur the shadow softens but is still there.
 #[test]
 fn a_layer_casts_the_shadow_of_content_outside_its_scissor() {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
+    // (rect, offset, a pixel in the shadow, a pixel where the rect would be)
+    let placements = [
+        ("right", (70.0, 8.0, 40.0, 32.0), (-70.0, 0.0), (10, 24), (40, 24)),
+        ("above", (8.0, -80.0, 32.0, 40.0), (0.0, 80.0), (16, 10), (16, 50)),
+        ("left", (-80.0, 8.0, 40.0, 32.0), (80.0, 0.0), (10, 24), (40, 24)),
+    ];
     for blur in [0.0f32, 4.0] {
-        let pixels = render_to_pixels(&device, &queue, |canvas| {
-            canvas.scissor(0.0, 0.0, 32.0, 64.0);
-            canvas.set_shadow_color(Color::rgb(0, 255, 0));
-            canvas.set_shadow_offset(-70.0, 0.0);
-            canvas.set_shadow_blur(blur);
-            assert!(canvas.begin_layer(&LayerEffects::new()));
-            let mut rect = Path::new();
-            rect.rect(70.0, 8.0, 40.0, 32.0);
-            canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
-            canvas.end_layer();
-        });
-        let shadow = pixel(&pixels, 10, 24);
-        assert!(
-            shadow[1] > 150 && shadow[0] < 90 && shadow[3] > 150,
-            "blur {blur}: the shadow of the rect past the canvas lands inside the scissor at (10,24), got {shadow:?}"
-        );
-        let clipped = pixel(&pixels, 40, 24);
-        assert!(
-            clipped[0] < 90 && clipped[3] < 90,
-            "blur {blur}: the rect itself stays outside the scissor, got {clipped:?}"
-        );
+        for (side, (x, y, w, h), (dx, dy), shadow_at, clear_at) in placements {
+            let pixels = render_to_pixels(&device, &queue, |canvas| {
+                canvas.scissor(0.0, 0.0, 32.0, 64.0);
+                canvas.set_shadow_color(Color::rgb(0, 255, 0));
+                canvas.set_shadow_offset(dx, dy);
+                canvas.set_shadow_blur(blur);
+                assert!(canvas.begin_layer(&LayerEffects::new()));
+                let mut rect = Path::new();
+                rect.rect(x, y, w, h);
+                canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+                canvas.end_layer();
+            });
+            let shadow = pixel(&pixels, shadow_at.0, shadow_at.1);
+            assert!(
+                shadow[1] > 150 && shadow[0] < 90 && shadow[3] > 150,
+                "{side}, blur {blur}: the shadow lands inside the scissor at {shadow_at:?}, got {shadow:?}"
+            );
+            let clipped = pixel(&pixels, clear_at.0, clear_at.1);
+            assert!(
+                clipped[0] < 90,
+                "{side}, blur {blur}: the rect itself stays out of view, got {clipped:?}"
+            );
+        }
     }
 }
