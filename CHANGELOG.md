@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `Canvas::with_render_target`: a side pass on another target that goes
+  back to the one that was current, an open layer's store included.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
   with any of the sixteen `BlendMode`s of the Compositing and Blending
   specification (multiply, screen, overlay, ..., luminosity), the SVG
