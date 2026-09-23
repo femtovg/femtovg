@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Antialiased fills on the wgpu backend are rasterized as exact per-pixel
+  coverage: each pixel carries the area the path covers in it, so sub-pixel
+  shapes - hairlines drawn as fills, small text, thin crescents - are as
+  faint as they are thin instead of a pixel wide and nearly opaque, and
+  every other edge is exact rather than a fringe's approximation. Fixes
+  #327. The OpenGL backend keeps the fringe.
+- Fixed a fill of a path that encloses nothing - a bare `<line>` or an open
+  path under SVG's default black fill - drawing a two-pixel line where
+  browsers draw nothing. Fixes #341.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which

@@ -7702,6 +7702,77 @@ fn a_blend_mode_layer_is_admitted_at_the_edge_of_the_work_budget() {
     }
 }
 
+/// Coverage fills whose regions do not overlap share one atlas clear, with
+/// their accumulates ahead of the batch's first draw; an overlapping fill,
+/// or another target, starts the next batch.
+#[test]
+fn coverage_fills_batch_while_their_regions_do_not_overlap() {
+    use renderer::CommandType;
+    let renderer = RecordingRenderer {
+        coverage_fills: true,
+        ..RecordingRenderer::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let concave = |x: f32, y: f32| {
+        let mut path = Path::new();
+        path.move_to(x, y);
+        path.line_to(x + 10.0, y);
+        path.line_to(x + 10.0, y + 10.0);
+        path.line_to(x + 5.0, y + 4.0);
+        path.line_to(x, y + 10.0);
+        path.close();
+        path
+    };
+    let paint = Paint::color(Color::black());
+    canvas.fill_path(&concave(0.0, 0.0), &paint);
+    canvas.fill_path(&concave(20.0, 0.0), &paint);
+    canvas.fill_path(&concave(40.0, 0.0), &paint);
+    // Overlaps the first: a new batch.
+    canvas.fill_path(&concave(5.0, 5.0), &paint);
+    let kinds: Vec<&str> = canvas
+        .commands
+        .iter()
+        .filter_map(|c| match c.cmd_type {
+            CommandType::AccumulateCoverage { clear: true, .. } => Some("clear+accumulate"),
+            CommandType::AccumulateCoverage { clear: false, .. } => Some("accumulate"),
+            CommandType::CoverageFill { .. } => Some("fill"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "clear+accumulate",
+            "accumulate",
+            "accumulate",
+            "fill",
+            "fill",
+            "fill",
+            "clear+accumulate",
+            "fill"
+        ]
+    );
+
+    // Another target starts a batch even without an overlap.
+    let image = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    canvas.fill_path(&concave(20.0, 20.0), &paint);
+    assert!(matches!(
+        canvas.commands.last().map(|c| &c.cmd_type),
+        Some(CommandType::CoverageFill { .. })
+    ));
+    assert!(matches!(
+        canvas.commands[canvas.commands.len() - 2].cmd_type,
+        CommandType::AccumulateCoverage { clear: true, .. }
+    ));
+    canvas.set_render_target(RenderTarget::Screen);
+    canvas.flush_to_output(());
+    assert!(canvas.coverage_batch.is_none(), "a flush ends the batch");
+}
+
 /// A side pass while a layer is open goes back to the layer's store.
 #[test]
 fn with_render_target_goes_back_to_the_layers_store() {
