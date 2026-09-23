@@ -506,9 +506,7 @@ vec3 blendMode(int mode, vec3 cb, vec3 cs) {
     return blendSetLum(cb, blendLum(cs));
 }
 
-// Slots as in shader.wgsl: frag[0].x the mode, .y the backdrop's flip, .z the
-// alpha the image is scaled by first, .w whether to write the image's
-// contribution over the backdrop rather than the blended result.
+// Slots as in shader.wgsl: mode, backdrop flip, image alpha, contribution.
 vec4 renderBlend() {
     vec2 uv = fpos.xy / extent;
     vec2 buv = frag[0].y > 0.5 ? vec2(uv.x, 1.0 - uv.y) : uv;

@@ -94,12 +94,10 @@ pub enum CommandType {
     },
 }
 
-/// What a blend pass takes beyond its mode: whether the backdrop bound in
-/// the glyph-texture slot is stored the other way up from the image at this
-/// pass, the alpha the image is scaled by before blending (a layer's opacity,
-/// applied before its composite blends), and whether the pass writes the
-/// image's contribution over the backdrop - what a source-over draw onto
-/// that backdrop must add to yield the blend - instead of the blended result.
+/// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
+/// texture) is stored the other way up from the image, the alpha the image
+/// is scaled by first, and whether to write the image's contribution over
+/// the backdrop - what source-over onto it adds - instead of the result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct BlendPass {
     pub(crate) backdrop_flipped: bool,

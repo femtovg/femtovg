@@ -348,10 +348,9 @@ fn renderTransfer(vertex: VertexOutput, params: Params) -> vec4<f32> {
 // SVG feBlend: the image over the backdrop bound in the glyph-texture slot.
 // Slot 0 is the BlendMode index, slot 1 whether the backdrop is stored the
 // other way up from the image at this pass, slot 2 the alpha the image is
-// scaled by first (a layer's opacity), slot 3 whether to write the image's
-// contribution over the backdrop - what source-over onto the backdrop adds
-// to it, which a layer composites in place of itself - rather than the
-// blended result. Both textures are premultiplied;
+// scaled by first, slot 3 whether to write the image's contribution over
+// the backdrop (what source-over onto it adds) instead of the result. Both
+// textures are premultiplied;
 // the blend function B(Cb, Cs) of the Compositing and Blending spec runs on
 // the unpremultiplied colors and the result is composited as
 // cs * (1 - ab) + cb * (1 - as) + as * ab * B, alpha as = as + ab - as * ab.

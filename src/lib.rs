@@ -555,21 +555,16 @@ impl LayerEffects {
     }
 
     /// Composites the layer with `mode`: CSS `mix-blend-mode`, SVG's on a
-    /// group, a blend-mode `globalCompositeOperation` at a Canvas 2D layer.
-    /// The finished layer - after its filters and mask, at its opacity - is
-    /// blended with what the target it was opened on held under the store,
-    /// and the result replaces that region under source-over: a blend mode
-    /// is the composite operation, so the current one is not applied on top.
-    /// The layer isolates its content, as a stacking context does: blends
-    /// inside it see only what was drawn inside it.
+    /// group. The finished layer, at its opacity, is blended with what the
+    /// target it was opened on holds under the store, under source-over;
+    /// the current composite operation is not applied on top. The layer's
+    /// content is isolated, as in a stacking context.
     ///
-    /// The backdrop has to be readable: a layer opened while rendering into
-    /// an image, or inside another captured layer. Opened on the screen, or
-    /// when the store-sized transients the blend draws through (the backdrop
-    /// copy, and the result unless a filter chain's capture serves) do not
-    /// fit the budget, the blend is omitted and the layer composites
-    /// source-over at its opacity, as an ordinary filter that cannot run is
-    /// omitted. [`BlendMode::Normal`] is source-over.
+    /// The backdrop must be readable: a layer opened while rendering into
+    /// an image or inside another captured layer. On the screen, or when
+    /// the blend's transients (the backdrop copy and, without a filter
+    /// chain, the result) do not fit the budget, the blend is omitted and
+    /// the layer composites source-over at its opacity.
     #[must_use]
     pub fn with_blend(mut self, mode: BlendMode) -> Self {
         self.blend = mode;
@@ -586,13 +581,10 @@ impl Default for LayerEffects {
     }
 }
 
-/// The transients a layer's blend mode draws through: the copy of the
-/// backdrop under the store, and the result the composite samples. The pass
-/// stores its result the other way up from its source: a capture (flipped
-/// storage) blends into `result`, an upright transient sampled without
-/// FLIP_Y; a chain's result (upright) blends back into the capture, free
-/// once the chain's first pass has read it, whose FLIP_Y samples the flipped
-/// result upright - so `result` is `None` when the layer has a chain.
+/// A blend mode's transients: the backdrop copy and the result. A chain's
+/// result blends back into the capture instead (free after the chain's
+/// first pass, and its FLIP_Y suits the flipped output), so `result` is
+/// `None`.
 #[derive(Clone, Copy, Debug)]
 struct BlendImages {
     backdrop: ImageId,
@@ -2321,12 +2313,8 @@ where
                 }
             }
 
-            // A blend mode reads the backdrop under the store: the region of
-            // the target the layer was opened on, which must be an image (an
-            // enclosing layer's store, a render target) since the screen
-            // cannot be sampled. Without that, or the transients, the blend
-            // is omitted and the layer composites source-over at its opacity,
-            // as an ordinary filter that cannot run is omitted.
+            // The backdrop under the store is readable from an image target
+            // only; without it, or the room, the layer composites source-over.
             if !record.discard
                 && effects.blend != BlendMode::Normal
                 && matches!(record.previous_target, RenderTarget::Image(_))
@@ -2451,10 +2439,8 @@ where
             self.apply_layer_mask(source, &record, mask, images, source != image);
         }
 
-        // A blend mode is the composite: the layer at its opacity is blended
-        // with what the previous target holds under the store, and the
-        // composite draws the layer's contribution over that backdrop, at
-        // full alpha and under source-over, in place of the layer itself.
+        // A blend mode composites the layer's contribution over the backdrop,
+        // under source-over and at full alpha: the opacity went into the pass.
         let blended = match (record.blend_images, record.previous_target) {
             (Some(images), RenderTarget::Image(parent)) => {
                 self.blend_layer_with_backdrop(source, image, &record, images, parent, alpha)
@@ -2504,25 +2490,18 @@ where
         self.release_layer_images(&record, filtered);
     }
 
-    /// Returns a finished layer's images to the transient pool: everything
-    /// the record holds and the chain's result `filtered`, taken out of the
-    /// record to run the chain. Every command that reads them has been
-    /// recorded.
+    /// Returns a finished layer's images, and its chain's result `filtered`,
+    /// to the transient pool once every command reading them is recorded.
     fn release_layer_images(&mut self, record: &LayerRecord, filtered: Option<ImageId>) {
         for image in record.images().chain(filtered) {
             self.release_transient_image(image);
         }
     }
 
-    /// Blends the layer's `source` - its capture, or its chain's result,
-    /// masked - with the backdrop under it: the region of `parent`, the
-    /// target the layer was opened on, that its store covers, copied by an
-    /// ordinary draw into the transient reserved for it. The source is scaled
-    /// by `alpha`, the layer's opacity, first: a group blends at its opacity.
-    /// Returns the image holding the source's contribution over that
-    /// backdrop, which the composite draws under source-over so the outer
-    /// scissor, clip and shadow apply to it as to any composite; `None` when
-    /// the parent cannot be read.
+    /// Blends `source` (the capture or its chain's result, masked), scaled
+    /// by `alpha` first, with the region of `parent` under the store, and
+    /// returns the image holding its contribution over that backdrop; `None`
+    /// when the parent cannot be read.
     fn blend_layer_with_backdrop(
         &mut self,
         source: ImageId,
@@ -2535,8 +2514,7 @@ where
         let (parent_width, parent_height) = self.image_size(parent).ok()?;
         let (minx, miny) = record.origin;
         let (width, height) = (record.width as f32, record.height as f32);
-        // The parent at its own size, shifted so the store's origin lands on
-        // (0, 0); what lies outside the parent stays transparent.
+        // The parent shifted so the store's origin lands on (0, 0).
         self.place_blend_backdrop(
             images.backdrop,
             parent,
@@ -2665,10 +2643,8 @@ where
         }
     }
 
-    /// Acquires a blend mode's transients for a layer store of
-    /// `width` x `height`: the backdrop copy and, unless the layer has a
-    /// chain whose capture the result reuses, the result ([`BlendImages`]).
-    /// `None`, holding nothing, when the budget cannot fit them.
+    /// A blend mode's transients for a store of `width` x `height`; the
+    /// result is skipped when a chain's capture serves. `None` holds nothing.
     fn reserve_blend_images(
         &mut self,
         width: usize,
@@ -7460,10 +7436,8 @@ fn a_blending_layer_reserves_its_backdrop_scratch() {
     canvas.end_layer();
 }
 
-/// A layer with a blend mode reserves its backdrop copy and, without a
-/// chain, the result the composite samples - with a chain the result goes
-/// back into the capture - and reserves nothing on the screen, where the
-/// backdrop cannot be read.
+/// A blend-mode layer reserves the backdrop copy and the result; with a
+/// chain the result reuses the capture; on the screen nothing.
 #[test]
 fn a_blend_mode_layer_reserves_its_backdrop_and_result() {
     use crate::BlendMode;
@@ -7474,9 +7448,7 @@ fn a_blend_mode_layer_reserves_its_backdrop_and_result() {
         .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
         .unwrap();
     let brightness = [ImageFilter::brightness(2.0)];
-    // The pool only grows, so the cases run in order of what they hold: the
-    // capture; capture and chain result; those two plus the backdrop copy
-    // and the blend result; capture, chain result and the backdrop copy.
+    // The pool only grows: cases in order of what they hold.
     let cases = [
         (LayerEffects::new(), 1),
         (LayerEffects::new().with_filters(&brightness), 2),

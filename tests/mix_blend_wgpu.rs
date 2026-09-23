@@ -1,11 +1,8 @@
-//! Headless GPU tests for a layer's blend mode (`LayerEffects::with_blend`,
-//! CSS `mix-blend-mode`): every mode against the specification's composite,
-//! opacity applied before the blend, the backdrop read from the enclosing
-//! layer's store at its origin, a chain and a mask in front of the blend,
-//! the outer composite operation and scissor, and the two cases that
-//! composite source-over instead: the screen, where the backdrop cannot be
-//! read, and a budget the blend's transients do not fit. Skips without a
-//! GPU adapter.
+//! Headless GPU tests for a layer's blend mode (`LayerEffects::with_blend`):
+//! every mode against the specification, opacity before the blend, the
+//! backdrop from the enclosing layer, a chain and a mask in front, the
+//! composite operation and scissor, and the source-over fallbacks (screen,
+//! budget). Skips without a GPU adapter.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
@@ -86,9 +83,8 @@ fn worst_delta(out: &[u8], want: impl Fn(u32, u32) -> [u8; 4]) -> i32 {
     worst
 }
 
-/// A source and a backdrop that vary across the image: the backdrop drawn
-/// in an enclosing plain layer (the screen cannot be read), the source in a
-/// layer blended with `mode` at `opacity`.
+/// Varying source over varying backdrop, the backdrop in an enclosing plain
+/// layer (the screen cannot be read), the source blended with `mode`.
 fn composite(mode: BlendMode, opacity: f32) -> Vec<u8> {
     let (device, queue) = headless_device().expect("gpu");
     render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
@@ -103,8 +99,7 @@ fn composite(mode: BlendMode, opacity: f32) -> Vec<u8> {
     })
 }
 
-/// Every mode, every pixel, within rounding of the specification's
-/// composite of the source over the backdrop.
+/// Every mode, every pixel, within rounding of the specification.
 #[test]
 fn every_mode_composites_like_the_specification() {
     if headless_device().is_none() {
@@ -117,12 +112,9 @@ fn every_mode_composites_like_the_specification() {
     }
 }
 
-/// Group opacity scales the source before the blend - the order Skia,
-/// Chromium and WebKit share, and the corpus's solidJS banner: a group at
-/// opacity .3 under color-burn - not the blended result after it. The two
-/// orders agree wherever the source or the backdrop is opaque (the
-/// difference is `cb x opacity x (1 - as) x (1 - ab)`), so the pixels here
-/// are translucent on both sides.
+/// Opacity scales the source before the blend (Skia, Chromium, WebKit).
+/// The orders differ by `cb * opacity * (1 - as) * (1 - ab)`, so both sides
+/// here are translucent.
 #[test]
 fn opacity_applies_before_the_blend() {
     let Some((device, queue)) = headless_device() else {
@@ -158,11 +150,9 @@ fn opacity_applies_before_the_blend() {
     assert!(worst <= 4, "opacity before the blend: worst channel delta {worst}/255");
 }
 
-/// A blend inside a layer reads that layer's store - not the canvas - and
-/// reads it where its own store sits: the enclosing store starts at
-/// (20, 10), the blending one at (30, 20), so the copy is taken at (10, 10)
-/// of the enclosing store. Green under gray multiplies to dark green; a
-/// copy from the white canvas, or from the wrong place, would be gray.
+/// A blend inside a layer reads that layer's store at its own origin:
+/// green under gray multiplies to dark green, while a copy from the white
+/// canvas, or from the wrong place, would be gray.
 #[test]
 fn the_backdrop_is_the_enclosing_layer_at_its_origin() {
     let Some((device, queue)) = headless_device() else {
@@ -184,10 +174,8 @@ fn the_backdrop_is_the_enclosing_layer_at_its_origin() {
     assert_close(px(&out, 64, 5, 5), [255, 255, 255, 255], "outside the enclosing layer");
 }
 
-/// The backdrop's top half red, its bottom half blue; the source white over
-/// the top half only. Multiply leaves red on top and the blue untouched -
-/// whether the layer's capture blends directly or its chain's result does,
-/// the two storage orientations the pass sees.
+/// Red over blue, white over the top half only: multiply leaves red on top
+/// and the blue untouched, for both storage orientations the pass sees.
 fn halves(with_chain: bool) -> Vec<u8> {
     let (device, queue) = headless_device().expect("gpu");
     render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
@@ -217,8 +205,7 @@ fn the_blend_lands_upright_with_and_without_a_chain() {
     }
 }
 
-/// The mask applies before the blend: where it masks the layer out, the
-/// backdrop shows unblended.
+/// Masked-out pixels show the backdrop unblended.
 #[test]
 fn a_mask_applies_before_the_blend() {
     let Some((device, queue)) = headless_device() else {
@@ -245,9 +232,8 @@ fn a_mask_applies_before_the_blend() {
     assert_close(px(&out, W, 12, 8), [255, 0, 0, 255], "masked out: the backdrop");
 }
 
-/// A blend mode is the composite operation: the one in effect at
-/// `begin_layer` (here destination-over, which would put the layer under
-/// the backdrop) is not applied on top of it.
+/// A blend mode is the composite operation: destination-over in effect at
+/// `begin_layer` is not applied on top of it.
 #[test]
 fn the_composite_operation_is_the_blend() {
     let Some((device, queue)) = headless_device() else {
@@ -266,8 +252,7 @@ fn the_composite_operation_is_the_blend() {
     assert_close(px(&out, W, 8, 8), [128, 0, 0, 255], "multiplied, not put underneath");
 }
 
-/// The outer scissor bounds the composite, and the store it sizes starts
-/// where the scissor does: the copy of the backdrop is taken from there.
+/// The outer scissor bounds the composite and places the backdrop copy.
 #[test]
 fn the_outer_scissor_bounds_the_blend() {
     let Some((device, queue)) = headless_device() else {
@@ -286,8 +271,7 @@ fn the_outer_scissor_bounds_the_blend() {
     assert_close(px(&out, W, 12, 8), [128, 0, 0, 255], "inside: multiplied");
 }
 
-/// On the screen the backdrop cannot be read: the blend is omitted and the
-/// layer composites source-over at its opacity, the documented fallback.
+/// On the screen the backdrop cannot be read: source-over at the opacity.
 #[test]
 fn on_the_screen_the_layer_composites_source_over() {
     let Some((device, queue)) = headless_device() else {
@@ -302,8 +286,7 @@ fn on_the_screen_the_layer_composites_source_over() {
     assert_close(px(&out, W, 8, 8), [191, 64, 64, 255], "gray at half opacity over red");
 }
 
-/// Gray multiplied over red inside a plain layer, with the transient budget
-/// set to `stores` store-sized images once the enclosing layer holds one.
+/// Gray multiplied over red in a plain layer, the budget `stores` stores.
 fn budget_case(stores: usize) -> [u8; 4] {
     let (device, queue) = headless_device().expect("gpu");
     let out = render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
@@ -320,10 +303,8 @@ fn budget_case(stores: usize) -> [u8; 4] {
     px(&out, W, 8, 8)
 }
 
-/// A blend needs its backdrop copy and its result on top of the capture,
-/// each reserved with a capture's headroom; when they do not fit, the
-/// layer composites source-over at its opacity, the documented fallback,
-/// and what was reserved before the shortfall is given back.
+/// Without room for the backdrop copy and the result (each reserved with a
+/// capture's headroom), source-over; what was reserved first is given back.
 #[test]
 fn a_blend_the_budget_cannot_fit_composites_source_over() {
     if headless_device().is_none() {
