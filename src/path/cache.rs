@@ -66,6 +66,9 @@ pub struct Contour {
     /// the orientation the fringe extrusion assumes, so the triangles built
     /// from them have to be flipped back.
     reversed: bool,
+    /// Set for the duration of a fill: the contour encloses no area (fewer
+    /// than three points, or collinear), so a fill of it draws nothing.
+    degenerate: bool,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity,
@@ -79,6 +82,7 @@ impl Default for Contour {
             bevel: Default::default(),
             solidity: None,
             reversed: false,
+            degenerate: false,
             fill: Vec::new(),
             stroke: Vec::new(),
             convexity: Convexity::default(),
@@ -102,6 +106,22 @@ impl Contour {
         }
 
         area * 0.5
+    }
+
+    /// Whether a fill of these points covers nothing: fewer than three of
+    /// them, or an area that is zero within rounding - measured as the mean
+    /// width `2 * area / perimeter`, so a long collinear contour's float
+    /// noise does not pass while a thin real sliver does. A bare `<line>`
+    /// or an open path under SVG's default black fill is the common case
+    /// (femtovg/femtovg#341); browsers draw nothing for it.
+    fn encloses_nothing(points: &[Point]) -> bool {
+        if points.len() < 3 {
+            return true;
+        }
+        let perimeter: f32 = (PointPairsIter { curr: 0, points })
+            .map(|(p0, p1)| (p1.pos - p0.pos).mag2().sqrt())
+            .sum();
+        2.0 * Self::polygon_area(points).abs() < 1e-3 * perimeter
     }
 
     fn point_count(&self) -> usize {
@@ -670,7 +690,8 @@ impl PathCache {
         // the winding the caller authored instead of declared.
         for (contour, is_hole) in self.contours.iter_mut().zip(hole) {
             let points = &mut self.points[contour.point_range.clone()];
-            contour.reversed = points.len() > 2 && (Contour::polygon_area(points) < 0.0) != is_hole;
+            contour.degenerate = Contour::encloses_nothing(points);
+            contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
             if contour.reversed {
                 points.reverse();
                 Contour::recompute_directions(points);
@@ -697,6 +718,9 @@ impl PathCache {
         for contour in &mut self.contours {
             contour.stroke.clear();
             contour.fill.clear();
+            if contour.degenerate {
+                continue;
+            }
 
             let triangle_count = (contour.fill.capacity() - 2) * 3;
             let mut triangle_fan_fill = Vec::with_capacity(triangle_count);
