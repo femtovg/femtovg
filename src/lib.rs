@@ -445,7 +445,7 @@ impl OverflowStack {
             self.bits[word] &= !bit;
             self.layers -= 1;
         }
-        if self.len % 64 == 0 {
+        if self.len.is_multiple_of(64) {
             self.bits.pop();
         }
         Some(layer)
