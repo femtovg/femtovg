@@ -99,21 +99,20 @@ fn end_layer_discards_saves_left_open_inside_the_layer() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
+    // The save inside the layer shifts the layer's content off the canvas;
+    // its pixels stay white, and the shift must not leak past end_layer.
+    const INNER_SHIFT: f32 = 100.0;
     let out = render(&device, &queue, |c| {
         c.translate(16.0, 0.0);
         assert!(c.begin_layer(&half()));
         c.save();
-        c.translate(100.0, 100.0); // must not leak past end_layer
+        c.translate(INNER_SHIFT, INNER_SHIFT);
         layer_content(c);
         c.end_layer();
         c.restore();
         marker_rect(c);
     });
-    assert_eq!(
-        px(&out, 8 + 100 - 100, 48),
-        WHITE,
-        "inner translate applied inside the layer"
-    );
+    assert_eq!(px(&out, 8, 48), WHITE, "the shifted layer content lands off the canvas");
     assert_eq!(marker(&out), (16, 32), "base transform kept");
 }
 
