@@ -129,6 +129,11 @@ impl TransientPool {
         self.bytes
     }
 
+    /// Whether `id` is a live transient: a layer's store or scratch.
+    pub(crate) fn owns(&self, id: ImageId) -> bool {
+        self.images.contains(&id)
+    }
+
     pub(crate) fn set_budget(&mut self, bytes: usize) {
         self.budget = bytes;
     }

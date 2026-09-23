@@ -61,6 +61,22 @@ pub enum CommandType {
         /// Rendering parameters for the fill operation.
         params: Params,
     },
+    /// Accumulates a fill's exact per-pixel coverage into the coverage atlas:
+    /// one instance per edge (a [`Vertex`] holding both endpoints), swept to
+    /// the right edge of the fill's region (`params.extent`). `clear` starts
+    /// a batch of fills whose regions do not overlap.
+    AccumulateCoverage {
+        /// Rendering parameters: the shader and the region's far edge.
+        params: Params,
+        /// Whether the atlas is cleared first.
+        clear: bool,
+    },
+    /// Draws a fill's paint through its accumulated coverage: a quad over
+    /// the region, sampling the atlas as its glyph texture.
+    CoverageFill {
+        /// Rendering parameters for the fill operation.
+        params: Params,
+    },
     /// Fill a concave shape.
     ConcaveFill {
         /// Rendering parameters for the stencil operation.
@@ -94,6 +110,27 @@ pub enum CommandType {
     },
 }
 
+/// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
+/// texture) is stored the other way up from the image, the alpha the image
+/// is scaled by first, and whether to write the image's contribution over
+/// the backdrop - what source-over onto it adds - instead of the result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BlendPass {
+    pub(crate) backdrop_flipped: bool,
+    pub(crate) source_alpha: f32,
+    pub(crate) contribution: bool,
+}
+
+impl Default for BlendPass {
+    fn default() -> Self {
+        Self {
+            backdrop_flipped: false,
+            source_alpha: 1.0,
+            contribution: false,
+        }
+    }
+}
+
 /// Represents a command that can be executed by the renderer.
 #[derive(Debug)]
 pub struct Command {
@@ -106,6 +143,8 @@ pub struct Command {
     pub(crate) image: Option<ImageId>,
     pub(crate) filter_scratch: Option<ImageId>,
     pub(crate) glyph_texture: GlyphTexture,
+    // A blend pass's inputs beyond its mode; the backdrop is the glyph texture.
+    pub(crate) blend_pass: BlendPass,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -121,6 +160,7 @@ impl Command {
             image: None,
             filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
+            blend_pass: BlendPass::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
@@ -155,6 +195,14 @@ pub trait Renderer {
 
     /// Set the size of the renderer.
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
+
+    /// Whether antialiased fills may be rasterized as exact per-pixel
+    /// coverage ([`CommandType::AccumulateCoverage`] and
+    /// [`CommandType::CoverageFill`]); otherwise they draw with the
+    /// stencil and fringe path.
+    fn supports_coverage_fills(&self) -> bool {
+        false
+    }
 
     /// Render the specified commands.
     fn render(
@@ -307,6 +355,11 @@ pub enum ShaderType {
     FilterImageTurbulence,
     /// sRGB transfer-curve shader: linearRGB to sRGB, or the reverse.
     FilterImageTransfer,
+    /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
+    /// glyph-texture slot, with one of the sixteen blend modes.
+    FilterImageBlend,
+    /// Coverage accumulation: an edge's signed area per pixel.
+    CoverageAccumulate,
 }
 
 impl ShaderType {
@@ -328,6 +381,8 @@ impl ShaderType {
             Self::FillImageGradientTwoPointRadial => 12,
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
+            Self::FilterImageBlend => 15,
+            Self::CoverageAccumulate => 16,
         }
     }
 

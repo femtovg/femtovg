@@ -274,6 +274,9 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
+    // One coverage atlas per render-target size: a fill's coverage lives at
+    // its own device position, so the atlas is the target's size.
+    coverage_atlases: HashMap<(u32, u32), (wgpu::Texture, wgpu::TextureView)>,
     bind_group_layout: wgpu::BindGroupLayout,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
@@ -418,7 +421,8 @@ impl WGPURenderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // The coverage sweep's vertex shader reads the region's edge.
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -482,6 +486,7 @@ impl WGPURenderer {
             vertex_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
+            coverage_atlases: HashMap::new(),
             bind_group_layout,
             viewport_bind_group_layout,
             pipeline_layout,
@@ -498,6 +503,10 @@ impl Renderer for WGPURenderer {
     type CommandBuffer = Option<wgpu::CommandBuffer>;
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
+
+    fn supports_coverage_fills(&self) -> bool {
+        true
+    }
 
     fn render(
         &mut self,
@@ -599,7 +608,22 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
+        let mut target_size = render_pass_builder.viewport;
+        // Whether the pass is on the coverage atlas rather than the target.
+        let mut on_atlas = false;
         for command in commands {
+            let accumulating = matches!(command.cmd_type, super::CommandType::AccumulateCoverage { .. });
+            if on_atlas && !accumulating {
+                on_atlas = false;
+                if !matches!(command.cmd_type, super::CommandType::SetRenderTarget(_)) {
+                    match current_render_target {
+                        RenderTarget::Screen => render_pass_builder.set_render_target_screen(),
+                        RenderTarget::Image(image_id) => {
+                            render_pass_builder.set_render_target_image(images, image_id, wgpu::LoadOp::Load)
+                        }
+                    }
+                }
+            }
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
                     current_render_target = render_target;
@@ -611,6 +635,44 @@ impl Renderer for WGPURenderer {
                             render_pass_builder.set_render_target_image(images, image_id, wgpu::LoadOp::Load);
                         }
                     }
+                    target_size = render_pass_builder.viewport;
+                }
+                super::CommandType::AccumulateCoverage { ref params, clear } => {
+                    let size = (target_size[0] as u32, target_size[1] as u32);
+                    let device = &self.device;
+                    let atlas = self
+                        .coverage_atlases
+                        .entry(size)
+                        .or_insert_with(|| create_coverage_atlas(device, size));
+                    if !on_atlas || clear {
+                        let load = if clear {
+                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                        } else {
+                            wgpu::LoadOp::Load
+                        };
+                        render_pass_builder.set_render_target_texture(&atlas.0, None, load);
+                        on_atlas = true;
+                    }
+                    pipeline_and_bindgroup_mapper.coverage_atlas = Some((size, atlas.1.clone()));
+                    accumulate_coverage(
+                        &command,
+                        &mut pipeline_and_bindgroup_mapper,
+                        &mut render_pass_builder,
+                        params,
+                        images,
+                    );
+                }
+                super::CommandType::CoverageFill { ref params } => {
+                    let size = (target_size[0] as u32, target_size[1] as u32);
+                    pipeline_and_bindgroup_mapper.coverage_atlas =
+                        self.coverage_atlases.get(&size).map(|atlas| (size, atlas.1.clone()));
+                    coverage_fill(
+                        &command,
+                        &mut pipeline_and_bindgroup_mapper,
+                        &mut render_pass_builder,
+                        params,
+                        images,
+                    );
                 }
                 super::CommandType::ClearRect { color, keep_clip } => {
                     clear_rect(
@@ -1061,11 +1123,13 @@ fn single_pass_filter(
         0.,
         1.,
     );
+    // A blend pass binds its backdrop in the glyph-texture slot; every other
+    // pass binds nothing there.
     let mut params = Params::new(
         images,
         &Default::default(),
         &image_paint.flavor,
-        &Default::default(),
+        &command.glyph_texture,
         &Scissor::default(),
         0.,
         0.,
@@ -1073,6 +1137,13 @@ fn single_pass_filter(
     );
     let target_info = images.get(target_image).unwrap().info;
     params.shader_type = shader_type;
+    let mut slots = slots;
+    if shader_type == ShaderType::FilterImageBlend {
+        let pass = command.blend_pass;
+        slots[1] = f32::from(u8::from(pass.backdrop_flipped));
+        slots[2] = pass.source_alpha;
+        slots[3] = f32::from(u8::from(pass.contribution));
+    }
     // The filter's parameters ride the dead scissor/paint-mat slots during the
     // pass (see `ImageFilter::single_pass`) — no uniform-array growth.
     params.scissor_mat.copy_from_slice(&slots[..12]);
@@ -1612,6 +1683,95 @@ fn clip_reset(
     }
 }
 
+/// A signed-area accumulation target: one float per pixel.
+fn create_coverage_atlas(device: &wgpu::Device, (width, height): (u32, u32)) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("femtovg coverage atlas"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R16Float,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    (texture, view)
+}
+
+const ADDITIVE: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+};
+
+/// Sweeps a fill's edges into the atlas: six vertices per edge instance.
+fn accumulate_coverage(
+    command: &super::Command,
+    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
+    render_pass_builder: &mut RenderPassBuilder<'_>,
+    params: &Params,
+    images: &ImageStore<Image>,
+) {
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        Some(ADDITIVE),
+        wgpu::PrimitiveTopology::TriangleList,
+        StencilTest::Disabled,
+        None,
+        params,
+        images,
+        None,
+        GlyphTexture::None,
+    );
+    for drawable in &command.drawables {
+        if let Some((start, count)) = drawable.fill_verts {
+            render_pass_builder
+                .rpass
+                .as_mut()
+                .unwrap()
+                .draw(0..6, start as u32..(start + count) as u32);
+        }
+    }
+}
+
+/// Draws the paint over the fill's region through its coverage.
+fn coverage_fill(
+    command: &super::Command,
+    pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
+    render_pass_builder: &mut RenderPassBuilder<'_>,
+    params: &Params,
+    images: &ImageStore<Image>,
+) {
+    pipeline_and_bindgroup_mapper.update_renderpass(
+        render_pass_builder,
+        Some(blend_state(command)),
+        wgpu::PrimitiveTopology::TriangleList,
+        clip_guard(command.clip_active),
+        None,
+        params,
+        images,
+        command.image,
+        GlyphTexture::Coverage,
+    );
+    for drawable in &command.drawables {
+        if let Some((start, count)) = drawable.fill_verts {
+            render_pass_builder.draw(start as u32..(start + count) as u32);
+        }
+    }
+}
+
 fn convex_fill(
     command: &super::Command,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
@@ -1822,10 +1982,10 @@ impl PipelineState {
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
-        let vertex_entry_point = if self.render_to_texture {
-            "vs_main_texture"
-        } else {
-            "vs_main"
+        let (vertex_entry_point, fragment_entry_point, step_mode) = match (self.shader_type, self.render_to_texture) {
+            (ShaderType::CoverageAccumulate, _) => ("vs_edge", "fs_accumulate", wgpu::VertexStepMode::Instance),
+            (_, true) => ("vs_main_texture", "fs_main", wgpu::VertexStepMode::Vertex),
+            (_, false) => ("vs_main", "fs_main", wgpu::VertexStepMode::Vertex),
         };
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1836,14 +1996,14 @@ impl PipelineState {
                 entry_point: Some(vertex_entry_point),
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
+                    step_mode,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
                 })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader_module,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fragment_entry_point),
                 compilation_options: Default::default(),
                 targets: &[Some(self.color_target_state.clone())],
             }),
@@ -1878,6 +2038,8 @@ impl PipelineState {
 struct BindGroupState {
     image: Option<ImageId>,
     glyph_texture: GlyphTexture,
+    // The coverage atlas bound as the glyph texture, by target size.
+    coverage: Option<(u32, u32)>,
 }
 
 impl BindGroupState {
@@ -1889,6 +2051,7 @@ impl BindGroupState {
         empty_texture_view: &wgpu::TextureView,
         sampler_cache: &RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>,
         uniform_buffer: &wgpu::Buffer,
+        coverage_view: Option<&wgpu::TextureView>,
     ) -> wgpu::BindGroup {
         let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
@@ -1930,7 +2093,10 @@ impl BindGroupState {
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
-                    resource: (&glyph_texture_view).into(),
+                    resource: match (self.glyph_texture, coverage_view) {
+                        (GlyphTexture::Coverage, Some(view)) => wgpu::BindingResource::TextureView(view),
+                        _ => (&glyph_texture_view).into(),
+                    },
                 },
                 wgpu::BindGroupEntry {
                     binding: 4,
@@ -2222,6 +2388,8 @@ struct CommandToPipelineAndBindGroupMapper {
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     pipeline_layout: wgpu::PipelineLayout,
+    // The atlas a coverage fill samples: the current target's size, and its view.
+    coverage_atlas: Option<((u32, u32), wgpu::TextureView)>,
 }
 
 impl CommandToPipelineAndBindGroupMapper {
@@ -2250,6 +2418,7 @@ impl CommandToPipelineAndBindGroupMapper {
             bind_group_layout,
             pipeline_cache,
             pipeline_layout,
+            coverage_atlas: None,
         }
     }
 
@@ -2276,7 +2445,15 @@ impl CommandToPipelineAndBindGroupMapper {
             render_pass_builder.current_stencil_reference = Some(stencil_reference);
         }
 
-        let bind_group_state = BindGroupState { image, glyph_texture };
+        let coverage = match glyph_texture {
+            GlyphTexture::Coverage => self.coverage_atlas.as_ref().map(|atlas| atlas.0),
+            _ => None,
+        };
+        let bind_group_state = BindGroupState {
+            image,
+            glyph_texture,
+            coverage,
+        };
 
         let bind_group_changed = self.current_bind_group_state != Some(bind_group_state.clone());
         if bind_group_changed {
@@ -2288,6 +2465,7 @@ impl CommandToPipelineAndBindGroupMapper {
                     &self.empty_texture_view,
                     &self.sampler_cache,
                     &self.uniform_buffer,
+                    self.coverage_atlas.as_ref().map(|atlas| &atlas.1),
                 )
                 .into();
             self.current_bind_group_state = Some(bind_group_state);

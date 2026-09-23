@@ -403,12 +403,14 @@ pub enum GlyphTexture {
     None,
     AlphaMask(ImageId),
     ColorTexture(ImageId),
+    /// The renderer's coverage atlas: a fill's exact per-pixel coverage.
+    Coverage,
 }
 
 impl GlyphTexture {
     pub(crate) fn image_id(&self) -> Option<ImageId> {
         match self {
-            Self::None => None,
+            Self::None | Self::Coverage => None,
             Self::AlphaMask(image_id) | Self::ColorTexture(image_id) => Some(*image_id),
         }
     }

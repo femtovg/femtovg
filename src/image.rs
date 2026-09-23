@@ -338,6 +338,55 @@ impl<T> ImageStore<T> {
     }
 }
 
+/// How [`ImageFilter::Blend`] combines a pixel of the image with the
+/// backdrop under it: the blend modes of the W3C Compositing and Blending
+/// specification, which SVG `feBlend`, CSS `mix-blend-mode` and Canvas 2D
+/// `globalCompositeOperation` share. The first twelve apply per color
+/// channel; the last four work on hue, saturation and luminosity as a whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlendMode {
+    /// The source color: `feBlend`'s default.
+    Normal,
+    /// `Cb * Cs`.
+    Multiply,
+    /// `Cb + Cs - Cb * Cs`.
+    Screen,
+    /// Multiplies or screens depending on the backdrop: hard light with the
+    /// two swapped.
+    Overlay,
+    /// The darker of the two.
+    Darken,
+    /// The lighter of the two.
+    Lighten,
+    /// Brightens the backdrop to reflect the source.
+    ColorDodge,
+    /// Darkens the backdrop to reflect the source.
+    ColorBurn,
+    /// Multiplies or screens depending on the source.
+    HardLight,
+    /// Darkens or lightens depending on the source, gently.
+    SoftLight,
+    /// `|Cb - Cs|`.
+    Difference,
+    /// `Cb + Cs - 2 * Cb * Cs`.
+    Exclusion,
+    /// The source's hue with the backdrop's saturation and luminosity.
+    Hue,
+    /// The source's saturation with the backdrop's hue and luminosity.
+    Saturation,
+    /// The source's hue and saturation with the backdrop's luminosity.
+    Color,
+    /// The source's luminosity with the backdrop's hue and saturation.
+    Luminosity,
+}
+
+impl BlendMode {
+    /// The mode's index in the shaders' blend function, in declaration order.
+    pub(crate) fn shader_index(self) -> f32 {
+        self as u8 as f32
+    }
+}
+
 /// Specifies the type of filter to apply to images with `crate::Canvas::filter_image`.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -425,6 +474,32 @@ pub enum ImageFilter {
     /// unpremultiplied sRGB color to linearRGB, for filtering an ordinary
     /// image the way a linearRGB SVG filter would.
     SrgbToLinearRgb,
+    /// Blends the image over a backdrop image: SVG `feBlend` with the image
+    /// as `in` and `backdrop` as `in2`. Both are premultiplied and the result
+    /// is the specification's `cs * (1 - ab) + cb * (1 - as) + as * ab *
+    /// B(Cb, Cs)`, so where the backdrop is transparent the image passes
+    /// through unchanged and where the image is transparent the backdrop
+    /// shows. The backdrop is placed at the rect `x, y, width, height` and is
+    /// transparent outside it: the rect is in the pixels of the image being
+    /// filtered for [`Canvas::filter_image_chain`](crate::Canvas::filter_image_chain),
+    /// and in root device space for a layer's filters, as a layer mask's rect
+    /// is. A blend is one shader pass over both images plus the draw that
+    /// places the backdrop; it needs its own scratch image, reserved with the
+    /// chain's.
+    Blend {
+        /// How the two combine.
+        mode: BlendMode,
+        /// The image under the filtered one (`in2`).
+        backdrop: ImageId,
+        /// Left edge of the backdrop's placement.
+        x: f32,
+        /// Top edge of the backdrop's placement.
+        y: f32,
+        /// Width of the backdrop's placement.
+        width: f32,
+        /// Height of the backdrop's placement.
+        height: f32,
+    },
 }
 
 /// The noise function of [`ImageFilter::Turbulence`]: SVG `feTurbulence`'s
@@ -728,7 +803,11 @@ impl ImageFilter {
     /// it. Exhaustive on purpose - a new variant must declare its parity here.
     pub(crate) fn flips_output(&self) -> bool {
         match self {
-            Self::ColorMatrix { .. } | Self::Turbulence { .. } | Self::LinearRgbToSrgb | Self::SrgbToLinearRgb => true,
+            Self::ColorMatrix { .. }
+            | Self::Turbulence { .. }
+            | Self::LinearRgbToSrgb
+            | Self::SrgbToLinearRgb
+            | Self::Blend { .. } => true,
             Self::GaussianBlur { .. } => false,
         }
     }
@@ -759,6 +838,13 @@ impl ImageFilter {
             )),
             Self::LinearRgbToSrgb => Some(transfer(1.0)),
             Self::SrgbToLinearRgb => Some(transfer(0.0)),
+            Self::Blend { mode, .. } => {
+                // Slot 1, whether the backdrop is sampled upside down, is the
+                // pass's to set: it depends on where in a chain the blend runs.
+                let mut slots = [0.0f32; 20];
+                slots[0] = mode.shader_index();
+                Some((ShaderType::FilterImageBlend, slots))
+            }
         }
     }
 }
