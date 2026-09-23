@@ -554,7 +554,8 @@ impl LayerEffects {
     ///
     /// The backdrop has to be readable: a layer opened while rendering into
     /// an image, or inside another captured layer. Opened on the screen, or
-    /// when the two store-sized transients the blend draws through do not
+    /// when the store-sized transients the blend draws through (the backdrop
+    /// copy, and the result unless a filter chain's capture serves) do not
     /// fit the budget, the blend is omitted and the layer composites
     /// source-over at its opacity, as an ordinary filter that cannot run is
     /// omitted. [`BlendMode::Normal`] is source-over.
