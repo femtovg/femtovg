@@ -6,8 +6,8 @@
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
-    imgref::Img, renderer::WGPURenderer, rgb::RGBA8, BlendMode, Canvas, Color, CompositeOperation, ImageFilter,
-    ImageFlags, ImageId, LayerEffects, MaskKind, Paint, Path,
+    imgref::Img, renderer::WGPURenderer, rgb::RGBA8, BlendMode, Canvas, Color, CompositeOperation, FillRule,
+    ImageFilter, ImageFlags, ImageId, LayerEffects, MaskKind, Paint, Path,
 };
 
 mod common;
@@ -313,4 +313,33 @@ fn a_blend_the_budget_cannot_fit_composites_source_over() {
     assert_close(budget_case(5), [128, 0, 0, 255], "five stores: multiplied");
     assert_close(budget_case(4), [128, 128, 128, 255], "four: the result does not fit");
     assert_close(budget_case(3), [128, 128, 128, 255], "three: the backdrop does not fit");
+}
+
+/// A stencil clip on the target the layer composites onto bounds the
+/// composite, as the scissor does.
+#[test]
+fn a_clip_on_the_backdrop_bounds_the_blend() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let out = render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
+        assert!(c.begin_layer(&LayerEffects::new()));
+        fill(c, 0.0, 0.0, W as f32, H as f32, red());
+        // A triangle covering the right half: not a rect, so a stencil clip.
+        let mut clip = Path::new();
+        clip.move_to(8.0, 0.0);
+        clip.line_to(40.0, 0.0);
+        clip.line_to(40.0, H as f32);
+        clip.line_to(8.0, H as f32);
+        clip.line_to(8.0, 0.0);
+        clip.line_to(8.0, 0.0);
+        clip.close();
+        c.clip_path(&clip, FillRule::NonZero);
+        assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Multiply)));
+        fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+        c.end_layer();
+        c.end_layer();
+    });
+    assert_close(px(&out, W, 3, 8), [255, 0, 0, 255], "outside the clip: the backdrop");
+    assert_close(px(&out, W, 12, 8), [128, 0, 0, 255], "inside: multiplied");
 }
