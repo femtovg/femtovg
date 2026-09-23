@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   transients it needs do not fit the budget, the layer composites normally.
   Fixes the solidJS banner's color-burn overlay and the multiply, screen and
   hard-light groups of three other corpus files.
+- Added `Canvas::with_render_target`: a side pass on another target that goes
+  back to the one that was current, an open layer's store included.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
   with any of the sixteen `BlendMode`s of the Compositing and Blending
   specification (multiply, screen, overlay, ..., luminosity), the SVG

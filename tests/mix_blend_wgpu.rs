@@ -343,3 +343,96 @@ fn a_clip_on_the_backdrop_bounds_the_blend() {
     assert_close(px(&out, W, 3, 8), [255, 0, 0, 255], "outside the clip: the backdrop");
     assert_close(px(&out, W, 12, 8), [128, 0, 0, 255], "inside: multiplied");
 }
+
+/// Gray multiplied over red with destination-over in effect at
+/// `begin_layer`: in every path the blend request composites source-over.
+/// An ordinary layer under the same operation lands under the red.
+#[test]
+fn a_blend_request_composites_source_over_in_every_path() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let cases: [(&str, Box<dyn Fn(&mut C)>, [u8; 4]); 5] = [
+        (
+            "blended",
+            Box::new(|c| {
+                assert!(c.begin_layer(&LayerEffects::new()));
+                fill(c, 0.0, 0.0, W as f32, H as f32, red());
+                c.global_composite_operation(CompositeOperation::DestinationOver);
+                assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Multiply)));
+                fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+                c.end_layer();
+                c.end_layer();
+            }),
+            [128, 0, 0, 255],
+        ),
+        (
+            "explicit normal",
+            Box::new(|c| {
+                assert!(c.begin_layer(&LayerEffects::new()));
+                fill(c, 0.0, 0.0, W as f32, H as f32, red());
+                c.global_composite_operation(CompositeOperation::DestinationOver);
+                assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Normal)));
+                fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+                c.end_layer();
+                c.end_layer();
+            }),
+            [128, 128, 128, 255],
+        ),
+        (
+            "on the screen",
+            Box::new(|c| {
+                fill(c, 0.0, 0.0, W as f32, H as f32, red());
+                c.global_composite_operation(CompositeOperation::DestinationOver);
+                assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Multiply)));
+                fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+                c.end_layer();
+            }),
+            [128, 128, 128, 255],
+        ),
+        (
+            "without room for the blend",
+            Box::new(|c| {
+                assert!(c.begin_layer(&LayerEffects::new()));
+                let store = c.transient_image_bytes();
+                c.set_transient_image_budget(store * 3);
+                fill(c, 0.0, 0.0, W as f32, H as f32, red());
+                c.global_composite_operation(CompositeOperation::DestinationOver);
+                assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Multiply)));
+                fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+                c.end_layer();
+                c.end_layer();
+            }),
+            [128, 128, 128, 255],
+        ),
+        (
+            "without a capture",
+            Box::new(|c| {
+                assert!(c.begin_layer(&LayerEffects::new()));
+                let store = c.transient_image_bytes();
+                c.set_transient_image_budget(store);
+                fill(c, 0.0, 0.0, W as f32, H as f32, red());
+                c.global_composite_operation(CompositeOperation::DestinationOver);
+                assert!(!c.begin_layer(&LayerEffects::new().with_blend(BlendMode::Multiply)));
+                fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+                c.end_layer();
+                c.end_layer();
+            }),
+            [128, 128, 128, 255],
+        ),
+    ];
+    for (name, draw, want) in &cases {
+        let out = render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| draw(c));
+        assert_close(px(&out, W, 8, 8), *want, name);
+    }
+    let control = render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
+        assert!(c.begin_layer(&LayerEffects::new()));
+        fill(c, 0.0, 0.0, W as f32, H as f32, red());
+        c.global_composite_operation(CompositeOperation::DestinationOver);
+        assert!(c.begin_layer(&LayerEffects::new()));
+        fill(c, 0.0, 0.0, W as f32, H as f32, gray());
+        c.end_layer();
+        c.end_layer();
+    });
+    assert_close(px(&control, W, 8, 8), [255, 0, 0, 255], "an ordinary layer lands under");
+}
