@@ -793,8 +793,10 @@ fn wpt_valid_calls() {
 }
 
 // Not portable, and why:
-// - 2d.layer.invalid-calls / malformed-operations: femtovg raises no
-//   exceptions; interleaved save/begin_layer/restore is femtovg/femtovg#335.
+// - 2d.layer.invalid-calls / malformed-operations: femtovg follows Skia's
+//   pairing (femtovg/femtovg#335) - a restore() closes the layer on top of
+//   the stack and end_layer() restores to its layer's boundary - where the
+//   proposal throws; tests/layer_state_wgpu.rs pins those sequences.
 // - 2d.layer.anisotropic-blur: GaussianBlur is isotropic (one sigma).
 // - 2d.layer.globalCompositeOperation multiply/screen/overlay/darken/lighten:
 //   separable blend modes, femtovg/femtovg#332.
