@@ -76,6 +76,7 @@ impl Params {
         params.stroke_thr = stroke_thr;
 
         params.glyph_texture_type = match glyph_texture {
+            GlyphTexture::Coverage => 3,
             GlyphTexture::None => 0,
             GlyphTexture::AlphaMask(_) => 1,
             GlyphTexture::ColorTexture(_) => 2,

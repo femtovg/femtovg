@@ -77,7 +77,7 @@ use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
 use renderer::BlendPass;
 
 mod path;
-use path::Convexity;
+use path::{Convexity, PathCache};
 pub use path::{Path, PathIter, Solidity, Verb};
 
 mod gradient_store;
@@ -382,6 +382,8 @@ pub struct Canvas<T: Renderer> {
     filter_work_budget: u64,
     // Open layers from begin_layer(), innermost last.
     layers: Vec<LayerRecord>,
+    // The coverage fills accumulated together: see `fill_with_coverage`.
+    coverage_batch: Option<CoverageBatch>,
     // Effect passes in progress (a backdrop placed, a mask normalised): their
     // draws are not suppressed by the depth limit or a pass-through layer.
     offscreen_passes: usize,
@@ -595,6 +597,17 @@ impl Default for LayerEffects {
 struct BlendImages {
     backdrop: ImageId,
     result: Option<ImageId>,
+}
+
+/// Antialiased fills accumulated into the coverage atlas together: their
+/// accumulate commands sit at `insert_at` ahead of their draws, and their
+/// regions do not overlap, so one clear serves them all.
+#[derive(Debug)]
+struct CoverageBatch {
+    insert_at: usize,
+    accumulates: usize,
+    regions: Vec<[i32; 4]>,
+    target: RenderTarget,
 }
 
 #[derive(Debug)]
@@ -871,6 +884,7 @@ where
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             offscreen_passes: 0,
+            coverage_batch: None,
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
@@ -912,6 +926,7 @@ where
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
             offscreen_passes: 0,
+            coverage_batch: None,
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
@@ -1058,6 +1073,7 @@ where
             std::mem::take(&mut self.commands),
         );
         self.verts.clear();
+        self.coverage_batch = None;
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -2527,6 +2543,134 @@ where
         self.release_layer_images(&record, filtered);
     }
 
+    /// The texture a paint samples: its image, or a multi-stop gradient's ramp.
+    fn paint_texture(&mut self, paint_flavor: &PaintFlavor) -> Option<ImageId> {
+        if let PaintFlavor::Image { id, .. } = paint_flavor {
+            Some(*id)
+        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
+            self.gradients
+                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
+                .ok()
+        } else {
+            None
+        }
+    }
+
+    /// Fills through exact per-pixel coverage: every edge of the path is
+    /// swept across its region into the coverage atlas, positive going down
+    /// and negative going up, so each pixel accumulates the signed area
+    /// inside the path; the paint is then drawn over the region through
+    /// that coverage. Fills whose regions do not overlap share one atlas
+    /// clear (a batch); a fill that overlaps an earlier one starts the next.
+    fn fill_with_coverage(
+        &mut self,
+        path_cache: &PathCache,
+        paint_flavor: &PaintFlavor,
+        transform: &Transform2D,
+        scissor: &Scissor,
+        fill_rule: FillRule,
+    ) {
+        if self.commands_suppressed() {
+            return;
+        }
+        let (width, height) = self.render_target_size();
+        let bounds = path_cache.bounds;
+        let region = [
+            bounds.minx.max(0.0).floor() as i32,
+            bounds.miny.max(0.0).floor() as i32,
+            bounds.maxx.min(width).ceil() as i32,
+            bounds.maxy.min(height).ceil() as i32,
+        ];
+        if region[2] <= region[0] || region[3] <= region[1] {
+            return;
+        }
+
+        // One instance per edge; horizontal edges sweep nothing.
+        let edge_start = self.verts.len();
+        for contour in &path_cache.contours {
+            if contour.degenerate {
+                continue;
+            }
+            for (p0, p1) in contour.point_pairs(&path_cache.points) {
+                if p0.pos.y != p1.pos.y {
+                    self.verts.push(Vertex::new(p0.pos.x, p0.pos.y, p1.pos.x, p1.pos.y));
+                }
+            }
+        }
+        let edge_count = self.verts.len() - edge_start;
+        if edge_count == 0 {
+            return;
+        }
+
+        let target = self.current_render_target;
+        let overlaps = |regions: &[[i32; 4]]| {
+            regions
+                .iter()
+                .any(|r| r[0] < region[2] && region[0] < r[2] && r[1] < region[3] && region[1] < r[3])
+        };
+        if self
+            .coverage_batch
+            .as_ref()
+            .is_none_or(|batch| batch.target != target || overlaps(&batch.regions))
+        {
+            self.coverage_batch = Some(CoverageBatch {
+                insert_at: self.commands.len(),
+                accumulates: 0,
+                regions: Vec::new(),
+                target,
+            });
+        }
+        let batch = self.coverage_batch.as_mut().expect("just ensured");
+        let mut params = Params::stencil();
+        params.shader_type = ShaderType::CoverageAccumulate;
+        params.extent = [region[2] as f32, region[3] as f32];
+        let mut accumulate = Command::new(CommandType::AccumulateCoverage {
+            params,
+            clear: batch.accumulates == 0,
+        });
+        accumulate.drawables.push(Drawable {
+            fill_verts: Some((edge_start, edge_count)),
+            stroke_verts: None,
+        });
+        self.commands.insert(batch.insert_at + batch.accumulates, accumulate);
+        batch.accumulates += 1;
+        batch.regions.push(region);
+
+        let mut params = Params::new(
+            &self.images,
+            transform,
+            paint_flavor,
+            &GlyphTexture::Coverage,
+            scissor,
+            self.fringe_width,
+            self.fringe_width,
+            -1.0,
+        );
+        if fill_rule == FillRule::EvenOdd {
+            params.glyph_texture_type = 4;
+        }
+        let mut cmd = Command::new(CommandType::CoverageFill { params });
+        cmd.fill_rule = fill_rule;
+        cmd.composite_operation = self.state().composite_operation;
+        cmd.image = self.paint_texture(paint_flavor);
+        let [x0, y0, x1, y1] = region.map(|v| v as f32);
+        let (u0, v0, u1, v1) = (x0 / width, y0 / height, x1 / width, y1 / height);
+        let start = self.verts.len();
+        self.verts.extend_from_slice(&[
+            Vertex::new(x0, y0, u0, v0),
+            Vertex::new(x1, y0, u1, v0),
+            Vertex::new(x1, y1, u1, v1),
+            Vertex::new(x0, y0, u0, v0),
+            Vertex::new(x1, y1, u1, v1),
+            Vertex::new(x0, y1, u0, v1),
+        ]);
+        cmd.drawables.push(Drawable {
+            fill_verts: Some((start, 6)),
+            stroke_verts: None,
+        });
+        self.append_cmd(cmd);
+    }
+
     /// Returns a finished layer's images, and its chain's result `filtered`,
     /// to the transient pool once every command reading them is recorded.
     fn release_layer_images(&mut self, record: &LayerRecord, filtered: Option<ImageId>) {
@@ -3252,6 +3396,13 @@ where
             return;
         }
 
+        // Exact per-pixel coverage where the renderer can accumulate it;
+        // the fringe approximates it elsewhere.
+        if anti_alias && self.renderer.supports_coverage_fills() {
+            self.fill_with_coverage(&path_cache, &paint_flavor, &transform, &scissor, fill_rule);
+            return;
+        }
+
         // GPU uniforms
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
             let params = Params::new(
@@ -3291,14 +3442,7 @@ where
         cmd.fill_rule = fill_rule;
         cmd.composite_operation = self.state().composite_operation;
 
-        if let PaintFlavor::Image { id, .. } = paint_flavor {
-            cmd.image = Some(id);
-        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
-            cmd.image = self
-                .gradients
-                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
-                .ok();
-        }
+        cmd.image = self.paint_texture(&paint_flavor);
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
         // Drawable struct is used to describe the range of vertices each draw call will operate on
@@ -3508,14 +3652,7 @@ where
         let mut cmd = Command::new(flavor);
         cmd.composite_operation = self.state().composite_operation;
 
-        if let PaintFlavor::Image { id, .. } = paint_flavor {
-            cmd.image = Some(id);
-        } else if let Some(paint::GradientColors::MultiStop { stops }) = paint_flavor.gradient_colors() {
-            cmd.image = self
-                .gradients
-                .lookup_or_add(stops, &mut self.images, &mut self.renderer)
-                .ok();
-        }
+        cmd.image = self.paint_texture(&paint_flavor);
 
         // All verts from all shapes are kept in a single buffer here in the canvas.
         // Drawable struct is used to describe the range of vertices each draw call will operate on
@@ -4671,6 +4808,7 @@ where
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
+        self.coverage_batch = None;
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -4721,6 +4859,8 @@ pub struct RecordingRenderer {
     pub max_texture_size: usize,
     /// Makes image allocation fail for resource-pressure tests.
     pub fail_image_allocations: bool,
+    /// Reports coverage fills as supported, so the canvas records them.
+    pub coverage_fills: bool,
     /// Number of image allocation attempts.
     pub image_allocation_attempts: usize,
     /// Number of backend images released.
@@ -4736,6 +4876,10 @@ impl Renderer for RecordingRenderer {
     type CommandBuffer = ();
 
     fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
+
+    fn supports_coverage_fills(&self) -> bool {
+        self.coverage_fills
+    }
 
     fn render(
         &mut self,

@@ -39,6 +39,7 @@ const SHADER_TYPE_FillImageGradientTwoPointRadial: i32 = 12;
 const SHADER_TYPE_FilterImageTurbulence: i32 = 13;
 const SHADER_TYPE_FilterImageTransfer: i32 = 14;
 const SHADER_TYPE_FilterImageBlend: i32 = 15;
+const SHADER_TYPE_CoverageAccumulate: i32 = 16;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -65,6 +66,8 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) ftcoord: vec2<f32>,
     @location(1) fpos: vec2<f32>,
+    // The edge a coverage-accumulation fragment belongs to.
+    @location(2) @interpolate(flat) edge: vec4<f32>,
 };
 
 @vertex
@@ -76,7 +79,91 @@ fn vs_main(
     result.ftcoord = tcoord;
     result.fpos = vertex;
     result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 1.0 - 2.0 * vertex.y / viewSize.y, 0, 1);
+    result.edge = vec4<f32>(0.0);
     return result;
+}
+
+// Coverage accumulation. One instance per edge: `a` and `b` its endpoints in
+// device space. The quad covers the pixels the edge's rows sweep from the
+// edge to the region's right edge (params.extent.x), in the atlas, whose
+// row y is device row y.
+@vertex
+fn vs_edge(
+    @builtin(vertex_index) index: u32,
+    @location(0) a: vec2<f32>,
+    @location(1) b: vec2<f32>,
+) -> VertexOutput {
+    let left = floor(min(a.x, b.x));
+    let right = params.extent.x;
+    let top = floor(min(a.y, b.y));
+    let bottom = ceil(max(a.y, b.y));
+    var corner: vec2<f32>;
+    switch (index) {
+        case 0u: { corner = vec2<f32>(left, top); }
+        case 1u: { corner = vec2<f32>(right, top); }
+        case 2u: { corner = vec2<f32>(left, bottom); }
+        case 3u: { corner = vec2<f32>(left, bottom); }
+        case 4u: { corner = vec2<f32>(right, top); }
+        default: { corner = vec2<f32>(right, bottom); }
+    }
+    var result: VertexOutput;
+    result.ftcoord = vec2<f32>(0.0);
+    result.fpos = corner;
+    result.position = vec4<f32>(2.0 * corner.x / viewSize.x - 1.0, 1.0 - 2.0 * corner.y / viewSize.y, 0, 1);
+    result.edge = vec4<f32>(a, b);
+    return result;
+}
+
+// Mean of clamp(r, 0, 1) as r moves linearly from r0 to r1.
+fn clampedMean(r0: f32, r1: f32) -> f32 {
+    let lo = min(r0, r1);
+    let hi = max(r0, r1);
+    if (hi <= 0.0) {
+        return 0.0;
+    }
+    if (lo >= 1.0) {
+        return 1.0;
+    }
+    if (hi - lo < 1e-6) {
+        return clamp(lo, 0.0, 1.0);
+    }
+    let t0 = clamp(-lo / (hi - lo), 0.0, 1.0);
+    let t1 = clamp((1.0 - lo) / (hi - lo), 0.0, 1.0);
+    let u0 = clamp(lo + t0 * (hi - lo), 0.0, 1.0);
+    let u1 = clamp(lo + t1 * (hi - lo), 0.0, 1.0);
+    return (t1 - t0) * 0.5 * (u0 + u1) + (1.0 - t1);
+}
+
+// The signed area of the pixel at `pixel` (its top-left corner) lying to
+// the right of edge a->b over the rows the edge spans: positive going down,
+// negative going up. Summed over a path's edges, a pixel's total is its
+// winding-weighted area inside the path.
+fn edgeCoverage(pixel: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    var p0 = a;
+    var p1 = b;
+    var sign = 1.0;
+    if (a.y > b.y) {
+        p0 = b;
+        p1 = a;
+        sign = -1.0;
+    }
+    let top = max(p0.y, pixel.y);
+    let bottom = min(p1.y, pixel.y + 1.0);
+    if (bottom <= top) {
+        return 0.0;
+    }
+    let dy = p1.y - p0.y;
+    let x_top = p0.x + (p1.x - p0.x) * (top - p0.y) / dy;
+    let x_bottom = p0.x + (p1.x - p0.x) * (bottom - p0.y) / dy;
+    let right_of_top = pixel.x + 1.0 - x_top;
+    let right_of_bottom = pixel.x + 1.0 - x_bottom;
+    return sign * (bottom - top) * clampedMean(right_of_top, right_of_bottom);
+}
+
+@fragment
+fn fs_accumulate(vertex: VertexOutput) -> @location(0) vec4<f32> {
+    let pixel = floor(vertex.fpos);
+    return vec4<f32>(edgeCoverage(pixel, vertex.edge.xy, vertex.edge.zw), 0.0, 0.0, 0.0);
 }
 
 @vertex
@@ -88,6 +175,7 @@ fn vs_main_texture(
     result.ftcoord = tcoord;
     result.fpos = vertex;
     result.position = vec4<f32>(2.0 * vertex.x / viewSize.x - 1.0, 2.0 * vertex.y / viewSize.y - 1.0, 0, 1);
+    result.edge = vec4<f32>(0.0);
     return result;
 }
 
@@ -197,6 +285,17 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
         if (params.glyph_texture_type == 1) {
             mask = vec4<f32>(mask.x);
+        } else if (params.glyph_texture_type >= 3) {
+            // Accumulated coverage: nonzero (3) or even-odd (4) winding.
+            let winding = abs(mask.x);
+            var coverage = min(winding, 1.0);
+            if (params.glyph_texture_type == 4) {
+                coverage = 1.0 - abs(1.0 - (winding % 2.0));
+            }
+            if (coverage <= 0.0) {
+                discard;
+            }
+            mask = vec4<f32>(coverage);
         } else {
             result = vec4<f32>(1, 1, 1, 1);
             mask = vec4<f32>(mask.xyz * mask.w, mask.w);

@@ -61,6 +61,22 @@ pub enum CommandType {
         /// Rendering parameters for the fill operation.
         params: Params,
     },
+    /// Accumulates a fill's exact per-pixel coverage into the coverage atlas:
+    /// one instance per edge (a [`Vertex`] holding both endpoints), swept to
+    /// the right edge of the fill's region (`params.extent`). `clear` starts
+    /// a batch of fills whose regions do not overlap.
+    AccumulateCoverage {
+        /// Rendering parameters: the shader and the region's far edge.
+        params: Params,
+        /// Whether the atlas is cleared first.
+        clear: bool,
+    },
+    /// Draws a fill's paint through its accumulated coverage: a quad over
+    /// the region, sampling the atlas as its glyph texture.
+    CoverageFill {
+        /// Rendering parameters for the fill operation.
+        params: Params,
+    },
     /// Fill a concave shape.
     ConcaveFill {
         /// Rendering parameters for the stencil operation.
@@ -179,6 +195,14 @@ pub trait Renderer {
 
     /// Set the size of the renderer.
     fn set_size(&mut self, width: u32, height: u32, dpi: f32);
+
+    /// Whether antialiased fills may be rasterized as exact per-pixel
+    /// coverage ([`CommandType::AccumulateCoverage`] and
+    /// [`CommandType::CoverageFill`]); otherwise they draw with the
+    /// stencil and fringe path.
+    fn supports_coverage_fills(&self) -> bool {
+        false
+    }
 
     /// Render the specified commands.
     fn render(
@@ -334,6 +358,8 @@ pub enum ShaderType {
     /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
     /// glyph-texture slot, with one of the sixteen blend modes.
     FilterImageBlend,
+    /// Coverage accumulation: an edge's signed area per pixel.
+    CoverageAccumulate,
 }
 
 impl ShaderType {
@@ -356,6 +382,7 @@ impl ShaderType {
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
             Self::FilterImageBlend => 15,
+            Self::CoverageAccumulate => 16,
         }
     }
 

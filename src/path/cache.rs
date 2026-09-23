@@ -22,7 +22,7 @@ bitflags! {
 
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Point {
-    pos: Position,
+    pub(crate) pos: Position,
     dpos: Vector,
     len: f32,
     dmpos: Vector,
@@ -68,7 +68,7 @@ pub struct Contour {
     reversed: bool,
     /// Set for the duration of a fill: the contour encloses no area (fewer
     /// than three points, or collinear), so a fill of it draws nothing.
-    degenerate: bool,
+    pub(crate) degenerate: bool,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity,
@@ -91,7 +91,7 @@ impl Default for Contour {
 }
 
 impl Contour {
-    fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> {
+    pub(crate) fn point_pairs<'a>(&self, points: &'a [Point]) -> impl Iterator<Item = (&'a Point, &'a Point)> {
         PointPairsIter {
             curr: 0,
             points: &points[self.point_range.clone()],
@@ -109,19 +109,25 @@ impl Contour {
     }
 
     /// Whether a fill of these points covers nothing: fewer than three of
-    /// them, or an area that is zero within rounding - measured as the mean
-    /// width `2 * area / perimeter`, so a long collinear contour's float
-    /// noise does not pass while a thin real sliver does. A bare `<line>`
-    /// or an open path under SVG's default black fill is the common case
+    /// them, or all on one line within rounding. Measured as the unsigned
+    /// area of the fan from the first point over the perimeter - a mean
+    /// width that a self-intersecting figure, whose signed area cancels,
+    /// keeps - below a thousandth of a pixel. A bare `<line>` or an open
+    /// path under SVG's default black fill is the common case
     /// (femtovg/femtovg#341); browsers draw nothing for it.
     fn encloses_nothing(points: &[Point]) -> bool {
         if points.len() < 3 {
             return true;
         }
+        let origin = points[0].pos;
+        let fan: f32 = points
+            .windows(2)
+            .map(|pair| (pair[0].pos - origin).cross(pair[1].pos - origin).abs())
+            .sum();
         let perimeter: f32 = (PointPairsIter { curr: 0, points })
             .map(|(p0, p1)| (p1.pos - p0.pos).mag2().sqrt())
             .sum();
-        2.0 * Self::polygon_area(points).abs() < 1e-3 * perimeter
+        fan < 2e-3 * perimeter
     }
 
     fn point_count(&self) -> usize {
@@ -168,7 +174,7 @@ impl<'a> Iterator for PointPairsIter<'a> {
 pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: Bounds,
-    points: Vec<Point>,
+    pub(crate) points: Vec<Point>,
     // Per contour, the other contours' winding number and crossing count at
     // a point just inside it, and its own orientation sign - what decides
     // whether it bounds a hole under either fill rule. Computed once per

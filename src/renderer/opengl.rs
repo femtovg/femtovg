@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 17],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 17],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -244,6 +244,8 @@ impl OpenGl {
                 } else {
                     None
                 },
+                // Coverage fills are not supported on this backend.
+                None,
             ])
         };
 
@@ -1109,6 +1111,9 @@ impl Renderer for OpenGl {
                 CommandType::ClipReset { visible } => {
                     let stencil_params = Params::stencil();
                     self.clip_reset(images, &cmd, &stencil_params, visible);
+                }
+                CommandType::AccumulateCoverage { .. } | CommandType::CoverageFill { .. } => {
+                    debug_assert!(false, "coverage fills are not supported by the OpenGL renderer");
                 }
             }
         }
