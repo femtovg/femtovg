@@ -2041,10 +2041,28 @@ where
         // the canvas and the scissor applies once, at the composite, after
         // the filters - SVG's clip-path over a filtered group and Canvas 2D's
         // clip under `ctx.filter` both clip the result, not the input.
-        let rect = state
+        let mut rect = state
             .scissor
             .device_bounds(canvas_w, canvas_h)
             .unwrap_or_else(|| Rect::new(0.0, 0.0, canvas_w, canvas_h));
+        // The shadow the composite casts comes from wherever the store's
+        // content lands once shifted by the offset and spread by the blur:
+        // the capture takes in the source that reaches into the scissor from
+        // outside it - up to the offset away, plus the blur's reach - or the
+        // shadow of content the scissor leaves out would be missing.
+        let (mut reach_x, mut reach_y) = (0.0, 0.0);
+        if state.shadow_color.a > 0.0 {
+            let spread = state.shadow_blur * 1.5;
+            let [dx, dy] = state.shadow_offset;
+            let (x0, y0) = (rect.x.min(rect.x - dx - spread), rect.y.min(rect.y - dy - spread));
+            let (x1, y1) = (
+                (rect.x + rect.w).max(rect.x + rect.w - dx + spread),
+                (rect.y + rect.h).max(rect.y + rect.h - dy + spread),
+            );
+            rect = Rect::new(x0, y0, x1 - x0, y1 - y0);
+            reach_x = dx.abs() + spread;
+            reach_y = dy.abs() + spread;
+        }
         // The true reach can push a full-width store past the backend's
         // texture limit (2048 px on a VideoCore IV); bound the pad so the
         // layer still captures with its reach truncated at the store edge,
@@ -2055,10 +2073,10 @@ where
             self.renderer.max_texture_size(),
             transient::LAYER_GRANULARITY,
         );
-        let minx = (rect.x - pad).floor().max(-pad);
-        let miny = (rect.y - pad).floor().max(-pad);
-        let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
-        let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad);
+        let minx = (rect.x - pad).floor().max(-pad - reach_x);
+        let miny = (rect.y - pad).floor().max(-pad - reach_y);
+        let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad + reach_x);
+        let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad + reach_y);
         let width = transient::round_up((maxx - minx) as usize, transient::LAYER_GRANULARITY);
         let height = transient::round_up((maxy - miny) as usize, transient::LAYER_GRANULARITY);
 

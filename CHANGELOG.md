@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a layer's shadow missing the shadow of content outside the scissor
+  (or the canvas): the capture now takes in whatever reaches into view once
+  shifted by the shadow offset and spread by its blur, so an SVG
+  `feDropShadow` cast from beyond a clip or the viewport lands inside it as
+  browsers draw it.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.

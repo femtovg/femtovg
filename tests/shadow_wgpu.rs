@@ -9,7 +9,7 @@
 //! they don't fail on backend-less CI.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path, RenderTarget};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, LayerEffects, Paint, Path, RenderTarget};
 
 mod common;
 use common::headless_device;
@@ -670,6 +670,41 @@ fn decoration_shares_the_single_text_shadow() {
             cover > plain_shadow_cover + 40,
             "{name}: the decoration line must cast a shadow (coverage {cover} \
              vs plain {plain_shadow_cover})"
+        );
+    }
+}
+
+/// A layer's shadow is cast by content the scissor, or the canvas, leaves
+/// out: a red rect entirely past the scissor's right edge, shadowed 34 px
+/// to the left, lands its shadow inside the scissor - and stays clipped
+/// itself. With a blur the shadow softens but is still there.
+#[test]
+fn a_layer_casts_the_shadow_of_content_outside_its_scissor() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    for blur in [0.0f32, 4.0] {
+        let pixels = render_to_pixels(&device, &queue, |canvas| {
+            canvas.scissor(0.0, 0.0, 32.0, 64.0);
+            canvas.set_shadow_color(Color::rgb(0, 255, 0));
+            canvas.set_shadow_offset(-34.0, 0.0);
+            canvas.set_shadow_blur(blur);
+            assert!(canvas.begin_layer(&LayerEffects::new()));
+            let mut rect = Path::new();
+            rect.rect(34.0, 8.0, 40.0, 32.0);
+            canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+            canvas.end_layer();
+        });
+        let shadow = pixel(&pixels, 10, 24);
+        assert!(
+            shadow[1] > 150 && shadow[0] < 90 && shadow[3] > 150,
+            "blur {blur}: the shadow of the rect past the scissor lands inside it at (10,24), got {shadow:?}"
+        );
+        let clipped = pixel(&pixels, 40, 24);
+        assert!(
+            clipped[0] < 90 && clipped[3] < 90,
+            "blur {blur}: the rect itself stays outside the scissor, got {clipped:?}"
         );
     }
 }
