@@ -568,6 +568,11 @@ struct LayerRecord {
     height: usize,
     effects: LayerEffects,
     outer_alpha: f32,
+    // The state stack's length while the layer's own entry - the save
+    // `begin_layer` pushes - is on top. That entry is the layer's boundary:
+    // `restore()` at it closes the layer, `end_layer()` restores to it, and
+    // the saves above it belong to the layer's content.
+    state_depth: usize,
 }
 
 impl LayerRecord {
@@ -883,7 +888,7 @@ where
     fn discard_open_layers(&mut self) {
         let mut outermost_target = None;
         while let Some(record) = self.layers.pop() {
-            self.restore();
+            self.restore_to_layer_boundary(&record);
             self.refund_filter_work(record.reserved_filter_work);
             for image in record.images() {
                 self.release_transient_image(image);
@@ -987,21 +992,53 @@ where
 
     /// Pushes and saves the current render state into a state stack.
     ///
-    /// A matching `restore()` must be used to restore the state.
+    /// A matching [`restore`](Self::restore) pops it. Layers share this
+    /// stack: [`begin_layer`](Self::begin_layer) pushes an entry of its own
+    /// that [`end_layer`](Self::end_layer), or a `restore()` reaching it,
+    /// pops.
     pub fn save(&mut self) {
         let state = self.state_stack.last().map_or_else(State::default, |state| *state);
 
         self.state_stack.push(state);
     }
 
-    /// Restores the previous render state. An unmatched restore is ignored.
+    /// Restores the previous render state.
+    ///
+    /// A layer opened by [`begin_layer`](Self::begin_layer) is an entry on
+    /// the same stack, so a `restore()` with the layer's own entry on top
+    /// closes the layer exactly as [`end_layer`](Self::end_layer) would
+    /// (Skia's `saveLayer()` / `restore()` pairing). An unmatched restore at
+    /// the base state is ignored.
     pub fn restore(&mut self) {
+        if self
+            .layers
+            .last()
+            .is_some_and(|layer| layer.state_depth == self.state_stack.len())
+        {
+            self.end_layer();
+            return;
+        }
         if self.state_stack.len() == 1 {
             return;
         }
+        self.pop_state();
+    }
+
+    /// Pops the state on top and the clips it owned.
+    fn pop_state(&mut self) {
         self.state_stack.pop();
         let depth = self.state().clip_depth;
         self.pop_clips_to(depth);
+    }
+
+    /// Restores to `record`'s boundary: the saves left open inside the layer
+    /// go with it, then the layer's own entry. The stack cannot be below the
+    /// boundary while the layer is open - `restore()` closes the layer
+    /// rather than cross it - so this pops at least the layer's entry.
+    fn restore_to_layer_boundary(&mut self, record: &LayerRecord) {
+        debug_assert!(self.state_stack.len() >= record.state_depth);
+        self.state_stack.truncate(record.state_depth);
+        self.pop_state();
     }
 
     /// Resets current state to default values. Does not affect the state stack.
@@ -1873,6 +1910,7 @@ where
                 height: void,
                 effects: effects.clone(),
                 outer_alpha: 0.0,
+                state_depth: self.state_stack.len() + 1,
             });
             self.save();
             if let Some(image) = image {
@@ -1961,6 +1999,7 @@ where
             height,
             effects: effects.clone(),
             outer_alpha: state.alpha,
+            state_depth: self.state_stack.len() + 1,
         };
         if let Some(image) = image {
             record.root_origin = (root.0 + minx, root.1 + miny);
@@ -2072,12 +2111,16 @@ where
     /// Closes the innermost [`begin_layer`](Self::begin_layer) and composites
     /// the captured layer onto the previous target with the layer's declared
     /// effects, honoring the outer scissor and composite operation.
-    /// Unbalanced calls are ignored.
+    ///
+    /// The state is restored to what it was at `begin_layer`: a `save()`
+    /// left open inside the layer is discarded with it, like Skia's
+    /// `restoreToCount()`. With no layer open this does nothing - a
+    /// `restore()` that reached the layer's entry has already closed it.
     pub fn end_layer(&mut self) {
         let Some(mut record) = self.layers.pop() else {
             return;
         };
-        self.restore();
+        self.restore_to_layer_boundary(&record);
         self.set_render_target(record.previous_target);
         let Some(image) = record.image else {
             return; // pass-through layer: nothing captured
@@ -7962,4 +8005,99 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         2,
         "expected underline + strikethrough rects in one fill, got {fills:?}"
     );
+}
+
+/// Random interleavings of save / restore / begin_layer / end_layer /
+/// translate / clip / fill / flush against a model of one stack whose
+/// entries are saves or layers: the state stack and the layer list always
+/// agree with the model, the render target is the innermost open layer's
+/// store, and outside every layer the transform is the model's.
+#[cfg(test)]
+#[test]
+fn random_api_sequences_keep_one_consistent_stack() {
+    use rand::{RngExt, SeedableRng};
+
+    for seed in 0..48u64 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(128, 128, 1.0);
+        // (is_layer, transform outside layers) per entry, base entry first.
+        let mut model: Vec<(bool, Transform2D)> = vec![(false, Transform2D::identity())];
+        let effects = LayerEffects::new().with_opacity(0.5);
+        let mut rect = Path::new();
+        rect.rect(4.0, 4.0, 20.0, 20.0);
+
+        for step in 0..160 {
+            match rng.random_range(0..8) {
+                0 => {
+                    canvas.save();
+                    let top = *model.last().unwrap();
+                    model.push((false, top.1));
+                }
+                1 => {
+                    canvas.restore();
+                    if model.len() > 1 {
+                        model.pop();
+                    }
+                }
+                2 => {
+                    let _ = canvas.begin_layer(&effects);
+                    let top = *model.last().unwrap();
+                    model.push((true, top.1));
+                }
+                3 => {
+                    canvas.end_layer();
+                    if let Some(boundary) = model.iter().rposition(|entry| entry.0) {
+                        model.truncate(boundary);
+                    }
+                }
+                4 => {
+                    let mut clip = Path::new();
+                    clip.rect(rng.random_range(0.0..40.0), rng.random_range(0.0..40.0), 60.0, 60.0);
+                    canvas.clip_path(&clip, FillRule::NonZero);
+                }
+                5 => canvas.fill_path(&rect, &Paint::color(Color::black())),
+                6 => canvas.flush_to_output(()),
+                _ => {
+                    let (dx, dy) = (rng.random_range(-8.0..8.0), rng.random_range(-8.0..8.0));
+                    canvas.translate(dx, dy);
+                    if !model.iter().any(|entry| entry.0) {
+                        model.last_mut().unwrap().1.translate(dx, dy);
+                    }
+                }
+            }
+
+            assert_eq!(
+                canvas.state_stack.len(),
+                model.len(),
+                "seed {seed} step {step}: state stack"
+            );
+            assert_eq!(
+                canvas.layers.len(),
+                model.iter().filter(|entry| entry.0).count(),
+                "seed {seed} step {step}: open layers"
+            );
+            for layer in &canvas.layers {
+                assert!(
+                    layer.state_depth <= canvas.state_stack.len(),
+                    "seed {seed} step {step}: boundary"
+                );
+            }
+            let expected_target = canvas.layers.last().map_or(RenderTarget::Screen, |layer| {
+                layer.image.map_or(layer.previous_target, RenderTarget::Image)
+            });
+            assert_eq!(
+                canvas.current_render_target, expected_target,
+                "seed {seed} step {step}: target"
+            );
+            if !model.iter().any(|entry| entry.0) {
+                assert_eq!(
+                    canvas.state().transform,
+                    model.last().unwrap().1,
+                    "seed {seed} step {step}: transform"
+                );
+            }
+        }
+        canvas.flush_to_output(());
+    }
 }

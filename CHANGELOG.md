@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `save()`/`restore()` and `begin_layer()`/`end_layer()` now share one state
+  stack that knows its layer boundaries: a `restore()` that reaches a layer's
+  entry closes the layer, and `end_layer()` restores to its layer's boundary,
+  discarding any `save()` left open inside it. A mismatched sequence used to
+  leave the stacks one level off, so a later draw lost the base transform or
+  clip, or an open layer swallowed everything drawn after it.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes
