@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::{
     geometry::{Position, Transform2D},
-    Align, Baseline, Color, FillRule, FontId, ImageId, LineCap, LineJoin,
+    Align, Baseline, Color, ColorSpace, FillRule, FontId, ImageId, LineCap, LineJoin,
 };
 
 const MAX_FONT_VARIATIONS: usize = 4;
@@ -147,6 +147,8 @@ impl PartialOrd for GradientStop {
 pub struct MultiStopGradient {
     shared_stops: Rc<[GradientStop]>,
     tint: f32,
+    #[cfg_attr(feature = "serde", serde(default))]
+    space: ColorSpace,
 }
 
 impl MultiStopGradient {
@@ -173,6 +175,14 @@ impl MultiStopGradient {
             stops
         })
     }
+
+    pub(crate) fn space(&self) -> ColorSpace {
+        self.space
+    }
+
+    pub(crate) fn set_interpolation_space(&mut self, space: ColorSpace) {
+        self.space = space;
+    }
 }
 
 impl Eq for MultiStopGradient {}
@@ -185,9 +195,9 @@ impl PartialOrd for MultiStopGradient {
 
 impl Ord for MultiStopGradient {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if (&other.shared_stops, other.tint) < (&self.shared_stops, self.tint) {
+        if (&other.shared_stops, other.tint, other.space) < (&self.shared_stops, self.tint, self.space) {
             std::cmp::Ordering::Less
-        } else if (&self.shared_stops, self.tint) < (&other.shared_stops, other.tint) {
+        } else if (&self.shared_stops, self.tint, self.space) < (&other.shared_stops, other.tint, other.space) {
             std::cmp::Ordering::Greater
         } else {
             std::cmp::Ordering::Equal
@@ -258,7 +268,26 @@ impl GradientColors {
             stops: MultiStopGradient {
                 shared_stops: out_stops,
                 tint: 1.0,
+                space: ColorSpace::Srgb,
             },
+        }
+    }
+
+    /// Sets the color space the stop colors are interpolated in.
+    pub(crate) fn set_interpolation_space(&mut self, space: ColorSpace) {
+        match self {
+            // The two-stop shader path only interpolates in sRGB; other spaces go through the LUT.
+            Self::TwoStop { .. } if space == ColorSpace::Srgb => {}
+            Self::TwoStop { start_color, end_color } => {
+                *self = Self::MultiStop {
+                    stops: MultiStopGradient {
+                        shared_stops: [GradientStop(0.0, *start_color), GradientStop(1.0, *end_color)].into(),
+                        tint: 1.0,
+                        space,
+                    },
+                };
+            }
+            Self::MultiStop { stops } => stops.set_interpolation_space(space),
         }
     }
 }
@@ -352,6 +381,20 @@ pub enum PaintFlavor {
     },
 }
 
+// Shared by `gradient_colors` and `gradient_colors_mut`; match ergonomics picks `&` or `&mut`.
+macro_rules! gradient_colors_arms {
+    ($self:expr) => {
+        match $self {
+            PaintFlavor::LinearGradient { colors, .. } => Some(colors),
+            PaintFlavor::BoxGradient { colors, .. } => Some(colors),
+            PaintFlavor::RadialGradient { colors, .. } => Some(colors),
+            PaintFlavor::ConicGradient { colors, .. } => Some(colors),
+            PaintFlavor::TwoPointRadialGradient { colors, .. } => Some(colors),
+            _ => None,
+        }
+    };
+}
+
 // Convenience method to fetch the GradientColors out of a PaintFlavor
 impl PaintFlavor {
     pub(crate) fn mul_alpha(&mut self, a: f32) {
@@ -381,14 +424,11 @@ impl PaintFlavor {
     }
 
     pub(crate) fn gradient_colors(&self) -> Option<&GradientColors> {
-        match self {
-            Self::LinearGradient { colors, .. } => Some(colors),
-            Self::BoxGradient { colors, .. } => Some(colors),
-            Self::RadialGradient { colors, .. } => Some(colors),
-            Self::ConicGradient { colors, .. } => Some(colors),
-            Self::TwoPointRadialGradient { colors, .. } => Some(colors),
-            _ => None,
-        }
+        gradient_colors_arms!(self)
+    }
+
+    pub(crate) fn gradient_colors_mut(&mut self) -> Option<&mut GradientColors> {
+        gradient_colors_arms!(self)
     }
 
     /// Returns true if this paint is an untransformed image paint without anti-aliasing at the edges in case of a fill
@@ -1608,6 +1648,24 @@ impl Paint {
         self
     }
 
+    /// Sets the color space gradient stops are interpolated in.
+    /// Ignored on non-gradient paints.
+    pub fn set_interpolation_space(&mut self, space: ColorSpace) {
+        if let Some(colors) = self.flavor.gradient_colors_mut() {
+            colors.set_interpolation_space(space);
+        }
+    }
+
+    /// Returns the paint with the color space set to the specified value.
+    ///
+    /// See [`set_interpolation_space`](Self::set_interpolation_space) for details.
+    #[inline]
+    #[must_use]
+    pub fn with_interpolation_space(mut self, space: ColorSpace) -> Self {
+        self.set_interpolation_space(space);
+        self
+    }
+
     /// Sets the fill rule for filling paths.
     #[inline]
     pub fn set_fill_rule(&mut self, rule: FillRule) {
@@ -1624,10 +1682,72 @@ impl Paint {
 
 #[cfg(test)]
 mod tests {
+    use super::{GradientColors, Paint, PaintFlavor};
     #[cfg(feature = "serde")]
-    use super::{GradientColors, Position};
-    use super::{Paint, PaintFlavor};
-    use crate::{geometry::Transform2D, Color};
+    use super::{Position, Transform2D};
+    use crate::{Color, ColorSpace};
+
+    #[test]
+    fn with_interpolation_space_turns_two_stop_gradient_into_multi_stop() {
+        let (start, end) = (Color::rgb(255, 0, 0), Color::rgb(0, 255, 0));
+        let paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, start, end).with_interpolation_space(ColorSpace::Oklab);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        let GradientColors::MultiStop { stops } = colors else {
+            panic!("expected MultiStop");
+        };
+        assert_eq!(stops.space(), ColorSpace::Oklab);
+        assert_eq!(stops.len(), 2);
+        assert_eq!((stops.get(0).0, stops.get(0).1), (0.0, start));
+        assert_eq!((stops.get(1).0, stops.get(1).1), (1.0, end));
+    }
+
+    #[test]
+    fn with_interpolation_space_srgb_keeps_two_stop_gradient() {
+        let paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, Color::rgb(255, 0, 0), Color::rgb(0, 255, 0))
+            .with_interpolation_space(ColorSpace::Srgb);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        assert!(matches!(colors, GradientColors::TwoStop { .. }));
+    }
+
+    #[test]
+    fn with_interpolation_space_sets_multi_stop_gradient_interpolation_space() {
+        let paint = Paint::linear_gradient_stops(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            [
+                (0.0, Color::rgb(255, 0, 0)),
+                (0.5, Color::rgb(0, 255, 0)),
+                (1.0, Color::rgb(0, 0, 255)),
+            ],
+        )
+        .with_interpolation_space(ColorSpace::Oklab);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        let GradientColors::MultiStop { stops } = colors else {
+            panic!("expected MultiStop");
+        };
+        assert_eq!(stops.space(), ColorSpace::Oklab);
+    }
+
+    #[test]
+    fn with_interpolation_space_ignores_non_gradient_paints() {
+        let original = Color::rgb(1, 2, 3);
+        let paint = Paint::color(original).with_interpolation_space(ColorSpace::Oklab);
+        let PaintFlavor::Color(color) = paint.flavor else {
+            panic!("expected Color");
+        };
+        assert_eq!(color, original);
+    }
 
     #[test]
     fn line_dash_empty_pattern_clears() {
