@@ -10,6 +10,9 @@ All notable changes to this project will be documented in this file.
   for a layer's filters, so a chain can blend a group with an image rendered
   elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
   portraits.
+- `save()` no longer grows the state stack past 16,384 nested levels: deeper
+  saves still pair with their restores, but nothing draws there and the state
+  changes made there are discarded.
 - Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
   above 8 device pixels) coming out narrower than requested. A layer filter, a
   filter chain or a shadow blurred past that limit now runs as several passes
