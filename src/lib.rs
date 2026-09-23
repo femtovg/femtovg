@@ -8053,46 +8053,85 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /
-/// translate / clip / fill / flush against a model of one stack whose
-/// entries are saves or layers: the state stack and the layer list always
-/// agree with the model, the render target is the innermost open layer's
-/// store, and outside every layer the transform is the model's.
+/// translate / clip_path / fill / flush / set_render_target against a model
+/// of one stack whose entries are saves or layers, each owning the clips
+/// taken at its level. After every step: the state stack and the layer list
+/// agree with the model, the clip stack holds exactly the levels' clips and
+/// the top level records its depth, every target's plane counts its own
+/// entries, the render target is the model's, and outside layers the
+/// transform is the model's.
 #[cfg(test)]
 #[test]
 fn random_api_sequences_keep_one_consistent_stack() {
     use rand::{RngExt, SeedableRng};
 
+    #[derive(Clone, Copy)]
+    struct Level {
+        layer: bool,
+        transform: Transform2D,
+        clips: usize,
+        // The render target to return to when this level is a layer.
+        previous_target: RenderTarget,
+    }
+
     for seed in 0..48u64 {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
         canvas.set_size(128, 128, 1.0);
-        // (is_layer, transform outside layers) per entry, base entry first.
-        let mut model: Vec<(bool, Transform2D)> = vec![(false, Transform2D::identity())];
+        let image = canvas
+            .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        let mut model = vec![Level {
+            layer: false,
+            transform: Transform2D::identity(),
+            clips: 0,
+            previous_target: RenderTarget::Screen,
+        }];
+        let mut target = RenderTarget::Screen;
         let effects = LayerEffects::new().with_opacity(0.5);
         let mut rect = Path::new();
         rect.rect(4.0, 4.0, 20.0, 20.0);
 
         for step in 0..160 {
-            match rng.random_range(0..8) {
+            match rng.random_range(0..9) {
                 0 => {
                     canvas.save();
                     let top = *model.last().unwrap();
-                    model.push((false, top.1));
+                    model.push(Level {
+                        layer: false,
+                        clips: 0,
+                        previous_target: target,
+                        ..top
+                    });
                 }
                 1 => {
                     canvas.restore();
                     if model.len() > 1 {
-                        model.pop();
+                        let popped = model.pop().unwrap();
+                        if popped.layer {
+                            target = popped.previous_target;
+                        }
                     }
                 }
                 2 => {
                     let _ = canvas.begin_layer(&effects);
                     let top = *model.last().unwrap();
-                    model.push((true, top.1));
+                    model.push(Level {
+                        layer: true,
+                        clips: 0,
+                        previous_target: target,
+                        ..top
+                    });
+                    // A captured layer redirects drawing to its store; a
+                    // pass-through one draws on.
+                    if let Some(store) = canvas.layers.last().and_then(|layer| layer.image) {
+                        target = RenderTarget::Image(store);
+                    }
                 }
                 3 => {
                     canvas.end_layer();
-                    if let Some(boundary) = model.iter().rposition(|entry| entry.0) {
+                    if let Some(boundary) = model.iter().rposition(|level| level.layer) {
+                        target = model[boundary].previous_target;
                         model.truncate(boundary);
                     }
                 }
@@ -8100,46 +8139,61 @@ fn random_api_sequences_keep_one_consistent_stack() {
                     let mut clip = Path::new();
                     clip.rect(rng.random_range(0.0..40.0), rng.random_range(0.0..40.0), 60.0, 60.0);
                     canvas.clip_path(&clip, FillRule::NonZero);
+                    model.last_mut().unwrap().clips += 1;
                 }
                 5 => canvas.fill_path(&rect, &Paint::color(Color::black())),
                 6 => canvas.flush_to_output(()),
+                7 => {
+                    target = if rng.random_range(0..2) == 0 {
+                        RenderTarget::Screen
+                    } else {
+                        RenderTarget::Image(image)
+                    };
+                    canvas.set_render_target(target);
+                }
                 _ => {
                     let (dx, dy) = (rng.random_range(-8.0..8.0), rng.random_range(-8.0..8.0));
                     canvas.translate(dx, dy);
-                    if !model.iter().any(|entry| entry.0) {
-                        model.last_mut().unwrap().1.translate(dx, dy);
+                    if !model.iter().any(|level| level.layer) {
+                        model.last_mut().unwrap().transform.translate(dx, dy);
                     }
                 }
             }
 
-            assert_eq!(
-                canvas.state_stack.len(),
-                model.len(),
-                "seed {seed} step {step}: state stack"
-            );
+            let at = format!("seed {seed} step {step}");
+            assert_eq!(canvas.state_stack.len(), model.len(), "{at}: state stack");
             assert_eq!(
                 canvas.layers.len(),
-                model.iter().filter(|entry| entry.0).count(),
-                "seed {seed} step {step}: open layers"
+                model.iter().filter(|level| level.layer).count(),
+                "{at}: open layers"
             );
             for layer in &canvas.layers {
+                assert!(layer.state_depth <= canvas.state_stack.len(), "{at}: boundary");
+            }
+            let clips: usize = model.iter().map(|level| level.clips).sum();
+            assert_eq!(canvas.clip_stack.len(), clips, "{at}: clip stack");
+            assert_eq!(canvas.state().clip_depth, clips, "{at}: top level's clip depth");
+            for (plane_target, plane) in &canvas.clip_planes {
+                let entries = canvas
+                    .clip_stack
+                    .iter()
+                    .filter(|entry| entry.target == *plane_target)
+                    .count();
+                assert_eq!(plane.count, entries, "{at}: plane count for {plane_target:?}");
+            }
+            for entry in &canvas.clip_stack {
                 assert!(
-                    layer.state_depth <= canvas.state_stack.len(),
-                    "seed {seed} step {step}: boundary"
+                    canvas.clip_planes.contains_key(&entry.target),
+                    "{at}: plane for {:?}",
+                    entry.target
                 );
             }
-            let expected_target = canvas.layers.last().map_or(RenderTarget::Screen, |layer| {
-                layer.image.map_or(layer.previous_target, RenderTarget::Image)
-            });
-            assert_eq!(
-                canvas.current_render_target, expected_target,
-                "seed {seed} step {step}: target"
-            );
-            if !model.iter().any(|entry| entry.0) {
+            assert_eq!(canvas.current_render_target, target, "{at}: render target");
+            if !model.iter().any(|level| level.layer) {
                 assert_eq!(
                     canvas.state().transform,
-                    model.last().unwrap().1,
-                    "seed {seed} step {step}: transform"
+                    model.last().unwrap().transform,
+                    "{at}: transform"
                 );
             }
         }
