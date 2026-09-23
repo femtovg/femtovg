@@ -347,7 +347,11 @@ fn renderTransfer(vertex: VertexOutput, params: Params) -> vec4<f32> {
 
 // SVG feBlend: the image over the backdrop bound in the glyph-texture slot.
 // Slot 0 is the BlendMode index, slot 1 whether the backdrop is stored the
-// other way up from the image at this pass. Both textures are premultiplied;
+// other way up from the image at this pass, slot 2 the alpha the image is
+// scaled by first (a layer's opacity), slot 3 whether to write the image's
+// contribution over the backdrop - what source-over onto the backdrop adds
+// to it, which a layer composites in place of itself - rather than the
+// blended result. Both textures are premultiplied;
 // the blend function B(Cb, Cs) of the Compositing and Blending spec runs on
 // the unpremultiplied colors and the result is composited as
 // cs * (1 - ab) + cb * (1 - as) + as * ab * B, alpha as = as + ab - as * ab.
@@ -436,7 +440,7 @@ fn blendMode(mode: i32, cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
 fn renderBlend(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let uv = vertex.fpos.xy / params.extent;
     let buv = select(uv, vec2<f32>(uv.x, 1.0 - uv.y), params.scissor_mat[0].y > 0.5);
-    let src = textureSample(image_texture, image_sampler, uv);
+    let src = textureSample(image_texture, image_sampler, uv) * params.scissor_mat[0].z;
     let bd = textureSample(glyph_texture, glyph_sampler, buv);
     var cs = src.rgb;
     if (src.a > 0.0) {
@@ -448,9 +452,11 @@ fn renderBlend(vertex: VertexOutput, params: Params) -> vec4<f32> {
     }
     let mode = i32(params.scissor_mat[0].x);
     let b = clamp(blendMode(mode, clamp(cb, vec3<f32>(0.0), vec3<f32>(1.0)), clamp(cs, vec3<f32>(0.0), vec3<f32>(1.0))), vec3<f32>(0.0), vec3<f32>(1.0));
-    let ao = src.a + bd.a - src.a * bd.a;
-    let co = src.rgb * (1.0 - bd.a) + bd.rgb * (1.0 - src.a) + src.a * bd.a * b;
-    return vec4<f32>(co, ao);
+    let contribution = src.rgb * (1.0 - bd.a) + src.a * bd.a * b;
+    if (params.scissor_mat[0].w > 0.5) {
+        return vec4<f32>(contribution, src.a);
+    }
+    return vec4<f32>(contribution + bd.rgb * (1.0 - src.a), src.a + bd.a - src.a * bd.a);
 }
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {

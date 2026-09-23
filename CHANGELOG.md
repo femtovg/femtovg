@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
+  `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
+  is blended with what lies under it on the target it was opened on, which
+  must be an image or an enclosing layer; on the screen, or when the two
+  transients it needs do not fit the budget, the layer composites normally.
+  Fixes the solidJS banner's color-burn overlay and the multiply, screen and
+  hard-light groups of three other corpus files.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
   with any of the sixteen `BlendMode`s of the Compositing and Blending
   specification (multiply, screen, overlay, ..., luminosity), the SVG

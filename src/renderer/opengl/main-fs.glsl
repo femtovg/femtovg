@@ -506,10 +506,13 @@ vec3 blendMode(int mode, vec3 cb, vec3 cs) {
     return blendSetLum(cb, blendLum(cs));
 }
 
+// Slots as in shader.wgsl: frag[0].x the mode, .y the backdrop's flip, .z the
+// alpha the image is scaled by first, .w whether to write the image's
+// contribution over the backdrop rather than the blended result.
 vec4 renderBlend() {
     vec2 uv = fpos.xy / extent;
     vec2 buv = frag[0].y > 0.5 ? vec2(uv.x, 1.0 - uv.y) : uv;
-    vec4 src = texture2D(tex, uv);
+    vec4 src = texture2D(tex, uv) * frag[0].z;
     vec4 bd = texture2D(glyphtex, buv);
     vec3 cs = src.rgb;
     if (src.a > 0.0) {
@@ -520,9 +523,11 @@ vec4 renderBlend() {
         cb = bd.rgb / bd.a;
     }
     vec3 b = clamp(blendMode(int(frag[0].x), clamp(cb, 0.0, 1.0), clamp(cs, 0.0, 1.0)), 0.0, 1.0);
-    float ao = src.a + bd.a - src.a * bd.a;
-    vec3 co = src.rgb * (1.0 - bd.a) + bd.rgb * (1.0 - src.a) + src.a * bd.a * b;
-    return vec4(co, ao);
+    vec3 contribution = src.rgb * (1.0 - bd.a) + src.a * bd.a * b;
+    if (frag[0].w > 0.5) {
+        return vec4(contribution, src.a);
+    }
+    return vec4(contribution + bd.rgb * (1.0 - src.a), src.a + bd.a - src.a * bd.a);
 }
 
 void main(void) {
