@@ -354,6 +354,10 @@ pub struct Canvas<T: Renderer> {
     ephemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
+    // Saves (and layers) taken past MAX_STATE_DEPTH: counted so their
+    // restores pair, but not pushed - the level's changes merge into the
+    // deepest real one.
+    unrealized_saves: usize,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
     images: ImageStore<T::Image>,
@@ -648,6 +652,13 @@ fn blur_passes(sigma: f32) -> (usize, f32) {
 
 const MAX_FILTER_PASSES: usize = 257;
 
+/// The deepest the state stack goes, WebKit's canvas limit. A level costs
+/// about a hundred bytes plus whatever it clips, so this bounds the stack
+/// near 1.6 MiB however deeply an untrusted scene nests; a `save()` or
+/// `begin_layer()` past it is counted rather than pushed, so its `restore()`
+/// or `end_layer()` still pairs with it.
+const MAX_STATE_DEPTH: usize = 16 * 1024;
+
 const DEFAULT_FILTER_WORK_BUDGET: u64 = 4 * 1024 * 1024 * 1024;
 
 fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
@@ -775,6 +786,7 @@ where
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
+            unrealized_saves: 0,
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
@@ -812,6 +824,7 @@ where
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
+            unrealized_saves: 0,
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
@@ -995,11 +1008,27 @@ where
     /// A matching [`restore`](Self::restore) pops it. Layers share this
     /// stack: [`begin_layer`](Self::begin_layer) pushes an entry of its own
     /// that [`end_layer`](Self::end_layer), or a `restore()` reaching it,
-    /// pops.
+    /// pops. The stack is bounded at 16,384 levels; a save past that is
+    /// still paired with its restore, but the changes made at that level
+    /// stay with the deepest real one.
     pub fn save(&mut self) {
+        if self.state_stack.len() >= MAX_STATE_DEPTH {
+            self.count_unrealized_save();
+            return;
+        }
         let state = self.state_stack.last().map_or_else(State::default, |state| *state);
 
         self.state_stack.push(state);
+    }
+
+    /// A save past [`MAX_STATE_DEPTH`]: counted so the matching restore pairs
+    /// with it, not pushed. Changes made at that level land on the deepest
+    /// real one and its restore does not undo them.
+    fn count_unrealized_save(&mut self) {
+        if self.unrealized_saves == 0 {
+            log::warn!("the state stack is {MAX_STATE_DEPTH} deep: further saves are not restored separately");
+        }
+        self.unrealized_saves += 1;
     }
 
     /// Restores the previous render state.
@@ -1010,6 +1039,10 @@ where
     /// (Skia's `saveLayer()` / `restore()` pairing). An unmatched restore at
     /// the base state is ignored.
     pub fn restore(&mut self) {
+        if self.unrealized_saves > 0 {
+            self.unrealized_saves -= 1;
+            return;
+        }
         if self
             .layers
             .last()
@@ -1877,6 +1910,13 @@ where
     /// whose mask or source-replacing filter cannot be applied.
     #[must_use = "false means ordinary content is using the pass-through fallback"]
     pub fn begin_layer(&mut self, effects: &LayerEffects) -> bool {
+        if self.state_stack.len() >= MAX_STATE_DEPTH {
+            // Past the depth limit the layer opens nothing: its entry is
+            // counted like a save's, so end_layer() pairs with it, and its
+            // content draws straight through.
+            self.count_unrealized_save();
+            return false;
+        }
         let state = *self.state();
         // The store spans what is being drawn into: the canvas, or an image
         // render target of another size (a layer opened while rendering to
@@ -2117,6 +2157,11 @@ where
     /// `restoreToCount()`. With no layer open this does nothing - a
     /// `restore()` that reached the layer's entry has already closed it.
     pub fn end_layer(&mut self) {
+        if self.unrealized_saves > 0 {
+            // Pairs with a save or layer taken past MAX_STATE_DEPTH.
+            self.unrealized_saves -= 1;
+            return;
+        }
         let Some(mut record) = self.layers.pop() else {
             return;
         };
@@ -8100,4 +8145,68 @@ fn random_api_sequences_keep_one_consistent_stack() {
         }
         canvas.flush_to_output(());
     }
+}
+
+/// Past MAX_STATE_DEPTH, saves are counted rather than pushed: the stack
+/// stays bounded, every restore still pairs with its save, and the levels
+/// past the limit fold into the deepest real one (their changes are not
+/// undone by their own restore).
+#[cfg(test)]
+#[test]
+fn saves_past_the_depth_limit_stay_paired_and_bounded() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let total = MAX_STATE_DEPTH + 1000;
+    for _ in 0..total {
+        canvas.save();
+        canvas.translate(1.0, 0.0);
+    }
+    assert_eq!(canvas.state_stack.len(), MAX_STATE_DEPTH);
+    assert_eq!(canvas.unrealized_saves, total - (MAX_STATE_DEPTH - 1));
+    assert_eq!(canvas.state().transform.0[4], total as f32, "every translate applied");
+
+    // The 1000 unrealized levels merge into the deepest real one: their
+    // restores undo nothing, the real levels' restores undo one step each.
+    for _ in 0..1001 {
+        canvas.restore();
+    }
+    assert_eq!(canvas.unrealized_saves, 0);
+    assert_eq!(canvas.state_stack.len(), MAX_STATE_DEPTH);
+    assert_eq!(canvas.state().transform.0[4], total as f32);
+    for _ in 0..(MAX_STATE_DEPTH - 1) {
+        canvas.restore();
+    }
+    assert_eq!(canvas.state_stack.len(), 1);
+    assert_eq!(canvas.state().transform, Transform2D::identity());
+    canvas.restore();
+    assert_eq!(canvas.state_stack.len(), 1, "unmatched restore at the base is ignored");
+}
+
+/// A layer opened past the depth limit opens nothing - `begin_layer` says
+/// so - and its `end_layer` pairs with it; the enclosing real layer stays
+/// open until its own end.
+#[cfg(test)]
+#[test]
+fn a_layer_past_the_depth_limit_passes_through_and_pairs_with_end_layer() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    while canvas.state_stack.len() < MAX_STATE_DEPTH {
+        canvas.save();
+    }
+    let store = canvas.current_render_target;
+    assert!(!canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    assert_eq!(canvas.layers.len(), 1);
+    assert_eq!(canvas.unrealized_saves, 1);
+    assert_eq!(canvas.current_render_target, store, "content draws straight through");
+    canvas.end_layer();
+    assert_eq!(canvas.unrealized_saves, 0);
+    assert_eq!(canvas.layers.len(), 1, "the real layer is still open");
+    while canvas.state_stack.len() > 2 {
+        canvas.restore();
+    }
+    canvas.end_layer();
+    assert!(canvas.layers.is_empty());
+    assert_eq!(canvas.current_render_target, RenderTarget::Screen);
+    assert_eq!(canvas.state_stack.len(), 1);
 }
