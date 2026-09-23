@@ -1215,6 +1215,14 @@ where
         }
     }
 
+    /// The render target drawing currently lands on: what the last
+    /// [`set_render_target`](Self::set_render_target) chose, or the store of
+    /// the innermost open layer, which is not otherwise reachable. A caller
+    /// that switches targets for a side pass restores this afterwards.
+    pub fn render_target(&self) -> RenderTarget {
+        self.current_render_target
+    }
+
     /// Sets a new render target. All drawing operations after this call will happen on the provided render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
         if let RenderTarget::Image(id) = target {
