@@ -354,10 +354,15 @@ pub struct Canvas<T: Renderer> {
     ephemeral_glyph_atlas: Option<Rc<GlyphAtlas>>,
     current_render_target: RenderTarget,
     state_stack: Vec<State>,
-    // Saves (and layers) taken past MAX_STATE_DEPTH: counted so their
-    // restores pair, but not pushed - the level's changes merge into the
-    // deepest real one.
-    unrealized_saves: usize,
+    // Saves and layers taken past MAX_STATE_DEPTH, one bit each, so their
+    // restores and end_layers still pair; while any exist the canvas is
+    // saturated: nothing draws and no state changes.
+    overflow: OverflowStack,
+    // What state() reports while saturated: a copy of the deepest real
+    // state, taken when saturation begins, that setters write into and
+    // nothing reads back for drawing.
+    overflow_state: State,
+    warned_overflow: bool,
     commands: Vec<Command>,
     verts: Vec<Vertex>,
     images: ImageStore<T::Image>,
@@ -400,6 +405,73 @@ struct ClipEntry {
     armed: Rect,
 }
 
+/// The entries past [`MAX_STATE_DEPTH`], innermost last, one bit each: set
+/// for a layer, clear for a save. They keep `restore()` and `end_layer()`
+/// paired with the calls that opened them and nothing more - no state, no
+/// clips, no capture - so a scene nested a million deep costs 128 KiB here.
+#[derive(Default, Debug)]
+struct OverflowStack {
+    bits: Vec<u64>,
+    len: usize,
+    layers: usize,
+}
+
+impl OverflowStack {
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn push(&mut self, layer: bool) {
+        let (word, bit) = (self.len / 64, 1u64 << (self.len % 64));
+        if word == self.bits.len() {
+            self.bits.push(0);
+        }
+        if layer {
+            self.bits[word] |= bit;
+            self.layers += 1;
+        }
+        self.len += 1;
+    }
+
+    /// Pops the innermost entry, reporting whether it was a layer.
+    fn pop(&mut self) -> Option<bool> {
+        if self.len == 0 {
+            return None;
+        }
+        self.len -= 1;
+        let (word, bit) = (self.len / 64, 1u64 << (self.len % 64));
+        let layer = self.bits[word] & bit != 0;
+        if layer {
+            self.bits[word] &= !bit;
+            self.layers -= 1;
+        }
+        if self.len % 64 == 0 {
+            self.bits.pop();
+        }
+        Some(layer)
+    }
+
+    /// Pops through the innermost layer entry; false, popping nothing, when
+    /// no layer is among the entries.
+    fn pop_layer(&mut self) -> bool {
+        if self.layers == 0 {
+            return false;
+        }
+        while let Some(layer) = self.pop() {
+            if layer {
+                return true;
+            }
+        }
+        unreachable!("a counted layer entry exists")
+    }
+
+    fn clear(&mut self) {
+        self.bits.clear();
+        self.len = 0;
+        self.layers = 0;
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 struct ClipPlaneState {
     count: usize,
@@ -417,7 +489,10 @@ struct ClipPlaneState {
 #[derive(Clone, Debug)]
 pub struct LayerEffects {
     opacity: f32,
-    filters: Vec<ImageFilter>,
+    // Shared, so a layer record clones a pointer rather than the list:
+    // a scene of thousands of filtered groups costs one copy per group
+    // declaration, not one per open layer.
+    filters: Option<Rc<[ImageFilter]>>,
     mask: Option<LayerMask>,
 }
 
@@ -475,7 +550,7 @@ impl LayerEffects {
     pub fn new() -> Self {
         Self {
             opacity: 1.0,
-            filters: Vec::new(),
+            filters: None,
             mask: None,
         }
     }
@@ -503,9 +578,14 @@ impl LayerEffects {
     /// opacity is preserved; a source-replacing turbulence chain fails closed.
     #[must_use]
     pub fn with_filters(mut self, filters: &[ImageFilter]) -> Self {
-        self.filters.clear();
-        self.filters.extend(filters.iter().take(MAX_FILTER_PASSES + 1).copied());
+        let filters: Vec<ImageFilter> = filters.iter().take(MAX_FILTER_PASSES + 1).copied().collect();
+        self.filters = (!filters.is_empty()).then(|| Rc::from(filters));
         self
+    }
+
+    /// The filters the layer's result runs through, in order.
+    fn filters(&self) -> &[ImageFilter] {
+        self.filters.as_deref().unwrap_or(&[])
     }
 
     /// Masks the layer by `image`, placed at the device-space rect
@@ -654,9 +734,11 @@ const MAX_FILTER_PASSES: usize = 257;
 
 /// The deepest the state stack goes, WebKit's canvas limit. A level costs
 /// about a hundred bytes plus whatever it clips, so this bounds the stack
-/// near 1.6 MiB however deeply an untrusted scene nests; a `save()` or
-/// `begin_layer()` past it is counted rather than pushed, so its `restore()`
-/// or `end_layer()` still pairs with it.
+/// near 1.6 MiB however deeply an untrusted scene nests. Past it the canvas
+/// saturates: a `save()` or `begin_layer()` becomes one bit that its
+/// `restore()` or `end_layer()` pairs with, and until the last of those bits
+/// is popped nothing draws and no state changes - the conservative reading
+/// of every effect a layer past the limit could have declared.
 const MAX_STATE_DEPTH: usize = 16 * 1024;
 
 const DEFAULT_FILTER_WORK_BUDGET: u64 = 4 * 1024 * 1024 * 1024;
@@ -786,7 +868,9 @@ where
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
-            unrealized_saves: 0,
+            overflow: OverflowStack::default(),
+            overflow_state: State::default(),
+            warned_overflow: false,
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
@@ -824,7 +908,9 @@ where
             ephemeral_glyph_atlas: None,
             current_render_target: RenderTarget::Screen,
             state_stack: Vec::new(),
-            unrealized_saves: 0,
+            overflow: OverflowStack::default(),
+            overflow_state: State::default(),
+            warned_overflow: false,
             commands: Vec::new(),
             verts: Vec::new(),
             images: ImageStore::new(),
@@ -1012,8 +1098,8 @@ where
     /// still paired with its restore, but the changes made at that level
     /// stay with the deepest real one.
     pub fn save(&mut self) {
-        if self.state_stack.len() >= MAX_STATE_DEPTH {
-            self.count_unrealized_save();
+        if self.saturated() || self.state_stack.len() >= MAX_STATE_DEPTH {
+            self.overflow_push(false);
             return;
         }
         let state = self.state_stack.last().map_or_else(State::default, |state| *state);
@@ -1021,14 +1107,22 @@ where
         self.state_stack.push(state);
     }
 
-    /// A save past [`MAX_STATE_DEPTH`]: counted so the matching restore pairs
-    /// with it, not pushed. Changes made at that level land on the deepest
-    /// real one and its restore does not undo them.
-    fn count_unrealized_save(&mut self) {
-        if self.unrealized_saves == 0 {
-            log::warn!("the state stack is {MAX_STATE_DEPTH} deep: further saves are not restored separately");
+    /// Whether the stack is past [`MAX_STATE_DEPTH`]: nothing draws and no
+    /// state changes until the entries past it are popped.
+    fn saturated(&self) -> bool {
+        !self.overflow.is_empty()
+    }
+
+    /// Records a save or layer past [`MAX_STATE_DEPTH`].
+    fn overflow_push(&mut self, layer: bool) {
+        if self.overflow.is_empty() {
+            self.overflow_state = *self.state_stack.last().unwrap();
         }
-        self.unrealized_saves += 1;
+        if !self.warned_overflow {
+            self.warned_overflow = true;
+            log::warn!("the state stack is {MAX_STATE_DEPTH} deep: nothing draws until it unwinds");
+        }
+        self.overflow.push(layer);
     }
 
     /// Restores the previous render state.
@@ -1039,8 +1133,8 @@ where
     /// (Skia's `saveLayer()` / `restore()` pairing). An unmatched restore at
     /// the base state is ignored.
     pub fn restore(&mut self) {
-        if self.unrealized_saves > 0 {
-            self.unrealized_saves -= 1;
+        if self.overflow.pop().is_some() {
+            // A save or layer past the limit: nothing was drawn or changed.
             return;
         }
         if self
@@ -1070,6 +1164,8 @@ where
     /// rather than cross it - so this pops at least the layer's entry.
     fn restore_to_layer_boundary(&mut self, record: &LayerRecord) {
         debug_assert!(self.state_stack.len() >= record.state_depth);
+        // Entries past the limit sit above every real boundary.
+        self.overflow.clear();
         self.state_stack.truncate(record.state_depth);
         self.pop_state();
     }
@@ -1082,6 +1178,8 @@ where
     pub fn reset(&mut self) {
         // A reset discards pending layers along with the state (WPT
         // 2d.layer.reset); drawing continues where the outermost one began.
+        // Entries past the depth limit go with them.
+        self.overflow.clear();
         self.discard_open_layers();
         // The clip stack is shared across state levels: this level owns the
         // entries past the depth it inherited from its parent (none at the
@@ -1318,7 +1416,7 @@ where
     }
 
     fn commands_suppressed(&self) -> bool {
-        self.layers.iter().any(|layer| layer.discard && layer.image.is_none())
+        self.saturated() || self.layers.iter().any(|layer| layer.discard && layer.image.is_none())
     }
 
     // Images
@@ -1910,12 +2008,12 @@ where
     /// whose mask or source-replacing filter cannot be applied.
     #[must_use = "false means ordinary content is using the pass-through fallback"]
     pub fn begin_layer(&mut self, effects: &LayerEffects) -> bool {
-        if self.state_stack.len() >= MAX_STATE_DEPTH {
-            // Past the depth limit the layer opens nothing: its entry is
-            // counted like a save's, so end_layer() pairs with it, and its
-            // content draws straight through.
-            self.count_unrealized_save();
-            return false;
+        if self.saturated() || self.state_stack.len() >= MAX_STATE_DEPTH {
+            // Past the depth limit the layer is one bit that end_layer()
+            // pairs with, and its content is suppressed: the safe reading
+            // of every effect it could have declared, so `true`.
+            self.overflow_push(true);
+            return true;
         }
         let state = *self.state();
         // The store spans what is being drawn into: the canvas, or an image
@@ -1967,7 +2065,7 @@ where
         // quadrature - n blurs of sigma reach like one of sigma * sqrt(n) - so
         // the reach of a chain is the root of the sum of squares.
         let sigma_sq: f32 = effects
-            .filters
+            .filters()
             .iter()
             .filter_map(|f| match f {
                 ImageFilter::GaussianBlur { sigma } => chain_blur_sigma(*sigma),
@@ -2022,7 +2120,7 @@ where
         let fail_closed = image.is_none()
             && (effects.mask.is_some()
                 || effects
-                    .filters
+                    .filters()
                     .iter()
                     .any(|filter| matches!(filter, ImageFilter::Turbulence { .. }))
                 || state.alpha * effects.opacity <= 0.0);
@@ -2069,15 +2167,15 @@ where
                 }
             }
 
-            if !record.discard && !effects.filters.is_empty() {
+            if !record.discard && !effects.filters().is_empty() {
                 let replacing = effects
-                    .filters
+                    .filters()
                     .iter()
                     .any(|filter| matches!(filter, ImageFilter::Turbulence { .. }));
-                if let Some(passes) = filter_passes(&effects.filters) {
+                if let Some(passes) = filter_passes(effects.filters()) {
                     let work = filter_work(&passes, width, height);
                     if self.reserve_filter_work(work) {
-                        if let Some(images) = self.reserve_filter_images(width, height, &effects.filters, headroom) {
+                        if let Some(images) = self.reserve_filter_images(width, height, effects.filters(), headroom) {
                             if self.prepare_turbulence_lattices(&passes).is_ok() {
                                 record.filter_images = Some(images);
                                 record.reserved_filter_work = record.reserved_filter_work.saturating_add(work);
@@ -2157,9 +2255,9 @@ where
     /// `restoreToCount()`. With no layer open this does nothing - a
     /// `restore()` that reached the layer's entry has already closed it.
     pub fn end_layer(&mut self) {
-        if self.unrealized_saves > 0 {
-            // Pairs with a save or layer taken past MAX_STATE_DEPTH.
-            self.unrealized_saves -= 1;
+        if self.overflow.pop_layer() {
+            // A layer past the limit closes with the saves left open inside
+            // it; nothing was drawn to composite.
             return;
         }
         let Some(mut record) = self.layers.pop() else {
@@ -2192,7 +2290,7 @@ where
         let source = match record.filter_images.take() {
             Some(FilterImages { target, scratch }) => {
                 let passes =
-                    filter_passes(&record.effects.filters).expect("an admitted layer has a bounded filter plan");
+                    filter_passes(record.effects.filters()).expect("an admitted layer has a bounded filter plan");
                 self.run_filter_passes(target, &passes, image, scratch, true);
                 target
             }
@@ -2447,6 +2545,11 @@ where
     /// `clearRect` under a clip is a fill of the rect with an opaque paint
     /// under [`CompositeOperation::DestinationOut`].
     pub fn clip_path(&mut self, path: &Path, fill_rule: FillRule) {
+        if self.saturated() {
+            // Nothing draws past the depth limit, so nothing to gate; the
+            // clip would only cost geometry.
+            return;
+        }
         self.reconcile_current_clip_plane();
         let target = self.current_render_target;
         let transform = self.state().transform;
@@ -4244,11 +4347,19 @@ where
     //
 
     fn state(&self) -> &State {
-        self.state_stack.last().unwrap()
+        if self.saturated() {
+            &self.overflow_state
+        } else {
+            self.state_stack.last().unwrap()
+        }
     }
 
     fn state_mut(&mut self) -> &mut State {
-        self.state_stack.last_mut().unwrap()
+        if self.saturated() {
+            &mut self.overflow_state
+        } else {
+            self.state_stack.last_mut().unwrap()
+        }
     }
 
     /// Get a list of all font textures.
@@ -7263,7 +7374,7 @@ fn filter_plans_bound_total_work_and_fail_layers_atomically() {
     canvas.flush_to_output(());
     let too_many = vec![ImageFilter::identity(); MAX_FILTER_PASSES + 1];
     let effects = LayerEffects::new().with_filters(&too_many);
-    assert_eq!(effects.filters.len(), MAX_FILTER_PASSES + 1);
+    assert_eq!(effects.filters().len(), MAX_FILTER_PASSES + 1);
     assert!(canvas.begin_layer(&effects));
     assert!(canvas.layers.last().unwrap().filter_images.is_none());
     canvas.end_layer();
@@ -7791,8 +7902,8 @@ fn default_layer_effects_are_the_no_op_effects_new_describes() {
     let new = LayerEffects::new();
     assert_eq!(default.opacity, 1.0);
     assert_eq!(default.opacity, new.opacity);
-    assert!(default.filters.is_empty());
-    assert!(new.filters.is_empty());
+    assert!(default.filters().is_empty());
+    assert!(new.filters().is_empty());
     assert!(default.mask.is_none());
     assert!(new.mask.is_none());
 }
@@ -8201,10 +8312,9 @@ fn random_api_sequences_keep_one_consistent_stack() {
     }
 }
 
-/// Past MAX_STATE_DEPTH, saves are counted rather than pushed: the stack
-/// stays bounded, every restore still pairs with its save, and the levels
-/// past the limit fold into the deepest real one (their changes are not
-/// undone by their own restore).
+/// Past MAX_STATE_DEPTH the canvas saturates: saves become one bit each,
+/// every restore still pairs with its save, nothing changes the real state
+/// and, once unwound, the base is exactly what it was.
 #[cfg(test)]
 #[test]
 fn saves_past_the_depth_limit_stay_paired_and_bounded() {
@@ -8216,17 +8326,20 @@ fn saves_past_the_depth_limit_stay_paired_and_bounded() {
         canvas.translate(1.0, 0.0);
     }
     assert_eq!(canvas.state_stack.len(), MAX_STATE_DEPTH);
-    assert_eq!(canvas.unrealized_saves, total - (MAX_STATE_DEPTH - 1));
-    assert_eq!(canvas.state().transform.0[4], total as f32, "every translate applied");
+    assert_eq!(canvas.overflow.len, total - (MAX_STATE_DEPTH - 1));
+    assert!(canvas.saturated());
+    assert_eq!(
+        canvas.state_stack.last().unwrap().transform.0[4],
+        (MAX_STATE_DEPTH - 1) as f32,
+        "translates past the limit do not reach the real stack"
+    );
 
-    // The 1000 unrealized levels merge into the deepest real one: their
-    // restores undo nothing, the real levels' restores undo one step each.
     for _ in 0..1001 {
         canvas.restore();
     }
-    assert_eq!(canvas.unrealized_saves, 0);
+    assert!(!canvas.saturated());
     assert_eq!(canvas.state_stack.len(), MAX_STATE_DEPTH);
-    assert_eq!(canvas.state().transform.0[4], total as f32);
+    assert_eq!(canvas.state().transform.0[4], (MAX_STATE_DEPTH - 1) as f32);
     for _ in 0..(MAX_STATE_DEPTH - 1) {
         canvas.restore();
     }
@@ -8236,26 +8349,52 @@ fn saves_past_the_depth_limit_stay_paired_and_bounded() {
     assert_eq!(canvas.state_stack.len(), 1, "unmatched restore at the base is ignored");
 }
 
-/// A layer opened past the depth limit opens nothing - `begin_layer` says
-/// so - and its `end_layer` pairs with it; the enclosing real layer stays
-/// open until its own end.
+/// Nothing draws past the limit - the safe reading of any effect a layer
+/// there could declare - and a layer past it says so with `true`, keeps its
+/// boundary for end_layer(), and leaves the real layer below open.
 #[cfg(test)]
 #[test]
-fn a_layer_past_the_depth_limit_passes_through_and_pairs_with_end_layer() {
-    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+fn a_layer_past_the_depth_limit_is_suppressed_and_keeps_its_boundary() {
+    use renderer::CommandType;
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(64, 64, 1.0);
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 10.0, 10.0);
+    let fills = |recorded: &Rc<RefCell<Vec<renderer::Command>>>| {
+        recorded
+            .borrow()
+            .iter()
+            .filter(|c| matches!(c.cmd_type, CommandType::ConvexFill { .. }))
+            .count()
+    };
+
     assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
     while canvas.state_stack.len() < MAX_STATE_DEPTH {
         canvas.save();
     }
     let store = canvas.current_render_target;
-    assert!(!canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    assert!(
+        canvas.begin_layer(&LayerEffects::new().with_opacity(0.0)),
+        "suppressed, hence true"
+    );
     assert_eq!(canvas.layers.len(), 1);
-    assert_eq!(canvas.unrealized_saves, 1);
-    assert_eq!(canvas.current_render_target, store, "content draws straight through");
+    assert_eq!(canvas.overflow.layers, 1);
+    canvas.save();
+    canvas.fill_path(&rect, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    assert_eq!(fills(&recorded), 0, "nothing draws past the limit");
     canvas.end_layer();
-    assert_eq!(canvas.unrealized_saves, 0);
+    assert!(
+        !canvas.saturated(),
+        "end_layer closed the layer with the save left open inside it"
+    );
+    assert_eq!(canvas.current_render_target, store);
     assert_eq!(canvas.layers.len(), 1, "the real layer is still open");
+    canvas.fill_path(&rect, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    assert_eq!(fills(&recorded), 1, "drawing resumes below the limit");
     while canvas.state_stack.len() > 2 {
         canvas.restore();
     }
@@ -8263,4 +8402,66 @@ fn a_layer_past_the_depth_limit_passes_through_and_pairs_with_end_layer() {
     assert!(canvas.layers.is_empty());
     assert_eq!(canvas.current_render_target, RenderTarget::Screen);
     assert_eq!(canvas.state_stack.len(), 1);
+}
+
+/// end_layer() past the limit with no layer to close pops nothing, so a
+/// later restore() still pairs with its own save and the clip that save
+/// level owns stays armed until that level is popped.
+#[cfg(test)]
+#[test]
+fn end_layer_past_the_depth_limit_without_a_layer_pops_nothing() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    canvas.save();
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 32.0, 64.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    while canvas.state_stack.len() < MAX_STATE_DEPTH {
+        canvas.save();
+    }
+    canvas.save(); // past the limit
+    canvas.end_layer(); // no layer anywhere: nothing to close
+    assert_eq!(canvas.overflow.len, 1);
+    canvas.restore(); // pairs with the save past the limit
+    assert!(!canvas.saturated());
+    assert_eq!(canvas.clip_stack.len(), 1, "the clip is untouched");
+    while canvas.state_stack.len() > 2 {
+        canvas.restore();
+    }
+    assert_eq!(canvas.clip_stack.len(), 1, "still armed at the level that took it");
+    canvas.restore();
+    assert!(canvas.clip_stack.is_empty());
+}
+
+/// Balanced save / clip_path / restore past the limit records no clip and
+/// no geometry, and reset() drops the entries past the limit with the
+/// layers it discards.
+#[cfg(test)]
+#[test]
+fn clips_past_the_depth_limit_cost_nothing_and_reset_clears_the_overflow() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    while canvas.state_stack.len() < MAX_STATE_DEPTH {
+        canvas.save();
+    }
+    let mut clip = Path::new();
+    clip.rect(0.0, 0.0, 32.0, 64.0);
+    for _ in 0..32 {
+        canvas.save();
+        canvas.clip_path(&clip, FillRule::NonZero);
+        canvas.restore();
+    }
+    assert!(canvas.clip_stack.is_empty());
+    assert!(canvas.clip_planes.is_empty());
+    assert!(!canvas.saturated());
+
+    for _ in 0..3 {
+        canvas.save();
+    }
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    assert_eq!(canvas.overflow.len, 4);
+    canvas.reset();
+    assert!(!canvas.saturated());
+    assert!(canvas.layers.is_empty());
+    assert!(canvas.warned_overflow, "one warning per canvas");
 }

@@ -281,3 +281,34 @@ fn reset_inside_a_layer_discards_it() {
     assert_eq!(px(&out, 8, 48), WHITE, "discarded layer content");
     assert_eq!(marker(&out), (0, 16), "reset state: identity transform");
 }
+
+/// Past the state-stack limit the canvas saturates: a layer opened there
+/// draws nothing, whatever it declared (here opacity 0, which below the
+/// limit would also suppress its content), and drawing resumes once the
+/// entries past the limit are popped.
+#[test]
+fn a_layer_past_the_depth_limit_draws_nothing() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let out = render(&device, &queue, |c| {
+        c.translate(16.0, 0.0);
+        for _ in 0..20_000 {
+            c.save();
+        }
+        assert!(c.begin_layer(&LayerEffects::new().with_opacity(0.0)));
+        fill(c, -16.0, 32.0, 32.0, 32.0, red());
+        c.end_layer();
+        // A plain save past the limit hides content too: nothing draws there.
+        c.save();
+        fill(c, 16.0, 32.0, 16.0, 32.0, red());
+        c.restore();
+        for _ in 0..20_000 {
+            c.restore();
+        }
+        marker_rect(c);
+    });
+    assert_eq!(px(&out, 8, 48), WHITE, "content of a zero-opacity layer past the limit");
+    assert_eq!(px(&out, 40, 48), WHITE, "content under a save past the limit");
+    assert_eq!(marker(&out), (16, 32), "drawing resumes with the base transform");
+}
