@@ -59,11 +59,11 @@ pub enum ImageSource<'a> {
     Rgba(ImgRef<'a, RGBA8>),
     /// Image source with 8-bit grayscale image format
     Gray(ImgRef<'a, Gray<u8>>),
-    /// Image source referencing a HTML image element (only available on `wasm32` target)
-    #[cfg(target_arch = "wasm32")]
+    /// Image source referencing a HTML image element (only available on `wasm32-unknown-unknown`)
+    #[cfg(wasm_unknown)]
     HtmlImageElement(&'a web_sys::HtmlImageElement),
-    /// Image source referencing a HTML canvas element (only available on `wasm32` target)
-    #[cfg(target_arch = "wasm32")]
+    /// Image source referencing a HTML canvas element (only available on `wasm32-unknown-unknown`)
+    #[cfg(wasm_unknown)]
     HtmlCanvasElement(&'a web_sys::HtmlCanvasElement),
 }
 
@@ -74,7 +74,7 @@ impl ImageSource<'_> {
             Self::Rgb(_) => PixelFormat::Rgb8,
             Self::Rgba(_) => PixelFormat::Rgba8,
             Self::Gray(_) => PixelFormat::Gray8,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlImageElement(_) | Self::HtmlCanvasElement(_) => PixelFormat::Rgba8,
         }
     }
@@ -85,9 +85,9 @@ impl ImageSource<'_> {
             Self::Rgb(imgref) => Size::new(imgref.width(), imgref.height()),
             Self::Rgba(imgref) => Size::new(imgref.width(), imgref.height()),
             Self::Gray(imgref) => Size::new(imgref.width(), imgref.height()),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlImageElement(element) => Size::new(element.width() as usize, element.height() as usize),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlCanvasElement(element) => Size::new(element.width() as usize, element.height() as usize),
         }
     }
@@ -140,14 +140,14 @@ impl<'a> From<ImgRef<'a, Gray<u8>>> for ImageSource<'a> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(wasm_unknown)]
 impl<'a> From<&'a web_sys::HtmlImageElement> for ImageSource<'a> {
     fn from(src: &'a web_sys::HtmlImageElement) -> Self {
         Self::HtmlImageElement(src)
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(wasm_unknown)]
 impl<'a> From<&'a web_sys::HtmlCanvasElement> for ImageSource<'a> {
     fn from(src: &'a web_sys::HtmlCanvasElement) -> Self {
         Self::HtmlCanvasElement(src)

@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
   or an open path under SVG's default black fill - drawing a two-pixel line
   where browsers draw nothing; such a contour no longer counts when the
   path's other contours are told apart as holes or solids. Fixes #341.
+- Added support for the `wasm32-unknown-emscripten` target.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
