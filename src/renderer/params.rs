@@ -321,8 +321,10 @@ impl Params {
                 params.feather = *r1 - *r0;
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Straight endpoints; the shader premultiplies post-mix
+                        // (see the linear-gradient arm).
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradientTwoPointRadial;
                     }
                     GradientColors::MultiStop { .. } => {
