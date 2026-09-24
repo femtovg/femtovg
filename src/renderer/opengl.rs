@@ -1,6 +1,6 @@
 use std::{collections::HashMap, mem, rc::Rc};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(wasm_unknown))]
 use std::ffi::c_void;
 
 #[cfg(all(feature = "glutin", not(target_arch = "wasm32")))]
@@ -62,7 +62,7 @@ impl OpenGl {
     /// # Safety
     /// This function is unsafe because it requires a function loader that can load OpenGL functions
     /// and create a valid OpenGL context.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_unknown))]
     pub unsafe fn new_from_function<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&str) -> *const c_void,
@@ -78,7 +78,7 @@ impl OpenGl {
     /// # Safety
     /// This function is unsafe because it requires a function loader that can load OpenGL functions
     /// and create a valid OpenGL context.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(wasm_unknown))]
     pub unsafe fn new_from_function_cstr<F>(load_fn: F) -> Result<Self, ErrorKind>
     where
         F: FnMut(&std::ffi::CStr) -> *const c_void,
@@ -96,7 +96,7 @@ impl OpenGl {
     }
 
     /// Creates a new OpenGL renderer from an HTML canvas element in a WASM32 target.
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(wasm_unknown)]
     pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
         let attrs = web_sys::WebGlContextAttributes::new();
         attrs.set_stencil(true);

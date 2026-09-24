@@ -9,7 +9,9 @@ All notable changes to this project will be documented in this file.
   `feDropShadow` cast from beyond a clip or the viewport lands inside it as
   browsers draw it. A capture the reach would push past the texture limit or
   the transient budget keeps the store it had and gives the reach the room
-  that is left, instead of passing through.
+  that is left, instead of passing through. Fixed multiple instances of wrong
+  pixels in BuseyBench and WPT reference tests.
+- Added support for the `wasm32-unknown-emscripten` target.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
