@@ -309,6 +309,12 @@ impl PathCache {
             true
         });
 
+        // Classified once: a contour whose points lie on one line encloses
+        // nothing, so it neither draws nor counts in the others' classification.
+        for contour in &mut cache.contours {
+            contour.degenerate = Contour::collinear(&cache.points[contour.point_range.clone()]);
+        }
+
         cache
     }
 
@@ -596,7 +602,10 @@ impl PathCache {
     /// computed once per cache. A contour whose box misses the sample point
     /// cannot wind around it (its crossings of the ray cancel), so only
     /// overlapping boxes are walked: near-linear for the usual
-    /// many-disjoint-contours path.
+    /// many-disjoint-contours path. A degenerate contour draws nothing, so
+    /// it gets an empty box and counts nowhere: a sliver within the band
+    /// could otherwise wind once around a sample point on its line and turn
+    /// the contour that owns the point inside out.
     fn contour_sides(&mut self) -> &[(i32, u32, i32)] {
         if self.contour_sides.is_none() {
             let n = self.contours.len();
@@ -605,6 +614,9 @@ impl PathCache {
                 .iter()
                 .map(|contour| {
                     let mut b = Bounds::default();
+                    if contour.degenerate {
+                        return b;
+                    }
                     for point in &self.points[contour.point_range.clone()] {
                         b.minx = b.minx.min(point.pos.x);
                         b.miny = b.miny.min(point.pos.y);
@@ -700,7 +712,6 @@ impl PathCache {
         // the winding the caller authored instead of declared.
         for (contour, is_hole) in self.contours.iter_mut().zip(hole) {
             let points = &mut self.points[contour.point_range.clone()];
-            contour.degenerate = Contour::collinear(points);
             contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
             if contour.reversed {
                 points.reverse();

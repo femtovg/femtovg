@@ -6,7 +6,7 @@
 //! on a long retraced tail. Skips without a GPU adapter.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, FillRule, Paint, Path};
 
 mod common;
 use common::headless_device;
@@ -121,4 +121,62 @@ fn shapes_that_enclose_area_still_fill() {
     assert!(sliver > 5.0, "the sliver draws: {sliver:.2} px of ink");
     let square = ink(&fill(&device, &queue, 1.0, |p| p.rect(20.0, 20.0, 40.0, 40.0)));
     assert!((square - 1600.0).abs() < 1.0, "{square:.2} px, expected 1600");
+}
+
+/// Fills the path under `rule` at scale 1 and returns the pixels.
+fn fill_with_rule(device: &wgpu::Device, queue: &wgpu::Queue, rule: FillRule, build: impl Fn(&mut Path)) -> Vec<u8> {
+    common::render_rgba(
+        device,
+        queue,
+        W,
+        H,
+        Color::rgba(0, 0, 0, 0),
+        |canvas: &mut Canvas<WGPURenderer>| {
+            let mut path = Path::new();
+            build(&mut path);
+            let mut paint = Paint::color(Color::black());
+            paint.set_anti_alias(true);
+            paint.set_fill_rule(rule);
+            canvas.fill_path(&path, &paint);
+        },
+    )
+}
+
+/// A degenerate contour stays out of the hole classification as well: a
+/// 0.001 px strip along a hole's first edge used to wind once around the
+/// point that decides which way the hole's fringe extrudes, turning the
+/// hole inside out - a pixel smaller all round - under either fill rule.
+/// Browsers ink nothing for the strip; the hole renders as without it.
+#[test]
+fn a_degenerate_strip_does_not_reclassify_a_hole() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let square_with_hole = |p: &mut Path| {
+        p.move_to(20.0, 20.0);
+        p.line_to(108.0, 20.0);
+        p.line_to(108.0, 108.0);
+        p.line_to(20.0, 108.0);
+        p.close();
+        // The hole, wound the other way; its first edge runs down x = 40.
+        p.move_to(40.0, 40.0);
+        p.line_to(40.0, 88.0);
+        p.line_to(88.0, 88.0);
+        p.line_to(88.0, 40.0);
+        p.close();
+    };
+    for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+        let plain = fill_with_rule(&device, &queue, rule, square_with_hole);
+        let with_strip = fill_with_rule(&device, &queue, rule, |p| {
+            square_with_hole(p);
+            p.move_to(39.9995, 40.0);
+            p.line_to(40.0005, 40.0);
+            p.line_to(40.0005, 88.0);
+            p.line_to(39.9995, 88.0);
+            p.close();
+        });
+        assert_eq!(alpha(&plain, 64, 64), 0.0, "{rule:?}: the hole is empty");
+        assert_eq!(alpha(&plain, 30, 64), 1.0, "{rule:?}: the ring is inked");
+        assert!(plain == with_strip, "{rule:?}: the strip changed the fill");
+    }
 }

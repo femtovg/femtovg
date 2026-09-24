@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 
 - Fixed a fill of a path whose points all lie on one line - a bare `<line>`
   or an open path under SVG's default black fill - drawing a two-pixel line
-  where browsers draw nothing. Fixes #341.
+  where browsers draw nothing; such a contour no longer counts when the
+  path's other contours are told apart as holes or solids. Fixes #341.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
