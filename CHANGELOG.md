@@ -8,8 +8,8 @@ All notable changes to this project will be documented in this file.
   is blended with what lies under it on the target it was opened on, which
   must be an image or an enclosing layer; on the screen, or when the two
   transients it needs do not fit the budget, the layer composites normally.
-  Fixes the solidJS banner's color-burn overlay and the multiply, screen and
-  hard-light groups of three other corpus files.
+  Fixes the solidJS banner's color-burn overlay. Also fixed the multiply, screen
+  and hard-light groups in Firefox, BuseyBench, and WPT reference examples.
 - Added `Canvas::with_render_target`: a side pass on another target that goes
   back to the one that was current, an open layer's store included.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
   for a layer's filters, so a chain can blend a group with an image rendered
   elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
   portraits.
+- Added support for the `wasm32-unknown-emscripten` target.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
