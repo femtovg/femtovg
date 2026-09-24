@@ -43,6 +43,9 @@ fn alpha(px: &[u8], x: u32, y: u32) -> f64 {
 
 const SCALES: [f32; 6] = [1.0, 2.0, 4.0, 8.0, 16.0, 64.0];
 
+/// A named path builder.
+type Case = (&'static str, fn(&mut Path));
+
 /// Collinear contours, in a 2 x 2 unit box so every zoom keeps them on the
 /// canvas, draw nothing at any zoom.
 #[test]
@@ -50,7 +53,7 @@ fn a_collinear_contour_fills_nothing_at_any_zoom() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    let cases: [(&str, fn(&mut Path)); 4] = [
+    let cases: [Case; 4] = [
         ("a bare line, closed", |p| {
             p.move_to(0.2, 0.2);
             p.line_to(0.2, 1.8);
