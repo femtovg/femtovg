@@ -6,6 +6,10 @@ All notable changes to this project will be documented in this file.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.
+- Gradient stops with a non-finite offset or color are now ignored, as Canvas
+  2D rejects them. A NaN offset used to compare equal to any other offset in
+  the gradient cache, so the gradient was drawn with whichever ramp differing
+  only in that stop had been cached first.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
