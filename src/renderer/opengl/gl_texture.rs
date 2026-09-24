@@ -255,7 +255,7 @@ impl GlTexture {
                     glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
                 );
             },
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             ImageSource::HtmlImageElement(image_element) => unsafe {
                 context.tex_sub_image_2d_with_html_image(
                     glow::TEXTURE_2D,
@@ -267,7 +267,7 @@ impl GlTexture {
                     image_element,
                 )
             },
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             ImageSource::HtmlCanvasElement(canvas_element) => unsafe {
                 context.tex_sub_image_2d_with_html_canvas(
                     glow::TEXTURE_2D,

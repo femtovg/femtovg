@@ -281,7 +281,7 @@ pub struct WGPURenderer {
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
-#[cfg(target_arch = "wasm32")]
+#[cfg(wasm_unknown)]
 fn rasterize_to_canvas(
     element: &web_sys::HtmlImageElement,
     size: crate::image::Size,
@@ -311,7 +311,7 @@ fn rasterize_to_canvas(
 
 impl WGPURenderer {
     /// Uploads a browser-side image source straight into an image's texture.
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(wasm_unknown)]
     fn copy_external_image(
         &self,
         image: &Image,
@@ -812,7 +812,7 @@ impl Renderer for WGPURenderer {
             }
             crate::ImageSource::Rgba(img) => (img.buf().as_bytes(), 4),
             crate::ImageSource::Gray(img) => (img.buf().as_bytes(), 1),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             crate::ImageSource::HtmlImageElement(element) => {
                 let size = data.dimensions();
                 // WebGPU copies from the natural size, so attribute sizes would overflow or crop the rect.
@@ -825,7 +825,7 @@ impl Renderer for WGPURenderer {
                 };
                 return self.copy_external_image(image, source, size, x, y);
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             crate::ImageSource::HtmlCanvasElement(element) => {
                 let source = wgpu::ExternalImageSource::HTMLCanvasElement(element.clone());
                 return self.copy_external_image(image, source, data.dimensions(), x, y);
