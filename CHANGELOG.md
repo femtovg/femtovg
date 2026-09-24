@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added support for the `wasm32-unknown-emscripten` target.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
