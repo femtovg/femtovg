@@ -3,6 +3,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Gradient stops with a non-finite offset or color are now ignored.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.

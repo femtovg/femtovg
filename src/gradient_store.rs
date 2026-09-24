@@ -82,7 +82,8 @@ fn gradient_span(
     let s0o = offset0.clamp(0.0, 1.0);
     let s1o = offset1.clamp(0.0, 1.0);
 
-    if s1o < s0o {
+    // Empty, reversed and NaN spans all take this exit.
+    if s1o.partial_cmp(&s0o) != Some(std::cmp::Ordering::Greater) {
         return;
     }
 
@@ -311,5 +312,57 @@ mod tests {
         ]);
         let t = texels[255];
         assert_eq!((t.r, t.g, t.b, t.a), (0, 0, 0, 0));
+    }
+
+    /// Empty, reversed and NaN spans write nothing.
+    #[test]
+    fn degenerate_spans_leave_the_ramp_untouched() {
+        let untouched = rgb::RGBA8::new(1, 2, 3, 4);
+        let (red, blue) = (Color::rgb(255, 0, 0), Color::rgb(0, 0, 255));
+        for (offset0, offset1) in [
+            (0.5, 0.5),
+            (0.6, 0.4),
+            (f32::NAN, 0.5),
+            (0.5, f32::NAN),
+            (f32::NAN, f32::NAN),
+        ] {
+            let mut dest = [untouched; 256];
+            gradient_span(&mut dest, red, blue, offset0, offset1, ColorSpace::Srgb);
+            assert!(
+                dest.iter().all(|&t| t == untouched),
+                "span {offset0}..{offset1} wrote texels"
+            );
+        }
+    }
+
+    #[test]
+    fn three_stop_ramp_is_unchanged() {
+        let texels = lut(vec![
+            (0.0, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(0, 255, 0)),
+            (1.0, Color::rgb(0, 0, 255)),
+        ]);
+        let rgba = |i: usize| {
+            let t = texels[i];
+            (t.r, t.g, t.b, t.a)
+        };
+        assert_eq!(rgba(0), (255, 0, 0, 255));
+        assert_eq!(rgba(64), (127, 127, 0, 255));
+        assert_eq!(rgba(128), (0, 255, 0, 255));
+        assert_eq!(rgba(192), (0, 127, 127, 255));
+        assert_eq!(rgba(255), (0, 1, 253, 255));
+    }
+
+    /// Coincident stops make a hard edge: each side keeps its own span.
+    #[test]
+    fn coincident_stops_make_a_hard_edge() {
+        let texels = lut(vec![
+            (0.0, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(0, 0, 255)),
+            (1.0, Color::rgb(0, 0, 255)),
+        ]);
+        assert_eq!((texels[127].r, texels[127].b), (255, 0));
+        assert_eq!((texels[128].r, texels[128].b), (0, 255));
     }
 }

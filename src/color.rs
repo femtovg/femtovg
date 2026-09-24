@@ -272,7 +272,7 @@ fn srgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     )
 }
 
-// Clamps in linear space, matching the shaders so the LUT and two-stop paths agree.
+// Out-of-gamut results are clamped in linear space per channel before encoding
 fn oklab_to_srgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
     let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
