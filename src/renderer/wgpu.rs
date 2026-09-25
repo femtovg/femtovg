@@ -1764,10 +1764,9 @@ fn clip_guard(active: bool) -> StencilTest {
     }
 }
 
+// Only what materialize() reads belongs in the key; anything else would split the cache for nothing.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct PipelineState {
-    shader_type: ShaderType,
-    enable_glyph_texture: bool,
     render_to_texture: bool,
     color_target_state: wgpu::ColorTargetState,
     primitive_topology: wgpu::PrimitiveTopology,
@@ -1780,8 +1779,6 @@ impl PipelineState {
         color_blend: Option<wgpu::BlendState>,
         stencil_test: StencilTest,
         format: wgpu::TextureFormat,
-        shader_type: ShaderType,
-        enable_glyph_texture: bool,
         render_to_texture: bool,
         primitive_topology: wgpu::PrimitiveTopology,
         cull_mode: Option<wgpu::Face>,
@@ -1815,8 +1812,6 @@ impl PipelineState {
             ),
         };
         Self {
-            shader_type,
-            enable_glyph_texture,
             render_to_texture,
             color_target_state,
             primitive_topology,
@@ -2321,8 +2316,6 @@ impl CommandToPipelineAndBindGroupMapper {
             color_blend,
             stencil_test,
             render_pass_builder.surface_format,
-            params.shader_type,
-            params.uses_glyph_texture(),
             render_pass_builder.rendering_to_texture,
             primitive_topology,
             cull_mode,
