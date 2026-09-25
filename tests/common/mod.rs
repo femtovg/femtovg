@@ -17,6 +17,16 @@ fn gpu_requirement() -> Option<String> {
 }
 
 pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+    headless_device_with_texture_limit(None)
+}
+
+/// A device whose 2D texture limit is lowered to `limit` (a VideoCore IV
+/// reports 2048), so a laptop GPU can run what a small one would.
+pub fn headless_device_limited(limit: u32) -> Option<(wgpu::Device, wgpu::Queue)> {
+    headless_device_with_texture_limit(Some(limit))
+}
+
+fn headless_device_with_texture_limit(limit: Option<u32>) -> Option<(wgpu::Device, wgpu::Queue)> {
     let require = gpu_requirement();
     let instance = wgpu::Instance::default();
     let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -57,7 +67,13 @@ pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let (device, queue) = match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("femtovg test device"),
         required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        required_limits: {
+            let mut limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+            if let Some(limit) = limit {
+                limits.max_texture_dimension_2d = limit;
+            }
+            limits
+        },
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::MemoryUsage,
         trace: wgpu::Trace::default(),
