@@ -362,6 +362,9 @@ type GlyphCacheKey = (u16, u64);
 pub struct Font {
     data: Box<dyn AsRef<[u8]>>,
     face_index: u32,
+    // swash's table-directory offset and cache key; `None` if swash can't parse the face.
+    #[cfg(feature = "swash")]
+    swash_identity: Option<(u32, swash::CacheKey)>,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: RefCell<FnvHashMap<GlyphCacheKey, Glyph>>,
@@ -458,6 +461,9 @@ impl Font {
         };
 
         Ok(Self {
+            #[cfg(feature = "swash")]
+            swash_identity: swash::FontRef::from_index(data.as_ref(), face_index as usize)
+                .map(|font_ref| (font_ref.offset, font_ref.key)),
             data: Box::new(data),
             face_index,
             units_per_em,
@@ -567,6 +573,7 @@ impl Font {
         };
 
         Ok(Self {
+            swash_identity: Some((font_ref.offset, font_ref.key)),
             data: Box::new(data),
             face_index,
             units_per_em,
@@ -607,7 +614,14 @@ impl Font {
 
     #[cfg(feature = "swash")]
     pub(crate) fn swash_font_ref(&self) -> Option<swash::FontRef<'_>> {
-        swash::FontRef::from_index(self.data.as_ref().as_ref(), self.face_index as usize)
+        // swash caches per-font scaler data and hinting instances by key, and every
+        // `FontRef` constructor mints a new key, so reuse the one minted at load.
+        let (offset, key) = self.swash_identity?;
+        Some(swash::FontRef {
+            data: self.data.as_ref().as_ref(),
+            offset,
+            key,
+        })
     }
 
     #[cfg(all(feature = "swash", not(feature = "textlayout")))]
@@ -1095,5 +1109,23 @@ mod tests {
 
         // The hhea line gap is commonly zero, but never negative for this font.
         assert!(metrics.line_gap() >= 0.0);
+    }
+
+    /// swash's `ScaleContext` caches scaler data and hinting instances per
+    /// `CacheKey`, so every `FontRef` for one face must carry the same key, and
+    /// two faces must never share one. Before the fix every call minted a new
+    /// key: run alone, `CacheKey(3)` then `CacheKey(4)` without textlayout, and
+    /// `CacheKey(1)` then `CacheKey(2)` with it.
+    #[cfg(feature = "swash")]
+    #[test]
+    fn each_face_keeps_one_swash_cache_key() {
+        let data = minimal_font_without_optional_tables();
+        let context = super::super::TextContextImpl::default();
+        let font = Font::new_with_data(data.clone(), 0, &context).expect("font should parse");
+        let other = Font::new_with_data(data, 0, &context).expect("font should parse");
+
+        let key = font.swash_font_ref().unwrap().key;
+        assert_eq!(key, font.swash_font_ref().unwrap().key);
+        assert_ne!(key, other.swash_font_ref().unwrap().key);
     }
 }
