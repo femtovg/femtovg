@@ -544,7 +544,9 @@ fn renderGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f3
     if (!r.covered) {
         return vec4<f32>(0.0);
     }
-    return ditherGradient(mix(params.inner_col, params.outer_col, r.t), vertex.position.xy);
+    // Straight endpoints, premultiplied post-mix (see renderGradient).
+    let color = ditherGradient(mix(params.inner_col, params.outer_col, r.t), vertex.position.xy);
+    return vec4<f32>(color.rgb * color.a, color.a);
 }
 
 fn renderImageGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f32> {
