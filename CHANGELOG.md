@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
   the gradient cache, so the gradient was drawn with whichever ramp differing
   only in the stop that had been cached first.
 - Added support for the `wasm32-unknown-emscripten` target.
+- Fixed a two-stop two-point radial gradient (`Paint::two_point_radial_gradient`)
+  interpolating in premultiplied space, which lost a semi-transparent stop's hue
+  instead of fading it in like every other gradient variant.
 - `save()` no longer grows the state stack past 16,384 nested levels: deeper
   saves still pair with their restores, but nothing draws there and the state
   changes made there are discarded.
