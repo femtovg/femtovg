@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a layer's shadow missing the shadow of content outside the scissor
+  (or the canvas): the capture now takes in whatever reaches into view once
+  shifted by the shadow offset and spread by its blur, so an SVG
+  `feDropShadow` cast from beyond a clip or the viewport lands inside it as
+  browsers draw it. A capture the reach would push past the texture limit or
+  the transient budget keeps the store it had and gives the reach the room
+  that is left, instead of passing through. Fixed multiple instances of wrong
+  pixels in BuseyBench and WPT reference tests.
 - Added support for the `wasm32-unknown-emscripten` target.
 - Fixed a two-stop two-point radial gradient (`Paint::two_point_radial_gradient`)
   interpolating in premultiplied space, which lost a semi-transparent stop's hue

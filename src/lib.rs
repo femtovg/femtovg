@@ -645,6 +645,20 @@ fn bounded_pad(pad: f32, extent: f32, limit: usize, granularity: usize) -> f32 {
     pad.min((room * 0.5).floor().max(0.0))
 }
 
+/// `lo..hi` grown by up to `before` and `after` and rounded outward, as
+/// far as a store of `limit` pixels leaves room; short of room, each side
+/// gets its share of what is left.
+fn reach_within(lo: f32, hi: f32, before: f32, after: f32, limit: usize) -> (f32, f32) {
+    let fit = (limit - limit % transient::LAYER_GRANULARITY) as f32;
+    let grown = ((lo - before).floor(), (hi + after).ceil());
+    if before + after <= 0.0 || grown.1 - grown.0 <= fit {
+        return grown;
+    }
+    let (lo, hi) = (lo.floor(), hi.ceil());
+    let scale = ((fit - (hi - lo)).max(0.0) / (before + after)).min(1.0);
+    (lo - (before * scale).floor(), hi + (after * scale).floor())
+}
+
 fn blur_passes(sigma: f32) -> (usize, f32) {
     let bound = renderer::MAX_BLUR_SIGMA;
     match chain_blur_sigma(sigma) {
@@ -2049,31 +2063,55 @@ where
         // texture limit (2048 px on a VideoCore IV); bound the pad so the
         // layer still captures with its reach truncated at the store edge,
         // instead of passing through with every effect dropped.
-        let pad = bounded_pad(
-            pad,
-            rect.w.max(rect.h),
-            self.renderer.max_texture_size(),
-            transient::LAYER_GRANULARITY,
+        let limit = self.renderer.max_texture_size();
+        let pad = bounded_pad(pad, rect.w.max(rect.h), limit, transient::LAYER_GRANULARITY);
+        let (x0, y0) = ((rect.x - pad).max(-pad), (rect.y - pad).max(-pad));
+        let (x1, y1) = (
+            (rect.x + rect.w + pad).min(canvas_w + pad),
+            (rect.y + rect.h + pad).min(canvas_h + pad),
         );
-        let minx = (rect.x - pad).floor().max(-pad);
-        let miny = (rect.y - pad).floor().max(-pad);
-        let maxx = (rect.x + rect.w + pad).ceil().min(canvas_w + pad);
-        let maxy = (rect.y + rect.h + pad).ceil().min(canvas_h + pad);
-        let width = transient::round_up((maxx - minx) as usize, transient::LAYER_GRANULARITY);
-        let height = transient::round_up((maxy - miny) as usize, transient::LAYER_GRANULARITY);
+        let visible = (x0.floor(), y0.floor(), x1.ceil(), y1.ceil());
+        let (mut minx, mut miny, mut maxx, mut maxy) = visible;
+        // The shadow the composite casts comes from wherever the store's
+        // content lands once shifted by the offset and spread by the blur:
+        // the capture takes in the source that reaches into the scissor from
+        // outside it - up to the offset away, plus the blur's reach - or the
+        // shadow of content the scissor leaves out would be missing. The
+        // reach takes what the texture limit leaves after the visible
+        // capture, so a store that fit without it keeps fitting.
+        if state.shadow_color.a > 0.0 {
+            let spread = state.shadow_blur * 1.5;
+            let [dx, dy] = state.shadow_offset;
+            (minx, maxx) = reach_within(x0, x1, (dx + spread).max(0.0), (spread - dx).max(0.0), limit);
+            (miny, maxy) = reach_within(y0, y1, (dy + spread).max(0.0), (spread - dy).max(0.0), limit);
+        }
+        let store_size = |minx: f32, miny: f32, maxx: f32, maxy: f32| {
+            (
+                transient::round_up((maxx - minx) as usize, transient::LAYER_GRANULARITY),
+                transient::round_up((maxy - miny) as usize, transient::LAYER_GRANULARITY),
+            )
+        };
+        let (mut width, mut height) = store_size(minx, miny, maxx, maxy);
 
         // Past the backend's texture limit (2048 px on a VideoCore IV), an
         // ordinary layer passes through; effects that cannot safely expose
         // their source are suppressed below.
-        let limit = self.renderer.max_texture_size();
-        let image = if width == 0 || height == 0 || width > limit || height > limit {
-            None
-        } else {
-            // Render-target storage is premultiplied and vertically flipped;
-            // FLIP_Y makes the unfiltered composite sample it upright.
-            self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y)
-                .ok()
-        };
+        // Render-target storage is premultiplied and vertically flipped;
+        // FLIP_Y makes the unfiltered composite sample it upright.
+        let flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
+        let fits = |width: usize, height: usize| width > 0 && height > 0 && width <= limit && height <= limit;
+        let mut image = fits(width, height)
+            .then(|| self.acquire_transient_image(width, height, flags).ok())
+            .flatten();
+        if image.is_none() && (minx, miny, maxx, maxy) != visible {
+            // The reach did not fit the transient budget; the visible
+            // capture alone may, and it is what the layer had before.
+            (minx, miny, maxx, maxy) = visible;
+            (width, height) = store_size(minx, miny, maxx, maxy);
+            image = fits(width, height)
+                .then(|| self.acquire_transient_image(width, height, flags).ok())
+                .flatten();
+        }
 
         let fail_closed = image.is_none()
             && (effects.mask.is_some()
@@ -7613,6 +7651,80 @@ fn a_layer_at_the_texture_limit_keeps_its_blur_with_a_bounded_pad() {
     let record = canvas.layers.last().unwrap();
     assert_eq!(record.origin, (100.0 - 122.0, 100.0 - 122.0));
     canvas.end_layer();
+}
+
+/// A shadowed layer whose reach would push its store past the texture limit
+/// keeps the capture it had without the reach - a 2048 px store with a 1 px
+/// offset used to round to 2112 and pass through, dropping the mask along
+/// with the shadow - and gives the reach whatever room is left: none here,
+/// 64 px a side for a 1920 px store under a 60 px blur.
+#[test]
+fn a_shadowed_layer_at_the_texture_limit_keeps_its_visible_capture() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 2048,
+        ..RecordingRenderer::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(2048, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let masked = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 2048.0, 64.0);
+    canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+    canvas.set_shadow_offset(1.0, 0.0);
+    assert!(
+        canvas.begin_layer(&masked),
+        "the layer captures instead of passing through"
+    );
+    let record = canvas.layers.last().unwrap();
+    assert!(record.image.is_some() && !record.discard, "the mask still applies");
+    assert_eq!((record.width, record.height), (2048, 64));
+    assert_eq!(record.origin, (0.0, 0.0), "no room: the reach is given up");
+    canvas.end_layer();
+
+    canvas.set_size(1920, 1080, 1.0);
+    canvas.set_shadow_offset(0.0, 0.0);
+    canvas.set_shadow_blur(60.0); // spread 90 a side: 2100 px wide, past the limit
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    let record = canvas.layers.last().unwrap();
+    assert!(record.image.is_some());
+    assert_eq!((record.width, record.height), (2048, 1280));
+    assert_eq!(
+        record.origin,
+        (-64.0, -90.0),
+        "the reach takes the 128 px the limit leaves, shared"
+    );
+    canvas.end_layer();
+}
+
+/// The same under the transient budget: when the store with its reach is
+/// refused, the layer takes the visible capture it had before instead of
+/// passing through.
+#[test]
+fn a_shadowed_layer_the_budget_cannot_reach_keeps_its_visible_capture() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(256, 256, 1.0);
+    // The visible 256 x 256 store (256 KiB) fits; with 90 px of reach a side (448 x 448) it does not.
+    canvas.set_transient_image_budget(300 * 1024);
+    canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+    canvas.set_shadow_blur(60.0);
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    let record = canvas.layers.last().unwrap();
+    assert!(record.image.is_some());
+    assert_eq!((record.width, record.height, record.origin), (256, 256, (0.0, 0.0)));
+    canvas.end_layer();
+}
+
+/// The reach rule alone: the full reach when it fits, a proportional share
+/// of the room when it does not, nothing when there is none.
+#[test]
+fn a_reach_takes_only_the_room_the_limit_leaves() {
+    assert_eq!(reach_within(0.0, 1000.0, 90.0, 90.0, 2048), (-90.0, 1090.0));
+    assert_eq!(reach_within(0.0, 1920.0, 90.0, 90.0, 2048), (-64.0, 1984.0));
+    assert_eq!(reach_within(0.0, 2048.0, 1.0, 0.0, 2048), (0.0, 2048.0));
+    assert_eq!(reach_within(0.0, 1920.0, 120.0, 40.0, 2048), (-96.0, 1952.0));
+    assert_eq!(reach_within(0.0, 1920.0, 0.0, 0.0, 2048), (0.0, 1920.0));
 }
 
 /// The pad rule alone: the full pad when it fits, what the rounded store can
