@@ -146,6 +146,40 @@ fn two_stop_transparent_stop_keeps_hue() {
     }
 }
 
+/// A semi-transparent stop keeps its hue, like `two_stop_transparent_stop_keeps_hue`.
+#[test]
+fn two_point_radial_transparent_stop_keeps_hue() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let radius = W as f32 / 2.0;
+    let out = render(&device, &queue, |canvas| {
+        let paint = Paint::two_point_radial_gradient(
+            W as f32 / 2.0,
+            H as f32 / 2.0,
+            0.0,
+            W as f32 / 2.0,
+            H as f32 / 2.0,
+            radius,
+            transparent_red(),
+            blue(),
+        );
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &paint);
+    });
+    for t in [0.25f32, 0.5, 0.75] {
+        let x = (W as f32 / 2.0 + t * radius) as u32;
+        let got = px(&out, x, H / 2);
+        let want = straight_over_white(t);
+        assert!(
+            close(got, want, 3),
+            "at t={t}: got {got:?}, straight-space expects {want:?}"
+        );
+    }
+}
+
 /// The two-stop shader path and the multi-stop LUT must agree: both are
 /// documented as the same gradient, differing only in how many stops forced
 /// the LUT. The LUT quantizes to 256 texels, so allow its rounding.

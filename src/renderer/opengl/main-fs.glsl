@@ -208,7 +208,9 @@ vec4 renderGradientTwoPointRadial() {
     bool covered;
     float d = radialTwoPointT(covered);
     if (!covered) return vec4(0.0);
-    return ditherGradient(mix(innerCol, outerCol, d));
+    // Straight endpoints, premultiplied post-mix (see renderGradient).
+    vec4 color = ditherGradient(mix(innerCol, outerCol, d));
+    return vec4(color.rgb * color.a, color.a);
 }
 
 vec4 renderImageGradientTwoPointRadial() {
