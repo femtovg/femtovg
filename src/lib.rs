@@ -57,7 +57,7 @@ use crate::transient::TransientPool;
 mod turbulence;
 
 mod color;
-pub use color::Color;
+pub use color::{Color, ColorSpace};
 
 pub mod renderer;
 pub use renderer::{RenderTarget, Renderer};

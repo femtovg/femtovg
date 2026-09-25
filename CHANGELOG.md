@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `Paint::with_interpolation_space`/`set_interpolation_space` and
+  `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
+  gradient's stop colors be interpolated in a space other than plain sRGB.
+- Gradient stops with a non-finite offset or color are now ignored, as Canvas
+  2D rejects them. A NaN offset used to compare equal to any other offset in
+  the gradient cache, so the gradient was drawn with whichever ramp differing
+  only in the stop that had been cached first.
 - Added support for the `wasm32-unknown-emscripten` target.
 - Fixed a two-stop two-point radial gradient (`Paint::two_point_radial_gradient`)
   interpolating in premultiplied space, which lost a semi-transparent stop's hue
