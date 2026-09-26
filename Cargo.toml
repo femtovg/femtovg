@@ -79,7 +79,7 @@ cosmic-text = "0.19.0"
 swash = "0.2.6"
 lazy_static = "1.4.0"
 pollster = "1.0"
-wgpu = { version = "30.0.0" }
+wgpu = { version = "30.0.0", features = ["counters"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 glutin = "0.32.3"
