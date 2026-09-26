@@ -1061,11 +1061,13 @@ fn single_pass_filter(
         0.,
         1.,
     );
+    // A blend pass binds its backdrop in the glyph-texture slot; every other
+    // pass binds nothing there.
     let mut params = Params::new(
         images,
         &Default::default(),
         &image_paint.flavor,
-        &Default::default(),
+        &command.glyph_texture,
         &Scissor::default(),
         0.,
         0.,
@@ -1073,6 +1075,10 @@ fn single_pass_filter(
     );
     let target_info = images.get(target_image).unwrap().info;
     params.shader_type = shader_type;
+    let mut slots = slots;
+    if shader_type == ShaderType::FilterImageBlend {
+        slots[1] = f32::from(u8::from(command.filter_backdrop_flipped));
+    }
     // The filter's parameters ride the dead scissor/paint-mat slots during the
     // pass (see `ImageFilter::single_pass`) — no uniform-array growth.
     params.scissor_mat.copy_from_slice(&slots[..12]);

@@ -106,6 +106,10 @@ pub struct Command {
     pub(crate) image: Option<ImageId>,
     pub(crate) filter_scratch: Option<ImageId>,
     pub(crate) glyph_texture: GlyphTexture,
+    // A blend pass: whether the backdrop in the glyph-texture slot is stored
+    // the other way up from the image at this pass, so the shader samples
+    // it upside down.
+    pub(crate) filter_backdrop_flipped: bool,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -121,6 +125,7 @@ impl Command {
             image: None,
             filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
+            filter_backdrop_flipped: false,
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
@@ -307,6 +312,9 @@ pub enum ShaderType {
     FilterImageTurbulence,
     /// sRGB transfer-curve shader: linearRGB to sRGB, or the reverse.
     FilterImageTransfer,
+    /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
+    /// glyph-texture slot, with one of the sixteen blend modes.
+    FilterImageBlend,
 }
 
 impl ShaderType {
@@ -328,6 +336,7 @@ impl ShaderType {
             Self::FillImageGradientTwoPointRadial => 12,
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
+            Self::FilterImageBlend => 15,
         }
     }
 

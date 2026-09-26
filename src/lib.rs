@@ -51,7 +51,9 @@ mod image;
 use crate::image::ImageStore;
 
 mod transient;
-pub use crate::image::{ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind};
+pub use crate::image::{
+    BlendMode, ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind,
+};
 use crate::transient::TransientPool;
 
 mod turbulence;
@@ -379,6 +381,9 @@ pub struct Canvas<T: Renderer> {
     filter_work_budget: u64,
     // Open layers from begin_layer(), innermost last.
     layers: Vec<LayerRecord>,
+    // Effect passes in progress (a backdrop placed, a mask normalised): their
+    // draws are not suppressed by the depth limit or a pass-through layer.
+    offscreen_passes: usize,
     // Turbulence lattice textures by seed, most recently used last. Bounded by
     // `turbulence::LATTICE_CACHE_CAPACITY`; an evicted one is deleted after
     // the next flush so a command already recorded against it still runs.
@@ -451,11 +456,14 @@ struct MaskImages {
 struct FilterScratchImages {
     chain: [Option<ImageId>; 2],
     blur: Option<ImageId>,
+    // A blend's backdrop, placed into an image of the chain's size just
+    // before its pass; one serves every blend in the chain in turn.
+    blend: Option<ImageId>,
 }
 
 impl FilterScratchImages {
     fn images(self) -> impl Iterator<Item = ImageId> {
-        self.chain.into_iter().flatten().chain(self.blur)
+        self.chain.into_iter().flatten().chain(self.blur).chain(self.blend)
     }
 }
 
@@ -685,6 +693,10 @@ const MAX_STATE_DEPTH: usize = 16 * 1024;
 
 const DEFAULT_FILTER_WORK_BUDGET: u64 = 4 * 1024 * 1024 * 1024;
 
+/// What a blend charges per pixel: the pass reads the image and its
+/// backdrop, and placing the backdrop clears the scratch and draws into it.
+const BLEND_SAMPLES: u64 = 4;
+
 fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
     let samples = filters.iter().fold(0u64, |total, filter| {
         let per_pixel = match filter {
@@ -698,6 +710,7 @@ fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
                 2 * (1 + 2 * radius.saturating_sub(1))
             }
             ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from((*num_octaves).min(10))).max(1),
+            ImageFilter::Blend { .. } => BLEND_SAMPLES,
             _ => 1,
         };
         total.saturating_add(per_pixel)
@@ -826,6 +839,7 @@ where
             filter_work: 0,
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
+            offscreen_passes: 0,
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
@@ -866,6 +880,7 @@ where
             filter_work: 0,
             filter_work_budget: DEFAULT_FILTER_WORK_BUDGET,
             layers: Vec::new(),
+            offscreen_passes: 0,
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
@@ -1349,6 +1364,18 @@ where
         }
     }
 
+    /// Draws through `draw` on `target`, then goes back to the target that
+    /// was current - the store of an open layer included, which is not
+    /// otherwise reachable. For a side pass, such as rendering a mask or a
+    /// filter's input, while a layer is open.
+    pub fn with_render_target<R>(&mut self, target: RenderTarget, draw: impl FnOnce(&mut Self) -> R) -> R {
+        let previous = self.current_render_target;
+        self.set_render_target(target);
+        let result = draw(self);
+        self.set_render_target(previous);
+        result
+    }
+
     /// Sets a new render target. All drawing operations after this call will happen on the provided render target
     pub fn set_render_target(&mut self, target: RenderTarget) {
         if let RenderTarget::Image(id) = target {
@@ -1389,7 +1416,23 @@ where
     }
 
     fn commands_suppressed(&self) -> bool {
-        self.saturated() || self.layers.iter().any(|layer| layer.discard && layer.image.is_none())
+        self.offscreen_passes == 0
+            && (self.saturated() || self.layers.iter().any(|layer| layer.discard && layer.image.is_none()))
+    }
+
+    /// Starts an effect's own draws - a backdrop placed, a mask normalised.
+    /// They run under a copy of the current state, outside the state stack,
+    /// and the depth limit and a pass-through layer's suppression, which
+    /// concern drawing on the target, do not apply to them. Ended by
+    /// [`end_offscreen_pass`](Self::end_offscreen_pass) with the copy.
+    fn begin_offscreen_pass(&mut self) -> State {
+        self.offscreen_passes += 1;
+        *self.state()
+    }
+
+    fn end_offscreen_pass(&mut self, state: State) {
+        *self.state_mut() = state;
+        self.offscreen_passes -= 1;
     }
 
     // Images
@@ -1482,7 +1525,7 @@ where
         format: PixelFormat,
         flags: ImageFlags,
     ) -> Result<(), ErrorKind> {
-        if self.pending_image_deletions.contains(&id) {
+        if self.pending_image_deletions.contains(&id) || self.transients.owns(id) {
             return Err(ErrorKind::ImageIdNotFound);
         }
         let info = ImageInfo::new(flags, width, height, format);
@@ -1525,21 +1568,25 @@ where
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        if self.pending_image_deletions.contains(&id) {
+        if self.pending_image_deletions.contains(&id) || self.transients.owns(id) {
             return Err(ErrorKind::ImageIdNotFound);
         }
         self.images.update(&mut self.renderer, id, src.into(), x, y)
     }
 
     /// Deletes an image at the next flush, after earlier commands are encoded.
-    /// An open layer borrowing it as a mask keeps it through that layer's
-    /// composite and the following flush.
+    /// An open layer borrowing it as a mask or a blend backdrop keeps it
+    /// through that layer's composite and the following flush. A layer's own
+    /// store is the canvas's, not the caller's: it is left alone here and by
+    /// [`realloc_image`](Self::realloc_image) and
+    /// [`update_image`](Self::update_image).
     pub fn delete_image(&mut self, id: ImageId) {
         self.defer_image_deletion(id);
     }
 
     fn defer_image_deletion(&mut self, id: ImageId) {
-        if self.images.info(id).is_none() || !self.pending_image_deletions.insert(id) {
+        // A layer's store or scratch is the canvas's own.
+        if self.transients.owns(id) || self.images.info(id).is_none() || !self.pending_image_deletions.insert(id) {
             return;
         }
         if self.current_render_target == RenderTarget::Image(id) {
@@ -1592,6 +1639,12 @@ where
     /// Unsafe in-place sampling filters, over-budget work and a blur that
     /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
+        if let ImageFilter::Blend { .. } = filter {
+            // A blend places its backdrop in a scratch first: the chain owns
+            // that, and a one-blend chain is the one pass.
+            let _ = self.filter_image_chain(target_image, std::slice::from_ref(&filter), source_image);
+            return;
+        }
         let Ok((image_width, image_height)) = self.image_size(source_image) else {
             return;
         };
@@ -1621,7 +1674,7 @@ where
         } else {
             None
         };
-        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch);
+        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None);
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -1636,11 +1689,15 @@ where
         filter: ImageFilter,
         source_image: ImageId,
         blur_scratch: Option<ImageId>,
+        // A blend's placed backdrop and whether it is stored the other way
+        // up from the source at this pass.
+        backdrop: Option<(ImageId, bool)>,
     ) -> bool {
         debug_assert_eq!(
             matches!(filter, ImageFilter::GaussianBlur { .. }),
             blur_scratch.is_some()
         );
+        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
         debug_assert!(
             target_image != source_image
                 || matches!(
@@ -1668,6 +1725,10 @@ where
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
+        if let Some((placed, upside_down)) = backdrop {
+            cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
+            cmd.filter_backdrop_flipped = upside_down;
+        }
 
         let vertex_offset = self.verts.len();
 
@@ -1871,6 +1932,11 @@ where
                 "a single-pass filter cannot read and write the same image".into(),
             ));
         }
+        for filter in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = filter {
+                self.image_info(*backdrop)?;
+            }
+        }
         let work = filter_work(&passes, width, height);
         if !self.reserve_filter_work(work) {
             return Err(ErrorKind::FilterWorkBudgetExceeded);
@@ -1887,11 +1953,12 @@ where
                 passes
                     .iter()
                     .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. })),
+                passes.iter().any(|filter| matches!(filter, ImageFilter::Blend { .. })),
                 2,
                 0,
             )
             .inspect_err(|_| self.refund_filter_work(work))?;
-        self.run_filter_passes(target_image, &passes, source_image, scratch, false);
+        self.run_filter_passes(target_image, &passes, source_image, scratch, false, (0.0, 0.0));
         Ok(())
     }
 
@@ -1908,6 +1975,7 @@ where
         height: usize,
         passes: usize,
         needs_blur: bool,
+        needs_blend: bool,
         chain_limit: usize,
         headroom: usize,
     ) -> Result<FilterScratchImages, ErrorKind> {
@@ -1934,6 +2002,17 @@ where
                 }
             }
         }
+        if needs_blend {
+            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
+                Ok(id) => scratch.blend = Some(id),
+                Err(err) => {
+                    for id in scratch.images() {
+                        self.rollback_transient_image(id);
+                    }
+                    return Err(err);
+                }
+            }
+        }
         Ok(scratch)
     }
 
@@ -1941,6 +2020,37 @@ where
     /// `target_image`, ping-ponging through the `scratch` images acquired for
     /// that plan, and releases them once the chain is recorded: they are free
     /// for the next chain (or layer) of this size.
+    /// Draws `backdrop` at `rect` into `into`, an image of the chain's size,
+    /// over transparent, so a blend pass samples it at the same pixel
+    /// coordinates as the image it filters. An ordinary draw, as a mask's
+    /// normalization is: the backdrop's own storage convention (an upload or
+    /// a render target) never enters the pass's orientation rule.
+    fn place_blend_backdrop(&mut self, into: ImageId, backdrop: ImageId, rect: (f32, f32, f32, f32)) {
+        let Some(info) = self.images.info(into) else {
+            return;
+        };
+        let previous_target = self.current_render_target;
+        let state = self.begin_offscreen_pass();
+        self.set_render_target(RenderTarget::Image(into));
+        self.clear_rect(
+            0,
+            0,
+            info.width() as u32,
+            info.height() as u32,
+            Color::rgbaf(0.0, 0.0, 0.0, 0.0),
+        );
+        self.enter_offscreen_state(Transform2D::identity());
+        let (x, y, width, height) = rect;
+        let paint = Paint::image(backdrop, x, y, width, height, 0.0, 1.0);
+        self.fill_device_rect(x, y, width, height, &paint.flavor);
+        self.end_offscreen_pass(state);
+        self.set_render_target(previous_target);
+    }
+
+    /// Runs `passes` from `source_image` to `target_image` through the
+    /// scratches. `origin` is where the source's (0, 0) sits in the space a
+    /// blend's backdrop rect is given in: the layer's root origin for a
+    /// layer's chain, (0, 0) for a chain over the caller's own image.
     fn run_filter_passes(
         &mut self,
         target_image: ImageId,
@@ -1948,9 +2058,17 @@ where
         source_image: ImageId,
         scratch: FilterScratchImages,
         target_as_scratch: bool,
+        origin: (f32, f32),
     ) {
         debug_assert!(!target_as_scratch || target_image != source_image);
         let mut src = source_image;
+        // Storage orientation of `src` at each pass: a render target (FLIP_Y)
+        // holds its rows the other way up from an upload, and every pass but
+        // a blur turns the result over once.
+        let mut src_flipped = self
+            .images
+            .info(source_image)
+            .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
         let last = passes.len() - 1;
         for (i, filter) in passes.iter().enumerate() {
             let dst = if i == last || (target_as_scratch && (last - i).is_multiple_of(2)) {
@@ -1961,7 +2079,28 @@ where
             };
             let blur_scratch = matches!(filter, ImageFilter::GaussianBlur { .. })
                 .then(|| scratch.blur.expect("a blur scratch was reserved"));
-            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch);
+            let backdrop = match filter {
+                ImageFilter::Blend {
+                    backdrop,
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } => {
+                    let placed = scratch.blend.expect("a blend scratch was reserved");
+                    self.place_blend_backdrop(placed, *backdrop, (x - origin.0, y - origin.1, *width, *height));
+                    // The placement is a draw into an image: stored the way
+                    // a render target is, so upside down against an upright
+                    // source at this pass.
+                    Some((placed, !src_flipped))
+                }
+                _ => None,
+            };
+            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch, backdrop);
+            if filter.flips_output() {
+                src_flipped = !src_flipped;
+            }
             src = dst;
         }
         for id in scratch.images() {
@@ -2287,7 +2426,7 @@ where
             Some(FilterImages { target, scratch }) => {
                 let passes =
                     filter_passes(&record.effects.filters).expect("an admitted layer has a bounded filter plan");
-                self.run_filter_passes(target, &passes, image, scratch, true);
+                self.run_filter_passes(target, &passes, image, scratch, true, record.root_origin);
                 target
             }
             None => image,
@@ -2414,6 +2553,14 @@ where
         headroom: usize,
     ) -> Option<FilterImages> {
         let passes = filter_passes(filters)?;
+        let mut needs_blend = false;
+        for filter in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = filter {
+                // A blend without its backdrop has nothing to run against.
+                self.images.info(*backdrop)?;
+                needs_blend = true;
+            }
+        }
         let target = self
             .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
             .ok()?;
@@ -2422,7 +2569,7 @@ where
             .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. }));
         // The result and chain scratches share the same storage convention,
         // so a layer can alternate through its result and one scratch.
-        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, 1, headroom) {
+        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, needs_blend, 1, headroom) {
             Ok(scratch) => Some(FilterImages { target, scratch }),
             Err(_) => {
                 self.rollback_transient_image(target);
@@ -2455,7 +2602,7 @@ where
         // included - not at the local origin the composite lands on.
         let (minx, miny) = record.root_origin;
         let previous_target = self.current_render_target;
-        self.save();
+        let state = self.begin_offscreen_pass();
 
         // Normalize the mask into layer space with an ordinary draw, so the
         // caller's storage convention (an upload or a render target, whatever
@@ -2498,6 +2645,7 @@ where
                     ImageFilter::luminance_to_alpha(),
                     images.normalized,
                     None,
+                    None,
                 );
                 converted
             }
@@ -2518,7 +2666,7 @@ where
         store.rect(0.0, 0.0, width, height);
         self.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
 
-        self.restore();
+        self.end_offscreen_pass(state);
         self.set_render_target(previous_target);
     }
 
@@ -3485,6 +3633,7 @@ where
                     ImageFilter::GaussianBlur { sigma: pass_sigma },
                     src,
                     blur_scratch,
+                    None,
                 );
                 std::mem::swap(&mut src, &mut dst);
             }
@@ -3539,15 +3688,23 @@ where
     }
 
     fn release_pending_images(&mut self) {
-        let held_masks: HashSet<ImageId> = self
+        // What an open layer still reads at its composite: its mask and
+        // its blends' backdrops.
+        let held: HashSet<ImageId> = self
             .layers
             .iter()
-            .filter_map(|layer| layer.effects.mask.map(|mask| mask.image))
+            .flat_map(|layer| {
+                let backdrops = layer.effects.filters.iter().filter_map(|filter| match filter {
+                    ImageFilter::Blend { backdrop, .. } => Some(*backdrop),
+                    _ => None,
+                });
+                layer.effects.mask.map(|mask| mask.image).into_iter().chain(backdrops)
+            })
             .collect();
         let releasable: Vec<ImageId> = self
             .pending_image_deletions
             .iter()
-            .filter(|id| !held_masks.contains(id))
+            .filter(|id| !held.contains(id))
             .copied()
             .collect();
         for id in releasable {
@@ -7150,6 +7307,206 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     }
 }
 
+/// A blending layer reserves one more transient, the image its backdrop is
+/// placed into before the pass, and returns it with the rest at end_layer; a
+/// blend whose backdrop does not exist reserves nothing and the layer
+/// composites unfiltered.
+#[test]
+fn a_blending_layer_reserves_its_backdrop_scratch() {
+    use crate::{BlendMode, ImageFilter};
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let backdrop = canvas
+        .create_image_empty(4, 4, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let blend = ImageFilter::Blend {
+        mode: BlendMode::Multiply,
+        backdrop,
+        x: 0.0,
+        y: 0.0,
+        width: 4.0,
+        height: 4.0,
+    };
+    // One pass: capture, result and the placement scratch. Brightness then
+    // the blend is two flipping passes plus the parity identity: one chain
+    // scratch more.
+    for (filters, images) in [(vec![blend], 3), (vec![ImageFilter::brightness(2.0), blend], 4)] {
+        let effects = LayerEffects::new().with_filters(&filters);
+        assert!(canvas.begin_layer(&effects));
+        assert_eq!(canvas.transients.images.len(), images, "{filters:?}");
+        assert_eq!(canvas.transients.free.len(), 0, "{filters:?}: all held");
+        canvas.end_layer();
+        assert_eq!(canvas.transients.free.len(), images, "{filters:?}: all returned");
+        canvas.flush_to_output(());
+    }
+
+    canvas.delete_image(backdrop);
+    canvas.flush_to_output(());
+    let effects = LayerEffects::new().with_filters(&[blend]);
+    assert!(canvas.begin_layer(&effects), "the capture still opens");
+    assert!(
+        canvas.layers.last().unwrap().filter_images.is_none(),
+        "no chain images without a backdrop to blend"
+    );
+    assert_eq!(canvas.transients.images.len(), 1, "the capture only");
+    canvas.end_layer();
+}
+
+/// A side pass while a layer is open goes back to the layer's store.
+#[test]
+fn with_render_target_goes_back_to_the_layers_store() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let image = canvas
+        .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    assert!(canvas.begin_layer(&LayerEffects::new()));
+    let store = canvas.current_render_target;
+    assert!(matches!(store, RenderTarget::Image(_)));
+    canvas.with_render_target(RenderTarget::Image(image), |canvas| {
+        assert_eq!(canvas.current_render_target, RenderTarget::Image(image));
+    });
+    assert_eq!(canvas.current_render_target, store);
+    canvas.end_layer();
+    assert_eq!(canvas.current_render_target, RenderTarget::Screen);
+}
+
+/// A layer's store is the canvas's own: deleting or reallocating it is
+/// refused, and a flush in between leaves the layer whole.
+#[test]
+fn a_layers_store_is_not_the_callers_to_delete_or_change() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    let RenderTarget::Image(store) = canvas.current_render_target else {
+        panic!("a captured layer draws on its store");
+    };
+    canvas.delete_image(store);
+    assert!(!canvas.pending_image_deletions.contains(&store));
+    assert!(matches!(
+        canvas.realloc_image(store, 8, 8, PixelFormat::Rgba8, ImageFlags::empty()),
+        Err(ErrorKind::ImageIdNotFound)
+    ));
+    canvas.flush_to_output(());
+    assert!(canvas.images.info(store).is_some(), "the store outlives the flush");
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 8.0, 8.0);
+    canvas.fill_path(&rect, &Paint::color(Color::black()));
+    canvas.end_layer();
+    canvas.flush_to_output(());
+}
+
+/// A blend backdrop deleted while its layer is open is read by the
+/// composite after the flush in between, as a mask is.
+#[test]
+fn a_blend_backdrop_deleted_while_its_layer_is_open_outlives_the_composite() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let backdrop = canvas
+        .create_image_empty(4, 4, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let blend = ImageFilter::Blend {
+        mode: crate::BlendMode::Multiply,
+        backdrop,
+        x: 0.0,
+        y: 0.0,
+        width: 4.0,
+        height: 4.0,
+    };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blend])));
+    assert!(canvas.layers.last().unwrap().filter_images.is_some());
+    canvas.delete_image(backdrop);
+    canvas.flush_to_output(());
+    assert!(canvas.images.info(backdrop).is_some(), "kept for the composite");
+    canvas.end_layer();
+    canvas.flush_to_output(());
+    assert!(
+        recorded.borrow().iter().any(|c| c.image == Some(backdrop)),
+        "the backdrop was placed"
+    );
+    assert!(canvas.images.info(backdrop).is_none(), "released after the composite");
+}
+
+/// A blend's placement is its own draw: recorded at the depth limit and
+/// past it, where drawing on the target is suppressed, as the pass is.
+#[test]
+fn a_blends_placement_is_recorded_at_and_past_the_depth_limit() {
+    use renderer::CommandType;
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let image = |canvas: &mut Canvas<RecordingRenderer>| {
+        canvas
+            .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap()
+    };
+    let (source, target, backdrop) = (image(&mut canvas), image(&mut canvas), image(&mut canvas));
+    let blend = ImageFilter::Blend {
+        mode: crate::BlendMode::Multiply,
+        backdrop,
+        x: 0.0,
+        y: 0.0,
+        width: 16.0,
+        height: 16.0,
+    };
+    for depth in [MAX_STATE_DEPTH, MAX_STATE_DEPTH + 10] {
+        while canvas.state_stack.len() + canvas.overflow.len() < depth {
+            canvas.save();
+        }
+        assert_eq!(canvas.saturated(), depth > MAX_STATE_DEPTH);
+        canvas.filter_image_chain(target, &[blend], source).unwrap();
+        canvas.flush_to_output(());
+        let commands = recorded.borrow();
+        let count = |pick: &dyn Fn(&renderer::Command) -> bool| commands.iter().filter(|c| pick(c)).count();
+        assert_eq!(
+            count(&|c| matches!(c.cmd_type, CommandType::RenderFilteredImage { .. })),
+            1
+        );
+        assert_eq!(
+            count(&|c| matches!(c.cmd_type, CommandType::ClearRect { .. })),
+            1,
+            "cleared at depth {depth}"
+        );
+        assert_eq!(count(&|c| c.image == Some(backdrop)), 1, "placed at depth {depth}");
+    }
+}
+
+/// A masked layer opened at the depth limit still applies its mask: the
+/// mask's draws are the layer's own, not drawing on the target.
+#[test]
+fn a_mask_applies_at_the_depth_limit() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let mask = canvas
+        .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    while canvas.state_stack.len() < MAX_STATE_DEPTH - 1 {
+        canvas.save();
+    }
+    let effects = LayerEffects::new().with_mask(mask, MaskKind::Alpha, 0.0, 0.0, 64.0, 64.0);
+    assert!(canvas.begin_layer(&effects));
+    assert_eq!(canvas.state_stack.len(), MAX_STATE_DEPTH);
+    assert!(!canvas.saturated());
+    let mut rect = Path::new();
+    rect.rect(0.0, 0.0, 8.0, 8.0);
+    canvas.fill_path(&rect, &Paint::color(Color::black()));
+    canvas.end_layer();
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    assert!(commands.iter().any(|c| c.image == Some(mask)), "the mask normalised");
+    let destination_in = CompositeOperationState::new(CompositeOperation::DestinationIn);
+    assert!(
+        commands.iter().any(|c| c.composite_operation == destination_in),
+        "the coverage applied"
+    );
+}
+
 /// A frame boundary at the same size keeps an open layer capturing (WPT
 /// 2d.layer.flush-on-frame-presentation): set_size re-issues the layer's
 /// target and the tracked target agrees with the command stream - it used to
@@ -7311,7 +7668,7 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
     canvas.set_size(64, 64, 1.0);
     for filters in [&[big][..], &[big, bright], &[big, bright, big]] {
         let scratch = canvas
-            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, 2, 0)
+            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, false, 2, 0)
             .unwrap();
         assert_eq!(
             scratch.chain.iter().flatten().count(),
@@ -7391,6 +7748,25 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     let target = canvas
         .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
+    let blend = ImageFilter::Blend {
+        mode: crate::BlendMode::Multiply,
+        backdrop: source,
+        x: 0.0,
+        y: 0.0,
+        width: 16.0,
+        height: 16.0,
+    };
+    assert_eq!(filter_work(&[blend], 10, 10), 400, "two reads, a clear and a draw");
+    // Admission at the edge: the placement is part of what is charged.
+    canvas.set_filter_work_budget(4 * 16 * 16);
+    canvas.filter_image_chain(target, &[blend], source).unwrap();
+    canvas.flush_to_output(());
+    canvas.set_filter_work_budget(4 * 16 * 16 - 1);
+    assert!(matches!(
+        canvas.filter_image_chain(target, &[blend], source),
+        Err(ErrorKind::FilterWorkBudgetExceeded)
+    ));
+    canvas.flush_to_output(());
     canvas.set_filter_work_budget(512);
     let color = ImageFilter::brightness(0.5);
     canvas.filter_image_chain(target, &[color], source).unwrap();

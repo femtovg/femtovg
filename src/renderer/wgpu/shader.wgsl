@@ -38,6 +38,7 @@ const SHADER_TYPE_FillGradientTwoPointRadial: i32 = 11;
 const SHADER_TYPE_FillImageGradientTwoPointRadial: i32 = 12;
 const SHADER_TYPE_FilterImageTurbulence: i32 = 13;
 const SHADER_TYPE_FilterImageTransfer: i32 = 14;
+const SHADER_TYPE_FilterImageBlend: i32 = 15;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -179,6 +180,9 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         }
         case SHADER_TYPE_FilterImageTransfer: {
             return renderTransfer(vertex, params);
+        }
+        case SHADER_TYPE_FilterImageBlend: {
+            return renderBlend(vertex, params);
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
@@ -338,6 +342,115 @@ fn renderTransfer(vertex: VertexOutput, params: Params) -> vec4<f32> {
         y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3<f32>(2.4)), step(vec3<f32>(0.04045), x));
     }
     return vec4<f32>(y * c.a, c.a);
+}
+
+
+// SVG feBlend: the image over the backdrop bound in the glyph-texture slot.
+// Slot 0 is the BlendMode index, slot 1 whether the backdrop is stored the
+// other way up from the image at this pass. Both textures are premultiplied;
+// the blend function B(Cb, Cs) of the Compositing and Blending spec runs on
+// the unpremultiplied colors and the result is composited as
+// cs * (1 - ab) + cb * (1 - as) + as * ab * B, alpha as = as + ab - as * ab.
+fn blendLum(c: vec3<f32>) -> f32 {
+    return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+}
+
+fn blendClipColor(c: vec3<f32>) -> vec3<f32> {
+    let l = blendLum(c);
+    let n = min(c.r, min(c.g, c.b));
+    let x = max(c.r, max(c.g, c.b));
+    var o = c;
+    if (n < 0.0) {
+        o = l + (c - l) * l / (l - n);
+    }
+    if (x > 1.0) {
+        o = l + (o - l) * (1.0 - l) / (x - l);
+    }
+    return o;
+}
+
+fn blendSetLum(c: vec3<f32>, l: f32) -> vec3<f32> {
+    return blendClipColor(c + (l - blendLum(c)));
+}
+
+fn blendSat(c: vec3<f32>) -> f32 {
+    return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+}
+
+fn blendSetSat(c: vec3<f32>, s: f32) -> vec3<f32> {
+    let mn = min(c.r, min(c.g, c.b));
+    let mx = max(c.r, max(c.g, c.b));
+    if (mx > mn) {
+        return (c - mn) * s / (mx - mn);
+    }
+    return vec3<f32>(0.0);
+}
+
+fn blendHardLight(cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    let multiply = cb * (2.0 * cs);
+    let cs2 = 2.0 * cs - 1.0;
+    let screen = cb + cs2 - cb * cs2;
+    return select(screen, multiply, cs <= vec3<f32>(0.5));
+}
+
+fn blendColorDodge(cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    let dodge = min(vec3<f32>(1.0), cb / max(1.0 - cs, vec3<f32>(1e-6)));
+    let lit = select(dodge, vec3<f32>(1.0), cs >= vec3<f32>(1.0));
+    return select(lit, vec3<f32>(0.0), cb <= vec3<f32>(0.0));
+}
+
+fn blendColorBurn(cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    let burn = 1.0 - min(vec3<f32>(1.0), (1.0 - cb) / max(cs, vec3<f32>(1e-6)));
+    let dark = select(burn, vec3<f32>(0.0), cs <= vec3<f32>(0.0));
+    return select(dark, vec3<f32>(1.0), cb >= vec3<f32>(1.0));
+}
+
+fn blendSoftLight(cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    let d = select(sqrt(cb), ((16.0 * cb - 12.0) * cb + 4.0) * cb, cb <= vec3<f32>(0.25));
+    let lo = cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb);
+    let hi = cb + (2.0 * cs - 1.0) * (d - cb);
+    return select(hi, lo, cs <= vec3<f32>(0.5));
+}
+
+fn blendMode(mode: i32, cb: vec3<f32>, cs: vec3<f32>) -> vec3<f32> {
+    switch (mode) {
+        case 0: { return cs; }
+        case 1: { return cb * cs; }
+        case 2: { return cb + cs - cb * cs; }
+        case 3: { return blendHardLight(cs, cb); }
+        case 4: { return min(cb, cs); }
+        case 5: { return max(cb, cs); }
+        case 6: { return blendColorDodge(cb, cs); }
+        case 7: { return blendColorBurn(cb, cs); }
+        case 8: { return blendHardLight(cb, cs); }
+        case 9: { return blendSoftLight(cb, cs); }
+        case 10: { return abs(cb - cs); }
+        case 11: { return cb + cs - 2.0 * cb * cs; }
+        case 12: { return blendSetLum(blendSetSat(cs, blendSat(cb)), blendLum(cb)); }
+        case 13: { return blendSetLum(blendSetSat(cb, blendSat(cs)), blendLum(cb)); }
+        case 14: { return blendSetLum(cs, blendLum(cb)); }
+        default: { return blendSetLum(cb, blendLum(cs)); }
+    }
+}
+
+fn renderBlend(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    let uv = vertex.fpos.xy / params.extent;
+    let buv = select(uv, vec2<f32>(uv.x, 1.0 - uv.y), params.scissor_mat[0].y > 0.5);
+    let src = textureSample(image_texture, image_sampler, uv);
+    let bd = textureSample(glyph_texture, glyph_sampler, buv);
+    var cs = src.rgb;
+    if (src.a > 0.0) {
+        cs = src.rgb / src.a;
+    }
+    var cb = bd.rgb;
+    if (bd.a > 0.0) {
+        cb = bd.rgb / bd.a;
+    }
+    let mode = i32(params.scissor_mat[0].x);
+    let b = clamp(blendMode(mode, clamp(cb, vec3<f32>(0.0), vec3<f32>(1.0)), clamp(cs, vec3<f32>(0.0), vec3<f32>(1.0))), vec3<f32>(0.0), vec3<f32>(1.0));
+    let ao = src.a + bd.a - src.a * bd.a;
+    let co = src.rgb * (1.0 - bd.a) + bd.rgb * (1.0 - src.a) + src.a * bd.a * b;
+    return vec4<f32>(co, ao);
 }
 
 fn conicAngleFraction(vertex: VertexOutput, params: Params) -> f32 {

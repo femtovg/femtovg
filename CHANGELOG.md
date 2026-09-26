@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `Canvas::with_render_target`: a side pass on another target that goes
+  back to the one that was current, an open layer's store included.
+- Added `ImageFilter::Blend`: blends the filtered image over a second image
+  with any of the sixteen `BlendMode`s of the Compositing and Blending
+  specification (multiply, screen, overlay, ..., luminosity), the SVG
+  `feBlend` primitive. The backdrop is placed at a rect, in root device space
+  for a layer's filters, so a chain can blend a group with an image rendered
+  elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
+  portraits and accuracy of several WPT reference tests.
 - Fixed a fill of a path whose points all lie on one line - a bare `<line>`
   or an open path under SVG's default black fill - drawing a two-pixel line
   where browsers draw nothing; such a contour no longer counts when the
