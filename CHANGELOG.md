@@ -11,7 +11,7 @@ All notable changes to this project will be documented in this file.
   `feBlend` primitive. The backdrop is placed at a rect, in root device space
   for a layer's filters, so a chain can blend a group with an image rendered
   elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
-  portraits.
+  portraits and accuracy of several WPT reference tests.
 - Fixed a fill of a path whose points all lie on one line - a bare `<line>`
   or an open path under SVG's default black fill - drawing a two-pixel line
   where browsers draw nothing; such a contour no longer counts when the
