@@ -1817,13 +1817,22 @@ impl PipelineState {
         }
     }
 
+    #[deny(unused_variables)]
     fn materialize(
         &self,
         device: &wgpu::Device,
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
-        let vertex_entry_point = if self.render_to_texture {
+        // Exhaustively bind the key so adding a field or leaving one unused here is a compile error.
+        let Self {
+            render_to_texture,
+            color_target_state,
+            primitive_topology,
+            cull_mode,
+            stencil_state,
+        } = self;
+        let vertex_entry_point = if *render_to_texture {
             "vs_main_texture"
         } else {
             "vs_main"
@@ -1846,28 +1855,25 @@ impl PipelineState {
                 module: shader_module,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(self.color_target_state.clone())],
+                targets: &[Some(color_target_state.clone())],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: self.primitive_topology,
-                front_face: if self.render_to_texture {
+                topology: *primitive_topology,
+                front_face: if *render_to_texture {
                     wgpu::FrontFace::Cw
                 } else {
                     wgpu::FrontFace::Ccw
                 },
-                cull_mode: self.cull_mode,
+                cull_mode: *cull_mode,
                 ..Default::default()
             },
-            depth_stencil: self
-                .stencil_state
-                .as_ref()
-                .map(|stencil_state| wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Stencil8,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
-                    stencil: stencil_state.clone(),
-                    bias: Default::default(),
-                }),
+            depth_stencil: stencil_state.as_ref().map(|stencil_state| wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Stencil8,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: stencil_state.clone(),
+                bias: Default::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
