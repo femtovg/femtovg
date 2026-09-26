@@ -66,6 +66,9 @@ pub struct Contour {
     /// the orientation the fringe extrusion assumes, so the triangles built
     /// from them have to be flipped back.
     reversed: bool,
+    /// Set for the duration of a fill: the points lie on one line, so the
+    /// contour encloses nothing and a fill of it draws nothing.
+    degenerate: bool,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity,
@@ -79,6 +82,7 @@ impl Default for Contour {
             bevel: Default::default(),
             solidity: None,
             reversed: false,
+            degenerate: false,
             fill: Vec::new(),
             stroke: Vec::new(),
             convexity: Convexity::default(),
@@ -102,6 +106,32 @@ impl Contour {
         }
 
         area * 0.5
+    }
+
+    /// Whether the points all lie on one line: fewer than three of them, or
+    /// none farther than 1/256 px from the line through the first point and
+    /// the point farthest from it. Such a contour encloses nothing, and
+    /// browsers draw nothing for its fill - a bare `<line>` or an open path
+    /// under SVG's default black fill (femtovg/femtovg#341). The band is a
+    /// fixed device distance, so a thin sliver stays a sliver at any zoom,
+    /// and a contour with a long retraced tail keeps whatever area it does
+    /// enclose.
+    fn collinear(points: &[Point]) -> bool {
+        if points.len() < 3 {
+            return true;
+        }
+        let origin = points[0].pos;
+        let far = points
+            .iter()
+            .map(|p| p.pos - origin)
+            .max_by(|a, b| a.mag2().total_cmp(&b.mag2()))
+            .unwrap();
+        let length = far.mag2().sqrt();
+        if length <= 0.0 {
+            return true;
+        }
+        let axis = far * (1.0 / length);
+        points.iter().all(|p| (p.pos - origin).cross(axis).abs() <= 1.0 / 256.0)
     }
 
     fn point_count(&self) -> usize {
@@ -278,6 +308,12 @@ impl PathCache {
 
             true
         });
+
+        // Classified once: a contour whose points lie on one line encloses
+        // nothing, so it neither draws nor counts in the others' classification.
+        for contour in &mut cache.contours {
+            contour.degenerate = Contour::collinear(&cache.points[contour.point_range.clone()]);
+        }
 
         cache
     }
@@ -566,7 +602,10 @@ impl PathCache {
     /// computed once per cache. A contour whose box misses the sample point
     /// cannot wind around it (its crossings of the ray cancel), so only
     /// overlapping boxes are walked: near-linear for the usual
-    /// many-disjoint-contours path.
+    /// many-disjoint-contours path. A degenerate contour draws nothing, so
+    /// it gets an empty box and counts nowhere: a sliver within the band
+    /// could otherwise wind once around a sample point on its line and turn
+    /// the contour that owns the point inside out.
     fn contour_sides(&mut self) -> &[(i32, u32, i32)] {
         if self.contour_sides.is_none() {
             let n = self.contours.len();
@@ -575,6 +614,9 @@ impl PathCache {
                 .iter()
                 .map(|contour| {
                     let mut b = Bounds::default();
+                    if contour.degenerate {
+                        return b;
+                    }
                     for point in &self.points[contour.point_range.clone()] {
                         b.minx = b.minx.min(point.pos.x);
                         b.miny = b.miny.min(point.pos.y);
@@ -670,7 +712,7 @@ impl PathCache {
         // the winding the caller authored instead of declared.
         for (contour, is_hole) in self.contours.iter_mut().zip(hole) {
             let points = &mut self.points[contour.point_range.clone()];
-            contour.reversed = points.len() > 2 && (Contour::polygon_area(points) < 0.0) != is_hole;
+            contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
             if contour.reversed {
                 points.reverse();
                 Contour::recompute_directions(points);
@@ -697,6 +739,9 @@ impl PathCache {
         for contour in &mut self.contours {
             contour.stroke.clear();
             contour.fill.clear();
+            if contour.degenerate {
+                continue;
+            }
 
             let triangle_count = (contour.fill.capacity() - 2) * 3;
             let mut triangle_fan_fill = Vec::with_capacity(triangle_count);

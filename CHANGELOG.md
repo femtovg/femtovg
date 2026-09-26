@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a fill of a path whose points all lie on one line - a bare `<line>`
+  or an open path under SVG's default black fill - drawing a two-pixel line
+  where browsers draw nothing; such a contour no longer counts when the
+  path's other contours are told apart as holes or solids. Fixes #341.
 - Fixed a layer's shadow missing the shadow of content outside the scissor
   (or the canvas): the capture now takes in whatever reaches into view once
   shifted by the shadow offset and spread by its blur, so an SVG
