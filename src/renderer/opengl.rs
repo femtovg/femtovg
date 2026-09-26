@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 15],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 16],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 15],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 16],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -231,6 +231,18 @@ impl OpenGl {
                         ShaderType::FilterImageTransfer,
                         false,
                     )?)
+                },
+                // The blend pass samples its backdrop through the glyph
+                // texture, so it only exists in that variant.
+                if with_glyph_texture {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageBlend,
+                        true,
+                    )?)
+                } else {
+                    None
                 },
             ])
         };
@@ -820,17 +832,26 @@ impl OpenGl {
             0.,
             1.,
         );
+        // A blend pass binds its backdrop in the glyph-texture slot; every
+        // other pass binds nothing there.
         let mut params = Params::new(
             images,
             &Transform2D::default(),
             &image_paint.flavor,
-            &GlyphTexture::default(),
+            &cmd.glyph_texture,
             &Scissor::default(),
             0.,
             0.,
             0.,
         );
         params.shader_type = shader_type;
+        let mut slots = slots;
+        if shader_type == ShaderType::FilterImageBlend {
+            let pass = cmd.blend_pass;
+            slots[1] = f32::from(u8::from(pass.backdrop_flipped));
+            slots[2] = pass.source_alpha;
+            slots[3] = f32::from(u8::from(pass.contribution));
+        }
         // The filter's parameters ride the scissor/paint-matrix uniform slots,
         // which are dead during a filter pass (no scissor, no paint gradient):
         // frag[0..2] hold the first 12 values, frag[3..4] the last 8, so no

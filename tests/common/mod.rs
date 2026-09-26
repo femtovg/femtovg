@@ -2,6 +2,8 @@
 //! offscreen render that returns tightly packed RGBA8 rows.
 #![allow(dead_code)]
 
+pub mod blend;
+
 use femtovg::{renderer::WGPURenderer, Canvas, Color};
 
 /// Set `FEMTOVG_REQUIRE_GPU` to turn "no adapter" from a skip into a failure:
