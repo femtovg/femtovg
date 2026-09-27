@@ -847,7 +847,10 @@ impl OpenGl {
         params.shader_type = shader_type;
         let mut slots = slots;
         if shader_type == ShaderType::FilterImageBlend {
-            slots[1] = f32::from(u8::from(cmd.filter_backdrop_flipped));
+            let pass = cmd.blend_pass;
+            slots[1] = f32::from(u8::from(pass.backdrop_flipped));
+            slots[2] = pass.source_alpha;
+            slots[3] = f32::from(u8::from(pass.contribution));
         }
         // The filter's parameters ride the scissor/paint-matrix uniform slots,
         // which are dead during a filter pass (no scissor, no paint gradient):

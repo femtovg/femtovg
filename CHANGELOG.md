@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
+  `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
+  is blended with what lies under it on the target it was opened on, which
+  must be an image or an enclosing layer; on the screen, or when the two
+  transients it needs do not fit the budget, the layer composites normally.
+  Fixes the solidJS banner's color-burn overlay. Also fixed the multiply, screen
+  and hard-light groups in Firefox, BuseyBench, and WPT reference examples.
 - Added `Canvas::with_render_target`: a side pass on another target that goes
   back to the one that was current, an open layer's store included.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
@@ -11,7 +18,6 @@ All notable changes to this project will be documented in this file.
   `feBlend` primitive. The backdrop is placed at a rect, in root device space
   for a layer's filters, so a chain can blend a group with an image rendered
   elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
-  portraits and accuracy of several WPT reference tests.
 - Fixed a fill of a path whose points all lie on one line - a bare `<line>`
   or an open path under SVG's default black fill - drawing a two-pixel line
   where browsers draw nothing; such a contour no longer counts when the

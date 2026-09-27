@@ -1077,7 +1077,10 @@ fn single_pass_filter(
     params.shader_type = shader_type;
     let mut slots = slots;
     if shader_type == ShaderType::FilterImageBlend {
-        slots[1] = f32::from(u8::from(command.filter_backdrop_flipped));
+        let pass = command.blend_pass;
+        slots[1] = f32::from(u8::from(pass.backdrop_flipped));
+        slots[2] = pass.source_alpha;
+        slots[3] = f32::from(u8::from(pass.contribution));
     }
     // The filter's parameters ride the dead scissor/paint-mat slots during the
     // pass (see `ImageFilter::single_pass`) — no uniform-array growth.
