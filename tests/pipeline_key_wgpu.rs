@@ -4,8 +4,10 @@
 //! so a pipeline cache keyed on them built identical pipelines once per shader
 //! type, and again for glyph quads.
 //!
-//! Live pipelines are read from wgpu's internal counters, which the `counters`
-//! feature on the `wgpu` dev-dependency turns on.
+//! Live pipelines are read from wgpu's internal counters, enabled by the
+//! `counters` feature on the `wgpu` dev-dependency. Feature unification also
+//! enables counters in examples. We accept the extra atomic updates so
+//! these tests run with just the `wgpu` feature.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
@@ -65,8 +67,7 @@ fn live_pipelines_after_flush(
 }
 
 /// Filling one rectangle with each kind of paint, eight shader types between
-/// them, needs no pipeline beyond those a solid fill of it needs. Before the fix
-/// the solid fill left 2 pipelines alive and the ten paints 16.
+/// them, needs no pipeline beyond those a solid fill of it needs.
 #[test]
 fn fills_that_differ_only_in_paint_share_their_pipelines() {
     let Some((device, queue)) = headless_device() else {
@@ -110,8 +111,7 @@ fn fills_that_differ_only_in_paint_share_their_pipelines() {
 }
 
 /// A glyph quad is drawn with the same fixed-function state as the interior of
-/// a convex fill, so it shares that fill's pipeline. Before the fix the solid
-/// fill left 2 pipelines alive and the fill plus a glyph quad 3.
+/// a convex fill, so it shares that fill's pipeline.
 #[test]
 fn glyph_quads_share_the_pipeline_of_a_plain_fill() {
     let Some((device, queue)) = headless_device() else {
