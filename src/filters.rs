@@ -39,6 +39,15 @@ pub(crate) fn chain_blur_sigma(sigma: f32) -> Option<f32> {
     (sigma > 0.0).then(|| sigma.min(MAX_CHAIN_BLUR_SIGMA))
 }
 
+/// How a Gaussian blur of `sigma` runs within the shader's per-pass bound
+/// ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per pass)`. Gaussians
+/// compose in quadrature - k passes of sigma s blur like one pass of
+/// s * sqrt(k) - so a sigma above the bound B is exactly k = ceil((sigma / B)^2)
+/// passes of sigma / sqrt(k), each at most B: sigma 16 is four passes of 8,
+/// sigma 23 nine of 23/3. A sigma within the bound, or a degenerate one, is
+/// one pass with the value untouched, so small blurs render exactly as they
+/// did before the split existed. The cost is quadratic in sigma (each pass is
+/// two full-size draws), which is what the ceiling above bounds.
 pub(crate) fn blur_passes(sigma: f32) -> (usize, f32) {
     let bound = renderer::MAX_BLUR_SIGMA;
     match chain_blur_sigma(sigma) {

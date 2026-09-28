@@ -3,15 +3,6 @@
 
 use super::*;
 
-/// How a Gaussian blur of `sigma` runs within the shader's per-pass bound
-/// ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per pass)`. Gaussians
-/// compose in quadrature - k passes of sigma s blur like one pass of
-/// s * sqrt(k) - so a sigma above the bound B is exactly k = ceil((sigma / B)^2)
-/// passes of sigma / sqrt(k), each at most B: sigma 16 is four passes of 8,
-/// sigma 23 nine of 23/3. A sigma within the bound, or a degenerate one, is
-/// one pass with the value untouched, so small blurs render exactly as they
-/// did before the split existed. The cost is quadratic in sigma (each pass is
-/// two full-size draws), which is what the ceiling above bounds.
 /// The blur padding a store of `extent` px can afford under the backend's
 /// texture `limit`, given that stores round up to `granularity`: the full
 /// `pad` when it fits, else what leaves the rounded store within the limit,
