@@ -79,36 +79,50 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 /// same frames held about 430 MiB on the M4 Max whatever their length -
 /// measured on that Metal driver, not a ceiling for every backend.
 ///
-/// A slice is submitted before the render pass that would exceed `passes`
-/// begins, wherever that pass comes from - a layer, a filter chain, a
-/// clear - so the bound holds per command buffer. The slices before the
-/// command buffer [`Canvas::flush_to_output`](crate::Canvas::flush_to_output)
-/// returns are submitted on the renderer's queue during the flush; work the
-/// caller needs ordered before the frame - a clear, a copy, an upload - must
-/// be submitted before the flush is called, since a command buffer submitted
-/// together with the returned one runs after the slices and a clear there
-/// erases them.
+/// The memory is per render pass because wgpu opens a Metal command buffer
+/// for every pass of a `CommandEncoder` and commits them together at submit
+/// (gfx-rs/wgpu#10494); the driver only releases a command buffer's memory
+/// once it has completed. A slice is submitted before the render pass that
+/// would exceed `passes` begins, wherever that pass comes from - a layer, a
+/// filter chain, a clear - so each submission holds at most that many, and
+/// the driver recycles the memory of the slices that complete while the rest
+/// of the frame is still being encoded. By default nothing waits for them:
+/// the renderer never polls the device, so an encoder that runs far ahead of
+/// the GPU can still accumulate unfinished slices (an M4 Max held 963 MiB
+/// for 800 layers and 3,589 MiB for 1,600 that way, against 3,685 MiB and
+/// a failed buffer creation in one submission); on the iPhone 12 the GPU
+/// never fell behind the efficiency-core encoder. `wait_past` bounds that
+/// at the cost of polling the device from inside the flush.
+///
+/// The slices before the command buffer
+/// [`Canvas::flush_to_output`](crate::Canvas::flush_to_output) returns are
+/// submitted on the renderer's queue during the flush. Work the caller needs
+/// ordered before the frame - a clear, a copy, an upload - must be submitted
+/// before the flush is called, since a command buffer submitted together
+/// with the returned one runs after the slices and a clear there erases
+/// them. Each of those submits, like the caller's own, fires the map and
+/// work-done callbacks of work that has already completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SubmissionSlicing {
     /// Render passes per submitted command buffer; at least one.
     pub passes: u32,
-    /// Submitted slices allowed to be unfinished before the next one is
-    /// encoded. Submitting alone does not bound the driver memory: the GPU
-    /// fell nine slices behind the encoder on an M4 Max. Waiting for the
-    /// oldest slice past this count stalls the encoder only when the GPU is
-    /// behind, which is when the memory would otherwise grow. The count spans
-    /// frames but covers only the renderer's own slices, not the command
-    /// buffers the caller submits, and it does not apply on the web, where
-    /// `Device::poll` cannot wait.
-    pub in_flight: usize,
+    /// With `Some(n)`, once more than `n` of the renderer's slices are
+    /// unfinished the flush waits for the oldest before encoding on, which
+    /// bounds the driver memory at about `n + 1` slices (430 MiB on an M4
+    /// Max for any frame length at 64 passes and `Some(2)`). The wait polls
+    /// the device from inside the flush, which runs the app's map and
+    /// work-done callbacks re-entrantly and blocks, so it is off by default;
+    /// on the web it is a no-op, since `Device::poll` cannot wait there. The
+    /// count spans frames but covers only the renderer's own slices.
+    pub wait_past: Option<usize>,
 }
 
 impl Default for SubmissionSlicing {
-    /// 64 passes per slice, two slices in flight.
+    /// 64 passes per slice, no waiting.
     fn default() -> Self {
         Self {
             passes: 64,
-            in_flight: 2,
+            wait_past: None,
         }
     }
 }
@@ -327,7 +341,8 @@ pub struct WGPURenderer {
     pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     slicing: Option<SubmissionSlicing>,
-    /// The renderer's own submissions that may still be running.
+    /// The renderer's own submissions that may still be running, kept only
+    /// while `SubmissionSlicing::wait_past` is set.
     slices_in_flight: VecDeque<wgpu::SubmissionIndex>,
     last_frame_slices: Vec<u32>,
 }
@@ -1022,24 +1037,28 @@ impl FrameEncoder<'_> {
     fn begin_pass(&mut self) {
         if let Some(slicing) = self.slicing {
             if self.passes >= slicing.passes.max(1) {
-                self.submit_slice(slicing.in_flight);
+                self.submit_slice(slicing.wait_past);
             }
         }
         self.passes += 1;
     }
 
-    fn submit_slice(&mut self, in_flight: usize) {
+    fn submit_slice(&mut self, wait_past: Option<usize>) {
         let encoder = std::mem::replace(
             &mut self.encoder,
             self.device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
         );
         self.write_uniforms();
-        self.slices_in_flight
-            .push_back(self.queue.submit(Some(encoder.finish())));
+        let submission = self.queue.submit(Some(encoder.finish()));
         self.slices.push(self.passes);
         self.passes = 0;
-        while self.slices_in_flight.len() > in_flight {
+        let Some(wait_past) = wait_past else {
+            self.slices_in_flight.clear();
+            return;
+        };
+        self.slices_in_flight.push_back(submission);
+        while self.slices_in_flight.len() > wait_past {
             let oldest = self
                 .slices_in_flight
                 .pop_front()

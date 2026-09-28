@@ -1,9 +1,9 @@
 #![cfg(feature = "wgpu")]
 //! `WGPURenderer::set_submission_slicing` submits a frame in slices of render
-//! passes: Metal keeps driver memory for every pass until its command buffer
-//! completes, and one command buffer per frame reached gigabytes (1,600
-//! opacity layers failed buffer creation on an M4 Max; a 176-layer portrait
-//! was jetsammed on an iPhone 12). A slice must hold at most the configured
+//! passes: wgpu opens a Metal command buffer per pass and the driver keeps
+//! about 2.3 MiB for each until it completes (gfx-rs/wgpu#10494), and one
+//! submission per frame reached gigabytes (1,600 opacity layers failed buffer
+//! creation on an M4 Max; a 176-layer portrait was jetsammed on an iPhone 12). A slice must hold at most the configured
 //! passes wherever the passes come from, every slice's uniforms and draws
 //! must land in it, in order, and the picture must not depend on where the
 //! frame was cut.
@@ -19,8 +19,21 @@ use common::{headless_device, render_rgba_on};
 
 type C = Canvas<WGPURenderer>;
 
+/// A named scene the footprint test measures.
+type Scene = (&'static str, fn(&mut C));
+
 fn slices_of(passes: u32) -> Option<SubmissionSlicing> {
-    Some(SubmissionSlicing { passes, in_flight: 1 })
+    Some(SubmissionSlicing {
+        passes,
+        wait_past: None,
+    })
+}
+
+fn waited() -> Option<SubmissionSlicing> {
+    Some(SubmissionSlicing {
+        passes: 64,
+        wait_past: Some(2),
+    })
 }
 
 /// Renders `draw` with the given slicing and returns the pixels and the
@@ -490,7 +503,10 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
             });
             peak.saturating_sub(baseline)
         };
-        let scenes: [(&str, fn(&mut C)); 2] = [("176-layer portrait", portrait), ("mixed scene", mixed_scene)];
+        let scenes: [Scene; 2] = [("176-layer portrait", portrait), ("mixed scene", mixed_scene)];
+        for (what, draw) in scenes {
+            println!("footprint waited {} {what}", mib(measure(waited(), draw)));
+        }
         for (what, draw) in scenes {
             println!(
                 "footprint sliced {} {what}",
@@ -521,6 +537,7 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
         return;
     }
     let mut lines = report.lines().filter(|line| line.starts_with("footprint "));
+    let mut waited = Vec::new();
     let mut sliced = Vec::new();
     let mut whole = Vec::new();
     for line in &mut lines {
@@ -528,19 +545,27 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
         let (_, kind, mib, what) = (words.next(), words.next(), words.next(), words.next());
         let entry = (what.unwrap().to_owned(), mib.unwrap().parse::<u64>().unwrap());
         match kind {
+            Some("waited") => waited.push(entry),
             Some("sliced") => sliced.push(entry),
             Some("whole") => whole.push(entry),
             _ => panic!("unexpected report line {line:?}"),
         }
     }
-    assert_eq!(sliced.len(), 2, "{report}");
-    for ((what, held), (_, held_whole)) in sliced.iter().zip(&whole) {
-        eprintln!("{what}: the footprint peaked {held} MiB above the baseline with slices, {held_whole} MiB without");
-        // 900 MiB with slices against 1,564 MiB without on an M4 Max, the
-        // sliced figure the same for any frame length.
+    assert_eq!(waited.len(), 2, "{report}");
+    for (((what, held_waited), (_, held)), (_, held_whole)) in waited.iter().zip(&sliced).zip(&whole) {
+        eprintln!(
+            "{what}: the footprint peaked {held_waited} MiB above the baseline waiting past two slices, {held} MiB with slices alone, {held_whole} MiB in one submission"
+        );
+        // On an M4 Max: 900 MiB waiting past two slices, 1,110 MiB with
+        // slices alone, 1,566 MiB in one submission; the waited figure is the
+        // same for any frame length.
         assert!(
-            *held < 1200 && held < held_whole,
-            "{what}: {held} MiB held with slices ({held_whole} MiB without)"
+            *held_waited < 1200,
+            "{what}: {held_waited} MiB held waiting past two slices"
+        );
+        assert!(
+            held < held_whole,
+            "{what}: {held} MiB held with slices alone, {held_whole} MiB in one submission"
         );
     }
 }
