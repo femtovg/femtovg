@@ -263,19 +263,27 @@ where
         result
     }
 
-    /// Starts an effect's own draws - a backdrop placed, a mask normalised.
-    /// They run under a copy of the current state, outside the state stack,
-    /// and the depth limit and a pass-through layer's suppression, which
-    /// concern drawing on the target, do not apply to them. Ended by
-    /// [`end_offscreen_pass`](Self::end_offscreen_pass) with the copy.
-    pub(crate) fn begin_offscreen_pass(&mut self) -> State {
+    /// Runs `draw` on `target` as an effect's own pass - a backdrop placed,
+    /// a mask normalised, a shadow's coverage drawn - under a state of its
+    /// own: `transform`, full alpha, no scissor, source-over, no shadow,
+    /// outside the state stack. The depth limit and a pass-through layer's
+    /// suppression concern drawing on the caller's target and do not apply
+    /// inside. The caller's state and target are back when it returns.
+    pub(crate) fn offscreen_pass<R>(
+        &mut self,
+        target: RenderTarget,
+        transform: Transform2D,
+        draw: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         self.offscreen_passes += 1;
-        *self.state()
-    }
-
-    pub(crate) fn end_offscreen_pass(&mut self, state: State) {
+        let state = *self.state();
+        let result = self.with_render_target(target, |canvas| {
+            canvas.enter_offscreen_state(transform);
+            draw(canvas)
+        });
         *self.state_mut() = state;
         self.offscreen_passes -= 1;
+        result
     }
 
     /// Runs `passes` (a [`filter_passes`] plan) from `source_image` into
@@ -291,22 +299,18 @@ where
         let Some(info) = self.images.info(into) else {
             return;
         };
-        let previous_target = self.current_render_target;
-        let state = self.begin_offscreen_pass();
-        self.set_render_target(RenderTarget::Image(into));
-        self.clear_rect(
-            0,
-            0,
-            info.width() as u32,
-            info.height() as u32,
-            Color::rgbaf(0.0, 0.0, 0.0, 0.0),
-        );
-        self.enter_offscreen_state(Transform2D::identity());
         let (x, y, width, height) = rect;
-        let paint = Paint::image(backdrop, x, y, width, height, 0.0, 1.0);
-        self.fill_device_rect(x, y, width, height, &paint.flavor);
-        self.end_offscreen_pass(state);
-        self.set_render_target(previous_target);
+        self.offscreen_pass(RenderTarget::Image(into), Transform2D::identity(), |canvas| {
+            canvas.clear_rect(
+                0,
+                0,
+                info.width() as u32,
+                info.height() as u32,
+                Color::rgbaf(0.0, 0.0, 0.0, 0.0),
+            );
+            let paint = Paint::image(backdrop, x, y, width, height, 0.0, 1.0);
+            canvas.fill_device_rect(x, y, width, height, &paint.flavor);
+        });
     }
 
     /// Opens a layer that [`end_layer`](Self::end_layer) composites with the
@@ -921,9 +925,6 @@ where
         // the record's root origin - every enclosing capture's shift
         // included - not at the local origin the composite lands on.
         let (minx, miny) = record.root_origin;
-        let previous_target = self.current_render_target;
-        let state = self.begin_offscreen_pass();
-
         // Normalize the mask into layer space with an ordinary draw, so the
         // caller's storage convention (an upload or a render target, whatever
         // ImageFlags it carries) never enters the parity rule above. The
@@ -938,56 +939,56 @@ where
             MaskKind::Luminance => Color::black(),
             MaskKind::Alpha => Color::rgbaf(0.0, 0.0, 0.0, 0.0),
         };
-        self.set_render_target(RenderTarget::Image(images.normalized));
-        self.clear_rect(0, 0, record.width as u32, record.height as u32, backdrop);
-        self.enter_offscreen_state(Transform2D::identity());
-        let mask_paint = Paint::image(
-            mask.image,
-            mask.x - minx,
-            mask.y - miny,
-            mask.width,
-            mask.height,
-            0.0,
-            1.0,
-        );
-        self.fill_device_rect(
-            mask.x - minx,
-            mask.y - miny,
-            mask.width,
-            mask.height,
-            &mask_paint.flavor,
-        );
-
-        let coverage = match images.converted {
-            Some(converted) => {
-                let _ = self.filter_image_with_scratch(
-                    converted,
-                    ImageFilter::luminance_to_alpha(),
-                    images.normalized,
-                    None,
-                    None,
-                );
-                converted
-            }
-            None => images.normalized,
-        };
-
-        // layer.alpha *= coverage.alpha over the whole store.
-        self.set_render_target(RenderTarget::Image(layer));
         let transform = if layer_is_filtered {
             Transform2D::new(1.0, 0.0, 0.0, -1.0, 0.0, height)
         } else {
             Transform2D::identity()
         };
-        self.enter_offscreen_state(transform);
-        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::DestinationIn);
-        let coverage_paint = Paint::image(coverage, 0.0, 0.0, width, height, 0.0, 1.0);
-        let mut store = Path::new();
-        store.rect(0.0, 0.0, width, height);
-        self.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
-
-        self.end_offscreen_pass(state);
-        self.set_render_target(previous_target);
+        self.offscreen_pass(
+            RenderTarget::Image(images.normalized),
+            Transform2D::identity(),
+            |canvas| {
+                canvas.clear_rect(0, 0, record.width as u32, record.height as u32, backdrop);
+                let mask_paint = Paint::image(
+                    mask.image,
+                    mask.x - minx,
+                    mask.y - miny,
+                    mask.width,
+                    mask.height,
+                    0.0,
+                    1.0,
+                );
+                canvas.fill_device_rect(
+                    mask.x - minx,
+                    mask.y - miny,
+                    mask.width,
+                    mask.height,
+                    &mask_paint.flavor,
+                );
+                let coverage = match images.converted {
+                    Some(converted) => {
+                        let _ = canvas.filter_image_with_scratch(
+                            converted,
+                            ImageFilter::luminance_to_alpha(),
+                            images.normalized,
+                            None,
+                            None,
+                        );
+                        converted
+                    }
+                    None => images.normalized,
+                };
+                // layer.alpha *= coverage.alpha over the whole store.
+                canvas.set_render_target(RenderTarget::Image(layer));
+                canvas.enter_offscreen_state(transform);
+                canvas.state_mut().composite_operation =
+                    CompositeOperationState::new(CompositeOperation::DestinationIn);
+                let coverage_paint = Paint::image(coverage, 0.0, 0.0, width, height, 0.0, 1.0);
+                let mut store = Path::new();
+                store.rect(0.0, 0.0, width, height);
+                canvas.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
+            },
+        );
     }
 }
 

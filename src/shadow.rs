@@ -133,6 +133,12 @@ where
         if shape_bounds.maxx <= shape_bounds.minx || shape_bounds.maxy <= shape_bounds.miny {
             return;
         }
+        // A draw whose commands are suppressed - past MAX_STATE_DEPTH, or in
+        // a discarded pass-through layer - loses its composite too: no
+        // coverage pass into a store nothing reads.
+        if self.commands_suppressed() {
+            return;
+        }
 
         let state = *self.state();
         let shadow_color = state.shadow_color;
@@ -240,56 +246,32 @@ where
             (None, None)
         };
 
-        let previous_target = self.current_render_target;
-
-        // Draw the *real* source (its actual paint and per-pixel alpha) into the
-        // offscreen image, then recolor it by the shadow color while preserving the
-        // source alpha. The image space is the device space translated so the
-        // padded bbox origin maps to (0, 0): pre-translate the CTM by (-minx, -miny).
-        self.save();
-        self.set_render_target(RenderTarget::Image(coverage_image));
-        self.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
-
-        // Build the offset transform for coverage rendering: original CTM with an
-        // extra device-space translation that shifts the shape into the offscreen.
-        // Render the source at full strength: the shadow color's alpha and the
-        // global alpha are applied later (the former via the SourceIn mask below,
-        // the latter when compositing the finished shadow under the shape).
+        // The coverage pass: the real source (its actual paint and per-pixel
+        // alpha) drawn into the coverage image, in device space translated so
+        // the padded bbox origin maps to (0, 0), then recolored by the shadow
+        // color under SourceIn so the image carries shadowColor.rgb with
+        // alpha = source.alpha * shadowColor.a - a transparent source casts
+        // nothing, a half-alpha source a half-strength shadow. Then the blur:
+        // a sigma above the shader's per-pass bound is the planner's k passes
+        // of sigma / sqrt(k), ping-ponging between the two images through the
+        // reserved horizontal scratch, so the result sits in the blurred
+        // image after an odd count and back in the coverage image after an
+        // even one; a sharp shadow composites the coverage directly.
         let mut coverage_transform = Transform2D::translation(-minx, -miny);
         coverage_transform.premultiply(&state.transform);
-        self.enter_offscreen_state(coverage_transform);
-
-        // 1. Rasterize the source with its real paint so the offscreen holds the
-        //    source's true per-pixel alpha (semi-transparent fills, gradient/image
-        //    transparency, antialiased edges, ...).
-        draw_coverage(self);
-
-        // 2. Recolor by the shadow color, masked by the source alpha. SourceIn
-        //    keeps `shadowColor * dst.alpha`, so the offscreen ends up carrying
-        //    shadowColor.rgb with per-pixel alpha = source.alpha * shadowColor.a.
-        //    Where the source was transparent the shadow stays transparent, so a
-        //    fully transparent source casts no shadow and a 50%-alpha source casts
-        //    a half-strength shadow. The mask must cover the whole offscreen in its
-        //    own pixel space, so draw it with the identity transform (not the
-        //    shape's coverage transform, which is scaled/translated).
-        self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
-        self.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
-
-        self.restore();
-
-        // Blur the coverage into the second offscreen image; a sharp shadow (no
-        // blur image allocated) composites the coverage directly. A sigma above
-        // the shader's per-pass bound is the planner's k passes of sigma /
-        // sqrt(k), ping-ponging between the two images (each pass reads one
-        // and writes the other through the reserved horizontal scratch),
-        // so the result sits in the blurred image after an odd count and back
-        // in the coverage image after an even one.
-        let source_image = if let Some(blurred_image) = blurred_image {
+        let source_image = self.offscreen_pass(RenderTarget::Image(coverage_image), coverage_transform, |canvas| {
+            canvas.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
+            draw_coverage(canvas);
+            canvas.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
+            canvas.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
+            let Some(blurred_image) = blurred_image else {
+                return coverage_image;
+            };
             let (passes, pass_sigma) = blur_plan.expect("a blurred image has a blur plan");
             let mut src = coverage_image;
             let mut dst = blurred_image;
             for _ in 0..passes {
-                let _ = self.filter_image_with_scratch(
+                let _ = canvas.filter_image_with_scratch(
                     dst,
                     ImageFilter::GaussianBlur { sigma: pass_sigma },
                     src,
@@ -299,15 +281,7 @@ where
                 std::mem::swap(&mut src, &mut dst);
             }
             src
-        } else {
-            coverage_image
-        };
-
-        // Composite the shadow back into the original target, offset by the
-        // device-space shadow offset and drawn under the shape. The shadow color's
-        // alpha is already baked into the image (via the SourceIn mask); only the
-        // global alpha is folded into the image tint here.
-        self.set_render_target(previous_target);
+        });
 
         let dst_x = minx + txx;
         let dst_y = miny + txy;
@@ -660,4 +634,74 @@ fn shadow_passes_reuse_their_images() {
     assert_eq!(canvas.transients.free.len(), 3);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
+}
+
+/// Past the depth limit the shape's own draw is dropped, and so is the
+/// composite its shadow would feed: the coverage pass is skipped outright,
+/// target switches and blur passes included, rather than recorded into a
+/// store nothing reads.
+#[test]
+fn a_shadowed_draw_past_the_depth_limit_records_nothing() {
+    use renderer::CommandType;
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+    canvas.set_shadow_blur(6.0);
+    canvas.set_shadow_offset(4.0, 4.0);
+    while canvas.state_stack.len() < MAX_STATE_DEPTH {
+        canvas.save();
+    }
+    canvas.save();
+    assert!(canvas.saturated());
+    let mut rect = Path::new();
+    rect.rect(10.0, 10.0, 30.0, 30.0);
+    canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    assert!(
+        !commands.iter().any(|c| matches!(
+            c.cmd_type,
+            CommandType::SetRenderTarget(RenderTarget::Image(_)) | CommandType::RenderFilteredImage { .. }
+        )),
+        "a suppressed shadow acquires no store and runs no pass"
+    );
+}
+
+/// At exactly the limit nothing is suppressed, and the shadow's own save()
+/// used to be what saturated the stack: its coverage was dropped while its
+/// composite was not, painting a stale store. The pass runs outside the
+/// stack now, so the stream is the one the same draw records at the root.
+#[test]
+fn a_shadowed_draw_at_the_depth_limit_casts_as_at_the_root() {
+    let stream = |depth: usize| {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+        canvas.set_shadow_blur(6.0);
+        canvas.set_shadow_offset(4.0, 4.0);
+        while canvas.state_stack.len() < depth {
+            canvas.save();
+        }
+        assert!(!canvas.saturated());
+        let mut rect = Path::new();
+        rect.rect(10.0, 10.0, 30.0, 30.0);
+        canvas.fill_path(&rect, &Paint::color(Color::rgb(255, 0, 0)));
+        canvas.flush_to_output(());
+        let kinds: Vec<_> = recorded
+            .borrow()
+            .iter()
+            .map(|c| std::mem::discriminant(&c.cmd_type))
+            .collect();
+        kinds
+    };
+    let at_limit = stream(MAX_STATE_DEPTH);
+    assert!(
+        at_limit.len() > 2,
+        "the coverage, its blur and the composite are all recorded"
+    );
+    assert_eq!(at_limit, stream(1));
 }
