@@ -1113,9 +1113,7 @@ mod tests {
 
     /// swash's `ScaleContext` caches scaler data and hinting instances per
     /// `CacheKey`, so every `FontRef` for one face must carry the same key, and
-    /// two faces must never share one. Before the fix every call minted a new
-    /// key: run alone, `CacheKey(3)` then `CacheKey(4)` without textlayout, and
-    /// `CacheKey(1)` then `CacheKey(2)` with it.
+    /// two faces must never share one.
     #[cfg(feature = "swash")]
     #[test]
     fn each_face_keeps_one_swash_cache_key() {
