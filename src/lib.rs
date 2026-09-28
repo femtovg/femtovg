@@ -440,6 +440,18 @@ impl<T> Canvas<T>
 where
     T: Renderer,
 {
+    /// The renderer this canvas draws with, for backend-specific settings
+    /// and diagnostics such as `WGPURenderer::set_submission_slicing` and
+    /// `WGPURenderer::last_frame_slices`.
+    pub fn renderer(&self) -> &T {
+        &self.renderer
+    }
+
+    /// The renderer this canvas draws with, mutably; see [`Self::renderer`].
+    pub fn renderer_mut(&mut self) -> &mut T {
+        &mut self.renderer
+    }
+
     /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let text_context = Rc::new(RefCell::new(TextContextImpl::default()));

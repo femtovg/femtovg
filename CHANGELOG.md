@@ -3,14 +3,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Fixed the WGPU backend holding the whole frame in one command buffer.
-  Metal keeps about 2.3 MiB of driver memory per render pass until the
-  command buffer completes, so a frame of hundreds of layers held gigabytes:
-  1,600 opacity layers failed buffer creation on an M4 Max, and one
-  176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
-  The renderer now submits the frame in slices of 64 render passes with at
-  most two slices unfinished, which bounds that memory at about 430 MiB for
-  any layer count and halves the p99 frame time of the soak on the M4 Max.
+- Added `WGPURenderer::set_submission_slicing`: with a `SubmissionSlicing`,
+  a frame is submitted in slices of at most that many render passes (64 by
+  default, two slices in flight) instead of one command buffer holding every
+  pass. Metal keeps about 2.3 MiB of driver memory per render pass until its
+  command buffer completes, so one buffer per frame held gigabytes for a
+  frame of hundreds of layers or a long blur chain: 1,600 opacity layers
+  failed buffer creation on an M4 Max, and a 176-layer BuseyBench portrait
+  at 460x260 was jetsammed on an iPhone 12. Sliced, the same frames held
+  about 430 MiB on the M4 Max whatever their length. The slices before the
+  returned command buffer are submitted during the flush, so work that must
+  run before the frame is submitted before it; off by default, which keeps
+  the one-command-buffer contract of `flush_to_surface`. `Canvas::renderer`
+  and `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
+  reports the passes per command buffer of the last frame.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which

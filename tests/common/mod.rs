@@ -106,6 +106,21 @@ pub fn render_rgba(
     clear: Color,
     draw: impl FnOnce(&mut Canvas<WGPURenderer>),
 ) -> Vec<u8> {
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    render_rgba_on(device, queue, width, height, clear, renderer, draw).0
+}
+
+/// [`render_rgba`] on a renderer the caller configured; hands the canvas
+/// back with the pixels, for the renderer's diagnostics.
+pub fn render_rgba_on(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    clear: Color,
+    renderer: WGPURenderer,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> (Vec<u8>, Canvas<WGPURenderer>) {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("femtovg test target"),
         size: wgpu::Extent3d {
@@ -120,7 +135,6 @@ pub fn render_rgba(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(width, height, 1.0);
     canvas.clear_rect(0, 0, width, height, clear);
@@ -183,5 +197,5 @@ pub fn render_rgba(
     }
     drop(mapped);
     readback.unmap();
-    pixels
+    (pixels, canvas)
 }

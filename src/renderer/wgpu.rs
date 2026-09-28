@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use rgb::bytemuck;
@@ -66,26 +66,53 @@ const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 // A concave fill and a stencil stroke record two sets of params, every other command one.
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 
-/// Render passes encoded before the frame's command buffer so far is
-/// submitted and a new one begun.
+/// Submits each frame in slices of render passes instead of one command
+/// buffer holding every pass; see [`WGPURenderer::set_submission_slicing`].
 ///
 /// Metal allocates driver memory for every render command encoder (about
-/// 2.3 MiB on macOS 26, independent of the target size) and keeps it until
-/// the command buffer that holds the encoder completes. A frame that opens
-/// hundreds of layers - each one at least two passes - therefore held
-/// gigabytes in one command buffer: 800 opacity layers reached 3.7 GiB on an
-/// M4 Max and 1,600 failed buffer creation outright; on an iPhone 12 one
-/// BuseyBench portrait of 176 layers exceeded the 2.2 GiB per-process limit
-/// and was jetsammed. Submitting the frame in slices lets the driver recycle
-/// each slice's memory while the rest of the frame is still being encoded.
-const PASSES_PER_SUBMISSION: u32 = 64;
+/// 2.3 MiB on macOS 26, whatever the target size) and keeps it until the
+/// command buffer holding the encoder completes. One command buffer per
+/// frame therefore held gigabytes for a frame of hundreds of layers or a
+/// long blur chain: 800 opacity layers reached 3.7 GiB on an M4 Max, 1,600
+/// failed buffer creation, and a 176-layer portrait at 460x260 was
+/// jetsammed on an iPhone 12 at the 2.2 GiB per-process limit. Sliced, the
+/// same frames held about 430 MiB on the M4 Max whatever their length -
+/// measured on that Metal driver, not a ceiling for every backend.
+///
+/// A slice is submitted before the render pass that would exceed `passes`
+/// begins, wherever that pass comes from - a layer, a filter chain, a
+/// clear - so the bound holds per command buffer. The slices before the
+/// command buffer [`Canvas::flush_to_output`](crate::Canvas::flush_to_output)
+/// returns are submitted on the renderer's queue during the flush; work the
+/// caller needs ordered before the frame - a clear, a copy, an upload - must
+/// be submitted before the flush is called, since a command buffer submitted
+/// together with the returned one runs after the slices and a clear there
+/// erases them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubmissionSlicing {
+    /// Render passes per submitted command buffer; at least one.
+    pub passes: u32,
+    /// Submitted slices allowed to be unfinished before the next one is
+    /// encoded. Submitting alone does not bound the driver memory: the GPU
+    /// fell nine slices behind the encoder on an M4 Max. Waiting for the
+    /// oldest slice past this count stalls the encoder only when the GPU is
+    /// behind, which is when the memory would otherwise grow. The count spans
+    /// frames but covers only the renderer's own slices, not the command
+    /// buffers the caller submits, and it does not apply on the web, where
+    /// `Device::poll` cannot wait.
+    pub in_flight: usize,
+}
 
-/// Submitted slices of the frame allowed to be unfinished before the next
-/// one is encoded. Submitting alone does not bound the driver memory: the GPU
-/// fell nine slices behind the encoder on an M4 Max. Waiting for the oldest
-/// slice past this count stalls the encoder only when the GPU is behind,
-/// which is when the memory would otherwise grow.
-const SUBMISSIONS_IN_FLIGHT: usize = 2;
+impl Default for SubmissionSlicing {
+    /// 64 passes per slice, two slices in flight.
+    fn default() -> Self {
+        Self {
+            passes: 64,
+            in_flight: 2,
+        }
+    }
+}
+
 const MIN_UNIFORM_SLOTS: u64 = 64;
 const MIN_VERTEX_BYTES: u64 = 4096;
 
@@ -299,6 +326,10 @@ pub struct WGPURenderer {
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
+    slicing: Option<SubmissionSlicing>,
+    /// The renderer's own submissions that may still be running.
+    slices_in_flight: VecDeque<wgpu::SubmissionIndex>,
+    last_frame_slices: Vec<u32>,
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
@@ -517,7 +548,32 @@ impl WGPURenderer {
             viewport_bind_group_layout,
             pipeline_layout,
             pipeline_cache: Default::default(),
+            slicing: None,
+            slices_in_flight: VecDeque::new(),
+            last_frame_slices: Vec::new(),
         }
+    }
+}
+
+impl WGPURenderer {
+    /// Submits each frame in slices of render passes; see
+    /// [`SubmissionSlicing`]. `None`, the default, encodes the frame into the
+    /// one command buffer that the flush returns.
+    pub fn set_submission_slicing(&mut self, slicing: Option<SubmissionSlicing>) {
+        self.slicing = slicing;
+    }
+
+    /// The slicing in effect; see [`Self::set_submission_slicing`].
+    pub fn submission_slicing(&self) -> Option<SubmissionSlicing> {
+        self.slicing
+    }
+
+    /// Render passes in each command buffer of the last frame, in submission
+    /// order: every entry but the last was submitted during the flush, the
+    /// last is the command buffer the flush returned. Empty until a frame
+    /// has been flushed.
+    pub fn last_frame_slices(&self) -> &[u32] {
+        &self.last_frame_slices
     }
 }
 
@@ -599,32 +655,40 @@ impl Renderer for WGPURenderer {
             })
             .clone();
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-
+        let frame = FrameEncoder {
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            encoder: self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+            uniform_buffer: self.uniform_buffer.clone(),
+            uniform_stride: self.uniform_stride,
+            uniform_staging: Vec::new(),
+            uniforms_written: 0,
+            slicing: self.slicing,
+            slices_in_flight: &mut self.slices_in_flight,
+            slices: Vec::new(),
+            passes: 0,
+        };
         let mut render_pass_builder = RenderPassBuilder::new(
             self.device.clone(),
-            &mut encoder,
+            frame,
             output.format,
             self.screen_view,
             self.viewport_bind_group_layout.clone(),
             &mut self.stencil_buffer_for_textures,
-            texture_view.clone(),
-            stencil_buffer.clone(),
-            vertex_buffer.clone(),
+            texture_view,
+            stencil_buffer,
+            vertex_buffer,
         );
         // Ensure that we have one initial render pass, in case the first command is not SetRenderTarget
         render_pass_builder.set_render_target_screen();
-        let mut uniforms_written = 0;
-        let mut in_flight = std::collections::VecDeque::new();
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
             self.device.clone(),
             self.empty_texture_view.clone(),
             self.sampler_cache.clone(),
             self.uniform_buffer.clone(),
-            self.uniform_stride,
             self.shader_module.clone(),
             self.bind_group_layout.clone(),
             self.pipeline_layout.clone(),
@@ -633,45 +697,6 @@ impl Renderer for WGPURenderer {
 
         let mut current_render_target = RenderTarget::Screen;
         for command in commands {
-            if render_pass_builder.passes >= PASSES_PER_SUBMISSION
-                && matches!(command.cmd_type, super::CommandType::SetRenderTarget(_))
-            {
-                // Submit the passes encoded so far. The command about to run
-                // opens a pass on its own target, so nothing has to be restored.
-                drop(render_pass_builder);
-                let slice = std::mem::replace(
-                    &mut encoder,
-                    self.device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
-                )
-                .finish();
-                write_uniforms(
-                    &self.queue,
-                    &self.uniform_buffer,
-                    &pipeline_and_bindgroup_mapper.uniform_staging,
-                    &mut uniforms_written,
-                );
-                in_flight.push_back(self.queue.submit(Some(slice)));
-                if in_flight.len() > SUBMISSIONS_IN_FLIGHT {
-                    let oldest = in_flight.pop_front().expect("a slice was just pushed");
-                    // A no-op on the web, where the queue cannot be waited on.
-                    let _ = self.device.poll(wgpu::PollType::Wait {
-                        submission_index: Some(oldest),
-                        timeout: None,
-                    });
-                }
-                render_pass_builder = RenderPassBuilder::new(
-                    self.device.clone(),
-                    &mut encoder,
-                    output.format,
-                    self.screen_view,
-                    self.viewport_bind_group_layout.clone(),
-                    &mut self.stencil_buffer_for_textures,
-                    texture_view.clone(),
-                    stencil_buffer.clone(),
-                    vertex_buffer.clone(),
-                );
-            }
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
                     current_render_target = render_target;
@@ -788,17 +813,9 @@ impl Renderer for WGPURenderer {
             }
         }
 
-        drop(render_pass_builder);
-
-        // write_buffer is ordered ahead of the caller's submit.
-        let uniform_staging = &pipeline_and_bindgroup_mapper.uniform_staging;
-        debug_assert!(
-            uniform_staging.len() as u64 <= self.uniform_buffer.size(),
-            "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
-        );
-        write_uniforms(&self.queue, &self.uniform_buffer, uniform_staging, &mut uniforms_written);
-
-        let command_buffer = encoder.finish();
+        // The uniform slots are uploaded ahead of the caller's submit.
+        let (command_buffer, slices) = render_pass_builder.finish();
+        self.last_frame_slices = slices;
 
         self.pipeline_cache
             .borrow_mut()
@@ -980,13 +997,94 @@ mod transient_cost_tests {
 /// The render-loop state an image-filter pass draws through: the images,
 /// the target it must restore when done, the open pass builder and the
 /// pipeline mapper.
-/// Uploads the uniform slots recorded since the previous upload, ordered
-/// ahead of the next submit.
-fn write_uniforms(queue: &wgpu::Queue, buffer: &wgpu::Buffer, staging: &[u8], written: &mut usize) {
-    let pending = &staging[*written..];
-    if !pending.is_empty() {
-        queue.write_buffer(buffer, *written as u64, pending);
-        *written = staging.len();
+/// The frame's command encoding: the encoder, the uniform slots staged for
+/// it, and, with slicing on, the command buffers submitted so far.
+struct FrameEncoder<'a> {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    encoder: wgpu::CommandEncoder,
+    uniform_buffer: wgpu::Buffer,
+    uniform_stride: u64,
+    uniform_staging: Vec<u8>,
+    uniforms_written: usize,
+    slicing: Option<SubmissionSlicing>,
+    slices_in_flight: &'a mut VecDeque<wgpu::SubmissionIndex>,
+    /// Render passes in each command buffer submitted so far.
+    slices: Vec<u32>,
+    /// Render passes begun on the current encoder.
+    passes: u32,
+}
+
+impl FrameEncoder<'_> {
+    /// Counts a render pass about to begin on the encoder, which must hold
+    /// no open pass; with slicing on, an encoder that already holds the
+    /// configured passes is submitted first.
+    fn begin_pass(&mut self) {
+        if let Some(slicing) = self.slicing {
+            if self.passes >= slicing.passes.max(1) {
+                self.submit_slice(slicing.in_flight);
+            }
+        }
+        self.passes += 1;
+    }
+
+    fn submit_slice(&mut self, in_flight: usize) {
+        let encoder = std::mem::replace(
+            &mut self.encoder,
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+        );
+        self.write_uniforms();
+        self.slices_in_flight
+            .push_back(self.queue.submit(Some(encoder.finish())));
+        self.slices.push(self.passes);
+        self.passes = 0;
+        while self.slices_in_flight.len() > in_flight {
+            let oldest = self
+                .slices_in_flight
+                .pop_front()
+                .expect("more slices than allowed in flight");
+            // A no-op on the web, where the queue cannot be waited on.
+            let _ = self.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(oldest),
+                timeout: None,
+            });
+        }
+    }
+
+    /// Stages one uniform slot.
+    fn stage_uniforms(&mut self, uniforms: &[u8]) {
+        let end = self.uniform_staging.len() + self.uniform_stride as usize;
+        self.uniform_staging.extend_from_slice(uniforms);
+        self.uniform_staging.resize(end, 0);
+        debug_assert!(
+            self.uniform_staging.len() as u64 <= self.uniform_buffer.size(),
+            "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
+        );
+    }
+
+    /// The dynamic offset of the last staged slot.
+    fn current_uniform_offset(&self) -> u32 {
+        (self.uniform_staging.len() - self.uniform_stride as usize) as u32
+    }
+
+    /// Uploads the slots staged since the previous upload, ordered ahead of
+    /// the next submit.
+    fn write_uniforms(&mut self) {
+        let pending = &self.uniform_staging[self.uniforms_written..];
+        if !pending.is_empty() {
+            self.queue
+                .write_buffer(&self.uniform_buffer, self.uniforms_written as u64, pending);
+            self.uniforms_written = self.uniform_staging.len();
+        }
+    }
+
+    /// Finishes the frame's last command buffer, and lists the passes of
+    /// every command buffer, that one last.
+    fn finish(mut self) -> (wgpu::CommandBuffer, Vec<u32>) {
+        self.write_uniforms();
+        self.slices.push(self.passes);
+        (self.encoder.finish(), self.slices)
     }
 }
 
@@ -2034,7 +2132,7 @@ impl BindGroupState {
 
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
-    encoder: &'a mut wgpu::CommandEncoder,
+    frame: FrameEncoder<'a>,
     surface_view: wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
     texture_view: wgpu::TextureView,
@@ -2052,14 +2150,12 @@ struct RenderPassBuilder<'a> {
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
     current_bound_offset: Option<u32>,
-    /// Render passes begun on this builder's encoder.
-    passes: u32,
 }
 
 impl<'a> RenderPassBuilder<'a> {
     fn new(
         device: wgpu::Device,
-        encoder: &'a mut wgpu::CommandEncoder,
+        frame: FrameEncoder<'a>,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
         viewport_bind_group_layout: wgpu::BindGroupLayout,
@@ -2071,7 +2167,7 @@ impl<'a> RenderPassBuilder<'a> {
         let viewport_bind_group = Self::create_viewport_bind_group(&device, &screen_view, &viewport_bind_group_layout);
         Self {
             device: device.clone(),
-            encoder,
+            frame,
             surface_view: texture_view.clone(),
             surface_format: screen_surface_format,
             texture_view,
@@ -2089,8 +2185,13 @@ impl<'a> RenderPassBuilder<'a> {
             current_pipeline_state: None,
             current_stencil_reference: None,
             current_bound_offset: None,
-            passes: 0,
         }
+    }
+
+    /// Finishes the frame's last command buffer; see `FrameEncoder::finish`.
+    fn finish(mut self) -> (wgpu::CommandBuffer, Vec<u32>) {
+        drop(self.rpass.take());
+        self.frame.finish()
     }
 
     fn set_viewport(&mut self, viewport: [f32; 2]) {
@@ -2258,14 +2359,14 @@ impl<'a> RenderPassBuilder<'a> {
         self.current_pipeline_state = None;
         self.current_stencil_reference = None;
         self.current_bound_offset = None;
-        self.passes += 1;
         drop(self.rpass.take());
+        self.frame.begin_pass();
         let stencil_view = self
             .stencil_buffer
             .as_ref()
             .map(|buffer| buffer.create_view(&Default::default()));
 
-        let mut rpass = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut rpass = self.frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &self.texture_view,
@@ -2306,8 +2407,6 @@ struct CommandToPipelineAndBindGroupMapper {
     empty_texture_view: wgpu::TextureView,
     sampler_cache: SamplerCache,
     uniform_buffer: wgpu::Buffer,
-    uniform_stride: u64,
-    uniform_staging: Vec<u8>,
     current_uniforms: Option<UniformArray>,
     shader_module: Rc<wgpu::ShaderModule>,
 
@@ -2324,7 +2423,6 @@ impl CommandToPipelineAndBindGroupMapper {
         empty_texture_view: wgpu::TextureView,
         sampler_cache: SamplerCache,
         uniform_buffer: wgpu::Buffer,
-        uniform_stride: u64,
         shader_module: Rc<wgpu::ShaderModule>,
         bind_group_layout: wgpu::BindGroupLayout,
         pipeline_layout: wgpu::PipelineLayout,
@@ -2335,8 +2433,6 @@ impl CommandToPipelineAndBindGroupMapper {
             empty_texture_view,
             sampler_cache,
             uniform_buffer,
-            uniform_stride,
-            uniform_staging: Vec::new(),
             current_uniforms: None,
             shader_module,
             current_bind_group_state: None,
@@ -2389,14 +2485,13 @@ impl CommandToPipelineAndBindGroupMapper {
 
         let uniforms = UniformArray::from(params);
         if self.current_uniforms.as_ref() != Some(&uniforms) {
-            let end = self.uniform_staging.len() + self.uniform_stride as usize;
-            self.uniform_staging
-                .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
-            self.uniform_staging.resize(end, 0);
+            render_pass_builder
+                .frame
+                .stage_uniforms(bytemuck::cast_slice(uniforms.as_slice()));
             self.current_uniforms = Some(uniforms);
         }
         // The current command's slot is the last one staged.
-        let offset = (self.uniform_staging.len() - self.uniform_stride as usize) as u32;
+        let offset = render_pass_builder.frame.current_uniform_offset();
         if bind_group_changed || render_pass_builder.current_bound_offset != Some(offset) {
             render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
             render_pass_builder.current_bound_offset = Some(offset);
