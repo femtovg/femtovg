@@ -30,6 +30,16 @@ pub struct Params {
 }
 
 impl Params {
+    /// The parameters of a stencil-only pass - winding accumulation, clip
+    /// arm/resolve: the stencil shader, no paint, no stroke threshold.
+    pub(crate) fn stencil() -> Self {
+        Self {
+            stroke_thr: -1.0,
+            shader_type: ShaderType::Stencil,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
         global_transform: &Transform2D,
@@ -311,8 +321,10 @@ impl Params {
                 params.feather = *r1 - *r0;
                 match colors {
                     GradientColors::TwoStop { start_color, end_color } => {
-                        params.inner_col = start_color.premultiplied().to_array();
-                        params.outer_col = end_color.premultiplied().to_array();
+                        // Straight endpoints; the shader premultiplies post-mix
+                        // (see the linear-gradient arm).
+                        params.inner_col = start_color.to_array();
+                        params.outer_col = end_color.to_array();
                         params.shader_type = ShaderType::FillGradientTwoPointRadial;
                     }
                     GradientColors::MultiStop { .. } => {

@@ -4,6 +4,9 @@ use rgb::alt::Gray;
 use rgb::*;
 use slotmap::{DefaultKey, SlotMap};
 
+use crate::geometry::Transform2D;
+use crate::renderer::ShaderType;
+
 #[cfg(feature = "image-loading")]
 use ::image::DynamicImage;
 
@@ -56,11 +59,11 @@ pub enum ImageSource<'a> {
     Rgba(ImgRef<'a, RGBA8>),
     /// Image source with 8-bit grayscale image format
     Gray(ImgRef<'a, Gray<u8>>),
-    /// Image source referencing a HTML image element (only available on `wasm32` target)
-    #[cfg(target_arch = "wasm32")]
+    /// Image source referencing a HTML image element (only available on `wasm32-unknown-unknown`)
+    #[cfg(wasm_unknown)]
     HtmlImageElement(&'a web_sys::HtmlImageElement),
-    /// Image source referencing a HTML canvas element (only available on `wasm32` target)
-    #[cfg(target_arch = "wasm32")]
+    /// Image source referencing a HTML canvas element (only available on `wasm32-unknown-unknown`)
+    #[cfg(wasm_unknown)]
     HtmlCanvasElement(&'a web_sys::HtmlCanvasElement),
 }
 
@@ -71,7 +74,7 @@ impl ImageSource<'_> {
             Self::Rgb(_) => PixelFormat::Rgb8,
             Self::Rgba(_) => PixelFormat::Rgba8,
             Self::Gray(_) => PixelFormat::Gray8,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlImageElement(_) | Self::HtmlCanvasElement(_) => PixelFormat::Rgba8,
         }
     }
@@ -82,9 +85,9 @@ impl ImageSource<'_> {
             Self::Rgb(imgref) => Size::new(imgref.width(), imgref.height()),
             Self::Rgba(imgref) => Size::new(imgref.width(), imgref.height()),
             Self::Gray(imgref) => Size::new(imgref.width(), imgref.height()),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlImageElement(element) => Size::new(element.width() as usize, element.height() as usize),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(wasm_unknown)]
             Self::HtmlCanvasElement(element) => Size::new(element.width() as usize, element.height() as usize),
         }
     }
@@ -137,14 +140,14 @@ impl<'a> From<ImgRef<'a, Gray<u8>>> for ImageSource<'a> {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(wasm_unknown)]
 impl<'a> From<&'a web_sys::HtmlImageElement> for ImageSource<'a> {
     fn from(src: &'a web_sys::HtmlImageElement) -> Self {
         Self::HtmlImageElement(src)
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(wasm_unknown)]
 impl<'a> From<&'a web_sys::HtmlCanvasElement> for ImageSource<'a> {
     fn from(src: &'a web_sys::HtmlCanvasElement) -> Self {
         Self::HtmlCanvasElement(src)
@@ -285,8 +288,9 @@ impl<T> ImageStore<T> {
     ) -> Result<(), ErrorKind> {
         if let Some(old) = self.0.get_mut(id.0) {
             let new = renderer.alloc_image(info)?;
+            let previous = std::mem::replace(&mut old.1, new);
             old.0 = info;
-            old.1 = new;
+            renderer.delete_image(previous, id);
             Ok(())
         } else {
             Err(ErrorKind::ImageIdNotFound)
@@ -334,13 +338,70 @@ impl<T> ImageStore<T> {
     }
 }
 
+/// How [`ImageFilter::Blend`] combines a pixel of the image with the
+/// backdrop under it: the blend modes of the W3C Compositing and Blending
+/// specification, which SVG `feBlend`, CSS `mix-blend-mode` and Canvas 2D
+/// `globalCompositeOperation` share. The first twelve apply per color
+/// channel; the last four work on hue, saturation and luminosity as a whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlendMode {
+    /// The source color: `feBlend`'s default.
+    Normal,
+    /// `Cb * Cs`.
+    Multiply,
+    /// `Cb + Cs - Cb * Cs`.
+    Screen,
+    /// Multiplies or screens depending on the backdrop: hard light with the
+    /// two swapped.
+    Overlay,
+    /// The darker of the two.
+    Darken,
+    /// The lighter of the two.
+    Lighten,
+    /// Brightens the backdrop to reflect the source.
+    ColorDodge,
+    /// Darkens the backdrop to reflect the source.
+    ColorBurn,
+    /// Multiplies or screens depending on the source.
+    HardLight,
+    /// Darkens or lightens depending on the source, gently.
+    SoftLight,
+    /// `|Cb - Cs|`.
+    Difference,
+    /// `Cb + Cs - 2 * Cb * Cs`.
+    Exclusion,
+    /// The source's hue with the backdrop's saturation and luminosity.
+    Hue,
+    /// The source's saturation with the backdrop's hue and luminosity.
+    Saturation,
+    /// The source's hue and saturation with the backdrop's luminosity.
+    Color,
+    /// The source's luminosity with the backdrop's hue and saturation.
+    Luminosity,
+}
+
+impl BlendMode {
+    /// The mode's index in the shaders' blend function, in declaration order.
+    pub(crate) fn shader_index(self) -> f32 {
+        self as u8 as f32
+    }
+}
+
 /// Specifies the type of filter to apply to images with `crate::Canvas::filter_image`.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub enum ImageFilter {
     /// Applies a Gaussian blur filter with the specified standard deviation.
+    ///
+    /// One shader pass covers a standard deviation of at most 8 device
+    /// pixels: `Canvas::filter_image` clamps a larger one to 8, while
+    /// `Canvas::filter_image_chain`, a layer filter and a shadow blur split
+    /// it into passes that compose to the requested value (Gaussians add in
+    /// quadrature), up to a sigma of 128.
     GaussianBlur {
-        /// The standard deviation of the Gaussian blur filter.
+        /// The standard deviation of the Gaussian blur filter, in device
+        /// pixels. Zero, negative or non-finite values leave the image
+        /// unchanged.
         sigma: f32,
     },
     /// Applies a 4x5 color matrix, the operation behind SVG `feColorMatrix` and
@@ -357,6 +418,100 @@ pub enum ImageFilter {
         /// Row-major 4x5 color matrix.
         matrix: [f32; 20],
     },
+    /// Perlin turbulence or fractal noise: the SVG `feTurbulence` primitive,
+    /// generated from the reference algorithm in SVG 1.1 section 15.19 that
+    /// Chromium and Firefox both implement, so the same parameters give the
+    /// same noise as a browser.
+    ///
+    /// Unlike the other filters this one does not sample its source image -
+    /// `feTurbulence` takes no input - it only sizes the output from it.
+    /// Each pixel gets four independent noise channels (RGBA, each in
+    /// `[0, 1]`) and the result is stored premultiplied. `fractalNoise` is
+    /// centered on 0.5 and `turbulence` on 0 in every channel, alpha
+    /// included, exactly as the primitive is specified; a chain typically
+    /// follows with a [`ColorMatrix`](Self::ColorMatrix) that remaps the
+    /// channels into a color and an opacity.
+    ///
+    /// The noise lives in its own coordinate space: `transform` maps that
+    /// space onto output pixels, so the pattern scales and moves with the
+    /// content it decorates instead of sticking to the device grid. Pixel
+    /// `(x, y)` is evaluated at `transform⁻¹ · (x, y)`; with the identity
+    /// transform one noise unit is one pixel, which is what a browser does
+    /// at 1:1 and what Firefox does at any zoom (Chromium additionally snaps
+    /// the mapped position to whole noise units).
+    ///
+    /// The primitive's values are defined in the filter's working color
+    /// space, which SVG defaults to linearRGB; end such a chain with
+    /// [`LinearRgbToSrgb`](Self::LinearRgbToSrgb) to get what a browser
+    /// displays for a default `<filter>`.
+    ///
+    /// Octaves past the tenth are skipped: octave `n` contributes at most
+    /// `1 / 2ⁿ`, so the ones skipped change the sum by less than half of an
+    /// 8-bit step, and the bound keeps the per-pixel cost finite on GLES 2.0
+    /// hardware, where loops need a constant bound.
+    Turbulence {
+        /// Base frequency per axis, in cycles per noise unit (SVG `baseFrequency`).
+        base_frequency: [f32; 2],
+        /// Number of octaves to sum (SVG `numOctaves`); 0 sums nothing.
+        num_octaves: u32,
+        /// Random seed (SVG `seed`, already truncated to an integer).
+        seed: i32,
+        /// Adjust the frequency and wrap the lattice so the noise tiles
+        /// seamlessly across the output image (SVG `stitchTiles="stitch"`).
+        stitch_tiles: bool,
+        /// `fractalNoise` or `turbulence` (SVG `type`).
+        kind: TurbulenceKind,
+        /// Maps noise space onto output pixels.
+        transform: Transform2D,
+    },
+    /// Converts unpremultiplied color from linearRGB to sRGB with the sRGB
+    /// transfer curve (IEC 61966-2-1), leaving alpha unchanged. SVG filters
+    /// run in linearRGB by default (`color-interpolation-filters`), so a
+    /// chain that reproduces one ends with this to hand the display the
+    /// sRGB values a browser shows. Adjacent to its inverse it folds away.
+    LinearRgbToSrgb,
+    /// The inverse of [`LinearRgbToSrgb`](Self::LinearRgbToSrgb): converts
+    /// unpremultiplied sRGB color to linearRGB, for filtering an ordinary
+    /// image the way a linearRGB SVG filter would.
+    SrgbToLinearRgb,
+    /// Blends the image over a backdrop image: SVG `feBlend` with the image
+    /// as `in` and `backdrop` as `in2`. Both are premultiplied and the result
+    /// is the specification's `cs * (1 - ab) + cb * (1 - as) + as * ab *
+    /// B(Cb, Cs)`, so where the backdrop is transparent the image passes
+    /// through unchanged and where the image is transparent the backdrop
+    /// shows. The backdrop is placed at the rect `x, y, width, height` and is
+    /// transparent outside it: the rect is in the pixels of the image being
+    /// filtered for [`Canvas::filter_image_chain`](crate::Canvas::filter_image_chain),
+    /// and in root device space for a layer's filters, as a layer mask's rect
+    /// is. A blend is one shader pass over both images plus the draw that
+    /// places the backdrop; it needs its own scratch image, reserved with the
+    /// chain's.
+    Blend {
+        /// How the two combine.
+        mode: BlendMode,
+        /// The image under the filtered one (`in2`).
+        backdrop: ImageId,
+        /// Left edge of the backdrop's placement.
+        x: f32,
+        /// Top edge of the backdrop's placement.
+        y: f32,
+        /// Width of the backdrop's placement.
+        width: f32,
+        /// Height of the backdrop's placement.
+        height: f32,
+    },
+}
+
+/// The noise function of [`ImageFilter::Turbulence`]: SVG `feTurbulence`'s
+/// `type` attribute.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TurbulenceKind {
+    /// Sums signed octaves: smooth, cloud-like values centered on 0.5.
+    FractalNoise,
+    /// Sums the absolute value of each octave: sharper, vein-like values
+    /// centered on 0. The SVG default.
+    #[default]
+    Turbulence,
 }
 
 impl ImageFilter {
@@ -550,6 +705,24 @@ impl ImageFilter {
         }
     }
 
+    /// The `feColorMatrix type="luminanceToAlpha"` conversion: the output
+    /// alpha is the input's luminance and the color channels go to zero,
+    /// which is how SVG luminance masks read their content. Uses the Rec.
+    /// 709 weights above, the ones Skia's luma filter applies for Chromium's
+    /// masks; the SVG row (0.2125, 0.7154, 0.0721) differs by at most
+    /// 0.0002. Like every color matrix it runs on straight (unpremultiplied)
+    /// color, so the luminance is the color's own, not scaled by alpha.
+    pub fn luminance_to_alpha() -> Self {
+        #[rustfmt::skip]
+        let matrix = [
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            0.0,      0.0,      0.0,      0.0, 0.0,
+            Self::LR, Self::LG, Self::LB, 0.0, 0.0,
+        ];
+        ImageFilter::ColorMatrix { matrix }
+    }
+
     /// CSS `opacity(amount)`; `amount` is clamped to `[0, 1]` and scales alpha.
     pub fn opacity(amount: f32) -> Self {
         let a = amount.clamp(0.0, 1.0);
@@ -582,10 +755,20 @@ impl ImageFilter {
     /// sequential result and from Chromium. `next` may overflow freely: its
     /// output is clamped at the end of the pass either way.
     ///
-    /// Returns `None` when either side is not a color matrix (a blur cannot
-    /// fold) or when `self` is not range-safe, leaving chain execution to run
-    /// the passes separately.
+    /// A color-space transfer followed by its inverse folds to the identity:
+    /// the pair is a mathematical no-op, and skipping it is more exact than
+    /// running it, which would round the linear intermediate to 8 bits.
+    ///
+    /// Returns `None` for any other pairing that is not two color matrices
+    /// (a blur or a turbulence cannot fold) or when `self` is not
+    /// range-safe, leaving chain execution to run the passes separately.
     pub fn fold_with(self, next: Self) -> Option<Self> {
+        if matches!(
+            (self, next),
+            (Self::LinearRgbToSrgb, Self::SrgbToLinearRgb) | (Self::SrgbToLinearRgb, Self::LinearRgbToSrgb)
+        ) {
+            return Some(Self::identity());
+        }
         let (Self::ColorMatrix { matrix: a }, Self::ColorMatrix { matrix: b }) = (self, next) else {
             return None;
         };
@@ -620,8 +803,48 @@ impl ImageFilter {
     /// it. Exhaustive on purpose - a new variant must declare its parity here.
     pub(crate) fn flips_output(&self) -> bool {
         match self {
-            Self::ColorMatrix { .. } => true,
+            Self::ColorMatrix { .. }
+            | Self::Turbulence { .. }
+            | Self::LinearRgbToSrgb
+            | Self::SrgbToLinearRgb
+            | Self::Blend { .. } => true,
             Self::GaussianBlur { .. } => false,
+        }
+    }
+
+    /// The shader and its 20 parameter slots for a filter that runs as one
+    /// full-image pass over a `width` x `height` target; `None` for the
+    /// two-pass Gaussian blur, which the renderers drive themselves.
+    ///
+    /// The slots ride the scissor and paint matrix uniforms, which are dead
+    /// during a filter pass (no scissor, no paint gradient): the first 12
+    /// land in `scissor_mat`, the last 8 in `paint_mat`, so no uniform-array
+    /// growth is needed. Each shader documents its own layout; the color
+    /// matrix is its 20 values row-major, a transfer uses slot 0 as its
+    /// direction (1 = to sRGB), turbulence is laid out by
+    /// [`turbulence::shader_slots`](crate::turbulence::shader_slots).
+    pub(crate) fn single_pass(&self, width: f32, height: f32) -> Option<(ShaderType, [f32; 20])> {
+        let transfer = |to_srgb: f32| {
+            let mut slots = [0.0f32; 20];
+            slots[0] = to_srgb;
+            (ShaderType::FilterImageTransfer, slots)
+        };
+        match *self {
+            Self::GaussianBlur { .. } => None,
+            Self::ColorMatrix { matrix } => Some((ShaderType::FilterImageColorMatrix, matrix)),
+            Self::Turbulence { .. } => Some((
+                ShaderType::FilterImageTurbulence,
+                crate::turbulence::shader_slots(self, width, height),
+            )),
+            Self::LinearRgbToSrgb => Some(transfer(1.0)),
+            Self::SrgbToLinearRgb => Some(transfer(0.0)),
+            Self::Blend { mode, .. } => {
+                // Slot 1, whether the backdrop is sampled upside down, is the
+                // pass's to set: it depends on where in a chain the blend runs.
+                let mut slots = [0.0f32; 20];
+                slots[0] = mode.shader_index();
+                Some((ShaderType::FilterImageBlend, slots))
+            }
         }
     }
 }
@@ -788,6 +1011,20 @@ mod filter_fold_tests {
     /// constant column composes in order. `brightness(0.5)` and `invert(1.0)`
     /// are both range-safe, so both directions fold, and they do not commute:
     /// brighten-then-invert is `1 - 0.5c`, invert-then-brighten is `0.5 - 0.5c`.
+    /// luminanceToAlpha writes the Rec. 709 luminance into alpha and nothing
+    /// into the color rows, so white converts to full coverage and a pure
+    /// green pixel to 0.7152 of it.
+    #[test]
+    fn luminance_to_alpha_moves_luminance_into_alpha_only() {
+        let ImageFilter::ColorMatrix { matrix } = ImageFilter::luminance_to_alpha() else {
+            panic!("luminance_to_alpha is a color matrix");
+        };
+        assert!(matrix[..15].iter().all(|c| *c == 0.0), "color rows are zero");
+        assert_eq!(&matrix[15..], &[0.2126, 0.7152, 0.0722, 0.0, 0.0]);
+        let white: f32 = matrix[15..18].iter().sum();
+        assert!((white - 1.0).abs() < 1e-4, "white is full coverage, got {white}");
+    }
+
     #[test]
     fn folding_respects_order_and_identity() {
         let bright = ImageFilter::brightness(0.5);

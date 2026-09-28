@@ -32,12 +32,29 @@ pub struct Drawable {
 /// Defines different types of commands that can be executed by the renderer.
 #[derive(Debug)]
 pub enum CommandType {
+    /// Intersects the persistent stencil clip with a path: the drawables carry
+    /// the winding fan triangles and `triangles_verts` the resolve quad over
+    /// the previously visible clip bounds. `fill_rule` is the clip-rule.
+    ClipFill,
+    /// Rewrites the persistent stencil clip with a full-canvas quad
+    /// (`triangles_verts`): `visible: true` arms the clip plane (everything
+    /// visible, ambient value 0x80), `false` disarms it back to the zero
+    /// ambient so clip-free rendering pays nothing.
+    ClipReset {
+        /// Whether the plane resets to "everything visible" (armed) or to the
+        /// disarmed zero state.
+        visible: bool,
+    },
     /// Set the render target (screen or image).
     SetRenderTarget(RenderTarget),
     /// Clear a rectangle with the specified color.
     ClearRect {
         /// Color to fill the rectangle with.
         color: Color,
+        /// A clip is armed on the target: clear only the stencil's winding
+        /// bits so the clip plane (bit 7) survives. Otherwise the whole
+        /// stencil is cleared, the tile clear a tiler does for free.
+        keep_clip: bool,
     },
     /// Fill a convex shape.
     ConvexFill {
@@ -77,14 +94,41 @@ pub enum CommandType {
     },
 }
 
+/// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
+/// texture) is stored the other way up from the image, the alpha the image
+/// is scaled by first, and whether to write the image's contribution over
+/// the backdrop - what source-over onto it adds - instead of the result.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BlendPass {
+    pub(crate) backdrop_flipped: bool,
+    pub(crate) source_alpha: f32,
+    pub(crate) contribution: bool,
+}
+
+impl Default for BlendPass {
+    fn default() -> Self {
+        Self {
+            backdrop_flipped: false,
+            source_alpha: 1.0,
+            contribution: false,
+        }
+    }
+}
+
 /// Represents a command that can be executed by the renderer.
 #[derive(Debug)]
 pub struct Command {
     pub(crate) cmd_type: CommandType,
+    // Whether the persistent stencil clip (Canvas::clip_path) applies to this
+    // command's fragments. Set centrally when the command is appended.
+    pub(crate) clip_active: bool,
     pub(crate) drawables: Vec<Drawable>,
     pub(crate) triangles_verts: Option<(usize, usize)>,
     pub(crate) image: Option<ImageId>,
+    pub(crate) filter_scratch: Option<ImageId>,
     pub(crate) glyph_texture: GlyphTexture,
+    // A blend pass's inputs beyond its mode; the backdrop is the glyph texture.
+    pub(crate) blend_pass: BlendPass,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -94,10 +138,13 @@ impl Command {
     pub fn new(flavor: CommandType) -> Self {
         Self {
             cmd_type: flavor,
+            clip_active: false,
             drawables: Vec::new(),
             triangles_verts: None,
             image: None,
+            filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
+            blend_pass: BlendPass::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
@@ -105,7 +152,7 @@ impl Command {
 }
 
 /// Represents different render targets (screen or image).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ord, PartialOrd)]
 pub enum RenderTarget {
     /// Render to the screen.
     Screen,
@@ -179,6 +226,28 @@ pub trait Renderer {
 
     /// Take a screenshot of the current render target.
     fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind>;
+
+    /// The largest width or height this backend can allocate for an image, in
+    /// pixels. Layers and shadows whose stores would exceed it degrade rather
+    /// than fail. The default matches current desktop GPUs; a VideoCore IV
+    /// (Raspberry Pi Zero through 3) reports 2048.
+    fn max_texture_size(&self) -> usize {
+        8192
+    }
+
+    /// Backend allocation charged when the transient pool creates `info`.
+    /// Renderers override this for attachments or scratch reserved alongside
+    /// pooled images.
+    fn transient_image_cost(&self, info: ImageInfo) -> usize {
+        let bytes_per_pixel = match info.format() {
+            crate::PixelFormat::Gray8 => 1,
+            crate::PixelFormat::Rgb8 => 3,
+            crate::PixelFormat::Rgba8 => 4,
+        };
+        info.width()
+            .saturating_mul(info.height())
+            .saturating_mul(bytes_per_pixel)
+    }
 }
 
 /// Marker trait for renderers that don't have a surface.
@@ -257,6 +326,14 @@ pub enum ShaderType {
     FillGradientTwoPointRadial,
     /// Fill image two-point radial gradient shader (multi-stop LUT variant).
     FillImageGradientTwoPointRadial,
+    /// Turbulence generator shader (SVG `feTurbulence`); samples the noise
+    /// lattice bound in place of the image.
+    FilterImageTurbulence,
+    /// sRGB transfer-curve shader: linearRGB to sRGB, or the reverse.
+    FilterImageTransfer,
+    /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
+    /// glyph-texture slot, with one of the sixteen blend modes.
+    FilterImageBlend,
 }
 
 impl ShaderType {
@@ -276,6 +353,9 @@ impl ShaderType {
             Self::FilterImageColorMatrix => 10,
             Self::FillGradientTwoPointRadial => 11,
             Self::FillImageGradientTwoPointRadial => 12,
+            Self::FilterImageTurbulence => 13,
+            Self::FilterImageTransfer => 14,
+            Self::FilterImageBlend => 15,
         }
     }
 
@@ -285,15 +365,26 @@ impl ShaderType {
     }
 }
 
+/// The largest standard deviation one Gaussian blur pass renders. The
+/// fragment shader's blur loop is bounded at 24 taps per side (GLES 2.0 needs
+/// a constant loop bound) and the kernel reaches 3 sigma, so a pass covers
+/// sigma 8 exactly and no more. A blur above it is not clamped away: the chain
+/// planner (`filter_passes` in lib.rs) runs it as several passes of at most
+/// this sigma, which compose in quadrature to the requested one. The
+/// coefficients below and the shader's tap count agree on this value.
+pub(crate) const MAX_BLUR_SIGMA: f32 = 8.0;
+
 /// Gaussian blur coefficients for `sigma`, sanitized the same way for every
 /// backend. Sigma 0 (or negative / NaN) would divide the coefficient by zero
-/// and blank the output instead of passing the image through, and a huge sigma
-/// must clamp to the bound the fragment shader's loop uses (GLES 2.0 needs a
-/// constant loop bound) so the coefficients and the iteration count agree.
-/// Near-zero renders as a visually exact copy. Returns the three coefficients
-/// and the sanitized sigma the shader must be given.
+/// and blank the output instead of passing the image through, and a sigma
+/// above [`MAX_BLUR_SIGMA`] must clamp to the bound the fragment shader's loop
+/// uses so the coefficients and the iteration count agree - a single
+/// `filter_image` pass renders such a sigma at the bound; a chain, a layer
+/// filter or a shadow blur splits it into passes first and never sends one
+/// above it. Near-zero renders as a visually exact copy. Returns the three
+/// coefficients and the sanitized sigma the shader must be given.
 pub(crate) fn gaussian_blur_coefficients(sigma: f32) -> ([f32; 3], f32) {
-    let sigma = if sigma > 0.0 { sigma.min(8.0) } else { 1e-3 };
+    let sigma = if sigma > 0.0 { sigma.min(MAX_BLUR_SIGMA) } else { 1e-3 };
     let x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
     let y = f32::exp(-0.5 / (sigma * sigma));
     ([x, y, y * y], sigma)

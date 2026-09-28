@@ -62,6 +62,13 @@ pub struct Contour {
     closed: bool,
     bevel: usize,
     solidity: Option<Solidity>,
+    /// Set for the duration of a fill: this contour's points were flipped to
+    /// the orientation the fringe extrusion assumes, so the triangles built
+    /// from them have to be flipped back.
+    reversed: bool,
+    /// Set for the duration of a fill: the points lie on one line, so the
+    /// contour encloses nothing and a fill of it draws nothing.
+    degenerate: bool,
     pub(crate) fill: Vec<Vertex>,
     pub(crate) stroke: Vec<Vertex>,
     pub(crate) convexity: Convexity,
@@ -74,6 +81,8 @@ impl Default for Contour {
             closed: Default::default(),
             bevel: Default::default(),
             solidity: None,
+            reversed: false,
+            degenerate: false,
             fill: Vec::new(),
             stroke: Vec::new(),
             convexity: Convexity::default(),
@@ -99,8 +108,46 @@ impl Contour {
         area * 0.5
     }
 
+    /// Whether the points all lie on one line: fewer than three of them, or
+    /// none farther than 1/256 px from the line through the first point and
+    /// the point farthest from it. Such a contour encloses nothing, and
+    /// browsers draw nothing for its fill - a bare `<line>` or an open path
+    /// under SVG's default black fill (femtovg/femtovg#341). The band is a
+    /// fixed device distance, so a thin sliver stays a sliver at any zoom,
+    /// and a contour with a long retraced tail keeps whatever area it does
+    /// enclose.
+    fn collinear(points: &[Point]) -> bool {
+        if points.len() < 3 {
+            return true;
+        }
+        let origin = points[0].pos;
+        let far = points
+            .iter()
+            .map(|p| p.pos - origin)
+            .max_by(|a, b| a.mag2().total_cmp(&b.mag2()))
+            .unwrap();
+        let length = far.mag2().sqrt();
+        if length <= 0.0 {
+            return true;
+        }
+        let axis = far * (1.0 / length);
+        points.iter().all(|p| (p.pos - origin).cross(axis).abs() <= 1.0 / 256.0)
+    }
+
     fn point_count(&self) -> usize {
         self.point_range.end - self.point_range.start
+    }
+
+    /// Recomputes each point's direction and length to its successor. Every
+    /// point stores the edge that leaves it, so reversing a contour leaves all
+    /// of them pointing at what is now the previous point.
+    fn recompute_directions(points: &mut [Point]) {
+        for i in 0..points.len() {
+            let next = points[(i + 1) % points.len()].pos;
+            let p = &mut points[i];
+            p.dpos = next - p.pos;
+            p.len = p.dpos.normalize();
+        }
     }
 }
 
@@ -132,6 +179,11 @@ pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: Bounds,
     points: Vec<Point>,
+    // Per contour, the other contours' winding number and crossing count at
+    // a point just inside it, and its own orientation sign - what decides
+    // whether it bounds a hole under either fill rule. Computed once per
+    // cache (per transform), not per fill.
+    contour_sides: Option<Vec<(i32, u32, i32)>>,
 }
 
 impl PathCache {
@@ -257,7 +309,36 @@ impl PathCache {
             true
         });
 
+        // Classified once: a contour whose points lie on one line encloses
+        // nothing, so it neither draws nor counts in the others' classification.
+        for contour in &mut cache.contours {
+            contour.degenerate = Contour::collinear(&cache.points[contour.point_range.clone()]);
+        }
+
         cache
+    }
+
+    /// Emits independent triangle-list fans whose signed coverage can be
+    /// accumulated in the stencil buffer to recover the path's winding. The
+    /// contours share one vertex list without introducing triangles between
+    /// them.
+    pub(crate) fn winding_triangles(&self) -> Vec<Vertex> {
+        let mut vertices = Vec::new();
+
+        for contour in &self.contours {
+            let points = &self.points[contour.point_range.clone()];
+            if let Some((&center, tail)) = points.split_first() {
+                vertices.extend(tail.windows(2).flat_map(|edge| {
+                    [
+                        Vertex::pos(center.pos, 0.5, 1.0),
+                        Vertex::pos(edge[0].pos, 0.5, 1.0),
+                        Vertex::pos(edge[1].pos, 0.5, 1.0),
+                    ]
+                }));
+            }
+        }
+
+        vertices
     }
 
     fn add_contour(&mut self) {
@@ -516,8 +597,127 @@ impl PathCache {
         false
     }
 
-    pub(crate) fn expand_fill(&mut self, fringe_width: f32, line_join: LineJoin, miter_limit: f32) {
+    /// The other contours' winding number and crossing count at the midpoint
+    /// of each contour's first edge, plus the contour's own orientation sign,
+    /// computed once per cache. A contour whose box misses the sample point
+    /// cannot wind around it (its crossings of the ray cancel), so only
+    /// overlapping boxes are walked: near-linear for the usual
+    /// many-disjoint-contours path. A degenerate contour draws nothing, so
+    /// it gets an empty box and counts nowhere: a sliver within the band
+    /// could otherwise wind once around a sample point on its line and turn
+    /// the contour that owns the point inside out.
+    fn contour_sides(&mut self) -> &[(i32, u32, i32)] {
+        if self.contour_sides.is_none() {
+            let n = self.contours.len();
+            let boxes: Vec<Bounds> = self
+                .contours
+                .iter()
+                .map(|contour| {
+                    let mut b = Bounds::default();
+                    if contour.degenerate {
+                        return b;
+                    }
+                    for point in &self.points[contour.point_range.clone()] {
+                        b.minx = b.minx.min(point.pos.x);
+                        b.miny = b.miny.min(point.pos.y);
+                        b.maxx = b.maxx.max(point.pos.x);
+                        b.maxy = b.maxy.max(point.pos.y);
+                    }
+                    b
+                })
+                .collect();
+            let sides = (0..n)
+                .map(|i| {
+                    let points = &self.points[self.contours[i].point_range.clone()];
+                    if n < 2 || points.len() < 3 {
+                        return (0, 0, 0);
+                    }
+                    let (a, b) = (points[0].pos, points[1].pos);
+                    let (x, y) = ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                    // `is_left` winds the orientation `polygon_area` calls positive as -1.
+                    let own = if Contour::polygon_area(points) > 0.0 { -1 } else { 1 };
+                    let (mut winding, mut crossings) = (0i32, 0u32);
+                    for (j, contour) in self.contours.iter().enumerate() {
+                        if j == i || !boxes[j].contains(x, y) {
+                            continue;
+                        }
+                        for (p0, p1) in contour.point_pairs(&self.points) {
+                            if p0.pos.y <= y {
+                                if p1.pos.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                                    winding += 1;
+                                    crossings += 1;
+                                }
+                            } else if p1.pos.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                                winding -= 1;
+                                crossings += 1;
+                            }
+                        }
+                    }
+                    (winding, crossings, own)
+                })
+                .collect();
+            self.contour_sides = Some(sides);
+        }
+        self.contour_sides.as_deref().unwrap_or(&[])
+    }
+
+    /// For each contour, whether the region just inside it is unfilled under
+    /// `fill_rule` - a hole boundary. A path with one contour has none.
+    fn hole_contours(&mut self, fill_rule: FillRule) -> Vec<bool> {
+        if self.contours.len() < 2 {
+            return vec![false; self.contours.len()];
+        }
+        self.contour_sides()
+            .iter()
+            .map(|&(winding, crossings, own)| match fill_rule {
+                FillRule::NonZero => own != 0 && winding + own == 0,
+                FillRule::EvenOdd => own != 0 && crossings % 2 == 1,
+            })
+            .collect()
+    }
+
+    pub(crate) fn expand_fill(
+        &mut self,
+        fringe_width: f32,
+        line_join: LineJoin,
+        miter_limit: f32,
+        fill_rule: FillRule,
+    ) {
         let has_fringe = fringe_width > 0.0;
+
+        // Which contours bound a hole: their interior is unfilled under the
+        // fill rule, so the fringe must extrude away from it. Sampled at the
+        // midpoint of each contour's first edge, which is adjacent to its
+        // interior, against every other contour of the path.
+        let hole = self.hole_contours(fill_rule);
+
+        // Every offset below is taken along a point's miter vector, and that
+        // vector's direction follows the order the contour's points are in. A
+        // contour wound the other way extrudes its fringe outward instead of
+        // inward, so the fill lands a whole fringe too wide - the clockwise
+        // square in #308, a pixel bigger all round than the identical
+        // counter-clockwise one. nanovg never meets this because it normalizes
+        // every contour up front ("Enforce winding" in nvg__flattenPaths, with
+        // nvg__addPath defaulting each path to NVG_CCW). femtovg cannot just do
+        // that: unlike nanovg it lets the authored winding express holes, the
+        // way SVG and Canvas write them, and the stencil pass reads that
+        // winding back off these triangles. So normalize for the geometry, put
+        // the triangles back the way the caller wound them, and restore the
+        // points - a later stroke of the same cached path must still see its
+        // own direction, which decides dash phase and which end gets which cap.
+        // A contour whose interior is filled is oriented so the miter vectors
+        // point inward; a hole's boundary the other way round, so its fringe
+        // lands in the fill on the far side of the edge rather than in the
+        // hole - nanovg's NVG_SOLID / NVG_HOLE distinction, derived here from
+        // the winding the caller authored instead of declared.
+        for (contour, is_hole) in self.contours.iter_mut().zip(hole) {
+            let points = &mut self.points[contour.point_range.clone()];
+            contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
+            if contour.reversed {
+                points.reverse();
+                Contour::recompute_directions(points);
+            }
+        }
 
         self.calculate_joins(fringe_width, line_join, miter_limit);
 
@@ -539,6 +739,9 @@ impl PathCache {
         for contour in &mut self.contours {
             contour.stroke.clear();
             contour.fill.clear();
+            if contour.degenerate {
+                continue;
+            }
 
             let triangle_count = (contour.fill.capacity() - 2) * 3;
             let mut triangle_fan_fill = Vec::with_capacity(triangle_count);
@@ -576,9 +779,20 @@ impl PathCache {
             if triangle_fan_fill.len() > 2 {
                 let center = triangle_fan_fill[0];
                 let tail = &triangle_fan_fill[1..];
+                // Only the stencil pass reads this winding back, to tell a hole
+                // from a solid. A convex path skips the stencil and is drawn
+                // directly, where flipped triangles would just face away.
+                let flip = contour.reversed && !convex;
                 contour.fill = tail
                     .windows(2)
-                    .flat_map(|vertices| IntoIterator::into_iter([center, vertices[0], vertices[1]]))
+                    .flat_map(|vertices| {
+                        let (a, b) = if flip {
+                            (vertices[1], vertices[0])
+                        } else {
+                            (vertices[0], vertices[1])
+                        };
+                        IntoIterator::into_iter([center, a, b])
+                    })
                     .collect();
             }
 
@@ -608,6 +822,16 @@ impl PathCache {
                 let p1 = contour.stroke[1];
                 contour.stroke.push(Vertex::new(p0.x, p0.y, lu, 1.0));
                 contour.stroke.push(Vertex::new(p1.x, p1.y, ru, 1.0));
+            }
+        }
+
+        // The cache outlives this call; a stroke of the same path reads these
+        // same points, so give them back exactly as they arrived.
+        for contour in &mut self.contours {
+            if contour.reversed {
+                let points = &mut self.points[contour.point_range.clone()];
+                points.reverse();
+                Contour::recompute_directions(points);
             }
         }
     }
@@ -896,11 +1120,18 @@ impl PathCache {
             && maybe_t1_bottom_right.x == maybe_t2_top_right.x
             && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
         {
+            // A mirrored transform hands the corners over in the opposite
+            // order, so take the extent by min/max rather than by position in
+            // the strip: the fill is the same rect either way, and the blit
+            // maps its texture coordinates through the paint transform, flip
+            // included.
+            let (x0, x1) = (maybe_t1_top_left.x, maybe_t2_top_right.x);
+            let (y0, y1) = (maybe_t1_top_left.y, maybe_t1_bottom_left.y);
             Some(crate::Rect::new(
-                maybe_t1_top_left.x,
-                maybe_t1_top_left.y,
-                maybe_t2_top_right.x - maybe_t1_top_left.x,
-                maybe_t1_bottom_left.y - maybe_t1_top_left.y,
+                x0.min(x1),
+                y0.min(y1),
+                (x1 - x0).abs(),
+                (y1 - y0).abs(),
             ))
         } else {
             None
@@ -1120,9 +1351,46 @@ mod tests {
         let transform = Transform2D::identity();
 
         let mut path_cache = PathCache::new(path.verbs(), &transform, 0.25, 0.01);
-        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0);
+        path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, FillRule::NonZero);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
+    }
+
+    /// A rect stays a rect under a mirrored transform: the corners arrive in
+    /// the opposite order, and the fast image-blit path used to read that as
+    /// a negative extent and draw nothing.
+    #[test]
+    fn a_mirrored_rect_fill_is_still_a_rect() {
+        let mut path = Path::new();
+        path.rect(10.0, 20.0, 30.0, 40.0);
+
+        let upright = Transform2D::identity();
+        let mut cache = PathCache::new(path.verbs(), &upright, 0.25, 0.01);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
+        let rect = cache.path_fill_is_rect().expect("an upright rect");
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (10.0, 20.0, 30.0, 40.0));
+
+        // y' = 100 - y: the rect lands at y in 40..80; x' = -x: at x in -40..-10.
+        let mirrored = Transform2D::new(-1.0, 0.0, 0.0, -1.0, 0.0, 100.0);
+        let mut cache = PathCache::new(path.verbs(), &mirrored, 0.25, 0.01);
+        cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
+        let rect = cache.path_fill_is_rect().expect("a mirrored rect is still a rect");
+        assert_eq!((rect.x, rect.y, rect.w, rect.h), (-40.0, 40.0, 30.0, 40.0));
+    }
+
+    #[test]
+    fn winding_triangles_do_not_classify_contour_nesting() {
+        let mut path = Path::new();
+        for inset in 0..256 {
+            let inset = inset as f32 * 0.01;
+            path.rect(inset, inset, 10.0, 10.0);
+        }
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let vertices = cache.winding_triangles();
+
+        assert!(cache.contour_sides.is_none());
+        assert_eq!(vertices.len(), 256 * 6);
     }
 }
 

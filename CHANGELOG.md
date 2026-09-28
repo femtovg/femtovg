@@ -9,6 +9,75 @@ All notable changes to this project will be documented in this file.
   `BlendFactor` is a subset of what the backends expose - so adding to either
   should not be a breaking change. Downstream `match`es on them now need a
   wildcard arm.
+- Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
+  `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
+  is blended with what lies under it on the target it was opened on, which
+  must be an image or an enclosing layer; on the screen, or when the two
+  transients it needs do not fit the budget, the layer composites normally.
+  Fixes the solidJS banner's color-burn overlay. Also fixed the multiply, screen
+  and hard-light groups in Firefox, BuseyBench, and WPT reference examples.
+- Added `Canvas::with_render_target`: a side pass on another target that goes
+  back to the one that was current, an open layer's store included.
+- Added `ImageFilter::Blend`: blends the filtered image over a second image
+  with any of the sixteen `BlendMode`s of the Compositing and Blending
+  specification (multiply, screen, overlay, ..., luminosity), the SVG
+  `feBlend` primitive. The backdrop is placed at a rect, in root device space
+  for a layer's filters, so a chain can blend a group with an image rendered
+  elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
+- Fixed a fill of a path whose points all lie on one line - a bare `<line>`
+  or an open path under SVG's default black fill - drawing a two-pixel line
+  where browsers draw nothing; such a contour no longer counts when the
+  path's other contours are told apart as holes or solids. Fixes #341.
+- Fixed a layer's shadow missing the shadow of content outside the scissor
+  (or the canvas): the capture now takes in whatever reaches into view once
+  shifted by the shadow offset and spread by its blur, so an SVG
+  `feDropShadow` cast from beyond a clip or the viewport lands inside it as
+  browsers draw it. A capture the reach would push past the texture limit or
+  the transient budget keeps the store it had and gives the reach the room
+  that is left, instead of passing through. Fixed multiple instances of wrong
+  pixels in BuseyBench and WPT reference tests.
+- Added support for the `wasm32-unknown-emscripten` target.
+- Fixed a two-stop two-point radial gradient (`Paint::two_point_radial_gradient`)
+  interpolating in premultiplied space, which lost a semi-transparent stop's hue
+  instead of fading it in like every other gradient variant.
+- `save()` no longer grows the state stack past 16,384 nested levels: deeper
+  saves still pair with their restores, but nothing draws there and the state
+  changes made there are discarded.
+- Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
+  above 8 device pixels) coming out narrower than requested. A layer filter, a
+  filter chain or a shadow blurred past that limit now runs as several passes
+  that compose to the requested width, and its offscreen padding follows the
+  true reach; blurs within the limit render exactly as before. The wgpu backend
+  also reuses one blur buffer across passes instead of allocating one per pass.
+  Fixes the Google Workspace SVG icon, amongst several others.
+- Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
+  by the square of the device width (a nanovg heuristic), so a 0.2 px line
+  carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
+  a 0.5 px line is 50% - which is the coverage Skia's hairline path puts down
+  and what both browsers render. Fine detail drawn with sub-pixel strokes
+  (hatching, iris lines, thin outlines at small zoom) was visibly lighter than
+  in a browser before.
+- Fixed filled paths landing a pixel too wide when the contour runs clockwise.
+  The antialiasing fringe is extruded along each point's miter vector, whose
+  direction follows the order the points are in, so a clockwise contour pushed
+  it outward instead of inward - `Path::rect()` and `Path::circle()` emit
+  counter-clockwise and were exact, while an SVG arc with `sweep = 1`, or any
+  imported path wound the other way, was a pixel fat all round. Fills now cover
+  the same pixels either way, and the authored winding still selects holes for
+  `FillRule::NonZero`. This also takes most of the over-inking out of thin
+  filled shapes, which were paying the same pixel on both edges.
+- Added `ImageFilter::Turbulence`, the SVG `feTurbulence` primitive, generated on
+  the GPU from the SVG 1.1 reference algorithm - the same Park-Miller generator
+  and Perlin lattice Chromium and Firefox run, so a seed gives a browser's noise.
+  The lattice is uploaded once per seed as a 512 KB texture with the spec's two
+  dependent permutation lookups pre-composed, so every fetch is addressed
+  straight from the pixel (the shape tile-based mobile GPUs pipeline) at eight
+  fetches per octave for all four channels; the last four seeds stay cached. A
+  `transform` maps noise space onto the output so the pattern scales with the
+  content, and `stitchTiles` is supported. Added `ImageFilter::LinearRgbToSrgb`
+  and `SrgbToLinearRgb`, the sRGB transfer curve as a pass, so a chain can run
+  in linearRGB the way SVG filters do by default and hand back what a browser
+  displays; an adjacent pair folds away.
 - Added `Canvas::filter_image_chain()`, which applies a list of image filters in
   one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
   an SVG filter chain does. Consecutive color-matrix filters fold into a single
@@ -26,6 +95,64 @@ All notable changes to this project will be documented in this file.
   ramp was left transparent (or holding stale texture data) instead of the last
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
+- Added `Canvas::clip_path(path, fill_rule)`, which clips later drawing to any
+  path under the current transform - Canvas 2D `clip()` and SVG `clip-path`
+  with `clip-rule` - and is scoped by `save()`/`restore()`. Clips use a bit of
+  the stencil buffer both backends already have, so they add no textures or
+  render passes; a clip taken while drawing into a layer lives on the layer's
+  store and gates its content, while the clips underneath gate the composite.
+  `clear_rect()` stays a raw clear the clip does not affect; it clears the
+  stencil with the color so a winding count a cover pass missed cannot reach
+  the next frame - the whole stencil, or only the winding bits while a clip is
+  armed on the target. Clip edges are not antialiased yet.
+- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
+  a mask image placed in device space, using either its luminance times alpha
+  (SVG `mask`'s default `mask-type`, via the new
+  `ImageFilter::luminance_to_alpha()`) or its alpha. Masks apply after the
+  layer's filters, as in SVG, and reserve their coverage images with the
+  layer's store, so a masked layer the transient budget cannot fit passes
+  through as a whole (`begin_layer()` returns `false`) rather than composite
+  unmasked.
+- Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
+  offscreen image and composite it back with `LayerEffects` - group opacity, so
+  overlapping shapes fade as one like an SVG group, and/or an image-filter
+  chain. The offscreen image is sized to the current scissor rect (under any
+  axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
+  blur reach of the whole chain (successive blurs compound in quadrature),
+  not the whole canvas or render target. A rounded or rotated scissor clips
+  the layer's composite once, after its filters, where it was set - a blur
+  samples content past the clip edge, as SVG's `clip-path` over a filtered
+  group does - instead of also clipping the draws inside the layer (which
+  squared the edge coverage and, in a blur-padded store, landed in the wrong
+  place). `begin_layer()` returns whether the
+  layer captured: `false` means it passed through with its effects dropped -
+  over the transient budget, past the backend's texture limit
+  (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate
+  bounds. Layers stay open across a flush of the same size; a `set_size()`
+  that changes the size, and `reset()`, discard open layers as a Canvas 2D
+  reset does. A layer opened under a non-invertible transform draws nothing,
+  as in Canvas 2D. The web-platform-tests layer suite is ported where the API
+  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at 
+  `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` 
+  rule, and what SVG `feDropShadow` on a group means) and resets inside the layer,
+  so children are not each shadowed on their own.
+- A layer's backing images return to a pool at `end_layer()` and the next
+  layer of the same size takes them (commands run in order, so this needs no
+  synchronization; store sizes round up to 64 px so siblings with different
+  blur reaches share one), as do filter-chain scratches and shadow coverage; a
+  frame's transient memory is therefore its deepest nesting, not its layer
+  count - at 1080p a viewport-sized layer is 4.7 MB and thirteen blurred ones
+  would fill 256 MiB, while real artwork opens hundreds per frame.
+  `Canvas::set_transient_image_budget()` caps what is held at once (default
+  256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
+  through (`begin_layer()` returns `false` - a layer reserves every image its
+  effects draw through, a filter chain's result and scratches included, with
+  its store, so it is admitted whole or not at all; each open filtered level
+  holds its result and scratches for its whole life, so nesting filtered
+  layers costs their sum), `filter_image_chain()`
+  returns `ErrorKind::TransientImageBudgetExceeded`, and shadows are skipped
+  rather than allocate. Shadow coverage rounds to 8 px, not the layers' 64,
+  since shadows are many and small.
 - Fixed two-stop gradients fading a transparent stop through the wrong colors:
   the stop's own color was discarded, so `transparent` to blue turned a plain
   light blue instead of darkening, and transparent red to blue lost its red.
