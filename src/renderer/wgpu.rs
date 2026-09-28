@@ -65,6 +65,27 @@ const UNIFORMARRAY_SIZE: usize = 14;
 const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 // A concave fill and a stencil stroke record two sets of params, every other command one.
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
+
+/// Render passes encoded before the frame's command buffer so far is
+/// submitted and a new one begun.
+///
+/// Metal allocates driver memory for every render command encoder (about
+/// 2.3 MiB on macOS 26, independent of the target size) and keeps it until
+/// the command buffer that holds the encoder completes. A frame that opens
+/// hundreds of layers - each one at least two passes - therefore held
+/// gigabytes in one command buffer: 800 opacity layers reached 3.7 GiB on an
+/// M4 Max and 1,600 failed buffer creation outright; on an iPhone 12 one
+/// BuseyBench portrait of 176 layers exceeded the 2.2 GiB per-process limit
+/// and was jetsammed. Submitting the frame in slices lets the driver recycle
+/// each slice's memory while the rest of the frame is still being encoded.
+const PASSES_PER_SUBMISSION: u32 = 64;
+
+/// Submitted slices of the frame allowed to be unfinished before the next
+/// one is encoded. Submitting alone does not bound the driver memory: the GPU
+/// fell nine slices behind the encoder on an M4 Max. Waiting for the oldest
+/// slice past this count stalls the encoder only when the GPU is behind,
+/// which is when the memory would otherwise grow.
+const SUBMISSIONS_IN_FLIGHT: usize = 2;
 const MIN_UNIFORM_SLOTS: u64 = 64;
 const MIN_VERTEX_BYTES: u64 = 4096;
 
@@ -589,12 +610,14 @@ impl Renderer for WGPURenderer {
             self.screen_view,
             self.viewport_bind_group_layout.clone(),
             &mut self.stencil_buffer_for_textures,
-            texture_view,
+            texture_view.clone(),
             stencil_buffer.clone(),
-            vertex_buffer,
+            vertex_buffer.clone(),
         );
         // Ensure that we have one initial render pass, in case the first command is not SetRenderTarget
         render_pass_builder.set_render_target_screen();
+        let mut uniforms_written = 0;
+        let mut in_flight = std::collections::VecDeque::new();
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
             self.device.clone(),
@@ -610,6 +633,45 @@ impl Renderer for WGPURenderer {
 
         let mut current_render_target = RenderTarget::Screen;
         for command in commands {
+            if render_pass_builder.passes >= PASSES_PER_SUBMISSION
+                && matches!(command.cmd_type, super::CommandType::SetRenderTarget(_))
+            {
+                // Submit the passes encoded so far. The command about to run
+                // opens a pass on its own target, so nothing has to be restored.
+                drop(render_pass_builder);
+                let slice = std::mem::replace(
+                    &mut encoder,
+                    self.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+                )
+                .finish();
+                write_uniforms(
+                    &self.queue,
+                    &self.uniform_buffer,
+                    &pipeline_and_bindgroup_mapper.uniform_staging,
+                    &mut uniforms_written,
+                );
+                in_flight.push_back(self.queue.submit(Some(slice)));
+                if in_flight.len() > SUBMISSIONS_IN_FLIGHT {
+                    let oldest = in_flight.pop_front().expect("a slice was just pushed");
+                    // A no-op on the web, where the queue cannot be waited on.
+                    let _ = self.device.poll(wgpu::PollType::Wait {
+                        submission_index: Some(oldest),
+                        timeout: None,
+                    });
+                }
+                render_pass_builder = RenderPassBuilder::new(
+                    self.device.clone(),
+                    &mut encoder,
+                    output.format,
+                    self.screen_view,
+                    self.viewport_bind_group_layout.clone(),
+                    &mut self.stencil_buffer_for_textures,
+                    texture_view.clone(),
+                    stencil_buffer.clone(),
+                    vertex_buffer.clone(),
+                );
+            }
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
                     current_render_target = render_target;
@@ -734,9 +796,7 @@ impl Renderer for WGPURenderer {
             uniform_staging.len() as u64 <= self.uniform_buffer.size(),
             "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
         );
-        if !uniform_staging.is_empty() {
-            self.queue.write_buffer(&self.uniform_buffer, 0, uniform_staging);
-        }
+        write_uniforms(&self.queue, &self.uniform_buffer, uniform_staging, &mut uniforms_written);
 
         let command_buffer = encoder.finish();
 
@@ -920,6 +980,16 @@ mod transient_cost_tests {
 /// The render-loop state an image-filter pass draws through: the images,
 /// the target it must restore when done, the open pass builder and the
 /// pipeline mapper.
+/// Uploads the uniform slots recorded since the previous upload, ordered
+/// ahead of the next submit.
+fn write_uniforms(queue: &wgpu::Queue, buffer: &wgpu::Buffer, staging: &[u8], written: &mut usize) {
+    let pending = &staging[*written..];
+    if !pending.is_empty() {
+        queue.write_buffer(buffer, *written as u64, pending);
+        *written = staging.len();
+    }
+}
+
 struct FilterPass<'a, 'b> {
     images: &'a mut ImageStore<Image>,
     current_render_target: &'a mut RenderTarget,
@@ -1982,6 +2052,8 @@ struct RenderPassBuilder<'a> {
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
     current_bound_offset: Option<u32>,
+    /// Render passes begun on this builder's encoder.
+    passes: u32,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -2017,6 +2089,7 @@ impl<'a> RenderPassBuilder<'a> {
             current_pipeline_state: None,
             current_stencil_reference: None,
             current_bound_offset: None,
+            passes: 0,
         }
     }
 
@@ -2185,6 +2258,7 @@ impl<'a> RenderPassBuilder<'a> {
         self.current_pipeline_state = None;
         self.current_stencil_reference = None;
         self.current_bound_offset = None;
+        self.passes += 1;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer

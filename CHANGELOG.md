@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the WGPU backend holding the whole frame in one command buffer.
+  Metal keeps about 2.3 MiB of driver memory per render pass until the
+  command buffer completes, so a frame of hundreds of layers held gigabytes:
+  1,600 opacity layers failed buffer creation on an M4 Max, and one
+  176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
+  The renderer now submits the frame in slices of 64 render passes with at
+  most two slices unfinished, which bounds that memory at about 430 MiB for
+  any layer count and halves the p99 frame time of the soak on the M4 Max.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which
