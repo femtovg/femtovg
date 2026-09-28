@@ -383,20 +383,11 @@ where
         // clamped only at the chain ceiling. Successive Gaussians compound in
         // quadrature - n blurs of sigma reach like one of sigma * sqrt(n) - so
         // the reach of a chain is the root of the sum of squares.
-        let sigma_sq: f32 = effects
-            .filters
-            .iter()
-            .filter_map(|f| match f {
-                ImageFilter::GaussianBlur { sigma } => chain_blur_sigma(*sigma),
-                _ => None,
-            })
-            .map(|sigma| sigma * sigma)
-            .sum();
-        let pad = if sigma_sq > 0.0 {
-            (sigma_sq.sqrt() * 3.0).ceil() + 2.0
-        } else {
-            0.0
-        };
+        let pad = blur_reach(effects.filters.iter().filter_map(|f| match f {
+            ImageFilter::GaussianBlur { sigma } => Some(*sigma),
+            _ => None,
+        }))
+        .map_or(0.0, |reach| reach + FRINGE_PAD);
 
         // A rounded or rotated scissor has no device rect: the store spans
         // the canvas and the scissor applies once, at the composite, after
@@ -412,13 +403,9 @@ where
         // instead of passing through with every effect dropped.
         let limit = self.renderer.max_texture_size();
         let pad = bounded_pad(pad, rect.w.max(rect.h), limit, transient::LAYER_GRANULARITY);
-        let (x0, y0) = ((rect.x - pad).max(-pad), (rect.y - pad).max(-pad));
-        let (x1, y1) = (
-            (rect.x + rect.w + pad).min(canvas_w + pad),
-            (rect.y + rect.h + pad).min(canvas_h + pad),
-        );
-        let visible = (x0.floor(), y0.floor(), x1.ceil(), y1.ceil());
-        let (mut minx, mut miny, mut maxx, mut maxy) = visible;
+        let span =
+            StoreSpan::padded(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, pad).clamped(canvas_w, canvas_h, pad);
+        let visible = span.store(transient::LAYER_GRANULARITY);
         // The shadow the composite casts comes from wherever the store's
         // content lands once shifted by the offset and spread by the blur:
         // the capture takes in the source that reaches into the scissor from
@@ -426,19 +413,12 @@ where
         // shadow of content the scissor leaves out would be missing. The
         // reach takes what the texture limit leaves after the visible
         // capture, so a store that fit without it keeps fitting.
-        if state.shadow_color.a > 0.0 {
-            let spread = state.shadow_blur * 1.5;
-            let [dx, dy] = state.shadow_offset;
-            (minx, maxx) = reach_within(x0, x1, (dx + spread).max(0.0), (spread - dx).max(0.0), limit);
-            (miny, maxy) = reach_within(y0, y1, (dy + spread).max(0.0), (spread - dy).max(0.0), limit);
-        }
-        let store_size = |minx: f32, miny: f32, maxx: f32, maxy: f32| {
-            (
-                transient::round_up((maxx - minx) as usize, transient::LAYER_GRANULARITY),
-                transient::round_up((maxy - miny) as usize, transient::LAYER_GRANULARITY),
-            )
+        let mut plan = if state.shadow_color.a > 0.0 {
+            span.with_shadow_reach(state.shadow_offset, state.shadow_blur * 1.5, limit)
+                .store(transient::LAYER_GRANULARITY)
+        } else {
+            visible
         };
-        let (mut width, mut height) = store_size(minx, miny, maxx, maxy);
 
         // Past the backend's texture limit (2048 px on a VideoCore IV), an
         // ordinary layer passes through; effects that cannot safely expose
@@ -446,19 +426,21 @@ where
         // Render-target storage is premultiplied and vertically flipped;
         // FLIP_Y makes the unfiltered composite sample it upright.
         let flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
-        let fits = |width: usize, height: usize| width > 0 && height > 0 && width <= limit && height <= limit;
-        let mut image = fits(width, height)
-            .then(|| self.acquire_transient_image(width, height, flags).ok())
+        let mut image = plan
+            .fits(limit)
+            .then(|| self.acquire_transient_image(plan.width, plan.height, flags).ok())
             .flatten();
-        if image.is_none() && (minx, miny, maxx, maxy) != visible {
+        if image.is_none() && plan != visible {
             // The reach did not fit the transient budget; the visible
             // capture alone may, and it is what the layer had before.
-            (minx, miny, maxx, maxy) = visible;
-            (width, height) = store_size(minx, miny, maxx, maxy);
-            image = fits(width, height)
-                .then(|| self.acquire_transient_image(width, height, flags).ok())
+            plan = visible;
+            image = plan
+                .fits(limit)
+                .then(|| self.acquire_transient_image(plan.width, plan.height, flags).ok())
                 .flatten();
         }
+        let (minx, miny) = plan.origin;
+        let (width, height) = (plan.width, plan.height);
 
         let fail_closed = image.is_none()
             && (effects.mask.is_some()

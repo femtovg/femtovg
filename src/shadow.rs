@@ -159,8 +159,7 @@ where
         // >99.7% of the Gaussian) plus a fringe pixel for antialiased edges.
         // The reach is the true sigma's: the blur below runs as as many
         // passes as it takes to compose to it.
-        let reach = chain_blur_sigma(sigma).unwrap_or(0.0);
-        let pad = (reach * 3.0).ceil() + 2.0;
+        let pad = blur_reach([sigma]).unwrap_or(0.0) + FRINGE_PAD;
         // Bounded like a layer's: a shadow whose padded coverage would pass
         // the texture limit keeps its coverage and loses reach at the edge.
         let pad = bounded_pad(
@@ -172,20 +171,20 @@ where
 
         // Coverage is rendered at the shape's own location; the offset is applied
         // later when compositing, so the offscreen only needs to bound the shape.
-        let minx = (shape_bounds.minx - pad).floor();
-        let miny = (shape_bounds.miny - pad).floor();
-        let maxx = (shape_bounds.maxx + pad).ceil();
-        let maxy = (shape_bounds.maxy + pad).ceil();
-
-        let width = transient::round_up((maxx - minx) as usize, transient::SHADOW_GRANULARITY);
-        let height = transient::round_up((maxy - miny) as usize, transient::SHADOW_GRANULARITY);
-
-        // Guard against absurd allocations (e.g. enormous blur on a huge shape)
-        // and the backend's texture limit.
+        let plan = StoreSpan::padded(
+            shape_bounds.minx,
+            shape_bounds.miny,
+            shape_bounds.maxx,
+            shape_bounds.maxy,
+            pad,
+        )
+        .store(transient::SHADOW_GRANULARITY);
         let limit = self.renderer.max_texture_size();
-        if width == 0 || height == 0 || width > limit || height > limit {
+        if !plan.fits(limit) {
             return;
         }
+        let (minx, miny) = plan.origin;
+        let (width, height) = (plan.width, plan.height);
 
         let blur_plan = (sigma >= 0.01).then(|| blur_passes(sigma));
         let work = blur_plan.map_or(0, |(passes, pass_sigma)| {

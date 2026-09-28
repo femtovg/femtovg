@@ -25,10 +25,96 @@ pub(crate) fn bounded_pad(pad: f32, extent: f32, limit: usize, granularity: usiz
     pad.min((room * 0.5).floor().max(0.0))
 }
 
+/// A blur's reach around a store: three sigma of the quadrature sum of
+/// `sigmas` (each within the chain bound), rounded up; `None` without a
+/// blur.
+pub(crate) fn blur_reach(sigmas: impl IntoIterator<Item = f32>) -> Option<f32> {
+    let sigma_sq: f32 = sigmas
+        .into_iter()
+        .filter_map(chain_blur_sigma)
+        .map(|sigma| sigma * sigma)
+        .sum();
+    (sigma_sq > 0.0).then(|| (sigma_sq.sqrt() * 3.0).ceil())
+}
+
+/// The pixel a store keeps beyond its content on every side for antialiased
+/// edges.
+pub(crate) const FRINGE_PAD: f32 = 2.0;
+
+/// A store's extent as exact ends, before rounding: what a layer or a
+/// shadow's coverage captures.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StoreSpan {
+    pub(crate) x0: f32,
+    pub(crate) y0: f32,
+    pub(crate) x1: f32,
+    pub(crate) y1: f32,
+}
+
+impl StoreSpan {
+    /// `x0..x1` by `y0..y1`, padded by `pad` on every side.
+    pub(crate) fn padded(x0: f32, y0: f32, x1: f32, y1: f32, pad: f32) -> Self {
+        Self {
+            x0: x0 - pad,
+            y0: y0 - pad,
+            x1: x1 + pad,
+            y1: y1 + pad,
+        }
+    }
+
+    /// Kept within `pad` of a `width` x `height` canvas: content further out
+    /// cannot reach into it.
+    pub(crate) fn clamped(self, width: f32, height: f32, pad: f32) -> Self {
+        Self {
+            x0: self.x0.max(-pad),
+            y0: self.y0.max(-pad),
+            x1: self.x1.min(width + pad),
+            y1: self.y1.min(height + pad),
+        }
+    }
+
+    /// Grown to take in what casts a shadow into it - the source up to the
+    /// `offset` away, plus the blur's `spread` - as far as a store within the
+    /// texture `limit` leaves room.
+    pub(crate) fn with_shadow_reach(self, offset: [f32; 2], spread: f32, limit: usize) -> Self {
+        let [dx, dy] = offset;
+        let (x0, x1) = reach_within(self.x0, self.x1, (dx + spread).max(0.0), (spread - dx).max(0.0), limit);
+        let (y0, y1) = reach_within(self.y0, self.y1, (dy + spread).max(0.0), (spread - dy).max(0.0), limit);
+        Self { x0, y0, x1, y1 }
+    }
+
+    /// The store: ends rounded outward to whole pixels, size rounded up to
+    /// `granularity`.
+    pub(crate) fn store(self, granularity: usize) -> StorePlan {
+        let (x0, y0, x1, y1) = (self.x0.floor(), self.y0.floor(), self.x1.ceil(), self.y1.ceil());
+        StorePlan {
+            origin: (x0, y0),
+            width: transient::round_up((x1 - x0) as usize, granularity),
+            height: transient::round_up((y1 - y0) as usize, granularity),
+        }
+    }
+}
+
+/// A store's origin in device space and its size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StorePlan {
+    pub(crate) origin: (f32, f32),
+    pub(crate) width: usize,
+    pub(crate) height: usize,
+}
+
+impl StorePlan {
+    /// Whether the backend can hold it: non-empty and within its texture
+    /// `limit`.
+    pub(crate) fn fits(&self, limit: usize) -> bool {
+        self.width > 0 && self.height > 0 && self.width <= limit && self.height <= limit
+    }
+}
+
 /// `lo..hi` grown by up to `before` and `after` and rounded outward, as
 /// far as a store of `limit` pixels leaves room; short of room, each side
 /// gets its share of what is left.
-pub(crate) fn reach_within(lo: f32, hi: f32, before: f32, after: f32, limit: usize) -> (f32, f32) {
+fn reach_within(lo: f32, hi: f32, before: f32, after: f32, limit: usize) -> (f32, f32) {
     let fit = (limit - limit % transient::LAYER_GRANULARITY) as f32;
     let grown = ((lo - before).floor(), (hi + after).ceil());
     if before + after <= 0.0 || grown.1 - grown.0 <= fit {
@@ -507,4 +593,48 @@ fn end_layer_past_the_depth_limit_without_a_layer_pops_nothing() {
     assert_eq!(canvas.clip_stack.len(), 1, "still armed at the level that took it");
     canvas.restore();
     assert!(canvas.clip_stack.is_empty());
+}
+
+/// The shared reach reproduces what layers and shadows computed apart: a
+/// lone sigma's three-sigma pad to the pixel, and the quadrature sum of a
+/// chain's.
+#[test]
+fn a_blur_reach_matches_the_layer_and_shadow_pads() {
+    for tenths in 1..=1280u32 {
+        let sigma = tenths as f32 / 10.0;
+        let shadow_pad = (sigma.min(MAX_CHAIN_BLUR_SIGMA) * 3.0).ceil();
+        assert_eq!(blur_reach([sigma]), Some(shadow_pad), "sigma {sigma}");
+    }
+    assert_eq!(blur_reach([0.0]), None);
+    assert_eq!(blur_reach([]), None);
+    assert_eq!(blur_reach([3.0, 4.0]), Some(15.0));
+}
+
+/// The planner rounds a padded span outward and up to the granularity,
+/// clamps to the canvas, and gives a shadow's reach the room the limit
+/// leaves.
+#[test]
+fn a_store_span_rounds_clamps_and_reaches() {
+    let span = StoreSpan::padded(10.5, 20.25, 110.5, 120.75, 3.0);
+    assert_eq!(
+        span.store(8),
+        StorePlan {
+            origin: (7.0, 17.0),
+            width: 112,
+            height: 112
+        }
+    );
+    let clamped = StoreSpan::padded(-50.0, 0.0, 500.0, 100.0, 4.0).clamped(400.0, 100.0, 4.0);
+    assert_eq!((clamped.x0, clamped.x1), (-4.0, 404.0));
+    let reached = StoreSpan::padded(0.0, 0.0, 1920.0, 1080.0, 0.0).with_shadow_reach([0.0, 0.0], 90.0, 2048);
+    assert_eq!(
+        reached.store(64),
+        StorePlan {
+            origin: (-64.0, -90.0),
+            width: 2048,
+            height: 1280
+        }
+    );
+    assert!(reached.store(64).fits(2048));
+    assert!(!StoreSpan::padded(0.0, 0.0, 2049.0, 10.0, 0.0).store(64).fits(2048));
 }
