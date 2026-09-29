@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
+  created with it now gets its mip levels, filled after every upload the way
+  the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
+  mipmap filtering, so a raster drawn smaller than its size is box-filtered
+  instead of point-sampled from the base level. The levels cost a third more
+  texture memory for those images only; the downsample pipeline is built on
+  the first such upload.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which
