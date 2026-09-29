@@ -23,17 +23,7 @@ type C = Canvas<WGPURenderer>;
 type Scene = (&'static str, fn(&mut C));
 
 fn slices_of(passes: u32) -> Option<SubmissionSlicing> {
-    Some(SubmissionSlicing {
-        passes,
-        wait_past: None,
-    })
-}
-
-fn waited() -> Option<SubmissionSlicing> {
-    Some(SubmissionSlicing {
-        passes: 64,
-        wait_past: Some(2),
-    })
+    Some(SubmissionSlicing { passes })
 }
 
 /// Renders `draw` with the given slicing and returns the pixels and the
@@ -505,9 +495,6 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
         };
         let scenes: [Scene; 2] = [("176-layer portrait", portrait), ("mixed scene", mixed_scene)];
         for (what, draw) in scenes {
-            println!("footprint waited {} {what}", mib(measure(waited(), draw)));
-        }
-        for (what, draw) in scenes {
             println!(
                 "footprint sliced {} {what}",
                 mib(measure(Some(SubmissionSlicing::default()), draw))
@@ -537,7 +524,6 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
         return;
     }
     let mut lines = report.lines().filter(|line| line.starts_with("footprint "));
-    let mut waited = Vec::new();
     let mut sliced = Vec::new();
     let mut whole = Vec::new();
     for line in &mut lines {
@@ -545,24 +531,17 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
         let (_, kind, mib, what) = (words.next(), words.next(), words.next(), words.next());
         let entry = (what.unwrap().to_owned(), mib.unwrap().parse::<u64>().unwrap());
         match kind {
-            Some("waited") => waited.push(entry),
             Some("sliced") => sliced.push(entry),
             Some("whole") => whole.push(entry),
             _ => panic!("unexpected report line {line:?}"),
         }
     }
-    assert_eq!(waited.len(), 2, "{report}");
-    for (((what, held_waited), (_, held)), (_, held_whole)) in waited.iter().zip(&sliced).zip(&whole) {
+    assert_eq!(sliced.len(), 2, "{report}");
+    for ((what, held), (_, held_whole)) in sliced.iter().zip(&whole) {
         eprintln!(
-            "{what}: the footprint peaked {held_waited} MiB above the baseline waiting past two slices, {held} MiB with slices alone, {held_whole} MiB in one submission"
+            "{what}: the footprint peaked {held} MiB above the baseline with slices alone, {held_whole} MiB in one submission"
         );
-        // On an M4 Max: 900 MiB waiting past two slices, 1,110 MiB with
-        // slices alone, 1,566 MiB in one submission; the waited figure is the
-        // same for any frame length.
-        assert!(
-            *held_waited < 1200,
-            "{what}: {held_waited} MiB held waiting past two slices"
-        );
+        // On an M4 Max: 1,110 MiB with slices alone, 1,566 MiB in one submission.
         assert!(
             held < held_whole,
             "{what}: {held} MiB held with slices alone, {held_whole} MiB in one submission"

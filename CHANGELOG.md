@@ -12,10 +12,9 @@ All notable changes to this project will be documented in this file.
   chain: 1,600 opacity layers failed buffer creation on an M4 Max, and a
   176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
   Sliced, the driver recycles the command buffers that complete while the
-  rest of the frame is encoded, and `wait_past: Some(n)` bounds the
-  unfinished slices at the cost of polling the device from inside the
-  flush. The slices before the returned command buffer are submitted during
-  the flush, so work that must run before the frame is submitted before it;
+  rest of the frame is encoded; the renderer never polls the device. The
+  slices before the returned command buffer are submitted during the
+  flush, so work that must run before the frame is submitted before it;
   off by default, which keeps the one-command-buffer contract of
   `flush_to_surface`. `Canvas::renderer` and
   `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use rgb::bytemuck;
@@ -86,13 +86,12 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 /// would exceed `passes` begins, wherever that pass comes from - a layer, a
 /// filter chain, a clear - so each submission holds at most that many, and
 /// the driver recycles the memory of the slices that complete while the rest
-/// of the frame is still being encoded. By default nothing waits for them:
-/// the renderer never polls the device, so an encoder that runs far ahead of
-/// the GPU can still accumulate unfinished slices (an M4 Max held 963 MiB
-/// for 800 layers and 3,589 MiB for 1,600 that way, against 3,685 MiB and
-/// a failed buffer creation in one submission); on the iPhone 12 the GPU
-/// never fell behind the efficiency-core encoder. `wait_past` bounds that
-/// at the cost of polling the device from inside the flush.
+/// of the frame is still being encoded. Nothing waits for them: the
+/// renderer never polls the device, so an encoder that runs far ahead of
+/// the GPU still accumulates unfinished slices (an M4 Max held 963 MiB for
+/// 800 layers and 3,589 MiB for 1,600 that way, against 3,685 MiB and a
+/// failed buffer creation in one submission); on the iPhone 12 the GPU
+/// never fell behind the efficiency-core encoder.
 ///
 /// The slices before the command buffer
 /// [`Canvas::flush_to_output`](crate::Canvas::flush_to_output) returns are
@@ -106,24 +105,12 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 pub struct SubmissionSlicing {
     /// Render passes per submitted command buffer; at least one.
     pub passes: u32,
-    /// With `Some(n)`, once more than `n` of the renderer's slices are
-    /// unfinished the flush waits for the oldest before encoding on, which
-    /// bounds the driver memory at about `n + 1` slices (430 MiB on an M4
-    /// Max for any frame length at 64 passes and `Some(2)`). The wait polls
-    /// the device from inside the flush, which runs the app's map and
-    /// work-done callbacks re-entrantly and blocks, so it is off by default;
-    /// on the web it is a no-op, since `Device::poll` cannot wait there. The
-    /// count spans frames but covers only the renderer's own slices.
-    pub wait_past: Option<usize>,
 }
 
 impl Default for SubmissionSlicing {
-    /// 64 passes per slice, no waiting.
+    /// 64 passes per slice.
     fn default() -> Self {
-        Self {
-            passes: 64,
-            wait_past: None,
-        }
+        Self { passes: 64 }
     }
 }
 
@@ -341,9 +328,6 @@ pub struct WGPURenderer {
     pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     slicing: Option<SubmissionSlicing>,
-    /// The renderer's own submissions that may still be running, kept only
-    /// while `SubmissionSlicing::wait_past` is set.
-    slices_in_flight: VecDeque<wgpu::SubmissionIndex>,
     last_frame_slices: Vec<u32>,
 }
 
@@ -564,7 +548,6 @@ impl WGPURenderer {
             pipeline_layout,
             pipeline_cache: Default::default(),
             slicing: None,
-            slices_in_flight: VecDeque::new(),
             last_frame_slices: Vec::new(),
         }
     }
@@ -681,7 +664,6 @@ impl Renderer for WGPURenderer {
             uniform_staging: Vec::new(),
             uniforms_written: 0,
             slicing: self.slicing,
-            slices_in_flight: &mut self.slices_in_flight,
             slices: Vec::new(),
             passes: 0,
         };
@@ -1014,7 +996,7 @@ mod transient_cost_tests {
 /// pipeline mapper.
 /// The frame's command encoding: the encoder, the uniform slots staged for
 /// it, and, with slicing on, the command buffers submitted so far.
-struct FrameEncoder<'a> {
+struct FrameEncoder {
     device: wgpu::Device,
     queue: wgpu::Queue,
     encoder: wgpu::CommandEncoder,
@@ -1023,52 +1005,35 @@ struct FrameEncoder<'a> {
     uniform_staging: Vec<u8>,
     uniforms_written: usize,
     slicing: Option<SubmissionSlicing>,
-    slices_in_flight: &'a mut VecDeque<wgpu::SubmissionIndex>,
     /// Render passes in each command buffer submitted so far.
     slices: Vec<u32>,
     /// Render passes begun on the current encoder.
     passes: u32,
 }
 
-impl FrameEncoder<'_> {
+impl FrameEncoder {
     /// Counts a render pass about to begin on the encoder, which must hold
     /// no open pass; with slicing on, an encoder that already holds the
     /// configured passes is submitted first.
     fn begin_pass(&mut self) {
         if let Some(slicing) = self.slicing {
             if self.passes >= slicing.passes.max(1) {
-                self.submit_slice(slicing.wait_past);
+                self.submit_slice();
             }
         }
         self.passes += 1;
     }
 
-    fn submit_slice(&mut self, wait_past: Option<usize>) {
+    fn submit_slice(&mut self) {
         let encoder = std::mem::replace(
             &mut self.encoder,
             self.device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
         );
         self.write_uniforms();
-        let submission = self.queue.submit(Some(encoder.finish()));
+        self.queue.submit(Some(encoder.finish()));
         self.slices.push(self.passes);
         self.passes = 0;
-        let Some(wait_past) = wait_past else {
-            self.slices_in_flight.clear();
-            return;
-        };
-        self.slices_in_flight.push_back(submission);
-        while self.slices_in_flight.len() > wait_past {
-            let oldest = self
-                .slices_in_flight
-                .pop_front()
-                .expect("more slices than allowed in flight");
-            // A no-op on the web, where the queue cannot be waited on.
-            let _ = self.device.poll(wgpu::PollType::Wait {
-                submission_index: Some(oldest),
-                timeout: None,
-            });
-        }
     }
 
     /// Stages one uniform slot.
@@ -2151,7 +2116,7 @@ impl BindGroupState {
 
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
-    frame: FrameEncoder<'a>,
+    frame: FrameEncoder,
     surface_view: wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
     texture_view: wgpu::TextureView,
@@ -2174,7 +2139,7 @@ struct RenderPassBuilder<'a> {
 impl<'a> RenderPassBuilder<'a> {
     fn new(
         device: wgpu::Device,
-        frame: FrameEncoder<'a>,
+        frame: FrameEncoder,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
         viewport_bind_group_layout: wgpu::BindGroupLayout,
