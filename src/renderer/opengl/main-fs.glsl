@@ -225,7 +225,10 @@ vec4 renderImage() {
     // Calculate color from texture
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
 
-    vec4 color = texture2D(tex, pt);
+    // Half a level toward the larger mip: browsers minify sharper than plain
+    // trilinear (Chromium samples the larger level, Firefox downsamples
+    // directly); no effect without mipmaps or under magnification.
+    vec4 color = texture2D(tex, pt, -0.5);
 
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (texType == 2) color = vec4(color.x);
@@ -236,7 +239,7 @@ vec4 renderImage() {
 }
 
 vec4 renderPlainTextureCopy() {
-    vec4 color = texture2D(tex, ftcoord);
+    vec4 color = texture2D(tex, ftcoord, -0.5);
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (texType == 2) color = vec4(color.x);
     // Apply color tint and alpha.
