@@ -251,10 +251,14 @@ const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
 
 type SamplerCache = Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>;
 
+/// How many flushes a pipeline outlives its last use.
+const PIPELINE_KEEP_FLUSHES: u32 = 1024;
+
 #[derive(Debug)]
 struct CachedPipeline {
     pipeline: wgpu::RenderPipeline,
-    accessed: bool,
+    /// Flushes since the pipeline was last bound.
+    unused: u32,
 }
 
 /// WGPU renderer.
@@ -730,9 +734,17 @@ impl Renderer for WGPURenderer {
 
         let command_buffer = encoder.finish();
 
-        self.pipeline_cache
-            .borrow_mut()
-            .retain(|_, cached_pipeline| std::mem::replace(&mut cached_pipeline.accessed, false));
+        {
+            let mut cache = self.pipeline_cache.borrow_mut();
+            // A pipeline is kept through a run of flushes that do not
+            // bind it: one frame is many flushes (a flush a layer), and
+            // one that evicted at every flush recompiled every pipeline
+            // the other passes use, every frame.
+            cache.retain(|_, cached_pipeline| {
+                cached_pipeline.unused += 1;
+                cached_pipeline.unused <= PIPELINE_KEEP_FLUSHES
+            });
+        }
 
         Some(command_buffer)
     }
@@ -2335,10 +2347,10 @@ impl CommandToPipelineAndBindGroupMapper {
                 let pipeline = pipeline_state.materialize(&self.device, &self.pipeline_layout, &self.shader_module);
                 CachedPipeline {
                     pipeline,
-                    accessed: false,
+                    unused: 0,
                 }
             });
-            render_pipeline.accessed = true;
+            render_pipeline.unused = 0;
             render_pass.set_pipeline(&render_pipeline.pipeline);
             render_pass_builder.current_pipeline_state = Some(pipeline_state);
         }
