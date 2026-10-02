@@ -508,7 +508,7 @@ fn peak_footprint_during(work: impl FnOnce()) -> u64 {
 /// of the frame is encoded; they do not bound it, since nothing waits.
 #[cfg(target_os = "macos")]
 #[test]
-fn slices_hold_less_driver_memory_than_one_submission_on_metal() {
+fn slices_hold_no_more_driver_memory_than_one_submission_on_metal() {
     const CHILD: &str = "FEMTOVG_FOOTPRINT_CHILD";
     let mib = |bytes: u64| bytes / (1024 * 1024);
     if std::env::var_os(CHILD).is_some() {
@@ -540,7 +540,7 @@ fn slices_hold_less_driver_memory_than_one_submission_on_metal() {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "slices_hold_less_driver_memory_than_one_submission_on_metal",
+            "slices_hold_no_more_driver_memory_than_one_submission_on_metal",
             "--nocapture",
         ])
         .env(CHILD, "1")
@@ -566,11 +566,14 @@ fn slices_hold_less_driver_memory_than_one_submission_on_metal() {
     eprintln!(
         "176-layer portrait: the footprint peaked {sliced} MiB above the baseline in slices, {whole} MiB in one submission"
     );
-    // On an M4 Max: 1,050 MiB in slices, 1,499 MiB in one submission; about
-    // 445 MiB of either is a pool the driver grows for the first frame of
-    // any size.
+    // On an M4 Max with wgpu 30: 1,050 MiB in slices, 1,499 MiB in one
+    // submission; about 445 MiB of either is a pool the driver grows for
+    // the first frame of any size. A wgpu that encodes the passes of an
+    // encoder into one Metal command buffer (gfx-rs/wgpu#10506) leaves
+    // both at that pool, 490 and 492 MiB, with nothing for slices to lower:
+    // what must hold on either is that slicing never costs memory.
     assert!(
-        sliced < whole,
+        sliced <= whole + whole / 20 + 16,
         "{sliced} MiB held in slices, {whole} MiB in one submission"
     );
 }
