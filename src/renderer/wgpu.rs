@@ -69,29 +69,25 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 /// Submits each frame in slices of render passes instead of one command
 /// buffer holding every pass; see [`WGPURenderer::set_submission_slicing`].
 ///
-/// Metal allocates driver memory for every render command encoder (about
-/// 2.3 MiB on macOS 26, whatever the target size) and keeps it until the
-/// command buffer holding the encoder completes. One command buffer per
-/// frame therefore held gigabytes for a frame of hundreds of layers or a
-/// long blur chain: 800 opacity layers reached 3.7 GiB on an M4 Max, 1,600
-/// failed buffer creation, and a 176-layer portrait at 460x260 was
-/// jetsammed on an iPhone 12 at the 2.2 GiB per-process limit. Sliced, the
-/// same frames held about 430 MiB on the M4 Max whatever their length -
-/// measured on that Metal driver, not a ceiling for every backend.
+/// wgpu opens a Metal command buffer for every render pass of a
+/// `CommandEncoder` and commits them together at submit (gfx-rs/wgpu#5738),
+/// and the driver keeps about 2.3 MiB for each, whatever the target size,
+/// until it completes. One command buffer per frame therefore holds that
+/// much for every pass of the frame at once: a portrait of 200 filtered
+/// layers is 969 passes and 2.2 GiB of driver memory on an M4 Max, 1,600
+/// opacity layers failed buffer creation, and a 176-layer portrait at
+/// 460x260 was jetsammed on an iPhone 12 at the 2.2 GiB per-process limit.
 ///
-/// The memory is per render pass because wgpu opens a Metal command buffer
-/// for every pass of a `CommandEncoder` and commits them together at submit
-/// (gfx-rs/wgpu#10494); the driver only releases a command buffer's memory
-/// once it has completed. A slice is submitted before the render pass that
-/// would exceed `passes` begins, wherever that pass comes from - a layer, a
-/// filter chain, a clear - so each submission holds at most that many, and
-/// the driver recycles the memory of the slices that complete while the rest
-/// of the frame is still being encoded. Nothing waits for them: the
-/// renderer never polls the device, so an encoder that runs far ahead of
-/// the GPU still accumulates unfinished slices (an M4 Max held 963 MiB for
-/// 800 layers and 3,589 MiB for 1,600 that way, against 3,685 MiB and a
-/// failed buffer creation in one submission); on the iPhone 12 the GPU
-/// never fell behind the efficiency-core encoder.
+/// A slice is submitted before the render pass that would exceed `passes`
+/// begins, wherever that pass comes from - a layer, a filter chain, a
+/// clear - so each submission holds at most that many, and the driver
+/// recycles the memory of the slices that complete while the rest of the
+/// frame is still being encoded. Nothing waits for them: the renderer never
+/// polls the device, so slicing lowers the peak without bounding it. Over
+/// 27 portraits of 87 to 991 passes the sliced frames held between a
+/// quarter and all of the unsliced driver memory on the M4 Max, 60 % at the
+/// median, and the 969-pass frame held 0.6 GiB; a frame of fewer passes
+/// than a slice is submitted exactly as without slicing.
 ///
 /// The slices before the command buffer
 /// [`Canvas::flush_to_output`](crate::Canvas::flush_to_output) returns are
@@ -678,7 +674,7 @@ impl Renderer for WGPURenderer {
             stencil_buffer,
             vertex_buffer,
         );
-        // Ensure that we have one initial render pass, in case the first command is not SetRenderTarget
+        // The screen is the target until a command sets another.
         render_pass_builder.set_render_target_screen();
 
         let mut pipeline_and_bindgroup_mapper = CommandToPipelineAndBindGroupMapper::new(
@@ -2126,6 +2122,12 @@ struct RenderPassBuilder<'a> {
     rendering_to_texture: bool,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     rpass: Option<wgpu::RenderPass<'a>>,
+    /// The load op the current target's pass begins with, while no draw has
+    /// begun it. A pass that loads and stores its target without drawing
+    /// changes nothing and is not free - on Metal it is a command buffer of
+    /// its own, see `SubmissionSlicing` - so a target that is left again
+    /// before anything is drawn into it gets no pass.
+    pending_load: Option<wgpu::LoadOp<wgpu::Color>>,
     screen_stencil_buffer: wgpu::Texture,
     screen_view: [f32; 2],
     screen_surface_format: wgpu::TextureFormat,
@@ -2161,6 +2163,7 @@ impl<'a> RenderPassBuilder<'a> {
             rendering_to_texture: false,
             viewport_bind_group_layout,
             rpass: None,
+            pending_load: None,
             screen_stencil_buffer: stencil_buffer,
             screen_view,
             screen_surface_format,
@@ -2174,8 +2177,18 @@ impl<'a> RenderPassBuilder<'a> {
 
     /// Finishes the frame's last command buffer; see `FrameEncoder::finish`.
     fn finish(mut self) -> (wgpu::CommandBuffer, Vec<u32>) {
-        drop(self.rpass.take());
+        self.end_pass();
         self.frame.finish()
+    }
+
+    /// Ends the current target's pass. One that no draw began is begun here
+    /// only if it clears, which has to happen without a draw too.
+    fn end_pass(&mut self) {
+        if matches!(self.pending_load, Some(wgpu::LoadOp::Clear(_))) {
+            self.ensure_pass();
+        }
+        self.pending_load = None;
+        drop(self.rpass.take());
     }
 
     fn set_viewport(&mut self, viewport: [f32; 2]) {
@@ -2273,13 +2286,14 @@ impl<'a> RenderPassBuilder<'a> {
         stencil_buffer: Option<wgpu::Texture>,
         load: wgpu::LoadOp<wgpu::Color>,
     ) {
+        self.end_pass();
         self.texture_view = texture.create_view(&Default::default());
         self.set_viewport([texture.width() as f32, texture.height() as f32]);
         self.stencil_buffer = stencil_buffer;
         self.surface_format = texture.format();
         self.rendering_to_texture = true;
 
-        self.recreate_render_pass(load);
+        self.defer_pass(load);
     }
 
     fn set_render_target_image(
@@ -2329,21 +2343,31 @@ impl<'a> RenderPassBuilder<'a> {
     }
 
     fn set_render_target_screen(&mut self) {
+        self.end_pass();
         self.texture_view = self.surface_view.clone();
         self.stencil_buffer = Some(self.screen_stencil_buffer.clone());
         self.set_viewport(self.screen_view);
         self.surface_format = self.screen_surface_format;
         self.rendering_to_texture = false;
 
-        self.recreate_render_pass(wgpu::LoadOp::Load);
+        self.defer_pass(wgpu::LoadOp::Load);
     }
 
-    fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
+    /// Leaves the pass on the target just set to the first draw into it.
+    fn defer_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
         // A new render pass resets state, so nothing set on the previous one still counts.
         self.current_pipeline_state = None;
         self.current_stencil_reference = None;
         self.current_bound_offset = None;
-        drop(self.rpass.take());
+        self.pending_load = Some(load);
+    }
+
+    /// Begins the current target's pass unless a draw already has.
+    fn ensure_pass(&mut self) {
+        if self.rpass.is_some() {
+            return;
+        }
+        let load = self.pending_load.take().unwrap_or(wgpu::LoadOp::Load);
         self.frame.begin_pass();
         let stencil_view = self
             .stencil_buffer
@@ -2382,6 +2406,7 @@ impl<'a> RenderPassBuilder<'a> {
     }
 
     fn draw(&mut self, vertices: std::ops::Range<u32>) {
+        self.ensure_pass();
         self.rpass.as_mut().unwrap().draw(vertices, 0..1);
     }
 }
@@ -2439,6 +2464,7 @@ impl CommandToPipelineAndBindGroupMapper {
         image: Option<ImageId>,
         glyph_texture: GlyphTexture,
     ) {
+        render_pass_builder.ensure_pass();
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();
 
         let stencil_reference = match &stencil_test {

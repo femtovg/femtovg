@@ -1,12 +1,13 @@
 #![cfg(feature = "wgpu")]
 //! `WGPURenderer::set_submission_slicing` submits a frame in slices of render
 //! passes: wgpu opens a Metal command buffer per pass and the driver keeps
-//! about 2.3 MiB for each until it completes (gfx-rs/wgpu#10494), and one
+//! about 2.3 MiB for each until it completes (gfx-rs/wgpu#5738), and one
 //! submission per frame reached gigabytes (1,600 opacity layers failed buffer
-//! creation on an M4 Max; a 176-layer portrait was jetsammed on an iPhone 12). A slice must hold at most the configured
-//! passes wherever the passes come from, every slice's uniforms and draws
-//! must land in it, in order, and the picture must not depend on where the
-//! frame was cut.
+//! creation on an M4 Max; a 176-layer portrait was jetsammed on an iPhone
+//! 12). A slice must hold at most the configured passes wherever the passes
+//! come from, every slice's uniforms and draws must land in it, in order,
+//! and the picture must not depend on where the frame was cut. A pass is
+//! only begun by a draw, so the counts here are of passes that draw.
 
 use femtovg::{
     renderer::{SubmissionSlicing, WGPURenderer},
@@ -18,9 +19,6 @@ mod common;
 use common::{headless_device, render_rgba_on};
 
 type C = Canvas<WGPURenderer>;
-
-/// A named scene the footprint test measures.
-type Scene = (&'static str, fn(&mut C));
 
 fn slices_of(passes: u32) -> Option<SubmissionSlicing> {
     Some(SubmissionSlicing { passes })
@@ -93,13 +91,14 @@ fn every_layer_of_a_long_frame_lands_in_its_slice() {
     };
     const W: u32 = 64;
     const H: u32 = 5;
-    // The frame opens two passes on the screen and two per layer: 320
-    // layers are 642 passes, ten full slices and a tail of two.
+    // One pass on the screen for the clear, then two per layer, its content
+    // and the screen pass its composite is drawn in: 320 layers are 641
+    // passes, ten full slices and a tail of one.
     let layers = (W * H) as usize;
     let (out, slices) = render(&device, &queue, W, H, Some(SubmissionSlicing::default()), |c| {
         one_layer_per_pixel(c, layers, W)
     });
-    assert_eq!(slices, [[64; 10].as_slice(), &[2]].concat());
+    assert_eq!(slices, [[64; 10].as_slice(), &[1]].concat());
     for i in 0..layers {
         let got = &out[i * 4..i * 4 + 3];
         let want = cell(i).map(half_over_white);
@@ -117,32 +116,34 @@ fn a_slice_holds_at_most_the_configured_passes_at_63_64_and_65() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    // Two passes on the screen, two per layer, two to draw the blur's source
-    // image and three for a one-pass blur (its two directions and the target
-    // restore).
-    let scenes: [(&str, usize, bool, Vec<u32>); 3] = [
-        ("28 layers and a blur", 28, true, vec![63]),
-        ("31 layers", 31, false, vec![64]),
-        ("29 layers and a blur", 29, true, vec![64, 1]),
+    // One pass on the screen for the clear and two per layer; an image
+    // drawn into is one more, and blurring it and drawing the result three
+    // more: the blur's two directions and the screen pass of the fill.
+    let scenes: [(&str, usize, bool, bool, Vec<u32>); 3] = [
+        ("29 layers and a blur", 29, true, true, vec![63]),
+        ("31 layers and an image drawn into", 31, true, false, vec![64]),
+        ("30 layers and a blur", 30, true, true, vec![64, 1]),
     ];
-    for (what, layers, blur, want) in scenes {
+    for (what, layers, image, blur, want) in scenes {
         let draw = |c: &mut C| {
             one_layer_per_pixel(c, layers, 32);
-            if blur {
+            if image {
                 let source = c
-                    .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
-                    .unwrap();
-                let blurred = c
                     .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
                     .unwrap();
                 c.with_render_target(RenderTarget::Image(source), |c| {
                     c.clear_rect(0, 0, 8, 8, Color::rgba(0, 0, 0, 0));
                     fill(c, 2.0, 2.0, 4.0, 4.0, Color::rgb(0, 0, 255));
                 });
-                c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
-                let mut p = Path::new();
-                p.rect(20.0, 2.0, 8.0, 8.0);
-                c.fill_path(&p, &Paint::image(blurred, 20.0, 2.0, 8.0, 8.0, 0.0, 1.0));
+                if blur {
+                    let blurred = c
+                        .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
+                        .unwrap();
+                    c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+                    let mut p = Path::new();
+                    p.rect(20.0, 2.0, 8.0, 8.0);
+                    c.fill_path(&p, &Paint::image(blurred, 20.0, 2.0, 8.0, 8.0, 0.0, 1.0));
+                }
             }
         };
         let (unsliced, whole) = render(&device, &queue, 32, 4, None, draw);
@@ -151,6 +152,40 @@ fn a_slice_holds_at_most_the_configured_passes_at_63_64_and_65() {
         assert_eq!(slices, want, "{what}");
         assert_same_pixels(&sliced, &unsliced, what);
     }
+}
+
+/// A render pass begins with the first draw into its target, so a target
+/// that is set and left again undrawn gets none: the screen when nothing is
+/// drawn there after a filter, and the target every filter hands back
+/// before the next one takes over.
+#[test]
+fn a_target_left_undrawn_gets_no_pass() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let passes = |draw: &dyn Fn(&mut C)| render(&device, &queue, 32, 32, None, draw).1;
+    // The clear and the fill share the screen's one pass.
+    assert_eq!(passes(&|c| fill(c, 2.0, 2.0, 8.0, 8.0, Color::rgb(255, 0, 0))), [1]);
+    // The screen, the layer's content, and the screen again for its composite.
+    assert_eq!(passes(&|c| one_layer_per_pixel(c, 1, 32)), [3]);
+    // The screen, the image drawn into, the blur's two directions and the
+    // color matrix.
+    let filter_chain = |c: &mut C| {
+        let image = |c: &mut C| {
+            c.create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
+                .unwrap()
+        };
+        let (source, blurred, tinted) = (image(c), image(c), image(c));
+        c.with_render_target(RenderTarget::Image(source), |c| {
+            c.clear_rect(0, 0, 8, 8, Color::rgba(0, 0, 0, 0));
+            fill(c, 2.0, 2.0, 4.0, 4.0, Color::rgb(0, 0, 255));
+        });
+        c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+        let mut matrix = [0.0; 20];
+        (matrix[0], matrix[6], matrix[12], matrix[18]) = (1.0, 1.0, 1.0, 1.0);
+        c.filter_image(tinted, ImageFilter::ColorMatrix { matrix }, blurred);
+    };
+    assert_eq!(passes(&filter_chain), [5]);
 }
 
 /// Nested layers under a rotated scissor, an armed path clip, an image
@@ -222,15 +257,15 @@ fn mixed_scene(c: &mut C) {
 }
 
 #[test]
-fn a_mixed_scene_renders_the_same_in_slices_of_eight() {
+fn a_mixed_scene_renders_the_same_in_slices_of_four() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
     let (unsliced, whole) = render(&device, &queue, 96, 96, None, mixed_scene);
     assert_eq!(whole.len(), 1);
-    let (sliced, slices) = render(&device, &queue, 96, 96, slices_of(8), mixed_scene);
+    let (sliced, slices) = render(&device, &queue, 96, 96, slices_of(4), mixed_scene);
     assert!(slices.len() >= 3, "slices {slices:?}");
-    assert!(slices.iter().all(|&passes| passes <= 8), "slices {slices:?}");
+    assert!(slices.iter().all(|&passes| passes <= 4), "slices {slices:?}");
     assert_eq!(slices.iter().sum::<u32>(), whole[0]);
     assert_same_pixels(&sliced, &unsliced, "mixed scene");
     // The cut moves with the slice size; the picture must not.
@@ -241,8 +276,8 @@ fn a_mixed_scene_renders_the_same_in_slices_of_eight() {
 }
 
 /// Where the caller's own command buffer lands relative to the frame. The
-/// canvas draws a red square, a half-red layer and a blue layer, six passes,
-/// in slices of four: the square and the first layer are in the slice, the
+/// canvas draws a red square, a half-red layer and a blue layer, five passes,
+/// in slices of three: the square and the first layer are in the slice, the
 /// blue layer in the returned tail.
 enum Prepass {
     /// `queue.submit([prepass]); flush; queue.submit([tail])`.
@@ -317,7 +352,7 @@ fn frame_after_a_green_prepass(
         Prepass::WithTheTail => queue.submit([prepass.take().unwrap(), tail]),
     };
     if slicing.is_some() {
-        assert_eq!(canvas.renderer().last_frame_slices(), [4, 2]);
+        assert_eq!(canvas.renderer().last_frame_slices(), [3, 2]);
     }
 
     let padded = (W * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -392,7 +427,7 @@ fn with_slicing_a_prepass_submitted_before_the_flush_runs_first() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    let row = frame_after_a_green_prepass(&device, &queue, slices_of(4), Prepass::BeforeTheFlush);
+    let row = frame_after_a_green_prepass(&device, &queue, slices_of(3), Prepass::BeforeTheFlush);
     assert_eq!(px(&row, 4), RED);
     assert!(half_red_over_green(px(&row, 12)), "{:?}", px(&row, 12));
     assert_eq!(px(&row, 20), BLUE);
@@ -405,7 +440,7 @@ fn with_slicing_a_prepass_submitted_with_the_tail_erases_the_slices_before_it() 
     };
     // The documented hazard: the slice ran during the flush, the caller's
     // clear ran after it, only the tail's draws survive.
-    let row = frame_after_a_green_prepass(&device, &queue, slices_of(4), Prepass::WithTheTail);
+    let row = frame_after_a_green_prepass(&device, &queue, slices_of(3), Prepass::WithTheTail);
     assert_eq!(px(&row, 4), GREEN);
     assert_eq!(px(&row, 12), GREEN);
     assert_eq!(px(&row, 20), BLUE);
@@ -469,9 +504,11 @@ fn peak_footprint_during(work: impl FnOnce()) -> u64 {
 
 /// The footprint is the whole process's, so the frames are measured in a
 /// child process running only this test; the parent asserts on its report.
+/// Slices lower the peak by letting command buffers complete while the rest
+/// of the frame is encoded; they do not bound it, since nothing waits.
 #[cfg(target_os = "macos")]
 #[test]
-fn driver_memory_stays_bounded_with_slices_on_metal() {
+fn slices_hold_less_driver_memory_than_one_submission_on_metal() {
     const CHILD: &str = "FEMTOVG_FOOTPRINT_CHILD";
     let mib = |bytes: u64| bytes / (1024 * 1024);
     if std::env::var_os(CHILD).is_some() {
@@ -479,9 +516,9 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
             println!("footprint skip");
             return;
         };
-        // The driver keeps its pool once grown, so every peak is measured
-        // against the footprint before any frame, and the sliced frames run
-        // first.
+        // The driver keeps its pool for a second or two once grown, so both
+        // peaks are measured against the footprint before any frame, and
+        // the sliced frame runs first.
         let baseline = phys_footprint();
         let measure = |slicing: Option<SubmissionSlicing>, draw: fn(&mut C)| {
             let peak = peak_footprint_during(|| {
@@ -493,22 +530,17 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
             });
             peak.saturating_sub(baseline)
         };
-        let scenes: [Scene; 2] = [("176-layer portrait", portrait), ("mixed scene", mixed_scene)];
-        for (what, draw) in scenes {
-            println!(
-                "footprint sliced {} {what}",
-                mib(measure(Some(SubmissionSlicing::default()), draw))
-            );
-        }
-        for (what, draw) in scenes {
-            println!("footprint whole {} {what}", mib(measure(None, draw)));
-        }
+        println!(
+            "footprint sliced {}",
+            mib(measure(Some(SubmissionSlicing::default()), portrait))
+        );
+        println!("footprint whole {}", mib(measure(None, portrait)));
         return;
     }
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "driver_memory_stays_bounded_with_slices_on_metal",
+            "slices_hold_less_driver_memory_than_one_submission_on_metal",
             "--nocapture",
         ])
         .env(CHILD, "1")
@@ -523,28 +555,22 @@ fn driver_memory_stays_bounded_with_slices_on_metal() {
     if report.contains("footprint skip") {
         return;
     }
-    let mut lines = report.lines().filter(|line| line.starts_with("footprint "));
-    let mut sliced = Vec::new();
-    let mut whole = Vec::new();
-    for line in &mut lines {
-        let mut words = line.splitn(4, ' ');
-        let (_, kind, mib, what) = (words.next(), words.next(), words.next(), words.next());
-        let entry = (what.unwrap().to_owned(), mib.unwrap().parse::<u64>().unwrap());
-        match kind {
-            Some("sliced") => sliced.push(entry),
-            Some("whole") => whole.push(entry),
-            _ => panic!("unexpected report line {line:?}"),
-        }
-    }
-    assert_eq!(sliced.len(), 2, "{report}");
-    for ((what, held), (_, held_whole)) in sliced.iter().zip(&whole) {
-        eprintln!(
-            "{what}: the footprint peaked {held} MiB above the baseline with slices alone, {held_whole} MiB in one submission"
-        );
-        // On an M4 Max: 1,110 MiB with slices alone, 1,566 MiB in one submission.
-        assert!(
-            held < held_whole,
-            "{what}: {held} MiB held with slices alone, {held_whole} MiB in one submission"
-        );
-    }
+    let held = |kind: &str| -> u64 {
+        let line = report
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("footprint {kind} ")))
+            .unwrap_or_else(|| panic!("no {kind} line in the child's report:\n{report}"));
+        line.trim().parse().expect("a footprint in MiB")
+    };
+    let (sliced, whole) = (held("sliced"), held("whole"));
+    eprintln!(
+        "176-layer portrait: the footprint peaked {sliced} MiB above the baseline in slices, {whole} MiB in one submission"
+    );
+    // On an M4 Max: 1,050 MiB in slices, 1,499 MiB in one submission; about
+    // 445 MiB of either is a pool the driver grows for the first frame of
+    // any size.
+    assert!(
+        sliced < whole,
+        "{sliced} MiB held in slices, {whole} MiB in one submission"
+    );
 }
