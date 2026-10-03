@@ -159,7 +159,7 @@ where
         // >99.7% of the Gaussian) plus a fringe pixel for antialiased edges.
         // The reach is the true sigma's: the blur below runs as as many
         // passes as it takes to compose to it.
-        let pad = blur_reach([sigma]).unwrap_or(0.0) + FRINGE_PAD;
+        let pad = blur_reach([[sigma; 2]]).map_or(0.0, |reach| reach[0]) + FRINGE_PAD;
         // Bounded like a layer's: a shadow whose padded coverage would pass
         // the texture limit keeps its coverage and loses reach at the edge.
         let pad = bounded_pad(
@@ -176,7 +176,7 @@ where
             shape_bounds.miny,
             shape_bounds.maxx,
             shape_bounds.maxy,
-            pad,
+            [pad; 2],
         )
         .store(transient::SHADOW_GRANULARITY);
         let limit = self.renderer.max_texture_size();
@@ -186,15 +186,10 @@ where
         let (minx, miny) = plan.origin;
         let (width, height) = (plan.width, plan.height);
 
-        let blur_plan = (sigma >= 0.01).then(|| blur_passes(sigma));
-        let work = blur_plan.map_or(0, |(passes, pass_sigma)| {
-            filter_work(
-                std::slice::from_ref(&ImageFilter::GaussianBlur { sigma: pass_sigma }),
-                width,
-                height,
-            )
-            .saturating_mul(passes as u64)
-        });
+        let blur_plan: Option<Vec<ImageFilter>> = (sigma >= 0.01).then(|| blur_passes(sigma, sigma).collect());
+        let work = blur_plan
+            .as_deref()
+            .map_or(0, |passes| filter_work(passes, width, height));
         if !self.reserve_filter_work(work) {
             return;
         }
@@ -266,17 +261,11 @@ where
             let Some(blurred_image) = blurred_image else {
                 return coverage_image;
             };
-            let (passes, pass_sigma) = blur_plan.expect("a blurred image has a blur plan");
+            let passes = blur_plan.expect("a blurred image has a blur plan");
             let mut src = coverage_image;
             let mut dst = blurred_image;
-            for _ in 0..passes {
-                let _ = canvas.filter_image_with_scratch(
-                    dst,
-                    ImageFilter::GaussianBlur { sigma: pass_sigma },
-                    src,
-                    blur_scratch,
-                    None,
-                );
+            for pass in passes {
+                let _ = canvas.filter_image_with_scratch(dst, pass, src, blur_scratch, None);
                 std::mem::swap(&mut src, &mut dst);
             }
             src
@@ -557,11 +546,12 @@ fn opaque_shadow_emits_offscreen_blur_pass() {
     });
 
     match filtered {
-        Some(ImageFilter::GaussianBlur { sigma }) => {
-            // HTML drawing model: sigma == shadowBlur / 2.
+        Some(ImageFilter::GaussianBlur { sigma_x, sigma_y }) => {
+            // HTML drawing model: sigma == shadowBlur / 2, on both axes.
+            assert_eq!(sigma_x, sigma_y);
             assert!(
-                (sigma - 3.0).abs() < 1e-4,
-                "expected sigma 3.0 for blur 6.0, got {sigma}"
+                (sigma_x - 3.0).abs() < 1e-4,
+                "expected sigma 3.0 for blur 6.0, got {sigma_x}"
             );
         }
         Some(other) => panic!("opaque shadow must run the Gaussian blur filter, got {other:?}"),

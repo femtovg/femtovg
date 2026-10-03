@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `ImageFilter::GaussianBlur` now takes a standard deviation per axis
+  (`sigma_x`, `sigma_y`), SVG's two-valued `feGaussianBlur stdDeviation`: a
+  blur along one axis renders as a streak or a glow instead of spreading the
+  larger value both ways. Each axis splits into its own passes above the
+  per-pass bound, an unblurred axis copies through, and a layer pads each axis
+  by its own reach. `ImageFilter::gaussian_blur(sigma)` builds the isotropic
+  blur the single `sigma` field used to.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which

@@ -3034,8 +3034,11 @@ fn a_large_shadow_blur_runs_as_quadrature_passes() {
         .filter_map(|c| match c.cmd_type {
             CommandType::RenderFilteredImage {
                 target_image,
-                filter: ImageFilter::GaussianBlur { sigma },
-            } => Some((c.image.expect("a blur reads an image"), target_image, sigma)),
+                filter: ImageFilter::GaussianBlur { sigma_x, sigma_y },
+            } => {
+                assert_eq!(sigma_x, sigma_y, "a shadow blurs both axes alike");
+                Some((c.image.expect("a blur reads an image"), target_image, sigma_x))
+            }
             _ => None,
         })
         .collect();
@@ -4215,11 +4218,11 @@ fn filter_chain_bounds_transient_images() {
         .filter_image_chain(
             dst,
             &[
-                ImageFilter::GaussianBlur { sigma: 1.0 },
+                ImageFilter::gaussian_blur(1.0),
                 ImageFilter::sepia(1.0),
-                ImageFilter::GaussianBlur { sigma: 2.0 },
+                ImageFilter::gaussian_blur(2.0),
                 ImageFilter::invert(1.0),
-                ImageFilter::GaussianBlur { sigma: 1.5 },
+                ImageFilter::gaussian_blur(1.5),
                 ImageFilter::brightness(1.3),
             ],
             src,
@@ -4279,7 +4282,7 @@ fn nested_layers_accumulate_their_root_origin() {
     // without shifting anything, and the layer inside it still captures
     // against the outer store.
     canvas.reset_scissor();
-    let blur = ImageFilter::GaussianBlur { sigma: 4.0 };
+    let blur = ImageFilter::gaussian_blur(4.0);
     assert!(!canvas.begin_layer(&LayerEffects::new().with_filters(&[blur])));
     assert_eq!(origins(&canvas), ((-14.0, -14.0), (16.0, 8.0)));
     assert!(canvas.begin_layer(&LayerEffects::new()));

@@ -186,7 +186,7 @@ fn a_split_blur_chain_matches_the_gaussian_profile() {
         let source = step_image(canvas);
         let target = filter_target(canvas);
         canvas
-            .filter_image_chain(target, &[ImageFilter::GaussianBlur { sigma: 16.0 }], source)
+            .filter_image_chain(target, &[ImageFilter::gaussian_blur(16.0)], source)
             .expect("chain");
         blit(canvas, target);
     });
@@ -199,7 +199,7 @@ fn a_split_blur_chain_matches_the_gaussian_profile() {
     let single = render(&device, &queue, |canvas| {
         let source = step_image(canvas);
         let target = filter_target(canvas);
-        canvas.filter_image(target, ImageFilter::GaussianBlur { sigma: 16.0 }, source);
+        canvas.filter_image(target, ImageFilter::gaussian_blur(16.0), source);
         blit(canvas, target);
     });
     let clamped = max_deviation(&single, 16.0);
@@ -223,7 +223,7 @@ fn a_split_blur_layer_matches_the_gaussian_profile() {
         return;
     };
     let layered = render(&device, &queue, |canvas| {
-        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 20.0 }])));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(20.0)])));
         step_fill(canvas, -400.0, 800.0);
         canvas.end_layer();
     });
@@ -270,7 +270,7 @@ fn a_blur_within_the_bound_is_bit_identical_to_its_single_pass() {
             let source = step_image(canvas);
             let target = filter_target(canvas);
             canvas
-                .filter_image_chain(target, &[ImageFilter::GaussianBlur { sigma }], source)
+                .filter_image_chain(target, &[ImageFilter::gaussian_blur(sigma)], source)
                 .expect("chain");
             blit(canvas, target);
         });
@@ -280,7 +280,7 @@ fn a_blur_within_the_bound_is_bit_identical_to_its_single_pass() {
                 .create_image_empty(W as usize, H as usize, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
                 .expect("scratch");
             let target = filter_target(canvas);
-            canvas.filter_image(scratch, ImageFilter::GaussianBlur { sigma }, source);
+            canvas.filter_image(scratch, ImageFilter::gaussian_blur(sigma), source);
             canvas.filter_image(target, ImageFilter::identity(), scratch);
             blit(canvas, target);
         });
