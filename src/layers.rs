@@ -377,18 +377,14 @@ where
             return true;
         }
 
-        // Blur reach padding, per axis: 3 sigma covers >99.7% of the kernel.
-        // The sigma is each blur's true one (the chain runs a blur above the
-        // shader's per-pass bound as passes that compose to it, so its reach
-        // is real), clamped only at the chain ceiling. Successive Gaussians
-        // compound in quadrature - n blurs of sigma reach like one of
-        // sigma * sqrt(n) - so the reach of a chain is the root of the sum of
-        // squares.
-        let pad = blur_reach(effects.filters.iter().filter_map(|f| match f {
-            ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some([*sigma_x, *sigma_y]),
-            _ => None,
-        }))
-        .map_or([0.0; 2], |reach| reach.map(|axis| axis + FRINGE_PAD));
+        // Reach padding, per axis: 3 sigma of the blurs covers >99.7% of the
+        // kernel - each blur's true sigma (the chain runs a blur above the
+        // shader's per-pass bound at the size where it fits one, so its
+        // reach is real), clamped only at the chain ceiling, and successive
+        // Gaussians compound in quadrature, n blurs of sigma reaching like
+        // one of sigma * sqrt(n) - plus each dilation's radius and each
+        // offset's shift, which carry content outward by that much.
+        let pad = chain_reach(&effects.filters).map_or([0.0; 2], |reach| reach.map(|axis| axis + FRINGE_PAD));
 
         // A rounded or rotated scissor has no device rect: the store spans
         // the canvas and the scissor applies once, at the composite, after
@@ -1751,6 +1747,34 @@ fn a_layer_pads_each_axis_by_its_own_reach() {
     let record = canvas.layers.last().unwrap();
     assert_eq!(record.origin, (50.0, 24.0));
     assert_eq!((record.width, record.height), (320, 256));
+    canvas.end_layer();
+    canvas.restore();
+}
+
+/// A layer pads its store by a dilation's radius and an offset's shift,
+/// which carry content outward as a blur's reach does: a 10 px dilation
+/// with a shift of 6 right and 3 up pads 16 + 2 in x and 13 + 2 in y.
+#[test]
+fn a_layer_pads_by_a_dilation_and_an_offset() {
+    use crate::ImageFilter;
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(800, 600, 1.0);
+    canvas.save();
+    canvas.scissor(100.0, 50.0, 200.0, 200.0);
+    let spread = [
+        ImageFilter::Morphology {
+            radius_x: 10.0,
+            radius_y: 10.0,
+            operator: MorphologyOperator::Dilate,
+        },
+        ImageFilter::Offset { dx: 6.0, dy: -3.0 },
+    ];
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&spread)));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (82.0, 35.0));
+    // 236 and 230 px, rounded up to 64.
+    assert_eq!((record.width, record.height), (256, 256));
+    assert!(record.filter_images.is_some());
     canvas.end_layer();
     canvas.restore();
 }

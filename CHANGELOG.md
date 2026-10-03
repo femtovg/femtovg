@@ -3,6 +3,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
+  `feMorphology` and `feOffset` primitives: a dilation grows the opaque
+  regions of an image by a whole-pixel radius per axis and an erosion
+  shrinks them (the per-channel maximum or minimum within the radius, as
+  two draws like the blur, a radius above the 24 pixels one draw covers
+  running as passes whose radii sum to it), and an offset shifts the image
+  by a device-pixel vector, transparent beyond its edge. A layer pads its
+  store by a morphology's radius - a dilation reaches that far out, an
+  erosion reads that far beyond the store - and by an offset's shift, as it
+  does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
+  shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
+  `feColorMatrix`) as one layer filter.
 - A Gaussian blur whose standard deviation on an axis is above the 8 device
   pixels one shader pass covers now runs at a downsampled size, the way
   Skia's GPU blur does: a filter chain, a layer filter or a shadow halves

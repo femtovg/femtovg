@@ -49,6 +49,8 @@ varying vec2 fpos;
  #define SHADER_TYPE_FilterImageTurbulence 13
  #define SHADER_TYPE_FilterImageTransfer 14
  #define SHADER_TYPE_FilterImageBlend 15
+ #define SHADER_TYPE_FilterImageMorphology 16
+ #define SHADER_TYPE_FilterImageOffset 17
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -296,6 +298,8 @@ vec4 renderColorMatrix();
 vec4 renderTurbulence();
 vec4 renderTransfer();
 vec4 renderBlend();
+vec4 renderMorphology();
+vec4 renderOffset();
 
 void main(void) {
     vec4 result;
@@ -348,6 +352,10 @@ void main(void) {
     result = renderTransfer();
 #elif SELECT_SHADER == SHADER_TYPE_FilterImageBlend
     result = renderBlend();
+#elif SELECT_SHADER == SHADER_TYPE_FilterImageMorphology
+    result = renderMorphology();
+#elif SELECT_SHADER == SHADER_TYPE_FilterImageOffset
+    result = renderOffset();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
@@ -370,7 +378,7 @@ void main(void) {
     result *= mask;
 #endif
 #else
-#if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage && SELECT_SHADER != SHADER_TYPE_FilterImageColorMatrix && SELECT_SHADER != SHADER_TYPE_FilterImageTurbulence && SELECT_SHADER != SHADER_TYPE_FilterImageTransfer
+#if SELECT_SHADER != SHADER_TYPE_Stencil && SELECT_SHADER != SHADER_TYPE_FilterImage && SELECT_SHADER != SHADER_TYPE_FilterImageColorMatrix && SELECT_SHADER != SHADER_TYPE_FilterImageTurbulence && SELECT_SHADER != SHADER_TYPE_FilterImageTransfer && SELECT_SHADER != SHADER_TYPE_FilterImageMorphology && SELECT_SHADER != SHADER_TYPE_FilterImageOffset
         // Not stencil fill
         // Combine alpha
         result *= strokeAlpha * scissor;

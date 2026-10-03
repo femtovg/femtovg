@@ -253,3 +253,37 @@ vec4 renderBlend() {
     }
     return vec4(contribution + bd.rgb * (1.0 - src.a), src.a + bd.a - src.a * bd.a);
 }
+
+// SVG feMorphology, one axis per draw like the blur: each pixel takes the
+// per-channel maximum (dilate) or minimum (erode) of the premultiplied
+// pixels within the radius along imageBlurFilterDirection, every tap
+// through blurTap, so beyond the image reads transparent and an erosion
+// eats into the border. The radius rides imageBlurFilterSigma (whole
+// pixels, at most 24, the loop's constant bound) and the operator
+// imageBlurFilterCoeff.x (1 dilates).
+vec4 renderMorphology() {
+    // `radius` is the box gradient's macro in main-fs.glsl.
+    float reach = imageBlurFilterSigma;
+    bool dilate = imageBlurFilterCoeff.x > 0.5;
+    vec4 acc = blurTap(fpos.xy);
+    for (float i = 1.0; i <= 24.0; i += 1.) {
+        if (i > reach) {
+            break;
+        }
+        vec4 before = blurTap(fpos.xy - i * imageBlurFilterDirection);
+        vec4 after = blurTap(fpos.xy + i * imageBlurFilterDirection);
+        if (dilate) {
+            acc = max(acc, max(before, after));
+        } else {
+            acc = min(acc, min(before, after));
+        }
+    }
+    if (texType == 2) acc = vec4(acc.x);
+    return acc;
+}
+
+// SVG feOffset: the image shifted by the (dx, dy) in the first two
+// parameter slots; what shifts in from beyond the image is transparent.
+vec4 renderOffset() {
+    return blurTap(fpos.xy - frag[0].xy);
+}

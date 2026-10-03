@@ -57,7 +57,8 @@ mod layers;
 mod shadow;
 mod transient;
 pub use crate::image::{
-    BlendMode, ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, PixelFormat, TurbulenceKind,
+    BlendMode, ImageFilter, ImageFlags, ImageId, ImageInfo, ImageSource, MorphologyOperator, PixelFormat,
+    TurbulenceKind,
 };
 use crate::transient::TransientPool;
 use budgets::*;

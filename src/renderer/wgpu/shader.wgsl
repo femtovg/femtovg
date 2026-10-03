@@ -39,6 +39,8 @@ const SHADER_TYPE_FillImageGradientTwoPointRadial: i32 = 12;
 const SHADER_TYPE_FilterImageTurbulence: i32 = 13;
 const SHADER_TYPE_FilterImageTransfer: i32 = 14;
 const SHADER_TYPE_FilterImageBlend: i32 = 15;
+const SHADER_TYPE_FilterImageMorphology: i32 = 16;
+const SHADER_TYPE_FilterImageOffset: i32 = 17;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -183,6 +185,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         }
         case SHADER_TYPE_FilterImageBlend: {
             return renderBlend(vertex, params);
+        }
+        case SHADER_TYPE_FilterImageMorphology: {
+            return renderMorphology(vertex, params);
+        }
+        case SHADER_TYPE_FilterImageOffset: {
+            return renderOffset(vertex, params);
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
