@@ -10,8 +10,9 @@ All notable changes to this project will be documented in this file.
   two draws like the blur, a radius above the 24 pixels one draw covers
   running as passes whose radii sum to it), and an offset shifts the image
   by a device-pixel vector, transparent beyond its edge. A layer pads its
-  store by a dilation's radius and an offset's shift as it does by a blur's
-  reach. Together with `SourceAlpha` as a color matrix they run the spread
+  store by a morphology's radius - a dilation reaches that far out, an
+  erosion reads that far beyond the store - and by an offset's shift, as it
+  does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
   shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
   `feColorMatrix`) as one layer filter.
 - A Gaussian blur whose standard deviation on an axis is above the 8 device
