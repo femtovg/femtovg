@@ -3,6 +3,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- A Gaussian blur whose standard deviation on an axis is above the 8 device
+  pixels one shader pass covers now runs at a downsampled size, the way
+  Skia's GPU blur does: a filter chain, a layer filter or a shadow halves
+  its image along that axis until the sigma fits one pass, blurs there and
+  scales the result back up bilinearly,
+  instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
+  1080p layer is four halvings, a blur over a sixteenth of the pixels and
+  one copy where it was 93 full-size blurs, so it no longer exceeds the
+  filter work budget, which had left the layer unblurred; the sigma ceiling
+  rises from 128 to 512; blurs within the bound render as before. The blur
+  shader also reads transparent beyond the image it samples instead of
+  extending its edge texels, so a blurred image fades at its border as it
+  does in a browser.
 - `ImageFilter::GaussianBlur` now takes a standard deviation per axis
   (`sigma_x`, `sigma_y`), SVG's two-valued `feGaussianBlur stdDeviation`: a
   blur along one axis renders as a streak or a glow instead of spreading the

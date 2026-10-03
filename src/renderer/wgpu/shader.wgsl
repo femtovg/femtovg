@@ -400,12 +400,26 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
     return color;
 }
 
+// A blur tap, premultiplied: a straight-alpha source is converted per tap,
+// so the sum is a sum of premultiplied colors as the blur's definition
+// wants (converting the sum afterwards squared any alpha the taps lost). A
+// tap beyond the image reads transparent, as a filter's input is beyond its
+// edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
+// weight stays in the sum, so an edge fades.
+fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
+    let uv = pos / params.extent;
+    let inside = all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0));
+    var color: vec4<f32> = textureSample(image_texture, image_sampler, uv);
+    if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
+    return color * select(0.0, 1.0, inside);
+}
+
 fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
 
-    var color_sum: vec4<f32> = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent) * gaussian_coeff.x;
+    var color_sum: vec4<f32> = blurTap(vertex.fpos.xy, params) * gaussian_coeff.x;
     var coefficient_sum: f32 = gaussian_coeff.x;
     gaussian_coeff.x *= gaussian_coeff.y;
     gaussian_coeff.y *= gaussian_coeff.z;
@@ -418,8 +432,8 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += textureSample(image_texture, image_sampler, (vertex.fpos.xy - i * params.image_blur_filter_direction) / params.extent) * gaussian_coeff.x;
-        color_sum += textureSample(image_texture, image_sampler, (vertex.fpos.xy + i * params.image_blur_filter_direction) / params.extent) * gaussian_coeff.x;
+        color_sum += blurTap(vertex.fpos.xy - i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
+        color_sum += blurTap(vertex.fpos.xy + i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:
@@ -430,7 +444,6 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
 
     var color: vec4<f32> = color_sum / coefficient_sum;
 
-    if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
     if (params.tex_type == 2) { color = vec4<f32>(color.x); }
 
     return color;

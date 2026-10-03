@@ -118,12 +118,12 @@ where
     /// alpha. The result carries `shadowColor.rgb` with alpha
     /// `source.alpha * shadowColor.a` per pixel. That image is then
     /// Gaussian-blurred (standard deviation `shadowBlur / 2`) through the
-    /// chain planner's split ([`blur_passes`]): a sigma above the shader's
-    /// per-pass bound runs as the passes that compose to it, ping-ponging
-    /// between the coverage image and the blurred one, and finally composited
-    /// back into the current render target, translated by the device-space
-    /// shadow offset and drawn *under* the actual shape. The current scissor,
-    /// global alpha and composite operation are honored when compositing.
+    /// chain planner's passes ([`blur_passes`]): a sigma above the shader's
+    /// per-pass bound runs down the pyramid and back, and the result is
+    /// composited into the current render target, translated by the
+    /// device-space shadow offset and drawn *under* the actual shape. The
+    /// current scissor, global alpha and composite operation are honored
+    /// when compositing.
     ///
     /// `draw_coverage` is expected to issue the shape's normal draw command(s) with
     /// its real paint; the canvas transform in effect during the call already maps
@@ -186,7 +186,7 @@ where
         let (minx, miny) = plan.origin;
         let (width, height) = (plan.width, plan.height);
 
-        let blur_plan: Option<Vec<ImageFilter>> = (sigma >= 0.01).then(|| blur_passes(sigma, sigma).collect());
+        let blur_plan = (sigma >= 0.01).then(|| blur_passes(sigma, sigma));
         let work = blur_plan
             .as_deref()
             .map_or(0, |passes| filter_work(passes, width, height));
@@ -208,8 +208,9 @@ where
         // rasterization coordinates to compensate). FLIP_Y declares that
         // orientation so the composite below samples the coverage upright;
         // without it the shadow is mirrored about its rect's horizontal midline.
-        // The Gaussian blur is unaffected: each of its two passes flips once, so
-        // the blurred image keeps the coverage image's orientation.
+        // A blur pass keeps that orientation (its two draws flip twice); each
+        // identity pass of a pyramid turns it over once, so the blurred image
+        // declares FLIP_Y only when the plan's flips come out even.
         let image_flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
         // Both come from the transient pool: past the budget the shadow is
         // skipped rather than allocated, like a layer degrading.
@@ -219,25 +220,32 @@ where
         };
         // The blur kernel divides by sigma, so a zero (or sub-pixel) blur skips
         // the filter pass entirely — and with it the second offscreen image.
-        let (blurred_image, blur_scratch) = if sigma >= 0.01 {
-            match self.acquire_transient_image(width, height, image_flags) {
-                Ok(image) => match self.acquire_transient_image(width, height, ImageFlags::PREMULTIPLIED) {
-                    Ok(scratch) => (Some(image), Some(scratch)),
+        let (blurred_image, scratch) = match &blur_plan {
+            Some(passes) => {
+                let flips = passes.iter().filter(|pass| pass.filter.flips_output()).count();
+                let blurred_flags = if flips.is_multiple_of(2) {
+                    image_flags
+                } else {
+                    ImageFlags::PREMULTIPLIED
+                };
+                match self.acquire_transient_image(width, height, blurred_flags) {
+                    Ok(image) => match self.acquire_filter_scratches(width, height, passes, 1, 0) {
+                        Ok(scratch) => (Some(image), Some(scratch)),
+                        Err(_) => {
+                            self.rollback_transient_image(image);
+                            self.rollback_transient_image(coverage_image);
+                            self.refund_filter_work(work);
+                            return;
+                        }
+                    },
                     Err(_) => {
-                        self.rollback_transient_image(image);
                         self.rollback_transient_image(coverage_image);
                         self.refund_filter_work(work);
                         return;
                     }
-                },
-                Err(_) => {
-                    self.rollback_transient_image(coverage_image);
-                    self.refund_filter_work(work);
-                    return;
                 }
             }
-        } else {
-            (None, None)
+            None => (None, None),
         };
 
         // The coverage pass: the real source (its actual paint and per-pixel
@@ -246,11 +254,9 @@ where
         // color under SourceIn so the image carries shadowColor.rgb with
         // alpha = source.alpha * shadowColor.a - a transparent source casts
         // nothing, a half-alpha source a half-strength shadow. Then the blur:
-        // a sigma above the shader's per-pass bound is the planner's k passes
-        // of sigma / sqrt(k), ping-ponging between the two images through the
-        // reserved horizontal scratch, so the result sits in the blurred
-        // image after an odd count and back in the coverage image after an
-        // even one; a sharp shadow composites the coverage directly.
+        // the planner's passes from the coverage image into the blurred one,
+        // through the scratches reserved for them; a sharp shadow composites
+        // the coverage directly.
         let mut coverage_transform = Transform2D::translation(-minx, -miny);
         coverage_transform.premultiply(&state.transform);
         let source_image = self.offscreen_pass(RenderTarget::Image(coverage_image), coverage_transform, |canvas| {
@@ -258,17 +264,12 @@ where
             draw_coverage(canvas);
             canvas.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
             canvas.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
-            let Some(blurred_image) = blurred_image else {
+            let (Some(blurred_image), Some(scratch)) = (blurred_image, scratch) else {
                 return coverage_image;
             };
-            let passes = blur_plan.expect("a blurred image has a blur plan");
-            let mut src = coverage_image;
-            let mut dst = blurred_image;
-            for pass in passes {
-                let _ = canvas.filter_image_with_scratch(dst, pass, src, blur_scratch, None);
-                std::mem::swap(&mut src, &mut dst);
-            }
-            src
+            let passes = blur_plan.as_deref().expect("a blurred image has a blur plan");
+            canvas.run_filter_passes(blurred_image, passes, coverage_image, scratch, true, (0.0, 0.0));
+            blurred_image
         });
 
         let dst_x = minx + txx;
@@ -290,13 +291,10 @@ where
         self.state_mut().shadow_color = shadow_color;
 
         // The composite that reads them is recorded; the next shadow of this
-        // size draws into the same images.
+        // size draws into the same images (the chain released its scratches).
         self.release_transient_image(coverage_image);
         if let Some(blurred_image) = blurred_image {
             self.release_transient_image(blurred_image);
-        }
-        if let Some(blur_scratch) = blur_scratch {
-            self.release_transient_image(blur_scratch);
         }
     }
 }
