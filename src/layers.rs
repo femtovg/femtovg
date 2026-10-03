@@ -157,10 +157,13 @@ impl Default for LayerEffects {
     }
 }
 
-/// A blend mode's transients: the backdrop copy and the result. A chain's
-/// result blends back into the capture instead (free after the chain's
-/// first pass, and its FLIP_Y suits the flipped output), so `result` is
-/// `None`.
+/// A blend mode's transients: the backdrop copy and the result. The blend
+/// pass turns what it reads over once, so its result is read through the
+/// opposite of what its source is. A chain whose result reads without
+/// FLIP_Y blends back into the capture (free after the chain's first pass,
+/// and its FLIP_Y suits the turned-over output), so `result` is `None`;
+/// a chain whose result reads through FLIP_Y, like no chain at all, blends
+/// into a plain `result`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BlendImages {
     pub(crate) backdrop: ImageId,
@@ -532,7 +535,13 @@ where
             {
                 let work = blend_work(width, height);
                 if self.reserve_filter_work(work) {
-                    match self.reserve_blend_images(width, height, record.filter_images.is_some(), headroom) {
+                    let capture_serves = record.filter_images.as_ref().is_some_and(|images| {
+                        !self
+                            .images
+                            .info(images.target)
+                            .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y))
+                    });
+                    match self.reserve_blend_images(width, height, capture_serves, headroom) {
                         Some(images) => {
                             record.blend_images = Some(images);
                             record.reserved_filter_work = record.reserved_filter_work.saturating_add(work);
@@ -740,6 +749,13 @@ where
             .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
         let target = images.result.unwrap_or(capture);
         debug_assert!(target != source);
+        debug_assert_eq!(
+            self.images
+                .info(target)
+                .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y)),
+            !source_flipped,
+            "the blend's result lands the other way up from its source"
+        );
         let blend = ImageFilter::Blend {
             mode,
             backdrop: images.backdrop,
@@ -869,18 +885,20 @@ where
     }
 
     /// A blend mode's transients for a store of `width` x `height`; the
-    /// result is skipped when a chain's capture serves. `None` holds nothing.
+    /// result is skipped when `capture_serves` - the chain's result reads
+    /// without FLIP_Y, so the capture reads the blend of it the right way
+    /// up. `None` holds nothing.
     pub(crate) fn reserve_blend_images(
         &mut self,
         width: usize,
         height: usize,
-        filtered: bool,
+        capture_serves: bool,
         headroom: usize,
     ) -> Option<BlendImages> {
         let backdrop = self
             .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
             .ok()?;
-        let result = if filtered {
+        let result = if capture_serves {
             None
         } else {
             match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
@@ -1325,7 +1343,9 @@ fn a_blending_layer_reserves_its_backdrop_scratch() {
 }
 
 /// A blend-mode layer reserves the backdrop copy and the result; with a
-/// chain the result reuses the capture; on the screen nothing.
+/// chain whose result reads without FLIP_Y the result reuses the capture,
+/// with one whose result reads through it a plain result is reserved; on
+/// the screen nothing.
 #[test]
 fn a_blend_mode_layer_reserves_its_backdrop_and_result() {
     use crate::BlendMode;
@@ -1336,7 +1356,13 @@ fn a_blend_mode_layer_reserves_its_backdrop_and_result() {
         .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
         .unwrap();
     let brightness = [ImageFilter::brightness(2.0)];
-    // The pool only grows: cases in order of what they hold.
+    let blur = [ImageFilter::gaussian_blur(2.0)];
+    let two_matrices = [ImageFilter::brightness(2.0), ImageFilter::invert(1.0)];
+    // The pool only grows: cases in order of what they hold. A brightness
+    // pass leaves its result reading without FLIP_Y, so its blend lands in
+    // the capture; a blur (two draws) and two matrices leave it reading
+    // through FLIP_Y, so the blend takes a plain result - beside the chain's
+    // own scratch, a second FLIP_Y image joins the pool for the target.
     let cases = [
         (LayerEffects::new(), 1),
         (LayerEffects::new().with_filters(&brightness), 2),
@@ -1346,6 +1372,16 @@ fn a_blend_mode_layer_reserves_its_backdrop_and_result() {
                 .with_filters(&brightness)
                 .with_blend(BlendMode::Multiply),
             3,
+        ),
+        (
+            LayerEffects::new().with_filters(&blur).with_blend(BlendMode::Multiply),
+            5,
+        ),
+        (
+            LayerEffects::new()
+                .with_filters(&two_matrices)
+                .with_blend(BlendMode::Multiply),
+            5,
         ),
     ];
     for (effects, images) in cases {
