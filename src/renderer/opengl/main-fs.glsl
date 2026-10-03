@@ -244,12 +244,26 @@ vec4 renderPlainTextureCopy() {
     return color;
 }
 
+// A blur tap, premultiplied: a straight-alpha source is converted per tap,
+// so the sum is a sum of premultiplied colors as the blur's definition
+// wants (converting the sum afterwards squared any alpha the taps lost). A
+// tap beyond the image reads transparent, as a filter's input is beyond its
+// edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
+// weight stays in the sum, so an edge fades.
+vec4 blurTap(vec2 pos) {
+    vec2 uv = pos / extent;
+    vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+    vec4 color = texture2D(tex, uv);
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    return color * inside.x * inside.y;
+}
+
 vec4 renderFilteredImage() {
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
 
     vec3 gaussian_coeff = imageBlurFilterCoeff;
 
-    vec4 color_sum = texture2D(tex, fpos.xy / extent) * gaussian_coeff.x;
+    vec4 color_sum = blurTap(fpos.xy) * gaussian_coeff.x;
     float coefficient_sum = gaussian_coeff.x;
     gaussian_coeff.xy *= gaussian_coeff.yz;
 
@@ -261,8 +275,8 @@ vec4 renderFilteredImage() {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += texture2D(tex, (fpos.xy - i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
-        color_sum += texture2D(tex, (fpos.xy + i * imageBlurFilterDirection) / extent) * gaussian_coeff.x;
+        color_sum += blurTap(fpos.xy - i * imageBlurFilterDirection) * gaussian_coeff.x;
+        color_sum += blurTap(fpos.xy + i * imageBlurFilterDirection) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:
@@ -272,7 +286,6 @@ vec4 renderFilteredImage() {
 
     vec4 color = color_sum / coefficient_sum;
 
-    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (texType == 2) color = vec4(color.x);
 
     return color;

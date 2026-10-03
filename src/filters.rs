@@ -1,77 +1,161 @@
 //! Image filters and their passes: chains over an image, the pass planner,
-//! blur quadrature and the work each pass costs.
+//! the blur pyramid and the work each pass costs.
 
 use super::*;
 
-#[derive(Clone, Copy, Debug, Default)]
+/// A pyramid level: how many times a pass's image is halved along x and
+/// along y from the chain's own size.
+pub(crate) type Level = [u8; 2];
+
+/// The level of a pass at the chain's own size.
+pub(crate) const FULL: Level = [0, 0];
+
+#[derive(Clone, Debug, Default)]
 pub(crate) struct FilterScratchImages {
     pub(crate) chain: [Option<ImageId>; 2],
     pub(crate) blur: Option<ImageId>,
     // A blend's backdrop, placed into an image of the chain's size just
     // before its pass; one serves every blend in the chain in turn.
     pub(crate) blend: Option<ImageId>,
+    /// The pyramid levels the plan's passes render at, each with its
+    /// images, in the order the plan reaches them.
+    pub(crate) levels: Vec<(Level, LevelImages)>,
+}
+
+/// The images of one pyramid level: the one the chain is halved into, and,
+/// where a blur runs at this level, its target and horizontal scratch.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LevelImages {
+    pub(crate) down: Option<ImageId>,
+    pub(crate) blurred: Option<ImageId>,
+    pub(crate) blur: Option<ImageId>,
 }
 
 impl FilterScratchImages {
-    pub(crate) fn images(self) -> impl Iterator<Item = ImageId> {
-        self.chain.into_iter().flatten().chain(self.blur).chain(self.blend)
+    pub(crate) fn images(&self) -> impl Iterator<Item = ImageId> + '_ {
+        self.chain
+            .iter()
+            .flatten()
+            .copied()
+            .chain(self.blur)
+            .chain(self.blend)
+            .chain(
+                self.levels
+                    .iter()
+                    .flat_map(|(_, level)| [level.down, level.blurred, level.blur])
+                    .flatten(),
+            )
+    }
+
+    /// The images reserved at pyramid `level`.
+    fn level(&self, level: Level) -> LevelImages {
+        self.levels
+            .iter()
+            .find(|(at, _)| *at == level)
+            .map(|(_, images)| *images)
+            .expect("images were reserved at every level the plan uses")
     }
 }
 
+/// One pass of a filter plan: `filter`, rendered into an image at pyramid
+/// `level` - [`FULL`] the chain's own size, `[m, n]` the chain halved m
+/// times along x and n times along y.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Pass {
+    pub(crate) filter: ImageFilter,
+    pub(crate) level: Level,
+}
+
+impl Pass {
+    pub(crate) fn at(filter: ImageFilter, level: Level) -> Self {
+        Self { filter, level }
+    }
+
+    /// The size of the image this pass renders into, for a chain of
+    /// `width` x `height`.
+    pub(crate) fn size(&self, width: usize, height: usize) -> (usize, usize) {
+        level_size(width, height, self.level)
+    }
+}
+
+/// Pyramid `level` of a `width` x `height` image: halved `level[0]` times
+/// along x and `level[1]` times along y, rounded up, never empty.
+pub(crate) fn level_size(width: usize, height: usize, level: Level) -> (usize, usize) {
+    let halve = |n: usize, times: u8| n.div_ceil(1 << times).max(1);
+    (halve(width, level[0]), halve(height, level[1]))
+}
+
+/// How many times an axis is halved at most: the ceiling below, halved this
+/// often, is the shader's per-pass bound.
+pub(crate) const MAX_LEVELS: usize = 6;
+
 /// The largest standard deviation a blur chain, a layer filter or a shadow
-/// renders on an axis; above it the sigma is clamped. A cost guard: the split below
-/// runs `(sigma / 8)^2` passes of two full-size draws each, so this is 256
-/// passes - sigma 128 device pixels is a CSS `blur(40px)` at a 3x device
-/// pixel ratio, and reaches 386 px - and an absurd or non-finite sigma
-/// cannot plan an unbounded pass count. Browsers stop at Skia's `kMaxSigma`
-/// of 532 (SkBlurImageFilter.cpp, a 1000 px box kernel), which they reach by
-/// downscaling or running-sum box blurs, not by pass count; that path is
-/// femtovg/femtovg#325's.
-pub(crate) const MAX_CHAIN_BLUR_SIGMA: f32 = 128.0;
+/// renders on an axis; above it the sigma is clamped, so an absurd or
+/// non-finite sigma plans a bounded pyramid. Skia stops at 532 (`kMaxSigma`,
+/// a 1000 px box kernel); the reach, three sigma, is what bounds a store at
+/// this value.
+pub(crate) const MAX_CHAIN_BLUR_SIGMA: f32 = 512.0;
 
 /// The standard deviation a chain renders for a requested `sigma`: `None`
 /// for a degenerate one (zero, negative, NaN), which the coefficient
 /// sanitization renders as a copy, else the value clamped to
-/// [`MAX_CHAIN_BLUR_SIGMA`]. The one place the pass split and the store
+/// [`MAX_CHAIN_BLUR_SIGMA`]. The one place the pyramid and the store
 /// padding read a blur's sigma, so the passes a chain runs and the reach a
 /// layer or shadow pads for cannot disagree.
 pub(crate) fn chain_blur_sigma(sigma: f32) -> Option<f32> {
     (sigma > 0.0).then(|| sigma.min(MAX_CHAIN_BLUR_SIGMA))
 }
 
-/// How a Gaussian blur of `sigma` runs on one axis within the shader's
-/// per-pass bound ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per
-/// pass)`. Gaussians compose in quadrature - k passes of sigma s blur like
-/// one pass of s * sqrt(k) - so a sigma above the bound B is exactly
-/// k = ceil((sigma / B)^2) passes of sigma / sqrt(k), each at most B: sigma
-/// 16 is four passes of 8, sigma 23 nine of 23/3. A sigma within the bound,
-/// or a degenerate one, is one pass with the value untouched, so small blurs
-/// render exactly as they did before the split existed. The cost is
-/// quadratic in sigma (each pass is two full-size draws), which is what the
-/// ceiling above bounds.
-pub(crate) fn axis_passes(sigma: f32) -> (usize, f32) {
+/// How a Gaussian blur of `sigma_x` by `sigma_y` runs within the shader's
+/// per-pass bound B ([`renderer::MAX_BLUR_SIGMA`]). Within it on both axes,
+/// one pass at the chain's size with the values untouched. Above it on an
+/// axis, the way Skia's GPU blur does: identity passes halve the chain
+/// along that axis n = ceil(log2(sigma / B)) times (a bilinear tap at an
+/// exact half scale averages the two texels it sits between), the blur runs at that
+/// level with sigma / 2^n - in (B/2, B] - on the halved axis and the
+/// requested value on an axis left whole, and an identity pass scales the
+/// result back up, bilinearly. A blur of sigma 77 is then four halvings, a
+/// blur over a sixteenth of the pixels and one full-size copy, where
+/// quadrature passes of B were 93 full-size blurs; the box prefilter of the
+/// halving widens the blur by under a tenth of a percent. A degenerate
+/// sigma is the copy it always was on its axis.
+pub(crate) fn blur_passes(sigma_x: f32, sigma_y: f32) -> Vec<Pass> {
     let bound = renderer::MAX_BLUR_SIGMA;
-    match chain_blur_sigma(sigma) {
-        Some(sigma) if sigma > bound => {
-            let ratio = sigma / bound;
-            let passes = (ratio * ratio).ceil() as usize;
-            (passes, sigma / (passes as f32).sqrt())
-        }
-        _ => (1, sigma),
+    let depth = |sigma: f32| -> u8 {
+        chain_blur_sigma(sigma)
+            .filter(|sigma| *sigma > bound)
+            .map_or(0, |sigma| (sigma / bound).log2().ceil() as u8)
+    };
+    let depths = [depth(sigma_x), depth(sigma_y)];
+    let deepest = depths[0].max(depths[1]);
+    if deepest == 0 {
+        return vec![Pass::at(ImageFilter::GaussianBlur { sigma_x, sigma_y }, FULL)];
     }
-}
-
-/// The passes a blur of `sigma_x` by `sigma_y` runs as: each axis split by
-/// [`axis_passes`] on its own, a pass carrying one bounded sigma per axis;
-/// the axis that is done first copies through (sigma 0) in the remaining
-/// passes. Degenerate on both axes is the one copy pass it always was.
-pub(crate) fn blur_passes(sigma_x: f32, sigma_y: f32) -> impl ExactSizeIterator<Item = ImageFilter> + Clone {
-    let (count_x, pass_x) = axis_passes(sigma_x);
-    let (count_y, pass_y) = axis_passes(sigma_y);
-    (0..count_x.max(count_y)).map(move |i| ImageFilter::GaussianBlur {
-        sigma_x: if i < count_x { pass_x } else { 0.0 },
-        sigma_y: if i < count_y { pass_y } else { 0.0 },
-    })
+    debug_assert!(usize::from(deepest) <= MAX_LEVELS);
+    // Halved with its axis; an axis left whole keeps its value.
+    let at_depth = |sigma: f32, depth: u8| {
+        if depth == 0 {
+            sigma
+        } else {
+            sigma.min(MAX_CHAIN_BLUR_SIGMA) / f32::from(1u16 << depth)
+        }
+    };
+    let mut passes = Vec::with_capacity(usize::from(deepest) + 2);
+    passes.extend((1..=deepest).map(|halvings| {
+        Pass::at(
+            ImageFilter::identity(),
+            [halvings.min(depths[0]), halvings.min(depths[1])],
+        )
+    }));
+    passes.push(Pass::at(
+        ImageFilter::GaussianBlur {
+            sigma_x: at_depth(sigma_x, depths[0]),
+            sigma_y: at_depth(sigma_y, depths[1]),
+        },
+        depths,
+    ));
+    passes.push(Pass::at(ImageFilter::identity(), FULL));
+    passes
 }
 
 /// The taps one blur draw takes per pixel along an axis of `sigma`: the
@@ -101,35 +185,36 @@ pub(crate) fn blend_work(width: usize, height: usize) -> u64 {
         .saturating_mul(BLEND_SAMPLES)
 }
 
-pub(crate) fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
-    let samples = filters.iter().fold(0u64, |total, filter| {
-        let per_pixel = match filter {
-            ImageFilter::GaussianBlur { sigma_x, sigma_y } => axis_taps(*sigma_x) + axis_taps(*sigma_y),
-            ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from((*num_octaves).min(10))).max(1),
+/// The samples a plan over a `width` x `height` chain takes: each pass's
+/// per-pixel cost over the pixels of its level.
+pub(crate) fn filter_work(passes: &[Pass], width: usize, height: usize) -> u64 {
+    passes.iter().fold(0u64, |total, pass| {
+        let per_pixel = match pass.filter {
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => axis_taps(sigma_x) + axis_taps(sigma_y),
+            ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from(num_octaves.min(10))).max(1),
             ImageFilter::Blend { .. } => BLEND_SAMPLES,
             _ => 1,
         };
-        total.saturating_add(per_pixel)
-    });
-    (width as u64).saturating_mul(height as u64).saturating_mul(samples)
+        let (w, h) = pass.size(width, height);
+        total.saturating_add((w as u64).saturating_mul(h as u64).saturating_mul(per_pixel))
+    })
 }
 
 /// The passes a filter list runs as: runs of adjacent color matrices folded
 /// where that is exact ([`ImageFilter::fold_with`]), each Gaussian blur
-/// above the shader's per-pass bound split into the passes that compose to
-/// it ([`blur_passes`]), plus an identity pass when the flip count comes out
+/// above the shader's per-pass bound run down the pyramid and back
+/// ([`blur_passes`]), plus an identity pass when the flip count comes out
 /// even, so every chain shape leaves storage flipped once - which makes the
 /// empty list a copy. The result is never empty; `None` rejects a plan above
 /// [`MAX_FILTER_PASSES`]. What [`Canvas::filter_image_chain`] executes and
 /// what a layer's scratch reservation is sized from, so the two cannot disagree.
-pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<ImageFilter>> {
+pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
     if filters.len() > MAX_FILTER_PASSES {
         return None;
     }
-    // Fold first, split second: a blur never folds today, but the split
-    // passes are adjacent blurs, and expanding after the fold keeps them
-    // from being folded back should a fold of blurs ever exist. ImageFilter
-    // is Copy, so neither list deep-copies anything.
+    // Fold first, expand second: the pyramid's identity passes sit at other
+    // levels than their neighbours, and expanding after the fold keeps them
+    // out of it. ImageFilter is Copy, so neither list deep-copies anything.
     let mut folded: Vec<ImageFilter> = Vec::with_capacity(filters.len().min(MAX_FILTER_PASSES));
     for filter in filters {
         if let Some(prev) = folded.last_mut() {
@@ -140,31 +225,25 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<ImageFilter>>
         }
         folded.push(*filter);
     }
-    // The capacity covers every split pass plus the parity pass, so the list
-    // never reallocates.
-    let count = folded.iter().try_fold(0usize, |count, filter| {
-        let passes = match filter {
-            ImageFilter::GaussianBlur { sigma_x, sigma_y } => blur_passes(*sigma_x, *sigma_y).len(),
-            _ => 1,
-        };
-        count.checked_add(passes).filter(|count| *count <= MAX_FILTER_PASSES)
-    })?;
-    let mut passes: Vec<ImageFilter> = Vec::with_capacity(count + 1);
+    let mut passes: Vec<Pass> = Vec::with_capacity(folded.len() + MAX_LEVELS + 2);
     for filter in folded {
         match filter {
             ImageFilter::GaussianBlur { sigma_x, sigma_y } => passes.extend(blur_passes(sigma_x, sigma_y)),
-            other => passes.push(other),
+            other => passes.push(Pass::at(other, FULL)),
+        }
+        if passes.len() > MAX_FILTER_PASSES {
+            return None;
         }
     }
     // A color-matrix pass flips the image (the render-target convention),
-    // the two-pass Gaussian blur preserves it - however many of them a
-    // split adds, the parity is the unsplit chain's.
-    let flips = passes.iter().filter(|f| f.flips_output()).count();
-    if flips % 2 == 0 {
+    // the two-pass Gaussian blur preserves it; the pyramid's identity passes
+    // count like any other.
+    let flips = passes.iter().filter(|pass| pass.filter.flips_output()).count();
+    if flips.is_multiple_of(2) {
         if passes.len() == MAX_FILTER_PASSES {
             return None;
         }
-        passes.push(ImageFilter::identity());
+        passes.push(Pass::at(ImageFilter::identity(), FULL));
     }
     Some(passes)
 }
@@ -185,8 +264,8 @@ where
     /// deviation of at most 8 device pixels per axis (the shader's kernel is
     /// bounded at 24 taps per side, a GLES 2.0 loop constraint): a larger
     /// sigma is clamped to 8 here. For a blur above that use
-    /// [`filter_image_chain`](Self::filter_image_chain), which splits it
-    /// into passes that compose to the requested sigma.
+    /// [`filter_image_chain`](Self::filter_image_chain), which renders it at
+    /// a downsampled size where it fits one pass.
     ///
     /// [`ImageFilter::Turbulence`] reads nothing from `source_image` - it only takes the output
     /// size from it - and keeps a small per-seed cache of lattice textures (512 KB each, the
@@ -214,7 +293,7 @@ where
         {
             return;
         }
-        let work = filter_work(std::slice::from_ref(&filter), image_width, image_height);
+        let work = filter_work(&[Pass::at(filter, FULL)], image_width, image_height);
         if !self.reserve_filter_work(work) {
             return;
         }
@@ -262,13 +341,17 @@ where
         if let Some(scratch) = blur_scratch {
             debug_assert!(scratch != source_image && scratch != target_image);
         }
-        let Ok((image_width, image_height)) = self.image_size(source_image) else {
+        // The quad covers the target: a pass between images of different
+        // sizes (a pyramid's halving and its scale back up) resamples the
+        // whole source over it, as the renderers set the shader's extent to
+        // the target too.
+        let Ok((image_width, image_height)) = self.image_size(target_image) else {
             return false;
         };
 
         // The renderer will receive a RenderFilteredImage command with two triangles attached that
-        // cover the image and the source image. A turbulence pass generates rather than samples,
-        // so it binds its noise lattice where the source would go; the source still sizes the quad.
+        // cover the target. A turbulence pass generates rather than samples, so it binds its noise
+        // lattice where the source would go.
         let sampled = match filter {
             ImageFilter::Turbulence { seed, .. } => match self.turbulence_lattice(seed) {
                 Ok(lattice) => lattice,
@@ -335,10 +418,10 @@ where
         Ok(id)
     }
 
-    pub(crate) fn prepare_turbulence_lattices(&mut self, filters: &[ImageFilter]) -> Result<(), ErrorKind> {
-        for filter in filters {
-            if let ImageFilter::Turbulence { seed, .. } = filter {
-                self.turbulence_lattice(*seed)?;
+    pub(crate) fn prepare_turbulence_lattices(&mut self, passes: &[Pass]) -> Result<(), ErrorKind> {
+        for pass in passes {
+            if let ImageFilter::Turbulence { seed, .. } = pass.filter {
+                self.turbulence_lattice(seed)?;
             }
         }
         Ok(())
@@ -354,21 +437,23 @@ where
     /// one that can overflow (`brightness(>1)`, `contrast`, `sepia`) keeps its
     /// own pass so its clamp still happens, matching how browsers clamp per
     /// filter function. A Gaussian blur whose standard deviation on an axis
-    /// is above the 8 device pixels one shader pass covers runs that axis as
-    /// `ceil((sigma / 8)^2)` passes of `sigma / sqrt(passes)`: Gaussians
-    /// compose in quadrature, so four passes of sigma 8 are exactly one blur
-    /// of sigma 16, and nine of 23/3 one of 23 - the full reach, where the
-    /// single-pass [`filter_image`](Self::filter_image) would clamp to 8; the
-    /// other axis runs its own split alongside. The pass count
-    /// grows with the square of the sigma, so sigma is capped at 128 and one
-    /// operation is capped at 257 total planned passes. Passes that do not fold ping-pong between at most two
-    /// transient scratch images sized like the source; a blur plan reserves
-    /// one more full-size horizontal scratch, so peak transient
-    /// memory is twice the source image, or three times across a blur - bounded
-    /// regardless of chain length or pass count either way. The scratches are
-    /// freed at the next flush. All color work is in unpremultiplied sRGB with
-    /// output clamped to [0, 1] per pass, so an alpha-amplifying matrix feeding
-    /// a blur cannot blow out later passes.
+    /// is above the 8 device pixels one shader pass covers runs the way
+    /// Skia's GPU blur does: the image is halved along that axis until the
+    /// sigma, halved with it, fits one pass, blurred there, and scaled back
+    /// up bilinearly - the full reach, where the single-pass
+    /// [`filter_image`](Self::filter_image) would clamp to 8, for about one
+    /// copy of the image plus a small blur, and the halving widens the blur
+    /// by under a tenth of a percent. Sigma is capped at 512 and one
+    /// operation at 257 planned passes. Passes that do not fold ping-pong
+    /// between at most two transient scratch images sized like the source; a
+    /// blur within the bound reserves one more full-size horizontal scratch,
+    /// one above it the pyramid's levels (under a third of the source in all
+    /// when both axes are halved) and its scratches at the blur's level, so
+    /// peak transient memory is twice the source image, or three times
+    /// across a blur - bounded regardless of chain length or sigma either
+    /// way. The scratches are freed at the next flush. All color work is in
+    /// unpremultiplied sRGB with output clamped to [0, 1] per pass, so an
+    /// alpha-amplifying matrix feeding a blur cannot blow out later passes.
     ///
     /// The target ends up in the same orientation convention as a single
     /// color-matrix [`filter_image`](Self::filter_image) call: content stored
@@ -410,14 +495,17 @@ where
         if target_image == source_image && filters.is_empty() {
             return Ok(());
         }
-        if target_image == source_image && passes.len() == 1 && !matches!(passes[0], ImageFilter::Turbulence { .. }) {
+        if target_image == source_image
+            && passes.len() == 1
+            && !matches!(passes[0].filter, ImageFilter::Turbulence { .. })
+        {
             return Err(ErrorKind::RenderTargetError(
                 "a single-pass filter cannot read and write the same image".into(),
             ));
         }
-        for filter in &passes {
-            if let ImageFilter::Blend { backdrop, .. } = filter {
-                self.image_info(*backdrop)?;
+        for pass in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = pass.filter {
+                self.image_info(backdrop)?;
             }
         }
         let work = filter_work(&passes, width, height);
@@ -429,73 +517,89 @@ where
             return Err(err);
         }
         let scratch = self
-            .acquire_filter_scratches(
-                width,
-                height,
-                passes.len(),
-                passes
-                    .iter()
-                    .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. })),
-                passes.iter().any(|filter| matches!(filter, ImageFilter::Blend { .. })),
-                2,
-                0,
-            )
+            .acquire_filter_scratches(width, height, &passes, 2, 0)
             .inspect_err(|_| self.refund_filter_work(work))?;
         self.run_filter_passes(target_image, &passes, source_image, scratch, false, (0.0, 0.0));
         Ok(())
     }
 
-    /// Acquires the scratches a chain of `passes` ping-pongs between: none
-    /// for a single pass, which writes its target directly, one for two, two
-    /// beyond, whatever the chain's length. Scratches hold premultiplied
-    /// filter output; the flag keeps every consumer (filter passes and
-    /// composites) reading them under the same alpha convention - without it,
-    /// semi-transparent content is premultiplied a second time at each read
-    /// and darkens per pass. Holds nothing on failure.
+    /// Acquires the scratches a plan's `passes` run through: the full-size
+    /// images its full-size passes ping-pong between - none for one such
+    /// pass, which writes its target directly, one for two, two beyond, up
+    /// to `chain_limit` - a horizontal scratch for a full-size blur, a
+    /// blend's backdrop, and for each pyramid level in use the image the
+    /// chain is halved into plus, where a blur runs there, its target and
+    /// scratch. Scratches hold premultiplied filter output; the flag keeps
+    /// every consumer (filter passes and composites) reading them under the
+    /// same alpha convention - without it, semi-transparent content is
+    /// premultiplied a second time at each read and darkens per pass. Holds
+    /// nothing on failure.
     pub(crate) fn acquire_filter_scratches(
         &mut self,
         width: usize,
         height: usize,
-        passes: usize,
-        needs_blur: bool,
-        needs_blend: bool,
+        passes: &[Pass],
         chain_limit: usize,
         headroom: usize,
     ) -> Result<FilterScratchImages, ErrorKind> {
+        let is_blur = |pass: &Pass| matches!(pass.filter, ImageFilter::GaussianBlur { .. });
+        let full = passes.iter().filter(|pass| pass.level == FULL).count();
+        let chain = full.saturating_sub(1).min(chain_limit);
+        let blur = passes.iter().any(|pass| pass.level == FULL && is_blur(pass));
+        let blend = passes
+            .iter()
+            .any(|pass| matches!(pass.filter, ImageFilter::Blend { .. }));
+        // Each level in use, in plan order, and whether a blur runs there.
+        let mut levels: Vec<(Level, bool)> = Vec::new();
+        for pass in passes.iter().filter(|pass| pass.level != FULL) {
+            match levels.iter_mut().find(|(level, _)| *level == pass.level) {
+                Some((_, blurred)) => *blurred |= is_blur(pass),
+                None => levels.push((pass.level, is_blur(pass))),
+            }
+        }
+        let mut wanted: Vec<(usize, usize)> = Vec::with_capacity(chain + 2 + 3 * levels.len());
+        wanted.extend(std::iter::repeat_n(
+            (width, height),
+            chain + usize::from(blur) + usize::from(blend),
+        ));
+        for (level, blurred) in &levels {
+            let size = level_size(width, height, *level);
+            wanted.extend(std::iter::repeat_n(size, if *blurred { 3 } else { 1 }));
+        }
+        let mut acquired: Vec<ImageId> = Vec::with_capacity(wanted.len());
+        for (w, h) in wanted {
+            match self.acquire_transient_image_reserving(w, h, ImageFlags::PREMULTIPLIED, headroom) {
+                Ok(id) => acquired.push(id),
+                Err(err) => {
+                    for id in acquired {
+                        self.rollback_transient_image(id);
+                    }
+                    return Err(err);
+                }
+            }
+        }
+        // Handed out in the order they were asked for.
+        let mut next = acquired.into_iter();
         let mut scratch = FilterScratchImages::default();
-        for i in 0..passes.saturating_sub(1).min(chain_limit) {
-            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
-                Ok(id) => scratch.chain[i] = Some(id),
-                Err(err) => {
-                    for id in scratch.images() {
-                        self.rollback_transient_image(id);
-                    }
-                    return Err(err);
-                }
-            }
+        for slot in scratch.chain.iter_mut().take(chain) {
+            *slot = next.next();
         }
-        if needs_blur {
-            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
-                Ok(id) => scratch.blur = Some(id),
-                Err(err) => {
-                    for id in scratch.images() {
-                        self.rollback_transient_image(id);
-                    }
-                    return Err(err);
-                }
-            }
+        if blur {
+            scratch.blur = next.next();
         }
-        if needs_blend {
-            match self.acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom) {
-                Ok(id) => scratch.blend = Some(id),
-                Err(err) => {
-                    for id in scratch.images() {
-                        self.rollback_transient_image(id);
-                    }
-                    return Err(err);
-                }
-            }
+        if blend {
+            scratch.blend = next.next();
         }
+        for (level, blurred) in levels {
+            let down = next.next();
+            let (blurred, blur) = if blurred {
+                (next.next(), next.next())
+            } else {
+                (None, None)
+            };
+            scratch.levels.push((level, LevelImages { down, blurred, blur }));
+        }
+        debug_assert!(next.next().is_none());
         Ok(scratch)
     }
 
@@ -506,7 +610,7 @@ where
     pub(crate) fn run_filter_passes(
         &mut self,
         target_image: ImageId,
-        passes: &[ImageFilter],
+        passes: &[Pass],
         source_image: ImageId,
         scratch: FilterScratchImages,
         target_as_scratch: bool,
@@ -521,16 +625,37 @@ where
             .images
             .info(source_image)
             .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
-        let last = passes.len() - 1;
-        for (i, filter) in passes.iter().enumerate() {
-            let dst = if i == last || (target_as_scratch && (last - i).is_multiple_of(2)) {
-                target_image
+        // The full-size passes alternate between the target (or the two
+        // scratches) so that the last of them lands in the target; a pyramid
+        // level's passes write that level's own images.
+        let mut full_left = passes.iter().filter(|pass| pass.level == FULL).count();
+        for pass in passes {
+            let is_blur = matches!(pass.filter, ImageFilter::GaussianBlur { .. });
+            let (dst, blur_scratch) = if pass.level == FULL {
+                full_left -= 1;
+                let dst = if full_left == 0 {
+                    target_image
+                } else if target_as_scratch {
+                    if full_left.is_multiple_of(2) {
+                        target_image
+                    } else {
+                        scratch.chain[0].expect("a scratch was acquired for every full pass but the last")
+                    }
+                } else {
+                    scratch.chain[(full_left - 1) % 2].expect("a scratch was acquired for every full pass but the last")
+                };
+                (dst, scratch.blur)
             } else {
-                let index = if target_as_scratch { 0 } else { i % 2 };
-                scratch.chain[index].expect("a scratch was acquired for every pass but the last")
+                let level = scratch.level(pass.level);
+                let dst = if is_blur {
+                    level.blurred.expect("a blurred image was reserved at the blur's level")
+                } else {
+                    level.down.expect("an image was reserved at every level in use")
+                };
+                (dst, level.blur)
             };
-            let blur_scratch = matches!(filter, ImageFilter::GaussianBlur { .. })
-                .then(|| scratch.blur.expect("a blur scratch was reserved"));
+            let blur_scratch = is_blur.then(|| blur_scratch.expect("a blur scratch was reserved at the blur's level"));
+            let filter = &pass.filter;
             let backdrop = match filter {
                 ImageFilter::Blend {
                     backdrop,
@@ -559,6 +684,7 @@ where
             }
             src = dst;
         }
+        debug_assert_eq!(src, target_image, "the plan's last pass lands in the target");
         for id in scratch.images() {
             self.release_transient_image(id);
         }
@@ -656,10 +782,11 @@ fn chained_blurs_pad_in_quadrature() {
     canvas.restore();
 }
 
-/// A blur within the shader's per-pass bound is one pass with its sigma
-/// untouched, plus the parity identity - the plan it always had, so small
-/// blurs render exactly as before the split existed. A degenerate sigma is
-/// one pass too, for the coefficient sanitization to copy through.
+/// A blur within the shader's per-pass bound is one pass at the chain's
+/// size with its sigmas untouched, plus the parity identity - the plan it
+/// always had, so small blurs render exactly as before the pyramid existed.
+/// A degenerate sigma is one pass too, for the coefficient sanitization to
+/// copy through.
 #[test]
 fn a_blur_within_the_shader_bound_stays_one_pass() {
     use crate::ImageFilter;
@@ -667,45 +794,117 @@ fn a_blur_within_the_shader_bound_stays_one_pass() {
         let passes = filter_passes(&[ImageFilter::gaussian_blur(sigma)]).unwrap();
         assert_eq!(passes.len(), 2, "sigma {sigma}: one blur pass and the parity identity");
         assert!(
-            matches!(passes[0], ImageFilter::GaussianBlur { sigma_x, sigma_y } if sigma_x == sigma && sigma_y == sigma),
+            matches!(passes[0].filter, ImageFilter::GaussianBlur { sigma_x, sigma_y } if sigma_x == sigma && sigma_y == sigma),
             "{:?}",
             passes[0]
         );
-        assert!(matches!(passes[1], ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX));
+        assert_eq!(passes[0].level, FULL);
+        assert!(
+            matches!(passes[1].filter, ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX)
+        );
     }
-    assert_eq!(axis_passes(8.0), (1, 8.0));
-    assert_eq!(axis_passes(0.0), (1, 0.0));
-    assert_eq!(axis_passes(-1.0).0, 1);
-    assert_eq!(axis_passes(f32::NAN).0, 1);
-    assert_eq!(blur_passes(0.0, 0.0).len(), 1);
-    assert_eq!(blur_passes(-1.0, f32::NAN).len(), 1);
+    for (sigma_x, sigma_y) in [(8.0, 8.0), (0.0, 0.0), (-1.0, f32::NAN), (3.0, 8.0)] {
+        let plan = blur_passes(sigma_x, sigma_y);
+        assert_eq!(plan.len(), 1, "sigma {sigma_x} by {sigma_y}");
+        assert_eq!(plan[0].level, FULL);
+    }
 }
 
-/// Each axis splits on its own: the longer axis sets the pass count and the
-/// other copies through once its passes are done, so sigma 16 by 0 is four
-/// passes blurring x by 8 and y not at all, 16 by 4 blurs y by 4 in the first
-/// of them, and 0 by 23 nine passes of y 23/3 - the squares still summing to
-/// the requested sigma on each axis.
+/// The level and blur sigmas of each pass of a blur plan: `None` for an
+/// identity pass.
+#[cfg(test)]
+fn plan_shape(sigma_x: f32, sigma_y: f32) -> Vec<(Level, Option<(f32, f32)>)> {
+    blur_passes(sigma_x, sigma_y)
+        .iter()
+        .map(|pass| {
+            let sigma = match pass.filter {
+                ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some((sigma_x, sigma_y)),
+                ImageFilter::ColorMatrix { matrix } => {
+                    assert_eq!(matrix, ImageFilter::IDENTITY_MATRIX);
+                    None
+                }
+                other => panic!("{other:?}"),
+            };
+            (pass.level, sigma)
+        })
+        .collect()
+}
+
+/// A blur above the bound runs down the pyramid and back: the chain is
+/// halved until the sigma, halved with it, fits one pass - sigma 16 once (a
+/// blur of 8 over a quarter of the pixels), 23 twice (5.75), 512 six times
+/// (8) - the blur runs there, and an identity pass scales the result back to
+/// the chain's size. The ceiling keeps the plan at six levels for an absurd
+/// sigma.
 #[test]
-fn a_blur_splits_each_axis_on_its_own() {
-    let sigmas = |sigma_x: f32, sigma_y: f32| -> Vec<(f32, f32)> {
-        blur_passes(sigma_x, sigma_y)
-            .map(|f| match f {
-                ImageFilter::GaussianBlur { sigma_x, sigma_y } => (sigma_x, sigma_y),
-                _ => unreachable!(),
-            })
-            .collect()
-    };
-    assert_eq!(sigmas(16.0, 0.0), vec![(8.0, 0.0); 4]);
-    assert_eq!(sigmas(0.0, 16.0), vec![(0.0, 8.0); 4]);
-    assert_eq!(sigmas(16.0, 4.0), vec![(8.0, 4.0), (8.0, 0.0), (8.0, 0.0), (8.0, 0.0)]);
-    assert_eq!(sigmas(3.0, 5.0), vec![(3.0, 5.0)]);
-    let nine = sigmas(0.0, 23.0);
-    assert_eq!(nine.len(), 9);
-    assert!(nine.iter().all(|(x, y)| *x == 0.0 && (y - 23.0 / 3.0).abs() < 1e-5));
-    let composed: f32 = nine.iter().map(|(_, y)| y * y).sum::<f32>().sqrt();
-    assert!((composed - 23.0).abs() < 1e-4, "{composed}");
-    // The plan counts the passes of the longer axis, plus the parity identity.
+fn a_blur_above_the_bound_runs_down_the_pyramid() {
+    assert_eq!(
+        plan_shape(16.0, 16.0),
+        vec![([1, 1], None), ([1, 1], Some((8.0, 8.0))), (FULL, None)]
+    );
+    assert_eq!(
+        plan_shape(23.0, 23.0),
+        vec![
+            ([1, 1], None),
+            ([2, 2], None),
+            ([2, 2], Some((5.75, 5.75))),
+            (FULL, None)
+        ]
+    );
+    assert_eq!(
+        plan_shape(8.5, 8.5),
+        vec![([1, 1], None), ([1, 1], Some((4.25, 4.25))), (FULL, None)]
+    );
+    let deepest = plan_shape(512.0, 512.0);
+    assert_eq!(deepest.len(), MAX_LEVELS + 2);
+    assert_eq!(deepest[MAX_LEVELS], ([MAX_LEVELS as u8; 2], Some((8.0, 8.0))));
+    assert_eq!(plan_shape(f32::INFINITY, f32::INFINITY), plan_shape(512.0, 512.0));
+    assert_eq!(plan_shape(1e9, 1e9), plan_shape(512.0, 512.0));
+    // Level sizes halve and round up, never to nothing.
+    assert_eq!(level_size(1080, 1080, [4, 4]), (68, 68));
+    assert_eq!(level_size(5, 3, [6, 6]), (1, 1));
+}
+
+/// Each axis is halved by its own depth: a streak of sigma 16 along x
+/// alone halves x once and leaves y whole, blurring (8, 0) at that level;
+/// 16 by 4 keeps y's sigma 4 at full height; 0 by 23 halves y twice; and
+/// 16 by 23 stops halving x after the first level while y goes on, so the
+/// blur runs at [1, 2] with (8, 5.75). The parity identity follows as for
+/// any blur.
+#[test]
+fn a_blur_halves_each_axis_by_its_own_depth() {
+    use crate::ImageFilter;
+    assert_eq!(
+        plan_shape(16.0, 0.0),
+        vec![([1, 0], None), ([1, 0], Some((8.0, 0.0))), (FULL, None)]
+    );
+    assert_eq!(
+        plan_shape(0.0, 16.0),
+        vec![([0, 1], None), ([0, 1], Some((0.0, 8.0))), (FULL, None)]
+    );
+    assert_eq!(
+        plan_shape(16.0, 4.0),
+        vec![([1, 0], None), ([1, 0], Some((8.0, 4.0))), (FULL, None)]
+    );
+    assert_eq!(
+        plan_shape(0.0, 23.0),
+        vec![
+            ([0, 1], None),
+            ([0, 2], None),
+            ([0, 2], Some((0.0, 5.75))),
+            (FULL, None)
+        ]
+    );
+    assert_eq!(
+        plan_shape(16.0, 23.0),
+        vec![
+            ([1, 1], None),
+            ([1, 2], None),
+            ([1, 2], Some((8.0, 5.75))),
+            (FULL, None)
+        ]
+    );
+    assert_eq!(plan_shape(3.0, 5.0), vec![(FULL, Some((3.0, 5.0)))]);
     assert_eq!(
         filter_passes(&[ImageFilter::GaussianBlur {
             sigma_x: 16.0,
@@ -713,63 +912,27 @@ fn a_blur_splits_each_axis_on_its_own() {
         }])
         .unwrap()
         .len(),
-        5
+        4
     );
+    assert_eq!(level_size(64, 64, [1, 0]), (32, 64));
 }
 
-/// Gaussians compose in quadrature, so a blur above the bound B = 8 is
-/// exactly k = ceil((sigma / B)^2) passes of sigma / sqrt(k): 16 is four of
-/// 8, 23 is nine of 23/3, every pass within the bound and their squares
-/// summing back to the requested sigma's. The ceiling keeps the plan finite
-/// for an absurd sigma.
+/// The pyramid changes the pass count, not the chain's contract: a chain
+/// still leaves storage flipped once, so [blur 16] - a halving, the blur,
+/// the scale back up: two flips - ends with the parity identity like
+/// [blur 8] does, and [blur 16, brightness] does not, like [blur 8,
+/// brightness]. Its scratches are the pyramid's: the level the chain is
+/// halved into, with the blur's target and scratch at that size, and no
+/// full-size blur scratch at all - 7/4 of the chain where the quadrature
+/// passes held three full-size scratches; a streak's level is half as wide
+/// and as tall as the chain.
 #[test]
-fn a_blur_above_the_bound_splits_into_quadrature_passes() {
-    use crate::ImageFilter;
-    let blur_sigmas = |filters: &[ImageFilter]| -> Vec<f32> {
-        filter_passes(filters)
-            .unwrap()
-            .iter()
-            .filter_map(|f| match f {
-                ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
-                    assert_eq!(sigma_x, sigma_y);
-                    Some(*sigma_x)
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    assert_eq!(blur_sigmas(&[ImageFilter::gaussian_blur(16.0)]), vec![8.0; 4]);
-    let nine = blur_sigmas(&[ImageFilter::gaussian_blur(23.0)]);
-    assert_eq!(nine.len(), 9);
-    for sigma in &nine {
-        assert!((sigma - 23.0 / 3.0).abs() < 1e-5, "{sigma}");
-        assert!(*sigma <= renderer::MAX_BLUR_SIGMA);
-    }
-    let composed: f32 = nine.iter().map(|s| s * s).sum::<f32>().sqrt();
-    assert!((composed - 23.0).abs() < 1e-4, "{composed}");
-    // Just past the bound: two passes, neither above it.
-    let (passes, sigma) = axis_passes(8.5);
-    assert_eq!(passes, 2);
-    assert!((sigma - 8.5 / 2f32.sqrt()).abs() < 1e-5);
-    // The ceiling bounds the plan: an infinite sigma is 128's 256 passes,
-    // not 2^56 of them.
-    assert_eq!(axis_passes(f32::INFINITY), axis_passes(128.0));
-    assert_eq!(axis_passes(128.0), (256, 8.0));
-    assert_eq!(axis_passes(1e9), axis_passes(128.0));
-}
-
-/// The split changes the pass count, not the chain's shape: a blur pass
-/// preserves the flip, so [blur 16] ends with the parity identity like
-/// [blur 8] does and [blur 16, brightness] does not, like [blur 8,
-/// brightness]; and every chain ping-pongs through the same scratch pair -
-/// min(2, passes - 1) of them, however many passes a split adds.
-#[test]
-fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
+fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
     use crate::ImageFilter;
     let ends_with_identity = |filters: &[ImageFilter]| {
         matches!(
             filter_passes(filters).unwrap().last(),
-            Some(ImageFilter::ColorMatrix { matrix }) if *matrix == ImageFilter::IDENTITY_MATRIX
+            Some(Pass { filter: ImageFilter::ColorMatrix { matrix }, level: FULL }) if *matrix == ImageFilter::IDENTITY_MATRIX
         )
     };
     let small = ImageFilter::gaussian_blur(8.0);
@@ -777,48 +940,86 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
     let bright = ImageFilter::brightness(1.2);
     assert!(ends_with_identity(&[small]) && ends_with_identity(&[big]));
     assert!(!ends_with_identity(&[small, bright]) && !ends_with_identity(&[big, bright]));
-    assert_eq!(filter_passes(&[big, bright]).unwrap().len(), 5);
+    assert_eq!(filter_passes(&[big, bright]).unwrap().len(), 4);
 
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(64, 64, 1.0);
-    for filters in [&[big][..], &[big, bright], &[big, bright, big]] {
-        let scratch = canvas
-            .acquire_filter_scratches(64, 64, filter_passes(filters).unwrap().len(), true, false, 2, 0)
-            .unwrap();
-        assert_eq!(
-            scratch.chain.iter().flatten().count(),
-            2,
-            "{filters:?}: one scratch pair"
-        );
-        assert!(scratch.blur.is_some());
-        for id in scratch.images() {
-            canvas.release_transient_image(id);
-        }
-    }
-    assert_eq!(
-        canvas.transients.images.len(),
-        3,
-        "the scratches are reused across plans"
+    let held = |canvas: &Canvas<RecordingRenderer>, scratch: &FilterScratchImages| -> usize {
+        scratch
+            .images()
+            .map(|id| {
+                let (w, h) = canvas.image_size(id).unwrap();
+                w * h
+            })
+            .sum()
+    };
+    let passes = filter_passes(&[big]).unwrap();
+    let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
+    assert!(
+        scratch.blur.is_none(),
+        "no blur at the chain's size, so no full-size blur scratch"
     );
+    assert_eq!(
+        scratch.chain.iter().flatten().count(),
+        1,
+        "the scale back up and the parity identity ping-pong through one scratch"
+    );
+    assert_eq!(scratch.levels.len(), 1);
+    let level = scratch.level([1, 1]);
+    for image in [level.down, level.blurred, level.blur] {
+        assert_eq!(canvas.image_size(image.unwrap()).unwrap(), (32, 32));
+    }
+    assert_eq!(held(&canvas, &scratch), 64 * 64 + 3 * 32 * 32);
+    for id in scratch.images() {
+        canvas.release_transient_image(id);
+    }
+
+    let streak = ImageFilter::GaussianBlur {
+        sigma_x: 16.0,
+        sigma_y: 0.0,
+    };
+    let passes = filter_passes(&[streak]).unwrap();
+    let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
+    let level = scratch.level([1, 0]);
+    for image in [level.down, level.blurred, level.blur] {
+        assert_eq!(canvas.image_size(image.unwrap()).unwrap(), (32, 64));
+    }
+    assert_eq!(held(&canvas, &scratch), 64 * 64 + 3 * 32 * 64);
+    for id in scratch.images() {
+        canvas.release_transient_image(id);
+    }
+
+    let passes = filter_passes(&[small]).unwrap();
+    let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
+    assert!(
+        scratch.blur.is_some() && scratch.levels.is_empty(),
+        "a blur within the bound keeps its full-size scratch and no pyramid"
+    );
+    for id in scratch.images() {
+        canvas.release_transient_image(id);
+    }
 }
 
 #[test]
 fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     let blur = ImageFilter::gaussian_blur(8.0);
-    assert_eq!(filter_work(&[blur], 10, 10), 9_400);
+    assert_eq!(filter_work(&[Pass::at(blur, FULL)], 10, 10), 9_400);
     // One axis blurred, the other copied: 47 taps plus the copy's one.
+    let streak = ImageFilter::GaussianBlur {
+        sigma_x: 8.0,
+        sigma_y: 0.0,
+    };
+    assert_eq!(filter_work(&[Pass::at(streak, FULL)], 10, 10), 4_800);
+    // Sigma 16 over 64 x 64: a quarter-size halving, the blur of 8 over a
+    // quarter of the pixels and a full-size scale back up - a fifteenth of
+    // the four full-size passes of quadrature (1,540,096). The streak of 16
+    // halves x alone, so its level is half the chain.
     assert_eq!(
-        filter_work(
-            &[ImageFilter::GaussianBlur {
-                sigma_x: 8.0,
-                sigma_y: 0.0
-            }],
-            10,
-            10
-        ),
-        4_800
+        filter_work(&blur_passes(16.0, 16.0), 64, 64),
+        1_024 + 94 * 1_024 + 4_096
     );
+    assert_eq!(filter_work(&blur_passes(16.0, 0.0), 64, 64), 2_048 + 48 * 2_048 + 4_096);
     let turbulence = |num_octaves| ImageFilter::Turbulence {
         base_frequency: [0.1, 0.1],
         num_octaves,
@@ -827,8 +1028,8 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
         kind: TurbulenceKind::Turbulence,
         transform: Transform2D::identity(),
     };
-    assert_eq!(filter_work(&[turbulence(0)], 10, 10), 100);
-    assert_eq!(filter_work(&[turbulence(10)], 10, 10), 8_000);
+    assert_eq!(filter_work(&[Pass::at(turbulence(0), FULL)], 10, 10), 100);
+    assert_eq!(filter_work(&[Pass::at(turbulence(10), FULL)], 10, 10), 8_000);
 
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(16, 16, 1.0);
@@ -846,7 +1047,11 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
         width: 16.0,
         height: 16.0,
     };
-    assert_eq!(filter_work(&[blend], 10, 10), 400, "two reads, a clear and a draw");
+    assert_eq!(
+        filter_work(&[Pass::at(blend, FULL)], 10, 10),
+        400,
+        "two reads, a clear and a draw"
+    );
     // Admission at the edge: the placement is part of what is charged.
     canvas.set_filter_work_budget(4 * 16 * 16);
     canvas.filter_image_chain(target, &[blend], source).unwrap();

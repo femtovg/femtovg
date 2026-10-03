@@ -387,7 +387,9 @@ fn alpha_amplifying_matrix_clamps_between_passes() {
 
 /// Degenerate blur parameters flow through chains without killing the output:
 /// sigma 0 passes through (Firefox bug 619968) and a huge sigma stays finite
-/// and bounded rather than overflowing (Firefox bug 441368).
+/// and bounded rather than overflowing (Firefox bug 441368): the solid's
+/// mass spreads far beyond its 32 px, so over the white canvas what is left
+/// at the center is a faint tint of the color, never garbage or black.
 #[test]
 fn degenerate_blur_parameters_stay_bounded() {
     let Some((device, queue)) = headless_device() else {
@@ -395,15 +397,26 @@ fn degenerate_blur_parameters_stay_bounded() {
         return;
     };
     let src = solid(femtovg::rgb::RGBA8::new(200, 60, 60, 255));
-    for chain in [
-        &[ImageFilter::gaussian_blur(0.0), ImageFilter::brightness(1.0)][..],
-        &[ImageFilter::gaussian_blur(2147483648.0), ImageFilter::brightness(1.0)][..],
-    ] {
-        let out = run_chain(&device, &queue, &src, chain);
-        let center = px(&out, 16, 16);
-        assert!(
-            close(center[0], 200, 20) && close(center[1], 60, 20),
-            "degenerate-sigma chain must keep the solid color, got {center:?}"
-        );
-    }
+    let out = run_chain(
+        &device,
+        &queue,
+        &src,
+        &[ImageFilter::gaussian_blur(0.0), ImageFilter::brightness(1.0)],
+    );
+    let center = px(&out, 16, 16);
+    assert!(
+        close(center[0], 200, 20) && close(center[1], 60, 20),
+        "a sigma-0 chain must keep the solid color, got {center:?}"
+    );
+    let out = run_chain(
+        &device,
+        &queue,
+        &src,
+        &[ImageFilter::gaussian_blur(2147483648.0), ImageFilter::brightness(1.0)],
+    );
+    let center = px(&out, 16, 16);
+    assert!(
+        center[0] >= 200 && center[1] >= 60 && center[0] >= center[1],
+        "a huge sigma must leave a bounded, faint tint of the solid, got {center:?}"
+    );
 }

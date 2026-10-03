@@ -41,9 +41,9 @@ pub(crate) struct MaskImages {
     pub(crate) converted: Option<ImageId>,
 }
 
-/// The transients a filter chain draws through: its result, the pair its
-/// passes ping-pong between, and one horizontal Gaussian-blur scratch.
-#[derive(Clone, Copy, Debug)]
+/// The transients a filter chain draws through: its result and the
+/// scratches its passes run through.
+#[derive(Clone, Debug)]
 pub(crate) struct FilterImages {
     pub(crate) target: ImageId,
     pub(crate) scratch: FilterScratchImages,
@@ -202,9 +202,9 @@ impl LayerRecord {
     /// Every transient the layer holds - its capture, the mask's coverage
     /// images and the filter chain's - which is what a flush keeps live and
     /// what `end_layer` or a discard returns to the pool.
-    pub(crate) fn images(&self) -> impl Iterator<Item = ImageId> {
+    pub(crate) fn images(&self) -> impl Iterator<Item = ImageId> + '_ {
         let mask = self.mask_images;
-        let filter = self.filter_images;
+        let filter = self.filter_images.as_ref();
         let blend = self.blend_images;
         self.image
             .into_iter()
@@ -481,7 +481,7 @@ where
                 let work = match mask.kind {
                     MaskKind::Alpha => 0,
                     MaskKind::Luminance => {
-                        filter_work(std::slice::from_ref(&ImageFilter::luminance_to_alpha()), width, height)
+                        filter_work(&[Pass::at(ImageFilter::luminance_to_alpha(), FULL)], width, height)
                     }
                 };
                 if self.reserve_filter_work(work) {
@@ -555,7 +555,7 @@ where
                     .chain(
                         record
                             .filter_images
-                            .into_iter()
+                            .iter()
                             .flat_map(|images| std::iter::once(images.target).chain(images.scratch.images())),
                     )
                     .collect();
@@ -837,23 +837,18 @@ where
         headroom: usize,
     ) -> Option<FilterImages> {
         let passes = filter_passes(filters)?;
-        let mut needs_blend = false;
-        for filter in &passes {
-            if let ImageFilter::Blend { backdrop, .. } = filter {
+        for pass in &passes {
+            if let ImageFilter::Blend { backdrop, .. } = pass.filter {
                 // A blend without its backdrop has nothing to run against.
-                self.images.info(*backdrop)?;
-                needs_blend = true;
+                self.images.info(backdrop)?;
             }
         }
         let target = self
             .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
             .ok()?;
-        let needs_blur = passes
-            .iter()
-            .any(|filter| matches!(filter, ImageFilter::GaussianBlur { .. }));
         // The result and chain scratches share the same storage convention,
         // so a layer can alternate through its result and one scratch.
-        match self.acquire_filter_scratches(width, height, passes.len(), needs_blur, needs_blend, 1, headroom) {
+        match self.acquire_filter_scratches(width, height, &passes, 1, headroom) {
             Ok(scratch) => Some(FilterImages { target, scratch }),
             Err(_) => {
                 self.rollback_transient_image(target);
@@ -1185,7 +1180,7 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
     canvas.flush_to_output(());
     canvas.set_transient_image_budget(5 * padded);
     assert!(canvas.begin_layer(&blur));
-    let target = canvas.layers.last().unwrap().filter_images.unwrap().target;
+    let target = canvas.layers.last().unwrap().filter_images.as_ref().unwrap().target;
     assert_eq!(canvas.transients.images.len(), 4);
     assert_eq!(
         canvas.transients.free.len(),
@@ -1211,14 +1206,17 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
 #[test]
 fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     use crate::ImageFilter;
-    let cases: [(&[ImageFilter], usize, usize); 4] = [
+    // (filters, transient images held at begin_layer, store edge, pixels held in all)
+    let cases: [(&[ImageFilter], usize, usize, usize); 4] = [
         // One color pass: the result only. No blur, so the store is the canvas.
-        (&[ImageFilter::brightness(0.0)], 2, 64),
+        (&[ImageFilter::brightness(0.0)], 2, 64, 2 * 64 * 64),
         // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
-        (&[ImageFilter::gaussian_blur(1.0)], 4, 128),
-        // A blur above the per-pass bound is four passes plus parity, and the
-        // store pads by the true reach, 50 px, to 192.
-        (&[ImageFilter::gaussian_blur(16.0)], 4, 192),
+        (&[ImageFilter::gaussian_blur(1.0)], 4, 128, 4 * 128 * 128),
+        // A blur above the per-pass bound runs down the pyramid: the store
+        // pads by the true reach, 50 px, to 192; the result and one scratch
+        // at that size serve the scale back up and the parity identity, and
+        // the halving, the blur and its scratch are quarter-size.
+        (&[ImageFilter::gaussian_blur(16.0)], 6, 192, 3 * 192 * 192 + 3 * 96 * 96),
         // A blur never folds with a color matrix, so brightness, blur and
         // invert are three passes plus the parity identity: four, two scratches.
         (
@@ -1229,16 +1227,18 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
             ],
             4,
             128,
+            4 * 128 * 128,
         ),
     ];
-    for (filters, images, store) in cases {
+    for (filters, images, store, pixels) in cases {
         let renderer = RecordingRenderer::default();
         let mut canvas = Canvas::new(renderer).unwrap();
         canvas.set_size(64, 64, 1.0);
         let effects = LayerEffects::new().with_filters(filters);
         let bytes = store * store * 4;
 
-        canvas.set_transient_image_budget((images + 1) * bytes);
+        // The filter images are reserved with the store's cost as headroom.
+        canvas.set_transient_image_budget((pixels + store * store) * 4);
         assert!(canvas.begin_layer(&effects), "{filters:?}: {images} images fit");
         assert_eq!(canvas.transients.images.len(), images, "{filters:?}");
         assert_eq!(
@@ -1254,9 +1254,10 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         );
 
         canvas.flush_to_output(());
-        canvas.set_transient_image_budget(images * bytes);
+        canvas.set_transient_image_budget((pixels + store * store) * 4 - 1);
         assert!(canvas.begin_layer(&effects), "{filters:?}: the capture still fits");
         assert!(canvas.layers.last().unwrap().filter_images.is_none(), "{filters:?}");
+        assert!(bytes <= pixels * 4);
         canvas.end_layer();
     }
 }
@@ -1511,9 +1512,15 @@ fn set_size_resize_discards_open_layers() {
 
 #[test]
 fn filter_plans_bound_total_work_and_fail_layers_atomically() {
-    let max_blur = ImageFilter::gaussian_blur(128.0);
-    assert_eq!(filter_passes(&[max_blur]).unwrap().len(), MAX_FILTER_PASSES);
-    assert!(filter_passes(&[max_blur, max_blur]).is_none());
+    // A blur of any sigma is a handful of passes; the limit bites on a list
+    // of filters that do not fold, a range-unsafe matrix each.
+    let past: Vec<ImageFilter> = vec![ImageFilter::brightness(2.0); MAX_FILTER_PASSES + 1];
+    assert_eq!(filter_passes(&past[1..]).unwrap().len(), MAX_FILTER_PASSES);
+    assert!(filter_passes(&past).is_none());
+    assert_eq!(
+        filter_passes(&[ImageFilter::gaussian_blur(512.0)]).unwrap().len(),
+        MAX_LEVELS + 2
+    );
 
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
@@ -1524,7 +1531,7 @@ fn filter_plans_bound_total_work_and_fail_layers_atomically() {
         .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
     assert!(matches!(
-        canvas.filter_image_chain(target, &[max_blur, max_blur], source),
+        canvas.filter_image_chain(target, &past, source),
         Err(ErrorKind::FilterPassLimitExceeded)
     ));
     assert!(!canvas
@@ -1532,7 +1539,7 @@ fn filter_plans_bound_total_work_and_fail_layers_atomically() {
         .iter()
         .any(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. })));
 
-    let effects = LayerEffects::new().with_filters(&[max_blur, max_blur]);
+    let effects = LayerEffects::new().with_filters(&past);
     assert!(canvas.begin_layer(&effects));
     assert!(canvas.layers.last().unwrap().image.is_some());
     assert!(canvas.layers.last().unwrap().filter_images.is_none());
@@ -1746,6 +1753,39 @@ fn a_layer_pads_each_axis_by_its_own_reach() {
     assert_eq!((record.width, record.height), (320, 256));
     canvas.end_layer();
     canvas.restore();
+}
+
+/// A wide blur over a large store fits the default work budget: sigma 77
+/// over a 1080 px square (a `stdDeviation="10"` SVG blur at 1080p) is a
+/// pyramid of four small passes and a copy, where 93 quadrature passes of
+/// 94 taps over the padded store were fifteen giga-samples, past the four
+/// the budget allows, so the layer kept its content and dropped its blur.
+#[test]
+fn a_wide_blur_fits_the_default_work_budget() {
+    use crate::ImageFilter;
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(1920, 1080, 1.0);
+    canvas.scissor(420.0, 0.0, 1080.0, 1080.0);
+    let blur = ImageFilter::gaussian_blur(77.0);
+    let passes = filter_passes(&[blur]).unwrap();
+    assert_eq!(
+        passes.len(),
+        6,
+        "four halvings, the blur at a sixteenth, the scale back up"
+    );
+    let record_size = |canvas: &Canvas<RecordingRenderer>| {
+        let record = canvas.layers.last().unwrap();
+        (record.width, record.height)
+    };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur])));
+    let (width, height) = record_size(&canvas);
+    assert!(
+        canvas.layers.last().unwrap().filter_images.is_some(),
+        "the blur is reserved under the default budget"
+    );
+    let work = filter_work(&passes, width, height);
+    assert!(work < DEFAULT_FILTER_WORK_BUDGET / 16, "{work} samples");
+    canvas.end_layer();
 }
 
 /// A shadowed layer whose reach would push its store past the texture limit

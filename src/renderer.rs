@@ -369,9 +369,9 @@ impl ShaderType {
 /// fragment shader's blur loop is bounded at 24 taps per side (GLES 2.0 needs
 /// a constant loop bound) and the kernel reaches 3 sigma, so a pass covers
 /// sigma 8 exactly and no more. A blur above it is not clamped away: the chain
-/// planner (`filter_passes` in lib.rs) runs it as several passes of at most
-/// this sigma, which compose in quadrature to the requested one. The
-/// coefficients below and the shader's tap count agree on this value.
+/// planner (`blur_passes` in filters.rs) halves the image until the sigma
+/// fits one pass and scales the result back up. The coefficients below and
+/// the shader's tap count agree on this value.
 pub(crate) const MAX_BLUR_SIGMA: f32 = 8.0;
 
 /// Gaussian blur coefficients for `sigma`, sanitized the same way for every

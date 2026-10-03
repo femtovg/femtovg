@@ -400,8 +400,9 @@ pub enum ImageFilter {
     /// One shader pass covers a standard deviation of at most 8 device
     /// pixels on an axis: `Canvas::filter_image` clamps a larger one to 8,
     /// while `Canvas::filter_image_chain`, a layer filter and a shadow blur
-    /// split each axis into passes that compose to the requested value
-    /// (Gaussians add in quadrature), up to a sigma of 128.
+    /// render it at a size halved along that axis until it fits one pass
+    /// and scale the result back up, up to a sigma of 512. Taps beyond the
+    /// image read transparent.
     GaussianBlur {
         /// The standard deviation along x, in device pixels. Zero, negative
         /// or non-finite values leave that axis unblurred.

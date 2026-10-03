@@ -2996,14 +2996,14 @@ fn fill_text_selects_atlas_or_path_rendering() {
     }
 }
 
-/// A shadow blur above what one shader pass covers (sigma 8, the 24-tap
-/// GLES 2.0 loop) runs as the planner's quadrature passes: `shadowBlur` 40 is
-/// sigma 20, seven passes of 20 / sqrt(7) whose squares sum back to 400,
-/// ping-ponging between the coverage and blurred images, and the composite
-/// reads the image the odd count leaves the result in. The offscreen pads by
-/// the true reach, 62 px per side, not the 26 of the per-pass bound.
+/// A shadow blur above the shader's per-pass bound (sigma 8, the 24-tap
+/// GLES 2.0 loop) runs down the planner's pyramid: `shadowBlur` 40 is sigma
+/// 20, so the coverage is halved twice, blurred by 5 at a quarter size and
+/// scaled back up into the blurred image, which the composite reads. The
+/// offscreen pads by the true reach, 62 px per side, not the 26 of the
+/// per-pass bound, and the pyramid's images are a fraction of it.
 #[test]
-fn a_large_shadow_blur_runs_as_quadrature_passes() {
+fn a_large_shadow_blur_runs_down_the_pyramid() {
     use renderer::CommandType;
 
     let renderer = RecordingRenderer::default();
@@ -3019,40 +3019,47 @@ fn a_large_shadow_blur_runs_as_quadrature_passes() {
     let mut paint = Paint::color(Color::rgb(255, 0, 0));
     paint.set_anti_alias(false);
     canvas.fill_path(&path, &paint);
-    // The coverage, blurred and horizontal scratch images: 20 + 2 * 62 =
-    // 144 px square (shadow images round to 8), where the per-pass bound
-    // padded 72.
-    assert_eq!(canvas.transients.images.len(), 3);
-    for &id in &canvas.transients.images {
-        assert_eq!(canvas.image_size(id).unwrap(), (144, 144));
-    }
+    // The coverage and blurred images, 20 + 2 * 62 = 144 px square (shadow
+    // images round to 8), the level the coverage is halved into, and the
+    // second level with the blur's target and scratch.
+    let size_of: HashMap<ImageId, usize> = canvas
+        .transients
+        .images
+        .iter()
+        .map(|&id| (id, canvas.image_size(id).unwrap().0))
+        .collect();
+    let mut sizes: Vec<usize> = size_of.values().copied().collect();
+    sizes.sort();
+    assert_eq!(sizes, [36, 36, 36, 72, 144, 144]);
     canvas.flush_to_output(());
 
     let commands = recorded.borrow();
-    let passes: Vec<(ImageId, ImageId, f32)> = commands
+    let passes: Vec<(ImageId, ImageId, ImageFilter)> = commands
         .iter()
         .filter_map(|c| match c.cmd_type {
-            CommandType::RenderFilteredImage {
-                target_image,
-                filter: ImageFilter::GaussianBlur { sigma_x, sigma_y },
-            } => {
-                assert_eq!(sigma_x, sigma_y, "a shadow blurs both axes alike");
-                Some((c.image.expect("a blur reads an image"), target_image, sigma_x))
+            CommandType::RenderFilteredImage { target_image, filter } => {
+                Some((c.image.expect("a pass reads an image"), target_image, filter))
             }
             _ => None,
         })
         .collect();
-    assert_eq!(passes.len(), 7);
-    for (_, _, sigma) in &passes {
-        assert!((sigma - 20.0 / 7f32.sqrt()).abs() < 1e-5, "{sigma}");
+    assert_eq!(passes.len(), 4);
+    for (i, (src, dst, filter)) in passes.iter().enumerate() {
+        let (expected_src, expected_dst) = [(144, 72), (72, 36), (36, 36), (36, 144)][i];
+        assert_eq!((size_of[src], size_of[dst]), (expected_src, expected_dst), "pass {i}");
+        match filter {
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
+                assert_eq!(i, 2);
+                assert_eq!(sigma_x, sigma_y, "a shadow blurs both axes alike");
+                assert!((sigma_x - 5.0).abs() < 1e-5, "{sigma_x}");
+            }
+            ImageFilter::ColorMatrix { matrix } => assert_eq!(*matrix, ImageFilter::IDENTITY_MATRIX),
+            other => panic!("{other:?}"),
+        }
+        if i > 0 {
+            assert_eq!(*src, passes[i - 1].1, "each pass reads the previous pass's target");
+        }
     }
-    let composed: f32 = passes.iter().map(|(_, _, s)| s * s).sum::<f32>().sqrt();
-    assert!((composed - 20.0).abs() < 1e-3, "{composed}");
-    for window in passes.windows(2) {
-        let ((src, dst, _), (next_src, next_dst, _)) = (window[0], window[1]);
-        assert_eq!((next_src, next_dst), (dst, src), "passes ping-pong");
-    }
-    let (_, last_target, _) = passes[6];
     let composite = commands
         .iter()
         .rev()
@@ -3060,8 +3067,8 @@ fn a_large_shadow_blur_runs_as_quadrature_passes() {
         .expect("the shadow composite");
     assert_eq!(
         composite.image,
-        Some(last_target),
-        "the composite reads the seventh pass's target"
+        Some(passes[3].1),
+        "the composite reads the image the pyramid scaled back up into"
     );
 }
 
