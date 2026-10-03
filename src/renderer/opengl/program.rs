@@ -159,11 +159,12 @@ impl MainProgram {
         );
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
         let frag_shader_src = format!(
-            "{}\n{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}",
             GLSL_VERSION,
             shader_defs,
             select_shader_type,
-            include_str!("main-fs.glsl")
+            include_str!("main-fs.glsl"),
+            include_str!("filters.glsl")
         );
 
         let vert_shader = Shader::new(context, &vert_shader_src, glow::VERTEX_SHADER)?;

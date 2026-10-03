@@ -356,7 +356,17 @@ impl WGPURenderer {
 
     /// Creates a new renderer for the device.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        let module = wgpu::include_wgsl!("wgpu/shader.wgsl");
+        let module = wgpu::ShaderModuleDescriptor {
+            label: Some("femtovg"),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(
+                    include_str!("wgpu/shader.wgsl"),
+                    "\n",
+                    include_str!("wgpu/filters.wgsl")
+                )
+                .into(),
+            ),
+        };
         let shader_module = Rc::new(device.create_shader_module(module));
 
         let texture_descriptor = wgpu::TextureDescriptor {
