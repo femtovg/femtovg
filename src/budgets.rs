@@ -31,6 +31,36 @@ pub(crate) fn blur_reach(sigmas: impl IntoIterator<Item = [f32; 2]>) -> Option<[
     (sigma_sq[0] > 0.0 || sigma_sq[1] > 0.0).then(|| sigma_sq.map(|sq| (sq.sqrt() * 3.0).ceil()))
 }
 
+/// A chain's reach around a store, per axis: the reach of its blurs
+/// ([`blur_reach`]) plus the radius of each dilation (an erosion reaches
+/// nothing) and the magnitude of each offset, as far as any of them can
+/// carry content outward, rounded up; `None` when nothing reaches.
+pub(crate) fn chain_reach(filters: &[ImageFilter]) -> Option<[f32; 2]> {
+    let mut reach = blur_reach(filters.iter().filter_map(|f| match f {
+        ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some([*sigma_x, *sigma_y]),
+        _ => None,
+    }))
+    .unwrap_or([0.0; 2]);
+    for filter in filters {
+        match *filter {
+            ImageFilter::Morphology {
+                radius_x,
+                radius_y,
+                operator: MorphologyOperator::Dilate,
+            } => {
+                reach[0] += morphology_radius(radius_x);
+                reach[1] += morphology_radius(radius_y);
+            }
+            ImageFilter::Offset { dx, dy } => {
+                reach[0] += offset_pixels(dx).abs().ceil();
+                reach[1] += offset_pixels(dy).abs().ceil();
+            }
+            _ => {}
+        }
+    }
+    (reach[0] > 0.0 || reach[1] > 0.0).then_some(reach)
+}
+
 /// The pixel a store keeps beyond its content on every side for antialiased
 /// edges.
 pub(crate) const FRINGE_PAD: f32 = 2.0;
@@ -605,6 +635,40 @@ fn a_blur_reach_matches_the_layer_and_shadow_pads() {
     // Each axis reaches on its own: a blur along x alone pads nothing in y.
     assert_eq!(blur_reach([[16.0, 0.0]]), Some([48.0, 0.0]));
     assert_eq!(blur_reach([[0.0, 3.0], [4.0, 0.0]]), Some([12.0, 9.0]));
+}
+
+/// A chain reaches as far as its blurs, plus each dilation's radius and
+/// each offset's shift on its axis; an erosion reaches nothing.
+#[test]
+fn a_chain_reach_adds_dilations_and_offsets_to_the_blur_reach() {
+    use crate::ImageFilter;
+    let dilate = |radius_x: f32, radius_y: f32| ImageFilter::Morphology {
+        radius_x,
+        radius_y,
+        operator: MorphologyOperator::Dilate,
+    };
+    let erode = ImageFilter::Morphology {
+        radius_x: 5.0,
+        radius_y: 5.0,
+        operator: MorphologyOperator::Erode,
+    };
+    assert_eq!(chain_reach(&[dilate(3.0, 2.0)]), Some([3.0, 2.0]));
+    assert_eq!(chain_reach(&[dilate(2.4, 2.6)]), Some([2.0, 3.0]));
+    assert_eq!(chain_reach(&[erode]), None);
+    assert_eq!(
+        chain_reach(&[ImageFilter::Offset { dx: -4.5, dy: 2.0 }]),
+        Some([5.0, 2.0])
+    );
+    assert_eq!(chain_reach(&[ImageFilter::Offset { dx: 0.0, dy: f32::NAN }]), None);
+    assert_eq!(
+        chain_reach(&[
+            ImageFilter::gaussian_blur(8.0),
+            dilate(2.0, 2.0),
+            ImageFilter::Offset { dx: 1.0, dy: 0.0 }
+        ]),
+        Some([27.0, 26.0])
+    );
+    assert_eq!(chain_reach(&[ImageFilter::brightness(0.5)]), None);
 }
 
 /// The planner rounds a padded span outward and up to the granularity,

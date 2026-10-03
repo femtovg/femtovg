@@ -334,6 +334,11 @@ pub enum ShaderType {
     /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
     /// glyph-texture slot, with one of the sixteen blend modes.
     FilterImageBlend,
+    /// Morphology shader (SVG `feMorphology`), one axis per draw like the
+    /// blur: the per-channel maximum or minimum within a radius.
+    FilterImageMorphology,
+    /// Offset shader (SVG `feOffset`): the image shifted by a pixel offset.
+    FilterImageOffset,
 }
 
 impl ShaderType {
@@ -356,6 +361,8 @@ impl ShaderType {
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
             Self::FilterImageBlend => 15,
+            Self::FilterImageMorphology => 16,
+            Self::FilterImageOffset => 17,
         }
     }
 

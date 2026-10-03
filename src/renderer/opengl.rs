@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 18],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 18],
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
@@ -243,6 +243,26 @@ impl OpenGl {
                     )?)
                 } else {
                     None
+                },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageMorphology,
+                        false,
+                    )?)
+                },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageOffset,
+                        false,
+                    )?)
                 },
             ])
         };
@@ -801,11 +821,16 @@ impl OpenGl {
             ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
                 self.render_gaussian_blur(images, cmd, target_image, [sigma_x, sigma_y])
             }
+            ImageFilter::Morphology {
+                radius_x,
+                radius_y,
+                operator,
+            } => self.render_morphology(images, cmd, target_image, [radius_x, radius_y], operator),
             single_pass => {
                 let target_image_info = images.get(target_image).unwrap().info();
                 let (shader_type, slots) = single_pass
                     .single_pass(target_image_info.width() as f32, target_image_info.height() as f32)
-                    .expect("every filter but the Gaussian blur runs as one pass");
+                    .expect("every filter but the Gaussian blur and the morphology runs as one pass");
                 self.render_filter_pass(images, cmd, target_image, shader_type, slots)
             }
         }
@@ -880,15 +905,16 @@ impl OpenGl {
         self.main_program().set_view(self.view);
     }
 
-    /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
-    /// by `sigma[0]` into the canvas-owned scratch, then vertical by
-    /// `sigma[1]` into the target. A degenerate sigma makes that draw a copy.
-    fn render_gaussian_blur(
+    /// A filter of two draws along the axes: the horizontal one, with the
+    /// parameters `axis_params(params, 0)` sets, into the canvas-owned
+    /// scratch, then the vertical one, with `axis_params(params, 1)`, from
+    /// the scratch into `target_image`.
+    fn render_separable_filter(
         &mut self,
         images: &mut ImageStore<GlTexture>,
         mut cmd: Command,
         target_image: ImageId,
-        sigma: [f32; 2],
+        mut axis_params: impl FnMut(&mut Params, usize),
     ) {
         let original_render_target = self.current_render_target;
 
@@ -903,7 +929,7 @@ impl OpenGl {
             0.,
             1.,
         );
-        let mut blur_params = Params::new(
+        let mut params = Params::new(
             images,
             &Transform2D::default(),
             &image_paint.flavor,
@@ -913,17 +939,13 @@ impl OpenGl {
             0.,
             0.,
         );
-        blur_params.shader_type = ShaderType::FilterImage;
+        axis_params(&mut params, 0);
+        params.image_blur_filter_direction = [1.0, 0.0];
 
-        let (coeff, sigma_x) = crate::renderer::gaussian_blur_coefficients(sigma[0]);
-        blur_params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
-        blur_params.image_blur_filter_direction = [1.0, 0.0];
-        blur_params.image_blur_filter_sigma = sigma_x;
-
-        let horizontal_blur_buffer = cmd
+        let horizontal_buffer = cmd
             .filter_scratch
-            .expect("a Gaussian blur has a reserved scratch image");
-        self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
+            .expect("a two-pass filter has a reserved scratch image");
+        self.set_target(images, RenderTarget::Image(horizontal_buffer));
         self.main_program().set_view(self.view);
 
         self.clear_rect(
@@ -935,7 +957,7 @@ impl OpenGl {
             false,
         );
 
-        self.triangles(images, &cmd, &blur_params);
+        self.triangles(images, &cmd, &params);
 
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
@@ -949,21 +971,57 @@ impl OpenGl {
             false,
         );
 
-        let (coeff, sigma_y) = crate::renderer::gaussian_blur_coefficients(sigma[1]);
-        blur_params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
-        blur_params.image_blur_filter_direction = [0.0, 1.0];
-        blur_params.image_blur_filter_sigma = sigma_y;
-        // The horizontal pass stored premultiplied RGBA regardless of the
+        axis_params(&mut params, 1);
+        params.image_blur_filter_direction = [0.0, 1.0];
+        // The horizontal draw stored premultiplied RGBA regardless of the
         // source image's format or premultiplication flag.
-        blur_params.tex_type = 0.0;
+        params.tex_type = 0.0;
 
-        cmd.image = Some(horizontal_blur_buffer);
+        cmd.image = Some(horizontal_buffer);
 
-        self.triangles(images, &cmd, &blur_params);
+        self.triangles(images, &cmd, &params);
 
         // restore previous render target and view
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
+    }
+
+    /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
+    /// by `sigma[0]`, then vertical by `sigma[1]`. A degenerate sigma makes
+    /// that draw a copy.
+    fn render_gaussian_blur(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        sigma: [f32; 2],
+    ) {
+        self.render_separable_filter(images, cmd, target_image, |params, axis| {
+            params.shader_type = ShaderType::FilterImage;
+            let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma[axis]);
+            params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
+            params.image_blur_filter_sigma = sigma;
+        });
+    }
+
+    /// Two-pass morphology of `cmd.image` into `target_image`: the
+    /// per-channel maximum (dilate) or minimum (erode) over `radius[0]`
+    /// whole pixels either side along x, then over `radius[1]` along y. The
+    /// radius rides the blur's sigma parameter and the operator its first
+    /// coefficient.
+    fn render_morphology(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        radius: [f32; 2],
+        operator: crate::MorphologyOperator,
+    ) {
+        self.render_separable_filter(images, cmd, target_image, |params, axis| {
+            params.shader_type = ShaderType::FilterImageMorphology;
+            params.image_blur_filter_sigma = radius[axis];
+            params.image_blur_filter_coeff[0] = f32::from(u8::from(operator == crate::MorphologyOperator::Dilate));
+        });
     }
 
     fn main_program(&self) -> &MainProgram {

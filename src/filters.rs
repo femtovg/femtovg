@@ -1,5 +1,5 @@
 //! Image filters and their passes: chains over an image, the pass planner,
-//! the blur pyramid and the work each pass costs.
+//! the blur pyramid, the morphology split and the work each pass costs.
 
 use super::*;
 
@@ -13,7 +13,9 @@ pub(crate) const FULL: Level = [0, 0];
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FilterScratchImages {
     pub(crate) chain: [Option<ImageId>; 2],
-    pub(crate) blur: Option<ImageId>,
+    /// The horizontal scratch of a full-size two-pass filter, a blur or a
+    /// morphology.
+    pub(crate) two_pass: Option<ImageId>,
     // A blend's backdrop, placed into an image of the chain's size just
     // before its pass; one serves every blend in the chain in turn.
     pub(crate) blend: Option<ImageId>,
@@ -37,7 +39,7 @@ impl FilterScratchImages {
             .iter()
             .flatten()
             .copied()
-            .chain(self.blur)
+            .chain(self.two_pass)
             .chain(self.blend)
             .chain(
                 self.levels
@@ -158,6 +160,69 @@ pub(crate) fn blur_passes(sigma_x: f32, sigma_y: f32) -> Vec<Pass> {
     passes
 }
 
+/// The largest morphology radius one shader draw covers on an axis: the
+/// loop's constant bound, as for the blur.
+pub(crate) const MAX_MORPHOLOGY_RADIUS: f32 = 24.0;
+
+/// A morphology radius as the shader runs it: whole device pixels, rounded
+/// as Skia rounds them (Gecko takes the ceiling); zero for a degenerate
+/// value (negative, non-finite), which leaves the axis alone. The one place
+/// the passes, the work and a layer's reach read a radius.
+pub(crate) fn morphology_radius(radius: f32) -> f32 {
+    if radius.is_finite() && radius > 0.0 {
+        radius.round()
+    } else {
+        0.0
+    }
+}
+
+/// An offset's shift as the shader runs it: the value, or zero for a
+/// non-finite one.
+pub(crate) fn offset_pixels(shift: f32) -> f32 {
+    if shift.is_finite() {
+        shift
+    } else {
+        0.0
+    }
+}
+
+/// How a morphology of `radius_x` by `radius_y` runs within the shader's
+/// per-draw bound ([`MAX_MORPHOLOGY_RADIUS`]): the radii rounded to whole
+/// pixels, each axis in as many passes of at most the bound as its radius
+/// needs - dilations and erosions by a rectangle compose by adding their
+/// radii, so the split is exact - the shorter axis done first and copying
+/// through (radius 0) in the remaining passes. Both radii zero is the one
+/// copy pass the shader runs with no taps.
+pub(crate) fn morphology_passes(radius_x: f32, radius_y: f32, operator: MorphologyOperator) -> Vec<Pass> {
+    let bound = MAX_MORPHOLOGY_RADIUS;
+    let radii = [morphology_radius(radius_x), morphology_radius(radius_y)];
+    let count = radii
+        .map(|radius| (radius / bound).ceil() as usize)
+        .into_iter()
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    (0..count)
+        .map(|pass| {
+            let left = |radius: f32| (radius - bound * pass as f32).clamp(0.0, bound);
+            Pass::at(
+                ImageFilter::Morphology {
+                    radius_x: left(radii[0]),
+                    radius_y: left(radii[1]),
+                    operator,
+                },
+                FULL,
+            )
+        })
+        .collect()
+}
+
+/// The taps one morphology draw takes per pixel along an axis of `radius`
+/// (whole pixels, within the bound): the center and `radius` either side.
+fn morphology_taps(radius: f32) -> u64 {
+    1 + 2 * (morphology_radius(radius).min(MAX_MORPHOLOGY_RADIUS) as u64)
+}
+
 /// The taps one blur draw takes per pixel along an axis of `sigma`: the
 /// shader's kernel reaches 3 sigma either side of the center tap, and a
 /// degenerate axis is the single center tap of a copy.
@@ -191,6 +256,7 @@ pub(crate) fn filter_work(passes: &[Pass], width: usize, height: usize) -> u64 {
     passes.iter().fold(0u64, |total, pass| {
         let per_pixel = match pass.filter {
             ImageFilter::GaussianBlur { sigma_x, sigma_y } => axis_taps(sigma_x) + axis_taps(sigma_y),
+            ImageFilter::Morphology { radius_x, radius_y, .. } => morphology_taps(radius_x) + morphology_taps(radius_y),
             ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from(num_octaves.min(10))).max(1),
             ImageFilter::Blend { .. } => BLEND_SAMPLES,
             _ => 1,
@@ -201,13 +267,15 @@ pub(crate) fn filter_work(passes: &[Pass], width: usize, height: usize) -> u64 {
 }
 
 /// The passes a filter list runs as: runs of adjacent color matrices folded
-/// where that is exact ([`ImageFilter::fold_with`]), each Gaussian blur
-/// above the shader's per-pass bound run down the pyramid and back
-/// ([`blur_passes`]), plus an identity pass when the flip count comes out
-/// even, so every chain shape leaves storage flipped once - which makes the
-/// empty list a copy. The result is never empty; `None` rejects a plan above
-/// [`MAX_FILTER_PASSES`]. What [`Canvas::filter_image_chain`] executes and
-/// what a layer's scratch reservation is sized from, so the two cannot disagree.
+/// where that is exact ([`ImageFilter::fold_with`]), a zero offset being the
+/// identity matrix, each Gaussian blur above the shader's per-pass bound
+/// run down the pyramid and back ([`blur_passes`]), each morphology as the
+/// passes its radii need ([`morphology_passes`]), plus an identity pass when
+/// the flip count comes out even, so every chain shape leaves storage
+/// flipped once - which makes the empty list a copy. The result is never
+/// empty; `None` rejects a plan above [`MAX_FILTER_PASSES`]. What
+/// [`Canvas::filter_image_chain`] executes and what a layer's scratch
+/// reservation is sized from, so the two cannot disagree.
 pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
     if filters.len() > MAX_FILTER_PASSES {
         return None;
@@ -217,18 +285,34 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
     // out of it. ImageFilter is Copy, so neither list deep-copies anything.
     let mut folded: Vec<ImageFilter> = Vec::with_capacity(filters.len().min(MAX_FILTER_PASSES));
     for filter in filters {
+        let filter = match *filter {
+            ImageFilter::Offset { dx, dy } => {
+                let (dx, dy) = (offset_pixels(dx), offset_pixels(dy));
+                if dx == 0.0 && dy == 0.0 {
+                    ImageFilter::identity()
+                } else {
+                    ImageFilter::Offset { dx, dy }
+                }
+            }
+            other => other,
+        };
         if let Some(prev) = folded.last_mut() {
-            if let Some(merged) = prev.fold_with(*filter) {
+            if let Some(merged) = prev.fold_with(filter) {
                 *prev = merged;
                 continue;
             }
         }
-        folded.push(*filter);
+        folded.push(filter);
     }
     let mut passes: Vec<Pass> = Vec::with_capacity(folded.len() + MAX_LEVELS + 2);
     for filter in folded {
         match filter {
             ImageFilter::GaussianBlur { sigma_x, sigma_y } => passes.extend(blur_passes(sigma_x, sigma_y)),
+            ImageFilter::Morphology {
+                radius_x,
+                radius_y,
+                operator,
+            } => passes.extend(morphology_passes(radius_x, radius_y, operator)),
             other => passes.push(Pass::at(other, FULL)),
         }
         if passes.len() > MAX_FILTER_PASSES {
@@ -236,8 +320,8 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         }
     }
     // A color-matrix pass flips the image (the render-target convention),
-    // the two-pass Gaussian blur preserves it; the pyramid's identity passes
-    // count like any other.
+    // the two-pass Gaussian blur and morphology preserve it; the pyramid's
+    // identity passes count like any other.
     let flips = passes.iter().filter(|pass| pass.filter.flips_output()).count();
     if flips.is_multiple_of(2) {
         if passes.len() == MAX_FILTER_PASSES {
@@ -263,9 +347,11 @@ where
     /// This is one shader pass, and a Gaussian blur pass renders a standard
     /// deviation of at most 8 device pixels per axis (the shader's kernel is
     /// bounded at 24 taps per side, a GLES 2.0 loop constraint): a larger
-    /// sigma is clamped to 8 here. For a blur above that use
+    /// sigma is clamped to 8 here, as a morphology radius is clamped to 24.
+    /// For a blur above that use
     /// [`filter_image_chain`](Self::filter_image_chain), which renders it at
-    /// a downsampled size where it fits one pass.
+    /// a downsampled size where it fits one pass, and for a wider morphology
+    /// too, which it runs as the passes that sum to it.
     ///
     /// [`ImageFilter::Turbulence`] reads nothing from `source_image` - it only takes the output
     /// size from it - and keeps a small per-seed cache of lattice textures (512 KB each, the
@@ -285,19 +371,35 @@ where
         if self.image_info(target_image).is_err() {
             return;
         }
-        if target_image == source_image
-            && !matches!(
-                filter,
-                ImageFilter::GaussianBlur { .. } | ImageFilter::Turbulence { .. }
-            )
-        {
+        if target_image == source_image && !filter.two_pass() && !matches!(filter, ImageFilter::Turbulence { .. }) {
             return;
         }
+        let source_flipped = self
+            .images
+            .info(source_image)
+            .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
+        let filter = match filter.oriented(source_flipped) {
+            // One draw per axis: the radius the shader can take.
+            ImageFilter::Morphology {
+                radius_x,
+                radius_y,
+                operator,
+            } => ImageFilter::Morphology {
+                radius_x: morphology_radius(radius_x).min(MAX_MORPHOLOGY_RADIUS),
+                radius_y: morphology_radius(radius_y).min(MAX_MORPHOLOGY_RADIUS),
+                operator,
+            },
+            ImageFilter::Offset { dx, dy } => ImageFilter::Offset {
+                dx: offset_pixels(dx),
+                dy: offset_pixels(dy),
+            },
+            other => other,
+        };
         let work = filter_work(&[Pass::at(filter, FULL)], image_width, image_height);
         if !self.reserve_filter_work(work) {
             return;
         }
-        let blur_scratch = if matches!(filter, ImageFilter::GaussianBlur { .. }) {
+        let blur_scratch = if filter.two_pass() {
             match self.acquire_transient_image(image_width, image_height, ImageFlags::PREMULTIPLIED) {
                 Ok(image) => Some(image),
                 Err(_) => {
@@ -326,17 +428,10 @@ where
         // A blend's placed backdrop and the pass's inputs beyond its mode.
         backdrop: Option<(ImageId, BlendPass)>,
     ) -> bool {
-        debug_assert_eq!(
-            matches!(filter, ImageFilter::GaussianBlur { .. }),
-            blur_scratch.is_some()
-        );
+        debug_assert_eq!(filter.two_pass(), blur_scratch.is_some());
         debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
         debug_assert!(
-            target_image != source_image
-                || matches!(
-                    filter,
-                    ImageFilter::GaussianBlur { .. } | ImageFilter::Turbulence { .. }
-                )
+            target_image != source_image || filter.two_pass() || matches!(filter, ImageFilter::Turbulence { .. })
         );
         if let Some(scratch) = blur_scratch {
             debug_assert!(scratch != source_image && scratch != target_image);
@@ -444,16 +539,20 @@ where
     /// [`filter_image`](Self::filter_image) would clamp to 8, for about one
     /// copy of the image plus a small blur, and the halving widens the blur
     /// by under a tenth of a percent. Sigma is capped at 512 and one
-    /// operation at 257 planned passes. Passes that do not fold ping-pong
-    /// between at most two transient scratch images sized like the source; a
-    /// blur within the bound reserves one more full-size horizontal scratch,
-    /// one above it the pyramid's levels (under a third of the source in all
-    /// when both axes are halved) and its scratches at the blur's level, so
-    /// peak transient memory is twice the source image, or three times
-    /// across a blur - bounded regardless of chain length or sigma either
-    /// way. The scratches are freed at the next flush. All color work is in
-    /// unpremultiplied sRGB with output clamped to [0, 1] per pass, so an
-    /// alpha-amplifying matrix feeding a blur cannot blow out later passes.
+    /// operation at 257 planned passes. A morphology whose radius on an axis
+    /// is above the 24 pixels one draw covers runs as passes whose radii sum
+    /// to it, which is exact for its rectangle; an offset is one pass, and a
+    /// zero one folds away. Passes that do not fold ping-pong between at
+    /// most two transient scratch images sized like the source; a blur
+    /// within the bound or a morphology reserves one more full-size
+    /// horizontal scratch, a blur above the bound the pyramid's levels (under
+    /// a third of the source in all when both axes are halved) and its
+    /// scratches at the blur's level, so peak transient memory is twice the
+    /// source image, or three times across a blur - bounded regardless of
+    /// chain length or sigma either way. The scratches are freed at the next
+    /// flush. All color work is in unpremultiplied sRGB with output clamped
+    /// to [0, 1] per pass, so an alpha-amplifying matrix feeding a blur
+    /// cannot blow out later passes.
     ///
     /// The target ends up in the same orientation convention as a single
     /// color-matrix [`filter_image`](Self::filter_image) call: content stored
@@ -526,10 +625,10 @@ where
     /// Acquires the scratches a plan's `passes` run through: the full-size
     /// images its full-size passes ping-pong between - none for one such
     /// pass, which writes its target directly, one for two, two beyond, up
-    /// to `chain_limit` - a horizontal scratch for a full-size blur, a
-    /// blend's backdrop, and for each pyramid level in use the image the
-    /// chain is halved into plus, where a blur runs there, its target and
-    /// scratch. Scratches hold premultiplied filter output; the flag keeps
+    /// to `chain_limit` - a horizontal scratch for a full-size two-pass
+    /// filter (a blur or a morphology), a blend's backdrop, and for each
+    /// pyramid level in use the image the chain is halved into plus, where
+    /// a blur runs there, its target and scratch. Scratches hold premultiplied filter output; the flag keeps
     /// every consumer (filter passes and composites) reading them under the
     /// same alpha convention - without it, semi-transparent content is
     /// premultiplied a second time at each read and darkens per pass. Holds
@@ -542,10 +641,10 @@ where
         chain_limit: usize,
         headroom: usize,
     ) -> Result<FilterScratchImages, ErrorKind> {
-        let is_blur = |pass: &Pass| matches!(pass.filter, ImageFilter::GaussianBlur { .. });
+        let is_two_pass = |pass: &Pass| pass.filter.two_pass();
         let full = passes.iter().filter(|pass| pass.level == FULL).count();
         let chain = full.saturating_sub(1).min(chain_limit);
-        let blur = passes.iter().any(|pass| pass.level == FULL && is_blur(pass));
+        let two_pass = passes.iter().any(|pass| pass.level == FULL && is_two_pass(pass));
         let blend = passes
             .iter()
             .any(|pass| matches!(pass.filter, ImageFilter::Blend { .. }));
@@ -553,14 +652,14 @@ where
         let mut levels: Vec<(Level, bool)> = Vec::new();
         for pass in passes.iter().filter(|pass| pass.level != FULL) {
             match levels.iter_mut().find(|(level, _)| *level == pass.level) {
-                Some((_, blurred)) => *blurred |= is_blur(pass),
-                None => levels.push((pass.level, is_blur(pass))),
+                Some((_, blurred)) => *blurred |= is_two_pass(pass),
+                None => levels.push((pass.level, is_two_pass(pass))),
             }
         }
         let mut wanted: Vec<(usize, usize)> = Vec::with_capacity(chain + 2 + 3 * levels.len());
         wanted.extend(std::iter::repeat_n(
             (width, height),
-            chain + usize::from(blur) + usize::from(blend),
+            chain + usize::from(two_pass) + usize::from(blend),
         ));
         for (level, blurred) in &levels {
             let size = level_size(width, height, *level);
@@ -584,8 +683,8 @@ where
         for slot in scratch.chain.iter_mut().take(chain) {
             *slot = next.next();
         }
-        if blur {
-            scratch.blur = next.next();
+        if two_pass {
+            scratch.two_pass = next.next();
         }
         if blend {
             scratch.blend = next.next();
@@ -630,8 +729,8 @@ where
         // level's passes write that level's own images.
         let mut full_left = passes.iter().filter(|pass| pass.level == FULL).count();
         for pass in passes {
-            let is_blur = matches!(pass.filter, ImageFilter::GaussianBlur { .. });
-            let (dst, blur_scratch) = if pass.level == FULL {
+            let two_pass = pass.filter.two_pass();
+            let (dst, two_pass_scratch) = if pass.level == FULL {
                 full_left -= 1;
                 let dst = if full_left == 0 {
                     target_image
@@ -644,18 +743,21 @@ where
                 } else {
                     scratch.chain[(full_left - 1) % 2].expect("a scratch was acquired for every full pass but the last")
                 };
-                (dst, scratch.blur)
+                (dst, scratch.two_pass)
             } else {
                 let level = scratch.level(pass.level);
-                let dst = if is_blur {
+                let dst = if two_pass {
                     level.blurred.expect("a blurred image was reserved at the blur's level")
                 } else {
                     level.down.expect("an image was reserved at every level in use")
                 };
                 (dst, level.blur)
             };
-            let blur_scratch = is_blur.then(|| blur_scratch.expect("a blur scratch was reserved at the blur's level"));
-            let filter = &pass.filter;
+            let two_pass_scratch =
+                two_pass.then(|| two_pass_scratch.expect("a scratch was reserved for every two-pass filter"));
+            // An offset is given for an upright image; the source may be
+            // stored the other way up at this point of the chain.
+            let filter = &pass.filter.oriented(src_flipped);
             let backdrop = match filter {
                 ImageFilter::Blend {
                     backdrop,
@@ -678,7 +780,7 @@ where
                 }
                 _ => None,
             };
-            let _ = self.filter_image_with_scratch(dst, *filter, src, blur_scratch, backdrop);
+            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop);
             if filter.flips_output() {
                 src_flipped = !src_flipped;
             }
@@ -957,7 +1059,7 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
     let passes = filter_passes(&[big]).unwrap();
     let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
     assert!(
-        scratch.blur.is_none(),
+        scratch.two_pass.is_none(),
         "no blur at the chain's size, so no full-size blur scratch"
     );
     assert_eq!(
@@ -993,9 +1095,78 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
     let passes = filter_passes(&[small]).unwrap();
     let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
     assert!(
-        scratch.blur.is_some() && scratch.levels.is_empty(),
+        scratch.two_pass.is_some() && scratch.levels.is_empty(),
         "a blur within the bound keeps its full-size scratch and no pyramid"
     );
+    for id in scratch.images() {
+        canvas.release_transient_image(id);
+    }
+}
+
+/// A morphology plans in whole pixels and splits at the per-draw bound
+/// per axis, exactly: 30 by 5 is a pass of 24 by 5 and one of 6 by 0, and
+/// radii that round to nothing are the one copy pass. Like a blur it keeps
+/// the chain's parity, so a lone morphology gets the parity identity; an
+/// offset is one flipping pass, and a zero or non-finite one is the
+/// identity, folding into a neighbouring matrix.
+#[test]
+fn a_morphology_splits_in_whole_pixels_and_an_offset_is_one_pass() {
+    use crate::ImageFilter;
+    let radii = |radius_x: f32, radius_y: f32| -> Vec<(f32, f32)> {
+        morphology_passes(radius_x, radius_y, MorphologyOperator::Dilate)
+            .iter()
+            .map(|pass| match pass.filter {
+                ImageFilter::Morphology { radius_x, radius_y, .. } => {
+                    assert_eq!(pass.level, FULL);
+                    (radius_x, radius_y)
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    assert_eq!(radii(2.4, 0.0), vec![(2.0, 0.0)]);
+    assert_eq!(radii(2.5, 2.6), vec![(3.0, 3.0)]);
+    assert_eq!(radii(30.0, 5.0), vec![(24.0, 5.0), (6.0, 0.0)]);
+    assert_eq!(radii(0.0, 50.0), vec![(0.0, 24.0), (0.0, 24.0), (0.0, 2.0)]);
+    assert_eq!(radii(0.0, 0.0), vec![(0.0, 0.0)]);
+    assert_eq!(radii(f32::NAN, -1.0), vec![(0.0, 0.0)]);
+    assert_eq!(radii(24.0, 0.0), vec![(24.0, 0.0)]);
+    let dilate = ImageFilter::Morphology {
+        radius_x: 2.0,
+        radius_y: 2.0,
+        operator: MorphologyOperator::Dilate,
+    };
+    let passes = filter_passes(&[dilate]).unwrap();
+    assert_eq!(passes.len(), 2, "the morphology and the parity identity");
+    assert!(!passes[0].filter.flips_output() && passes[0].filter.two_pass());
+
+    let shift = ImageFilter::Offset { dx: 3.0, dy: -4.0 };
+    assert_eq!(filter_passes(&[shift]).unwrap().len(), 1);
+    assert!(shift.flips_output() && !shift.two_pass());
+    let still = ImageFilter::Offset { dx: 0.0, dy: f32::NAN };
+    let passes = filter_passes(&[ImageFilter::brightness(0.5), still]).unwrap();
+    assert_eq!(passes.len(), 1, "a zero offset folds into the matrix before it");
+    assert!(matches!(passes[0].filter, ImageFilter::ColorMatrix { .. }));
+    assert_eq!(
+        filter_passes(&[still]).unwrap().len(),
+        1,
+        "a zero offset alone is the identity copy"
+    );
+    assert!(matches!(
+        ImageFilter::Offset { dx: 1.0, dy: 2.0 }.oriented(true),
+        ImageFilter::Offset { dx: 1.0, dy: -2.0 }
+    ));
+    assert!(matches!(
+        ImageFilter::Offset { dx: 1.0, dy: 2.0 }.oriented(false),
+        ImageFilter::Offset { dx: 1.0, dy: 2.0 }
+    ));
+
+    // A morphology reserves the two-pass scratch a blur does.
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let passes = filter_passes(&[dilate]).unwrap();
+    let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
+    assert!(scratch.two_pass.is_some() && scratch.chain.iter().flatten().count() == 1);
     for id in scratch.images() {
         canvas.release_transient_image(id);
     }
@@ -1005,6 +1176,18 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
 fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     let blur = ImageFilter::gaussian_blur(8.0);
     assert_eq!(filter_work(&[Pass::at(blur, FULL)], 10, 10), 9_400);
+    // A morphology taps its radius either side of the center on each axis,
+    // an offset is one tap.
+    let dilate = ImageFilter::Morphology {
+        radius_x: 2.0,
+        radius_y: 3.0,
+        operator: MorphologyOperator::Dilate,
+    };
+    assert_eq!(filter_work(&[Pass::at(dilate, FULL)], 10, 10), 1_200);
+    assert_eq!(
+        filter_work(&[Pass::at(ImageFilter::Offset { dx: 1.0, dy: 1.0 }, FULL)], 10, 10),
+        100
+    );
     // One axis blurred, the other copied: 47 taps plus the copy's one.
     let streak = ImageFilter::GaussianBlur {
         sigma_x: 8.0,
