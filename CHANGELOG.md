@@ -11,9 +11,12 @@ All notable changes to this project will be documented in this file.
   before. A color matrix beside a large blur's halving or scale back up now
   rides that pass. A chain may run in place: nothing samples what it
   writes, so `filter_image_chain` no longer refuses a single-pass chain
-  into its own source. A lone blur or morphology layer is one pass and two
-  transient images fewer; a `stdDeviation="8"` layer at 1080p drops from
-  three draws to two.
+  into its own source. The colour matrices beside a blur or a morphology
+  ride its two draws: `SourceAlpha` as a matrix before it is read by the
+  first draw and a matrix after it is applied by the second, so a design
+  tool's shadow chain - alpha, dilate, offset, blur, colour - runs as four
+  draws where it ran as seven, and a lone blur layer is one pass and two
+  transient images fewer.
 - Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
   `feMorphology` and `feOffset` primitives: a dilation grows the opaque
   regions of an image by a whole-pixel radius per axis and an erosion

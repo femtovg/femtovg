@@ -252,13 +252,20 @@ vec4 renderPlainTextureCopy() {
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
 // weight stays in the sum, so an edge fades.
+// With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
+// an alpha-only color matrix fused into the filter's first draw.
 vec4 blurTap(vec2 pos) {
     vec2 uv = pos / extent;
     vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
     vec4 color = texture2D(tex, uv);
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (radius > 0.5) color = vec4(0.0, 0.0, 0.0, color.w);
     return color * inside.x * inside.y;
 }
+
+// Defined in filters.glsl: the color matrix in the parameter slots applied
+// to a premultiplied color.
+vec4 colorMatrixOn(vec4 premultiplied);
 
 vec4 renderFilteredImage() {
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
@@ -288,6 +295,8 @@ vec4 renderFilteredImage() {
 
     vec4 color = color_sum / coefficient_sum;
 
+    // A color matrix fused into this second draw.
+    if (feather > 0.5) color = colorMatrixOn(color);
     if (texType == 2) color = vec4(color.x);
 
     return color;

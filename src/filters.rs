@@ -66,11 +66,17 @@ impl FilterScratchImages {
 pub(crate) struct Pass {
     pub(crate) filter: ImageFilter,
     pub(crate) level: Level,
+    /// The matrices a two-draw filter carries in its draws.
+    pub(crate) fused: Fused,
 }
 
 impl Pass {
     pub(crate) fn at(filter: ImageFilter, level: Level) -> Self {
-        Self { filter, level }
+        Self {
+            filter,
+            level,
+            fused: Fused::default(),
+        }
     }
 
     /// The size of the image this pass renders into, for a chain of
@@ -342,7 +348,49 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         }
         folded_passes.push(pass);
     }
-    Some(folded_passes)
+    // Fuse the matrices beside a two-draw filter into its draws: an
+    // alpha-only matrix just before it, read at the filter's own size, is
+    // what every tap of its first draw reads; any matrix just after it, at
+    // its size, is applied by its second draw before storing - one draw
+    // fewer each, the same arithmetic.
+    let mut fused: Vec<Pass> = Vec::with_capacity(folded_passes.len());
+    let mut previous_in = FULL;
+    for pass in folded_passes {
+        if let Some(prev) = fused.last_mut() {
+            if let ImageFilter::ColorMatrix { matrix } = pass.filter {
+                if prev.filter.two_pass() && prev.level == pass.level && prev.fused.post_matrix.is_none() {
+                    prev.fused.post_matrix = Some(matrix);
+                    continue;
+                }
+            }
+            if let ImageFilter::ColorMatrix { matrix } = prev.filter {
+                if pass.filter.two_pass()
+                    && prev.level == pass.level
+                    && previous_in == prev.level
+                    && alpha_only(&matrix)
+                    && !pass.fused.source_alpha
+                {
+                    *prev = Pass {
+                        fused: Fused {
+                            source_alpha: true,
+                            ..pass.fused
+                        },
+                        ..pass
+                    };
+                    continue;
+                }
+            }
+            previous_in = prev.level;
+        }
+        fused.push(pass);
+    }
+    Some(fused)
+}
+
+/// Whether a matrix keeps alpha and nothing else - `SourceAlpha` as a
+/// color matrix - which a two-draw filter's first draw can read directly.
+fn alpha_only(matrix: &[f32; 20]) -> bool {
+    matrix[..15].iter().all(|v| *v == 0.0) && matrix[15..] == [0.0, 0.0, 0.0, 1.0, 0.0]
 }
 
 /// How many of a plan's passes turn the image over: a single draw stores
@@ -430,7 +478,8 @@ where
         } else {
             None
         };
-        let recorded = self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None);
+        let recorded =
+            self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None, Fused::default());
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -447,6 +496,8 @@ where
         blur_scratch: Option<ImageId>,
         // A blend's placed backdrop and the pass's inputs beyond its mode.
         backdrop: Option<(ImageId, BlendPass)>,
+        // The matrices a two-draw filter carries in its draws.
+        fused: Fused,
     ) -> bool {
         debug_assert_eq!(filter.two_pass(), blur_scratch.is_some());
         debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
@@ -474,9 +525,11 @@ where
             },
             _ => source_image,
         };
+        debug_assert!(filter.two_pass() || (!fused.source_alpha && fused.post_matrix.is_none()));
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
+        cmd.fused = fused;
         if let Some((placed, pass)) = backdrop {
             cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
             cmd.blend_pass = pass;
@@ -813,7 +866,7 @@ where
                 }
                 _ => None,
             };
-            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop);
+            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused);
             if filter.flips_output() {
                 src_flipped = !src_flipped;
             }
@@ -1255,6 +1308,64 @@ fn a_matrix_rides_the_pyramid_halving_or_scale_back_up() {
         .len(),
         1
     );
+}
+
+/// The matrices beside a two-draw filter ride its draws: `SourceAlpha` as a
+/// matrix before a blur or a morphology is read by its first draw, a matrix
+/// after it is applied by its second, so a Sketch shadow chain - alpha,
+/// dilate, a zero offset, a colouring matrix - is one pass, and alpha, a
+/// sigma-2 blur and a brightness are one too. A matrix that is not
+/// alpha-only stays its own pass before the filter, a pyramid blur takes
+/// its matrices on its resampling passes instead, and two filters in a row
+/// fuse nothing between them.
+#[test]
+fn the_matrices_beside_a_two_draw_filter_ride_its_draws() {
+    use crate::ImageFilter;
+    let alpha = ImageFilter::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, 0.0,
+        ],
+    };
+    let tint = ImageFilter::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.25, 0.0,
+        ],
+    };
+    let dilate = ImageFilter::Morphology {
+        radius_x: 2.0,
+        radius_y: 2.0,
+        operator: MorphologyOperator::Dilate,
+    };
+    let sketch = filter_passes(&[alpha, dilate, ImageFilter::Offset { dx: 0.0, dy: 0.0 }, tint]).unwrap();
+    assert_eq!(sketch.len(), 1);
+    assert!(matches!(sketch[0].filter, ImageFilter::Morphology { .. }));
+    assert!(sketch[0].fused.source_alpha);
+    assert!(matches!(sketch[0].fused.post_matrix, Some(m) if m[18] == 0.25));
+    assert_eq!(plan_flips(&sketch), 0);
+
+    let blurred = filter_passes(&[alpha, ImageFilter::gaussian_blur(2.0), ImageFilter::brightness(0.5)]).unwrap();
+    assert_eq!(blurred.len(), 1);
+    assert!(blurred[0].fused.source_alpha && blurred[0].fused.post_matrix.is_some());
+
+    let bright_first = filter_passes(&[ImageFilter::brightness(0.5), ImageFilter::gaussian_blur(2.0)]).unwrap();
+    assert_eq!(bright_first.len(), 2, "a matrix that is not alpha-only keeps its pass");
+    assert!(!bright_first[1].fused.source_alpha);
+
+    let pyramid = filter_passes(&[alpha, ImageFilter::gaussian_blur(16.0), tint]).unwrap();
+    assert_eq!(pyramid.len(), 3, "the matrices ride the halving and the scale back up");
+    assert!(!pyramid[1].fused.source_alpha && pyramid[1].fused.post_matrix.is_none());
+
+    let two = filter_passes(&[ImageFilter::gaussian_blur(2.0), dilate]).unwrap();
+    assert_eq!(two.len(), 2);
+    assert!(two
+        .iter()
+        .all(|pass| !pass.fused.source_alpha && pass.fused.post_matrix.is_none()));
 }
 
 /// A chain copies its result once more only when the passes would leave it

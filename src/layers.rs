@@ -753,8 +753,15 @@ where
             source_alpha: alpha,
             contribution: true,
         };
-        self.filter_image_with_scratch(target, blend, source, None, Some((images.backdrop, pass)))
-            .then_some(target)
+        self.filter_image_with_scratch(
+            target,
+            blend,
+            source,
+            None,
+            Some((images.backdrop, pass)),
+            Fused::default(),
+        )
+        .then_some(target)
     }
 
     /// Puts the current state into the shape every offscreen pass draws
@@ -961,6 +968,7 @@ where
                             images.normalized,
                             None,
                             None,
+                            Fused::default(),
                         );
                         converted
                     }

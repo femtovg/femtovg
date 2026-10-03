@@ -85,7 +85,7 @@ mod paint;
 pub use paint::Paint;
 pub use paint::TextDecoration;
 use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
-use renderer::BlendPass;
+use renderer::{BlendPass, Fused};
 
 mod path;
 use path::Convexity;
