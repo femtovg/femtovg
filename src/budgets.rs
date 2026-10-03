@@ -32,9 +32,10 @@ pub(crate) fn blur_reach(sigmas: impl IntoIterator<Item = [f32; 2]>) -> Option<[
 }
 
 /// A chain's reach around a store, per axis: the reach of its blurs
-/// ([`blur_reach`]) plus the radius of each dilation (an erosion reaches
-/// nothing) and the magnitude of each offset, as far as any of them can
-/// carry content outward, rounded up; `None` when nothing reaches.
+/// ([`blur_reach`]) plus the radius of each morphology - a dilation carries
+/// content outward by it, an erosion reads that far beyond the store to
+/// erode the edge rightly, instead of into the transparent outside - and
+/// the magnitude of each offset, rounded up; `None` when nothing reaches.
 pub(crate) fn chain_reach(filters: &[ImageFilter]) -> Option<[f32; 2]> {
     let mut reach = blur_reach(filters.iter().filter_map(|f| match f {
         ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some([*sigma_x, *sigma_y]),
@@ -43,11 +44,7 @@ pub(crate) fn chain_reach(filters: &[ImageFilter]) -> Option<[f32; 2]> {
     .unwrap_or([0.0; 2]);
     for filter in filters {
         match *filter {
-            ImageFilter::Morphology {
-                radius_x,
-                radius_y,
-                operator: MorphologyOperator::Dilate,
-            } => {
+            ImageFilter::Morphology { radius_x, radius_y, .. } => {
                 reach[0] += morphology_radius(radius_x);
                 reach[1] += morphology_radius(radius_y);
             }
@@ -637,8 +634,9 @@ fn a_blur_reach_matches_the_layer_and_shadow_pads() {
     assert_eq!(blur_reach([[0.0, 3.0], [4.0, 0.0]]), Some([12.0, 9.0]));
 }
 
-/// A chain reaches as far as its blurs, plus each dilation's radius and
-/// each offset's shift on its axis; an erosion reaches nothing.
+/// A chain reaches as far as its blurs, plus each morphology's radius and
+/// each offset's shift on its axis: an erosion reaches as far as a
+/// dilation, since its edge pixels read that far into what lies beyond.
 #[test]
 fn a_chain_reach_adds_dilations_and_offsets_to_the_blur_reach() {
     use crate::ImageFilter;
@@ -654,7 +652,7 @@ fn a_chain_reach_adds_dilations_and_offsets_to_the_blur_reach() {
     };
     assert_eq!(chain_reach(&[dilate(3.0, 2.0)]), Some([3.0, 2.0]));
     assert_eq!(chain_reach(&[dilate(2.4, 2.6)]), Some([2.0, 3.0]));
-    assert_eq!(chain_reach(&[erode]), None);
+    assert_eq!(chain_reach(&[erode]), Some([5.0, 5.0]));
     assert_eq!(
         chain_reach(&[ImageFilter::Offset { dx: -4.5, dy: 2.0 }]),
         Some([5.0, 2.0])
