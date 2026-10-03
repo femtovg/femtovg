@@ -3,20 +3,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- A filter chain no longer spends a pass on orientation. A layer reads its
-  filtered result through the `FLIP_Y` flag its chain's parity calls for,
-  and `Canvas::filter_image_chain` adds a copy only when its target's flag
-  disagrees with that parity (a lone blur into a `FLIP_Y` target), where
-  every chain with an even number of flipping passes paid an identity pass
-  before. A color matrix beside a large blur's halving or scale back up now
-  rides that pass. A chain may run in place: nothing samples what it
-  writes, so `filter_image_chain` no longer refuses a single-pass chain
-  into its own source. The colour matrices beside a blur or a morphology
-  ride its two draws: `SourceAlpha` as a matrix before it is read by the
-  first draw and a matrix after it is applied by the second, so a design
-  tool's shadow chain - alpha, dilate, offset, blur, colour - runs as four
-  draws where it ran as seven, and a lone blur layer is one pass and two
-  transient images fewer.
 - Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
   `feMorphology` and `feOffset` primitives: a dilation grows the opaque
   regions of an image by a whole-pixel radius per axis and an erosion
@@ -34,8 +20,8 @@ All notable changes to this project will be documented in this file.
   its image along that axis until the sigma fits one pass, blurs there and
   scales the result back up bilinearly,
   instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
-  1080p layer is four halvings, a blur over a sixteenth of the pixels and
-  one copy where it was 93 full-size blurs, so it no longer exceeds the
+  1080p layer is four halvings, a blur over a sixteenth of the pixels
+  where it was 93 full-size blurs, so it no longer exceeds the
   filter work budget, which had left the layer unblurred; the sigma ceiling
   rises from 128 to 512; blurs within the bound render as before. The blur
   shader also reads transparent beyond the image it samples instead of
