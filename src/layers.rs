@@ -630,10 +630,9 @@ where
 
         // Run the filter chain, if any, through the images reserved for it at
         // begin_layer: the chain releases the scratches, the result goes back
-        // with the composite. Orientation bookkeeping per the chain contract:
-        // the capture holds flipped storage; the chain flips storage-parity
-        // exactly once, so the filtered result is stored upright and must be
-        // sampled WITHOUT the FLIP_Y flag the raw capture needs.
+        // with the composite. The result's FLIP_Y flag was chosen at
+        // begin_layer from the plan's parity, so the composite, the mask and
+        // the blend read it the right way up through it.
         let filtered = match record.filter_images.take() {
             Some(FilterImages { target, scratch }) => {
                 let passes =
@@ -650,7 +649,7 @@ where
         // The mask applies after the filter chain - SVG's order for a group
         // carrying both - and multiplies the layer's alpha in place.
         if let (Some(mask), Some(images)) = (record.effects.mask, record.mask_images) {
-            self.apply_layer_mask(source, &record, mask, images, source != image);
+            self.apply_layer_mask(source, &record, mask, images);
         }
 
         // A blend mode composites the layer's contribution over the backdrop,
@@ -839,11 +838,20 @@ where
                 self.images.info(backdrop)?;
             }
         }
+        // The capture is stored the way a render target is; the result is
+        // read through FLIP_Y when the chain's passes leave it that way too,
+        // so the chain never spends a pass on orientation.
+        let flags = if plan_flips(&passes).is_multiple_of(2) {
+            ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+        } else {
+            ImageFlags::PREMULTIPLIED
+        };
         let target = self
-            .acquire_transient_image_reserving(width, height, ImageFlags::PREMULTIPLIED, headroom)
+            .acquire_transient_image_reserving(width, height, flags, headroom)
             .ok()?;
-        // The result and chain scratches share the same storage convention,
-        // so a layer can alternate through its result and one scratch.
+        // The result and the chain scratches are plain render targets alike,
+        // so a layer can alternate through its result and one scratch; the
+        // result's flag matters only to the composite that reads it.
         match self.acquire_filter_scratches(width, height, &passes, 1, headroom) {
             Ok(scratch) => Some(FilterImages { target, scratch }),
             Err(_) => {
@@ -883,20 +891,23 @@ where
     /// drawing through the coverage images reserved at `begin_layer`.
     ///
     /// Orientation: a draw into an image target lands in flipped storage, so
-    /// draw-space row 0 writes the storage row holding a raw capture's top
-    /// but a filtered result's bottom (the chain flipped storage parity
-    /// once). Both coverage images sample upright - `normalized` through
-    /// FLIP_Y like a capture, `converted` without it like a filtered result -
-    /// so the coverage draw runs under the identity for a raw capture and
-    /// under a vertical flip for a filtered one.
+    /// draw-space row 0 writes the storage row holding the top of an image
+    /// sampled through FLIP_Y (a capture, a filtered result whose chain left
+    /// it that way) but the bottom of one sampled without it. Both coverage
+    /// images sample upright - `normalized` through FLIP_Y like a capture,
+    /// `converted` without it - so the coverage draw runs under the identity
+    /// over a FLIP_Y layer and under a vertical flip over the other kind.
     pub(crate) fn apply_layer_mask(
         &mut self,
         layer: ImageId,
         record: &LayerRecord,
         mask: LayerMask,
         images: MaskImages,
-        layer_is_filtered: bool,
     ) {
+        let layer_read_flipped = self
+            .images
+            .info(layer)
+            .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
         let (width, height) = (record.width as f32, record.height as f32);
         // The mask rect is root device space and the store's (0, 0) sits at
         // the record's root origin - every enclosing capture's shift
@@ -916,10 +927,10 @@ where
             MaskKind::Luminance => Color::black(),
             MaskKind::Alpha => Color::rgbaf(0.0, 0.0, 0.0, 0.0),
         };
-        let transform = if layer_is_filtered {
-            Transform2D::new(1.0, 0.0, 0.0, -1.0, 0.0, height)
-        } else {
+        let transform = if layer_read_flipped {
             Transform2D::identity()
+        } else {
+            Transform2D::new(1.0, 0.0, 0.0, -1.0, 0.0, height)
         };
         self.offscreen_pass(
             RenderTarget::Image(images.normalized),
@@ -1071,11 +1082,11 @@ fn layer_bounds_follow_the_scissor() {
     canvas.restore();
 
     // Two plain layers cost one transient each (their sizes differ, so no
-    // reuse); the blurred layer costs its capture, the filtered target, and
-    // the chain's single ping-pong scratch and blur scratch. All six are free again once
-    // their layers have ended, and the flush deletes them.
-    assert_eq!(canvas.transients.images.len(), 6);
-    assert_eq!(canvas.transients.free.len(), 6);
+    // reuse); the blurred layer costs its capture, the filtered target and
+    // the blur scratch. All five are free again once their layers have
+    // ended, and the flush deletes them.
+    assert_eq!(canvas.transients.images.len(), 5);
+    assert_eq!(canvas.transients.free.len(), 5);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
     assert_eq!(canvas.transients.free.len(), 0);
@@ -1114,19 +1125,19 @@ fn sibling_layers_reuse_backing_stores() {
     canvas.end_layer();
     assert_eq!(canvas.transients.images.len(), 2);
 
-    // Blurred siblings: capture, filtered target, one chain scratch and one
-    // horizontal blur scratch, once.
+    // Blurred siblings: capture, filtered target and one horizontal blur
+    // scratch, once.
     let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     for _ in 0..4 {
         assert!(canvas.begin_layer(&blur));
         canvas.end_layer();
     }
     let padded = 384 * 256 * 4; // 336 x 216 padded, rounded
-    assert_eq!(canvas.transients.images.len(), 2 + 4);
-    assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 4 * padded);
+    assert_eq!(canvas.transients.images.len(), 2 + 3);
+    assert_eq!(canvas.transient_image_bytes(), 2 * bytes + 3 * padded);
 
     // Everything is free between layers, nothing after the flush.
-    assert_eq!(canvas.transients.free.len(), 6);
+    assert_eq!(canvas.transients.free.len(), 5);
     canvas.flush_to_output(());
     assert_eq!(canvas.transients.images.len(), 0);
     assert_eq!(canvas.transient_image_bytes(), 0);
@@ -1151,8 +1162,8 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
         );
         canvas.end_layer();
     }
-    assert_eq!(canvas.transients.images.len(), 4);
-    assert_eq!(canvas.transient_image_bytes(), 4 * padded);
+    assert_eq!(canvas.transients.images.len(), 3);
+    assert_eq!(canvas.transient_image_bytes(), 3 * padded);
 }
 
 /// A layer keeps its capture and group opacity when optional filter storage
@@ -1177,7 +1188,7 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
     canvas.set_transient_image_budget(5 * padded);
     assert!(canvas.begin_layer(&blur));
     let target = canvas.layers.last().unwrap().filter_images.as_ref().unwrap().target;
-    assert_eq!(canvas.transients.images.len(), 4);
+    assert_eq!(canvas.transients.images.len(), 3);
     assert_eq!(
         canvas.transients.free.len(),
         0,
@@ -1192,7 +1203,7 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
         .find(|c| c.image.is_some())
         .expect("a composite was recorded");
     assert_eq!(composite.image, Some(target));
-    assert_eq!(canvas.transients.free.len(), 4);
+    assert_eq!(canvas.transients.free.len(), 3);
 }
 
 /// A filtered layer's reservation is sized by its pass plan: the result, one
@@ -1206,15 +1217,16 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
     let cases: [(&[ImageFilter], usize, usize, usize); 4] = [
         // One color pass: the result only. No blur, so the store is the canvas.
         (&[ImageFilter::brightness(0.0)], 2, 64, 2 * 64 * 64),
-        // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
-        (&[ImageFilter::gaussian_blur(1.0)], 4, 128, 4 * 128 * 128),
+        // One blur pass writing the result: its horizontal scratch only.
+        // Sigma 1 pads 5 px, rounding to 128.
+        (&[ImageFilter::gaussian_blur(1.0)], 3, 128, 3 * 128 * 128),
         // A blur above the per-pass bound runs down the pyramid: the store
-        // pads by the true reach, 50 px, to 192; the result and one scratch
-        // at that size serve the scale back up and the parity identity, and
-        // the halving, the blur and its scratch are quarter-size.
-        (&[ImageFilter::gaussian_blur(16.0)], 6, 192, 3 * 192 * 192 + 3 * 96 * 96),
+        // pads by the true reach, 50 px, to 192; the scale back up writes
+        // the result, and the halving, the blur and its scratch are
+        // quarter-size.
+        (&[ImageFilter::gaussian_blur(16.0)], 5, 192, 2 * 192 * 192 + 3 * 96 * 96),
         // A blur never folds with a color matrix, so brightness, blur and
-        // invert are three passes plus the parity identity: four, two scratches.
+        // invert are three passes: one chain scratch and the blur's.
         (
             &[
                 ImageFilter::brightness(2.0),
@@ -1777,6 +1789,33 @@ fn a_layer_pads_by_a_dilation_and_an_offset() {
     assert!(record.filter_images.is_some());
     canvas.end_layer();
     canvas.restore();
+}
+
+/// A filtered layer reads its result through the flag its chain's parity
+/// calls for: a lone blur leaves the capture's flipped storage as it is,
+/// so the result carries FLIP_Y like the capture; a matrix turns it over
+/// once, so the result carries none - and neither spends a pass on it.
+#[test]
+fn a_filtered_layer_reads_its_result_through_the_flag_its_parity_needs() {
+    use crate::ImageFilter;
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    for (filters, flipped) in [
+        (&[ImageFilter::gaussian_blur(2.0)][..], true),
+        (&[ImageFilter::brightness(0.5)][..], false),
+        (
+            &[ImageFilter::brightness(2.0), ImageFilter::gaussian_blur(2.0)][..],
+            false,
+        ),
+        (&[ImageFilter::brightness(2.0), ImageFilter::invert(1.0)][..], true),
+    ] {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(filters)));
+        let target = canvas.layers.last().unwrap().filter_images.as_ref().unwrap().target;
+        let flags = canvas.images.info(target).unwrap().flags();
+        assert_eq!(flags.contains(ImageFlags::FLIP_Y), flipped, "{filters:?}");
+        canvas.end_layer();
+        canvas.flush_to_output(());
+    }
 }
 
 /// A wide blur over a large store fits the default work budget: sigma 77

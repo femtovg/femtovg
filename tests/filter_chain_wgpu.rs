@@ -6,7 +6,7 @@
 //! GPU adapter.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, ErrorKind, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
 
 mod common;
 use common::headless_device;
@@ -173,8 +173,12 @@ fn close(a: u8, b: u8, tol: i32) -> bool {
     (a as i32 - b as i32).abs() <= tol
 }
 
+/// The single-pass `filter_image` refuses to sample what it writes, while
+/// an in-place chain runs: its one flipping pass is followed by the copy
+/// that reads the image back the right way up, through a scratch, so the
+/// image comes out filtered, not undefined.
 #[test]
-fn in_place_sampling_filters_are_rejected_before_gpu_submission() {
+fn an_in_place_chain_runs_through_a_scratch() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
@@ -183,13 +187,12 @@ fn in_place_sampling_filters_are_rejected_before_gpu_submission() {
 
     canvas.filter_image(image, ImageFilter::identity(), image);
     canvas.filter_image_chain(image, &[], image).unwrap();
-    assert!(matches!(
-        canvas.filter_image_chain(image, &[ImageFilter::brightness(0.5)], image),
-        Err(ErrorKind::RenderTargetError(_))
-    ));
+    canvas
+        .filter_image_chain(image, &[ImageFilter::brightness(0.5)], image)
+        .unwrap();
 
     let out = finish_and_read(&device, &queue, canvas, image, &target);
-    assert_eq!(px(&out, W / 2, H / 2), [80, 120, 160]);
+    assert_eq!(px(&out, W / 2, H / 2), [40, 60, 80]);
 }
 
 /// A folded color run must render identically to running the same filters as

@@ -270,10 +270,12 @@ pub(crate) fn filter_work(passes: &[Pass], width: usize, height: usize) -> u64 {
 /// where that is exact ([`ImageFilter::fold_with`]), a zero offset being the
 /// identity matrix, each Gaussian blur above the shader's per-pass bound
 /// run down the pyramid and back ([`blur_passes`]), each morphology as the
-/// passes its radii need ([`morphology_passes`]), plus an identity pass when
-/// the flip count comes out even, so every chain shape leaves storage
-/// flipped once - which makes the empty list a copy. The result is never
-/// empty; `None` rejects a plan above [`MAX_FILTER_PASSES`]. What
+/// passes its radii need ([`morphology_passes`]), and a matrix beside a
+/// pyramid's halving or scale back up folded into that pass, which is a
+/// matrix too. The plan says nothing about orientation: [`plan_flips`]
+/// counts the passes that turn the image over, and the caller reads its
+/// target the way that parity leaves it. An empty list plans no pass;
+/// `None` rejects a plan above [`MAX_FILTER_PASSES`]. What
 /// [`Canvas::filter_image_chain`] executes and what a layer's scratch
 /// reservation is sized from, so the two cannot disagree.
 pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
@@ -319,17 +321,35 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
             return None;
         }
     }
-    // A color-matrix pass flips the image (the render-target convention),
-    // the two-pass Gaussian blur and morphology preserve it; the pyramid's
-    // identity passes count like any other.
-    let flips = passes.iter().filter(|pass| pass.filter.flips_output()).count();
-    if flips.is_multiple_of(2) {
-        if passes.len() == MAX_FILTER_PASSES {
-            return None;
+    // Fold again across the pyramid's identity passes. A matrix pass and a
+    // resampling pass merge into one matrix pass reading what the first
+    // read and writing where the second wrote, which keeps the resampling
+    // exact only when one of the two was at a single size: a matrix before
+    // the first halving rides that halving, a matrix after the scale back
+    // up rides that; two halvings stay two.
+    let mut folded_passes: Vec<Pass> = Vec::with_capacity(passes.len());
+    let mut previous_in = FULL;
+    for pass in passes {
+        if let Some(prev) = folded_passes.last_mut() {
+            let one_size = previous_in == prev.level || prev.level == pass.level;
+            if one_size {
+                if let Some(merged) = prev.filter.fold_with(pass.filter) {
+                    *prev = Pass::at(merged, pass.level);
+                    continue;
+                }
+            }
+            previous_in = prev.level;
         }
-        passes.push(Pass::at(ImageFilter::identity(), FULL));
+        folded_passes.push(pass);
     }
-    Some(passes)
+    Some(folded_passes)
+}
+
+/// How many of a plan's passes turn the image over: a single draw stores
+/// its result the way a render target does, the other way up from what it
+/// read, and the two-draw filters turn it over twice.
+pub(crate) fn plan_flips(passes: &[Pass]) -> usize {
+    passes.iter().filter(|pass| pass.filter.flips_output()).count()
 }
 
 impl<T> Canvas<T>
@@ -554,20 +574,25 @@ where
     /// to [0, 1] per pass, so an alpha-amplifying matrix feeding a blur
     /// cannot blow out later passes.
     ///
-    /// The target ends up in the same orientation convention as a single
-    /// color-matrix [`filter_image`](Self::filter_image) call: content stored
-    /// vertically flipped, sampled upright via [`ImageFlags::FLIP_Y`], and
-    /// carrying premultiplied alpha - create chain targets with
-    /// `ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y` so semi-transparent
-    /// results composite once, not twice. An empty list degrades to a plain
-    /// copy under that same convention. A chain whose flip parity comes out
-    /// even (for example a lone blur) pays one extra identity pass for that
-    /// uniformity; blur-only callers who want the single-pass form can call
-    /// `filter_image` directly.
+    /// The result lands in the target the way the target's flags say it is
+    /// read: a target created with `ImageFlags::PREMULTIPLIED |
+    /// ImageFlags::FLIP_Y`, the convention of a single color-matrix
+    /// [`filter_image`](Self::filter_image) call, composites upright, and so
+    /// does one without `FLIP_Y`. Every single draw turns the stored image
+    /// over and the two-draw filters leave it as it was, so the chain adds
+    /// one copy pass when its own parity would store the result the other
+    /// way from the flag - a lone blur into a `FLIP_Y` target, say - and
+    /// none otherwise. An empty list is one copy under the `FLIP_Y`
+    /// convention. Create targets premultiplied so semi-transparent results
+    /// composite once, not twice.
+    ///
+    /// A chain may run in place (`target_image` the same as `source_image`):
+    /// a single sampling pass turns the image over, so it is followed by the
+    /// copy that reads it back the right way up, and nothing samples what it
+    /// writes; a two-draw filter goes through its scratch.
     ///
     /// Returns [`ErrorKind::ImageIdNotFound`] when either image is missing,
-    /// [`ErrorKind::RenderTargetError`] when a single sampling pass would read
-    /// and write the same image, [`ErrorKind::FilterPassLimitExceeded`] when
+    /// [`ErrorKind::FilterPassLimitExceeded`] when
     /// the chain exceeds the per-operation pass cap,
     /// [`ErrorKind::FilterWorkBudgetExceeded`] when it exceeds the command
     /// stream's work budget, and [`ErrorKind::TransientImageBudgetExceeded`]
@@ -588,19 +613,27 @@ where
         filters: &[ImageFilter],
         source_image: ImageId,
     ) -> Result<(), ErrorKind> {
-        let passes = filter_passes(filters).ok_or(ErrorKind::FilterPassLimitExceeded)?;
+        let mut passes = filter_passes(filters).ok_or(ErrorKind::FilterPassLimitExceeded)?;
         let (width, height) = self.image_size(source_image)?;
         self.image_info(target_image)?;
         if target_image == source_image && filters.is_empty() {
             return Ok(());
         }
-        if target_image == source_image
-            && passes.len() == 1
-            && !matches!(passes[0].filter, ImageFilter::Turbulence { .. })
-        {
-            return Err(ErrorKind::RenderTargetError(
-                "a single-pass filter cannot read and write the same image".into(),
-            ));
+        let stored_flipped = |canvas: &Self, image: ImageId| {
+            canvas
+                .images
+                .info(image)
+                .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y))
+        };
+        // The parity the passes leave the result in against how the target
+        // is read; an empty list is the one copy it always was.
+        let other_way = (stored_flipped(self, source_image) ^ !plan_flips(&passes).is_multiple_of(2))
+            != stored_flipped(self, target_image);
+        if passes.is_empty() || other_way {
+            if passes.len() == MAX_FILTER_PASSES {
+                return Err(ErrorKind::FilterPassLimitExceeded);
+            }
+            passes.push(Pass::at(ImageFilter::identity(), FULL));
         }
         for pass in &passes {
             if let ImageFilter::Blend { backdrop, .. } = pass.filter {
@@ -885,25 +918,21 @@ fn chained_blurs_pad_in_quadrature() {
 }
 
 /// A blur within the shader's per-pass bound is one pass at the chain's
-/// size with its sigmas untouched, plus the parity identity - the plan it
-/// always had, so small blurs render exactly as before the pyramid existed.
-/// A degenerate sigma is one pass too, for the coefficient sanitization to
-/// copy through.
+/// size with its sigmas untouched - the pass it always was, so small blurs
+/// render exactly as before the pyramid existed. A degenerate sigma is one
+/// pass too, for the coefficient sanitization to copy through.
 #[test]
 fn a_blur_within_the_shader_bound_stays_one_pass() {
     use crate::ImageFilter;
     for sigma in [0.5, 3.0, 8.0] {
         let passes = filter_passes(&[ImageFilter::gaussian_blur(sigma)]).unwrap();
-        assert_eq!(passes.len(), 2, "sigma {sigma}: one blur pass and the parity identity");
+        assert_eq!(passes.len(), 1, "sigma {sigma}: one blur pass");
         assert!(
             matches!(passes[0].filter, ImageFilter::GaussianBlur { sigma_x, sigma_y } if sigma_x == sigma && sigma_y == sigma),
             "{:?}",
             passes[0]
         );
         assert_eq!(passes[0].level, FULL);
-        assert!(
-            matches!(passes[1].filter, ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX)
-        );
     }
     for (sigma_x, sigma_y) in [(8.0, 8.0), (0.0, 0.0), (-1.0, f32::NAN), (3.0, 8.0)] {
         let plan = blur_passes(sigma_x, sigma_y);
@@ -971,8 +1000,7 @@ fn a_blur_above_the_bound_runs_down_the_pyramid() {
 /// alone halves x once and leaves y whole, blurring (8, 0) at that level;
 /// 16 by 4 keeps y's sigma 4 at full height; 0 by 23 halves y twice; and
 /// 16 by 23 stops halving x after the first level while y goes on, so the
-/// blur runs at [1, 2] with (8, 5.75). The parity identity follows as for
-/// any blur.
+/// blur runs at [1, 2] with (8, 5.75).
 #[test]
 fn a_blur_halves_each_axis_by_its_own_depth() {
     use crate::ImageFilter;
@@ -1014,35 +1042,28 @@ fn a_blur_halves_each_axis_by_its_own_depth() {
         }])
         .unwrap()
         .len(),
-        4
+        3
     );
     assert_eq!(level_size(64, 64, [1, 0]), (32, 64));
 }
 
-/// The pyramid changes the pass count, not the chain's contract: a chain
-/// still leaves storage flipped once, so [blur 16] - a halving, the blur,
-/// the scale back up: two flips - ends with the parity identity like
-/// [blur 8] does, and [blur 16, brightness] does not, like [blur 8,
-/// brightness]. Its scratches are the pyramid's: the level the chain is
+/// A pyramid blur's scratches are the pyramid's: the level the chain is
 /// halved into, with the blur's target and scratch at that size, and no
-/// full-size blur scratch at all - 7/4 of the chain where the quadrature
-/// passes held three full-size scratches; a streak's level is half as wide
-/// and as tall as the chain.
+/// full-size scratch at all - the scale back up writes the target - 3/4 of
+/// the chain where the quadrature passes held three full-size scratches; a
+/// streak's level is half as wide and as tall as the chain. A matrix after
+/// the blur rides the scale back up, so [blur 16, brightness] is three
+/// passes like [blur 16].
 #[test]
-fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
+fn a_pyramid_blur_shrinks_its_scratches() {
     use crate::ImageFilter;
-    let ends_with_identity = |filters: &[ImageFilter]| {
-        matches!(
-            filter_passes(filters).unwrap().last(),
-            Some(Pass { filter: ImageFilter::ColorMatrix { matrix }, level: FULL }) if *matrix == ImageFilter::IDENTITY_MATRIX
-        )
-    };
     let small = ImageFilter::gaussian_blur(8.0);
     let big = ImageFilter::gaussian_blur(16.0);
     let bright = ImageFilter::brightness(1.2);
-    assert!(ends_with_identity(&[small]) && ends_with_identity(&[big]));
-    assert!(!ends_with_identity(&[small, bright]) && !ends_with_identity(&[big, bright]));
-    assert_eq!(filter_passes(&[big, bright]).unwrap().len(), 4);
+    assert_eq!(filter_passes(&[big]).unwrap().len(), 3);
+    let with_matrix = filter_passes(&[big, bright]).unwrap();
+    assert_eq!(with_matrix.len(), 3);
+    assert!(matches!(with_matrix[2].filter, ImageFilter::ColorMatrix { .. }) && with_matrix[2].level == FULL);
 
     let renderer = RecordingRenderer::default();
     let mut canvas = Canvas::new(renderer).unwrap();
@@ -1064,15 +1085,15 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
     );
     assert_eq!(
         scratch.chain.iter().flatten().count(),
-        1,
-        "the scale back up and the parity identity ping-pong through one scratch"
+        0,
+        "the scale back up is the one full-size pass and writes the target"
     );
     assert_eq!(scratch.levels.len(), 1);
     let level = scratch.level([1, 1]);
     for image in [level.down, level.blurred, level.blur] {
         assert_eq!(canvas.image_size(image.unwrap()).unwrap(), (32, 32));
     }
-    assert_eq!(held(&canvas, &scratch), 64 * 64 + 3 * 32 * 32);
+    assert_eq!(held(&canvas, &scratch), 3 * 32 * 32);
     for id in scratch.images() {
         canvas.release_transient_image(id);
     }
@@ -1087,7 +1108,7 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
     for image in [level.down, level.blurred, level.blur] {
         assert_eq!(canvas.image_size(image.unwrap()).unwrap(), (32, 64));
     }
-    assert_eq!(held(&canvas, &scratch), 64 * 64 + 3 * 32 * 64);
+    assert_eq!(held(&canvas, &scratch), 3 * 32 * 64);
     for id in scratch.images() {
         canvas.release_transient_image(id);
     }
@@ -1106,9 +1127,8 @@ fn a_pyramid_blur_keeps_the_chain_parity_and_shrinks_its_scratches() {
 /// A morphology plans in whole pixels and splits at the per-draw bound
 /// per axis, exactly: 30 by 5 is a pass of 24 by 5 and one of 6 by 0, and
 /// radii that round to nothing are the one copy pass. Like a blur it keeps
-/// the chain's parity, so a lone morphology gets the parity identity; an
-/// offset is one flipping pass, and a zero or non-finite one is the
-/// identity, folding into a neighbouring matrix.
+/// the image the way up it was; an offset is one flipping pass, and a zero
+/// or non-finite one is the identity, folding into a neighbouring matrix.
 #[test]
 fn a_morphology_splits_in_whole_pixels_and_an_offset_is_one_pass() {
     use crate::ImageFilter;
@@ -1137,8 +1157,9 @@ fn a_morphology_splits_in_whole_pixels_and_an_offset_is_one_pass() {
         operator: MorphologyOperator::Dilate,
     };
     let passes = filter_passes(&[dilate]).unwrap();
-    assert_eq!(passes.len(), 2, "the morphology and the parity identity");
+    assert_eq!(passes.len(), 1, "the morphology alone");
     assert!(!passes[0].filter.flips_output() && passes[0].filter.two_pass());
+    assert_eq!(plan_flips(&passes), 0);
 
     let shift = ImageFilter::Offset { dx: 3.0, dy: -4.0 };
     assert_eq!(filter_passes(&[shift]).unwrap().len(), 1);
@@ -1161,15 +1182,116 @@ fn a_morphology_splits_in_whole_pixels_and_an_offset_is_one_pass() {
         ImageFilter::Offset { dx: 1.0, dy: 2.0 }
     ));
 
-    // A morphology reserves the two-pass scratch a blur does.
+    // A morphology reserves the two-pass scratch a blur does, and no chain
+    // scratch for the one pass it is.
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
     let passes = filter_passes(&[dilate]).unwrap();
     let scratch = canvas.acquire_filter_scratches(64, 64, &passes, 2, 0).unwrap();
-    assert!(scratch.two_pass.is_some() && scratch.chain.iter().flatten().count() == 1);
+    assert!(scratch.two_pass.is_some() && scratch.chain.iter().flatten().count() == 0);
     for id in scratch.images() {
         canvas.release_transient_image(id);
     }
+}
+
+/// A matrix beside a pyramid's resampling pass rides it: an alpha-only
+/// matrix before a sigma-16 blur becomes the first halving, a brightness
+/// after it the scale back up, so [alpha, blur 77, brightness] is the four
+/// halvings, the blur and one scale back up - six passes, not eight - while
+/// two halvings never merge into one, which would resample differently.
+#[test]
+fn a_matrix_rides_the_pyramid_halving_or_scale_back_up() {
+    use crate::ImageFilter;
+    let alpha = ImageFilter::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, 0.0,
+        ],
+    };
+    let bright = ImageFilter::brightness(0.5);
+    let kinds = |filters: &[ImageFilter]| -> Vec<(char, Level)> {
+        filter_passes(filters)
+            .unwrap()
+            .iter()
+            .map(|pass| {
+                let kind = match pass.filter {
+                    ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX => 'i',
+                    ImageFilter::ColorMatrix { .. } => 'm',
+                    ImageFilter::GaussianBlur { .. } => 'b',
+                    _ => '?',
+                };
+                (kind, pass.level)
+            })
+            .collect()
+    };
+    assert_eq!(
+        kinds(&[alpha, ImageFilter::gaussian_blur(16.0)]),
+        vec![('m', [1, 1]), ('b', [1, 1]), ('i', FULL)]
+    );
+    assert_eq!(
+        kinds(&[ImageFilter::gaussian_blur(16.0), bright]),
+        vec![('i', [1, 1]), ('b', [1, 1]), ('m', FULL)]
+    );
+    assert_eq!(
+        kinds(&[alpha, ImageFilter::gaussian_blur(77.0), bright]),
+        vec![
+            ('m', [1, 1]),
+            ('i', [2, 2]),
+            ('i', [3, 3]),
+            ('i', [4, 4]),
+            ('b', [4, 4]),
+            ('m', FULL)
+        ]
+    );
+    // Two zero offsets are one copy; a copy before a morphology stays.
+    assert_eq!(
+        filter_passes(&[
+            ImageFilter::Offset { dx: 0.0, dy: 0.0 },
+            ImageFilter::Offset { dx: 0.0, dy: 0.0 }
+        ])
+        .unwrap()
+        .len(),
+        1
+    );
+}
+
+/// A chain copies its result once more only when the passes would leave it
+/// stored the other way from how its target is read: into a `FLIP_Y`
+/// target from an upload, a lone blur (no flip) gets the copy and a matrix
+/// (one flip) does not; into a target without the flag it is the reverse;
+/// and an empty list is the one copy.
+#[test]
+fn a_chain_copies_only_when_its_target_reads_the_other_way() {
+    use crate::ImageFilter;
+    let recorded = |filters: &[ImageFilter], flip_target: bool| -> usize {
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        let source = canvas
+            .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        let flags = if flip_target {
+            ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
+        } else {
+            ImageFlags::PREMULTIPLIED
+        };
+        let target = canvas.create_image_empty(16, 16, PixelFormat::Rgba8, flags).unwrap();
+        canvas.filter_image_chain(target, filters, source).unwrap();
+        canvas
+            .commands
+            .iter()
+            .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+            .count()
+    };
+    let blur = ImageFilter::gaussian_blur(2.0);
+    let bright = ImageFilter::brightness(0.5);
+    assert_eq!(recorded(&[blur], true), 2);
+    assert_eq!(recorded(&[bright], true), 1);
+    assert_eq!(recorded(&[blur], false), 1);
+    assert_eq!(recorded(&[bright], false), 2);
+    assert_eq!(recorded(&[], true), 1);
+    assert_eq!(recorded(&[], false), 1);
 }
 
 #[test]
@@ -1219,8 +1341,9 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     let source = canvas
         .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
+    // Read through FLIP_Y, the way a one-flip chain leaves it: no copy pass.
     let target = canvas
-        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
         .unwrap();
     let blend = ImageFilter::Blend {
         mode: crate::BlendMode::Multiply,

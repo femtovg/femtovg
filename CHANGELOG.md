@@ -3,6 +3,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- A filter chain no longer spends a pass on orientation. A layer reads its
+  filtered result through the `FLIP_Y` flag its chain's parity calls for,
+  and `Canvas::filter_image_chain` adds a copy only when its target's flag
+  disagrees with that parity (a lone blur into a `FLIP_Y` target), where
+  every chain with an even number of flipping passes paid an identity pass
+  before. A color matrix beside a large blur's halving or scale back up now
+  rides that pass. A chain may run in place: nothing samples what it
+  writes, so `filter_image_chain` no longer refuses a single-pass chain
+  into its own source. A lone blur or morphology layer is one pass and two
+  transient images fewer; a `stdDeviation="8"` layer at 1080p drops from
+  three draws to two.
 - Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
   `feMorphology` and `feOffset` primitives: a dilation grows the opaque
   regions of an image by a whole-pixel radius per axis and an erosion
