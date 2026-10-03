@@ -377,17 +377,18 @@ where
             return true;
         }
 
-        // Blur reach padding: 3 sigma covers >99.7% of the kernel. The sigma
-        // is each blur's true one (the chain runs a blur above the shader's
-        // per-pass bound as passes that compose to it, so its reach is real),
-        // clamped only at the chain ceiling. Successive Gaussians compound in
-        // quadrature - n blurs of sigma reach like one of sigma * sqrt(n) - so
-        // the reach of a chain is the root of the sum of squares.
+        // Blur reach padding, per axis: 3 sigma covers >99.7% of the kernel.
+        // The sigma is each blur's true one (the chain runs a blur above the
+        // shader's per-pass bound as passes that compose to it, so its reach
+        // is real), clamped only at the chain ceiling. Successive Gaussians
+        // compound in quadrature - n blurs of sigma reach like one of
+        // sigma * sqrt(n) - so the reach of a chain is the root of the sum of
+        // squares.
         let pad = blur_reach(effects.filters.iter().filter_map(|f| match f {
-            ImageFilter::GaussianBlur { sigma } => Some(*sigma),
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some([*sigma_x, *sigma_y]),
             _ => None,
         }))
-        .map_or(0.0, |reach| reach + FRINGE_PAD);
+        .map_or([0.0; 2], |reach| reach.map(|axis| axis + FRINGE_PAD));
 
         // A rounded or rotated scissor has no device rect: the store spans
         // the canvas and the scissor applies once, at the composite, after
@@ -402,7 +403,10 @@ where
         // layer still captures with its reach truncated at the store edge,
         // instead of passing through with every effect dropped.
         let limit = self.renderer.max_texture_size();
-        let pad = bounded_pad(pad, rect.w.max(rect.h), limit, transient::LAYER_GRANULARITY);
+        let pad = [
+            bounded_pad(pad[0], rect.w, limit, transient::LAYER_GRANULARITY),
+            bounded_pad(pad[1], rect.h, limit, transient::LAYER_GRANULARITY),
+        ];
         let span =
             StoreSpan::padded(rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, pad).clamped(canvas_w, canvas_h, pad);
         let visible = span.store(transient::LAYER_GRANULARITY);
@@ -1009,7 +1013,7 @@ fn a_rounded_scissor_clips_a_layer_once_at_its_composite() {
 
     // Sigma 2 pads the store by ceil(3 * 2) + 2 = 8 px per side; no filter
     // leaves the store at the root origin. Neither may clip the inside.
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     let plain = LayerEffects::new();
     for (effects, origin) in [(&blur, (-8.0, -8.0)), (&plain, (0.0, 0.0))] {
         canvas.save();
@@ -1069,7 +1073,7 @@ fn layer_bounds_follow_the_scissor() {
     canvas.end_layer();
 
     // Declaring a blur pads the store by the kernel reach (3*sigma + 2).
-    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 4.0 }])));
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(4.0)])));
     let record = canvas.layers.last().unwrap();
     assert_eq!((record.width, record.height), (192, 128)); // 148 x 108 before rounding
     canvas.end_layer();
@@ -1121,7 +1125,7 @@ fn sibling_layers_reuse_backing_stores() {
 
     // Blurred siblings: capture, filtered target, one chain scratch and one
     // horizontal blur scratch, once.
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     for _ in 0..4 {
         assert!(canvas.begin_layer(&blur));
         canvas.end_layer();
@@ -1147,7 +1151,7 @@ fn a_budget_for_one_layer_fits_a_frame_of_them() {
     canvas.set_size(256, 256, 1.0);
     let padded = 320 * 320 * 4; // 272 x 272 padded, rounded
     canvas.set_transient_image_budget(5 * padded);
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     for i in 0..200 {
         assert!(canvas.begin_layer(&blur));
         assert!(
@@ -1170,7 +1174,7 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(128, 128, 1.0);
     let padded = 192 * 192 * 4; // 144 x 144 padded, rounded
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     canvas.set_transient_image_budget(3 * padded);
     assert!(canvas.begin_layer(&blur));
     assert!(canvas.layers.last().unwrap().image.is_some());
@@ -1211,16 +1215,16 @@ fn a_filtered_layer_reserves_its_chain_images_by_pass_plan() {
         // One color pass: the result only. No blur, so the store is the canvas.
         (&[ImageFilter::brightness(0.0)], 2, 64),
         // Blur plus its parity pass: one scratch. Sigma 1 pads 5 px, rounding to 128.
-        (&[ImageFilter::GaussianBlur { sigma: 1.0 }], 4, 128),
+        (&[ImageFilter::gaussian_blur(1.0)], 4, 128),
         // A blur above the per-pass bound is four passes plus parity, and the
         // store pads by the true reach, 50 px, to 192.
-        (&[ImageFilter::GaussianBlur { sigma: 16.0 }], 4, 192),
+        (&[ImageFilter::gaussian_blur(16.0)], 4, 192),
         // A blur never folds with a color matrix, so brightness, blur and
         // invert are three passes plus the parity identity: four, two scratches.
         (
             &[
                 ImageFilter::brightness(2.0),
-                ImageFilter::GaussianBlur { sigma: 1.0 },
+                ImageFilter::gaussian_blur(1.0),
                 ImageFilter::invert(1.0),
             ],
             4,
@@ -1507,7 +1511,7 @@ fn set_size_resize_discards_open_layers() {
 
 #[test]
 fn filter_plans_bound_total_work_and_fail_layers_atomically() {
-    let max_blur = ImageFilter::GaussianBlur { sigma: 128.0 };
+    let max_blur = ImageFilter::gaussian_blur(128.0);
     assert_eq!(filter_passes(&[max_blur]).unwrap().len(), MAX_FILTER_PASSES);
     assert!(filter_passes(&[max_blur, max_blur]).is_none());
 
@@ -1654,7 +1658,7 @@ fn explicit_image_filters_are_not_suppressed_with_layer_draws() {
 fn open_layer_filter_work_survives_a_flush_until_recorded() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
-    let effects = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]);
+    let effects = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)]);
     assert!(canvas.begin_layer(&effects));
     let reserved = canvas.layers.last().unwrap().reserved_filter_work;
     assert!(reserved > 0);
@@ -1672,7 +1676,7 @@ fn a_transparent_layer_skips_its_filter_plan() {
     canvas.set_size(64, 64, 1.0);
     let effects = LayerEffects::new()
         .with_opacity(0.0)
-        .with_filters(&[ImageFilter::GaussianBlur { sigma: 128.0 }]);
+        .with_filters(&[ImageFilter::gaussian_blur(128.0)]);
     assert!(canvas.begin_layer(&effects));
     canvas.end_layer();
     assert_eq!(canvas.filter_work, 0);
@@ -1694,7 +1698,7 @@ fn a_layer_pads_by_the_true_blur_reach() {
     canvas.save();
     canvas.scissor(100.0, 50.0, 200.0, 200.0);
     for (sigma, pad, store) in [(8.0, 26.0, 256), (16.0, 50.0, 320), (23.0, 71.0, 384)] {
-        let blur = ImageFilter::GaussianBlur { sigma };
+        let blur = ImageFilter::gaussian_blur(sigma);
         assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur])));
         let record = canvas.layers.last().unwrap();
         assert_eq!(record.origin, (100.0 - pad, 50.0 - pad), "sigma {sigma}");
@@ -1702,11 +1706,44 @@ fn a_layer_pads_by_the_true_blur_reach() {
         assert_eq!((record.width, record.height), (store, store), "sigma {sigma}");
         canvas.end_layer();
     }
-    let blur = ImageFilter::GaussianBlur { sigma: 16.0 };
+    let blur = ImageFilter::gaussian_blur(16.0);
     assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur, blur])));
     let record = canvas.layers.last().unwrap();
     assert_eq!(record.origin, (30.0, -20.0));
     assert_eq!((record.width, record.height), (384, 384));
+    canvas.end_layer();
+    canvas.restore();
+}
+
+/// An anisotropic blur pads each axis by its own reach: sigma 16 along x
+/// alone grows the store by 50 px a side in x and only the fringe in y, and
+/// a chain adds each axis's squares separately.
+#[test]
+fn a_layer_pads_each_axis_by_its_own_reach() {
+    use crate::ImageFilter;
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(800, 600, 1.0);
+    canvas.save();
+    canvas.scissor(100.0, 50.0, 200.0, 200.0);
+    let streak = ImageFilter::GaussianBlur {
+        sigma_x: 16.0,
+        sigma_y: 0.0,
+    };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[streak])));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (50.0, 48.0));
+    // 300 and 204 px, rounded up to 64.
+    assert_eq!((record.width, record.height), (320, 256));
+    canvas.end_layer();
+    let glow = ImageFilter::GaussianBlur {
+        sigma_x: 0.0,
+        sigma_y: 8.0,
+    };
+    assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[streak, glow])));
+    let record = canvas.layers.last().unwrap();
+    assert_eq!(record.origin, (50.0, 24.0));
+    assert_eq!((record.width, record.height), (320, 256));
     canvas.end_layer();
     canvas.restore();
 }

@@ -516,7 +516,7 @@ fn filter_passes_are_not_gated_by_the_active_clip() {
     let mut clip = Path::new();
     clip.rect(0.0, 0.0, 50.0, 50.0);
     canvas.clip_path(&clip, FillRule::NonZero);
-    canvas.filter_image(target, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+    canvas.filter_image(target, ImageFilter::gaussian_blur(2.0), source);
     let mut path = Path::new();
     path.rect(10.0, 10.0, 30.0, 30.0);
     canvas.fill_path(&path, &Paint::color(Color::rgb(255, 0, 0)));

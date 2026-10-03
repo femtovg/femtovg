@@ -179,7 +179,7 @@ fn declared_blur_applies_and_pads() {
         return;
     };
     let blurred = render(&device, &queue, |canvas| {
-        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 3.0 }])));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(3.0)])));
         red_rect(canvas, 16.0, 16.0, 32.0, 32.0);
         canvas.end_layer();
     });
@@ -1007,7 +1007,7 @@ fn reused_layer_backings_start_clear_and_fit_a_small_budget() {
             assert!(canvas.begin_layer(
                 &LayerEffects::new()
                     .with_opacity(0.5)
-                    .with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }]),
+                    .with_filters(&[ImageFilter::gaussian_blur(2.0)]),
             ));
             let mut p = Path::new();
             p.rect(40.0, 0.0, 24.0, H as f32);

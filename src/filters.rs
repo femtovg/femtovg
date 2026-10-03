@@ -19,7 +19,7 @@ impl FilterScratchImages {
 }
 
 /// The largest standard deviation a blur chain, a layer filter or a shadow
-/// renders; above it the sigma is clamped. A cost guard: the split below
+/// renders on an axis; above it the sigma is clamped. A cost guard: the split below
 /// runs `(sigma / 8)^2` passes of two full-size draws each, so this is 256
 /// passes - sigma 128 device pixels is a CSS `blur(40px)` at a 3x device
 /// pixel ratio, and reaches 386 px - and an absurd or non-finite sigma
@@ -39,16 +39,17 @@ pub(crate) fn chain_blur_sigma(sigma: f32) -> Option<f32> {
     (sigma > 0.0).then(|| sigma.min(MAX_CHAIN_BLUR_SIGMA))
 }
 
-/// How a Gaussian blur of `sigma` runs within the shader's per-pass bound
-/// ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per pass)`. Gaussians
-/// compose in quadrature - k passes of sigma s blur like one pass of
-/// s * sqrt(k) - so a sigma above the bound B is exactly k = ceil((sigma / B)^2)
-/// passes of sigma / sqrt(k), each at most B: sigma 16 is four passes of 8,
-/// sigma 23 nine of 23/3. A sigma within the bound, or a degenerate one, is
-/// one pass with the value untouched, so small blurs render exactly as they
-/// did before the split existed. The cost is quadratic in sigma (each pass is
-/// two full-size draws), which is what the ceiling above bounds.
-pub(crate) fn blur_passes(sigma: f32) -> (usize, f32) {
+/// How a Gaussian blur of `sigma` runs on one axis within the shader's
+/// per-pass bound ([`renderer::MAX_BLUR_SIGMA`]): `(passes, sigma per
+/// pass)`. Gaussians compose in quadrature - k passes of sigma s blur like
+/// one pass of s * sqrt(k) - so a sigma above the bound B is exactly
+/// k = ceil((sigma / B)^2) passes of sigma / sqrt(k), each at most B: sigma
+/// 16 is four passes of 8, sigma 23 nine of 23/3. A sigma within the bound,
+/// or a degenerate one, is one pass with the value untouched, so small blurs
+/// render exactly as they did before the split existed. The cost is
+/// quadratic in sigma (each pass is two full-size draws), which is what the
+/// ceiling above bounds.
+pub(crate) fn axis_passes(sigma: f32) -> (usize, f32) {
     let bound = renderer::MAX_BLUR_SIGMA;
     match chain_blur_sigma(sigma) {
         Some(sigma) if sigma > bound => {
@@ -58,6 +59,32 @@ pub(crate) fn blur_passes(sigma: f32) -> (usize, f32) {
         }
         _ => (1, sigma),
     }
+}
+
+/// The passes a blur of `sigma_x` by `sigma_y` runs as: each axis split by
+/// [`axis_passes`] on its own, a pass carrying one bounded sigma per axis;
+/// the axis that is done first copies through (sigma 0) in the remaining
+/// passes. Degenerate on both axes is the one copy pass it always was.
+pub(crate) fn blur_passes(sigma_x: f32, sigma_y: f32) -> impl ExactSizeIterator<Item = ImageFilter> + Clone {
+    let (count_x, pass_x) = axis_passes(sigma_x);
+    let (count_y, pass_y) = axis_passes(sigma_y);
+    (0..count_x.max(count_y)).map(move |i| ImageFilter::GaussianBlur {
+        sigma_x: if i < count_x { pass_x } else { 0.0 },
+        sigma_y: if i < count_y { pass_y } else { 0.0 },
+    })
+}
+
+/// The taps one blur draw takes per pixel along an axis of `sigma`: the
+/// shader's kernel reaches 3 sigma either side of the center tap, and a
+/// degenerate axis is the single center tap of a copy.
+fn axis_taps(sigma: f32) -> u64 {
+    let sigma = if sigma > 0.0 {
+        sigma.min(renderer::MAX_BLUR_SIGMA)
+    } else {
+        1e-3
+    };
+    let radius = (3.0 * sigma).ceil() as u64;
+    1 + 2 * radius.saturating_sub(1)
 }
 
 pub(crate) const MAX_FILTER_PASSES: usize = 257;
@@ -77,15 +104,7 @@ pub(crate) fn blend_work(width: usize, height: usize) -> u64 {
 pub(crate) fn filter_work(filters: &[ImageFilter], width: usize, height: usize) -> u64 {
     let samples = filters.iter().fold(0u64, |total, filter| {
         let per_pixel = match filter {
-            ImageFilter::GaussianBlur { sigma } => {
-                let sigma = if *sigma > 0.0 {
-                    sigma.min(renderer::MAX_BLUR_SIGMA)
-                } else {
-                    1e-3
-                };
-                let radius = (3.0 * sigma).ceil() as u64;
-                2 * (1 + 2 * radius.saturating_sub(1))
-            }
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => axis_taps(*sigma_x) + axis_taps(*sigma_y),
             ImageFilter::Turbulence { num_octaves, .. } => (8 * u64::from((*num_octaves).min(10))).max(1),
             ImageFilter::Blend { .. } => BLEND_SAMPLES,
             _ => 1,
@@ -125,7 +144,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<ImageFilter>>
     // never reallocates.
     let count = folded.iter().try_fold(0usize, |count, filter| {
         let passes = match filter {
-            ImageFilter::GaussianBlur { sigma } => blur_passes(*sigma).0,
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => blur_passes(*sigma_x, *sigma_y).len(),
             _ => 1,
         };
         count.checked_add(passes).filter(|count| *count <= MAX_FILTER_PASSES)
@@ -133,10 +152,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<ImageFilter>>
     let mut passes: Vec<ImageFilter> = Vec::with_capacity(count + 1);
     for filter in folded {
         match filter {
-            ImageFilter::GaussianBlur { sigma } => {
-                let (count, sigma) = blur_passes(sigma);
-                passes.extend(std::iter::repeat_n(ImageFilter::GaussianBlur { sigma }, count));
-            }
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => passes.extend(blur_passes(sigma_x, sigma_y)),
             other => passes.push(other),
         }
     }
@@ -166,9 +182,9 @@ where
     /// change the current rendering target.
     ///
     /// This is one shader pass, and a Gaussian blur pass renders a standard
-    /// deviation of at most 8 device pixels (the shader's kernel is bounded
-    /// at 24 taps per side, a GLES 2.0 loop constraint): a larger `sigma` is
-    /// clamped to 8 here. For a blur above that use
+    /// deviation of at most 8 device pixels per axis (the shader's kernel is
+    /// bounded at 24 taps per side, a GLES 2.0 loop constraint): a larger
+    /// sigma is clamped to 8 here. For a blur above that use
     /// [`filter_image_chain`](Self::filter_image_chain), which splits it
     /// into passes that compose to the requested sigma.
     ///
@@ -337,12 +353,13 @@ where
     /// one GPU pass - as long as each matrix but the last stays within [0, 1];
     /// one that can overflow (`brightness(>1)`, `contrast`, `sepia`) keeps its
     /// own pass so its clamp still happens, matching how browsers clamp per
-    /// filter function. A Gaussian blur whose standard deviation is above the
-    /// 8 device pixels one shader pass covers runs as `ceil((sigma / 8)^2)`
-    /// passes of `sigma / sqrt(passes)`: Gaussians compose in quadrature, so
-    /// four passes of sigma 8 are exactly one blur of sigma 16, and nine of
-    /// 23/3 one of 23 - the full reach, where the single-pass
-    /// [`filter_image`](Self::filter_image) would clamp to 8. The pass count
+    /// filter function. A Gaussian blur whose standard deviation on an axis
+    /// is above the 8 device pixels one shader pass covers runs that axis as
+    /// `ceil((sigma / 8)^2)` passes of `sigma / sqrt(passes)`: Gaussians
+    /// compose in quadrature, so four passes of sigma 8 are exactly one blur
+    /// of sigma 16, and nine of 23/3 one of 23 - the full reach, where the
+    /// single-pass [`filter_image`](Self::filter_image) would clamp to 8; the
+    /// other axis runs its own split alongside. The pass count
     /// grows with the square of the sigma, so sigma is capped at 128 and one
     /// operation is capped at 257 total planned passes. Passes that do not fold ping-pong between at most two
     /// transient scratch images sized like the source; a blur plan reserves
@@ -625,7 +642,7 @@ fn chained_blurs_pad_in_quadrature() {
     canvas.set_size(800, 600, 1.0);
     canvas.save();
     canvas.scissor(100.0, 50.0, 200.0, 200.0);
-    let blur = ImageFilter::GaussianBlur { sigma: 8.0 };
+    let blur = ImageFilter::gaussian_blur(8.0);
     assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[blur, blur, blur])));
     let record = canvas.layers.last().unwrap();
     // 200 + 2 * (ceil(3 * sqrt(3 * 64)) + 2) = 288, rounded to 320.
@@ -647,19 +664,57 @@ fn chained_blurs_pad_in_quadrature() {
 fn a_blur_within_the_shader_bound_stays_one_pass() {
     use crate::ImageFilter;
     for sigma in [0.5, 3.0, 8.0] {
-        let passes = filter_passes(&[ImageFilter::GaussianBlur { sigma }]).unwrap();
+        let passes = filter_passes(&[ImageFilter::gaussian_blur(sigma)]).unwrap();
         assert_eq!(passes.len(), 2, "sigma {sigma}: one blur pass and the parity identity");
         assert!(
-            matches!(passes[0], ImageFilter::GaussianBlur { sigma: s } if s == sigma),
+            matches!(passes[0], ImageFilter::GaussianBlur { sigma_x, sigma_y } if sigma_x == sigma && sigma_y == sigma),
             "{:?}",
             passes[0]
         );
         assert!(matches!(passes[1], ImageFilter::ColorMatrix { matrix } if matrix == ImageFilter::IDENTITY_MATRIX));
     }
-    assert_eq!(blur_passes(8.0), (1, 8.0));
-    assert_eq!(blur_passes(0.0), (1, 0.0));
-    assert_eq!(blur_passes(-1.0).0, 1);
-    assert_eq!(blur_passes(f32::NAN).0, 1);
+    assert_eq!(axis_passes(8.0), (1, 8.0));
+    assert_eq!(axis_passes(0.0), (1, 0.0));
+    assert_eq!(axis_passes(-1.0).0, 1);
+    assert_eq!(axis_passes(f32::NAN).0, 1);
+    assert_eq!(blur_passes(0.0, 0.0).len(), 1);
+    assert_eq!(blur_passes(-1.0, f32::NAN).len(), 1);
+}
+
+/// Each axis splits on its own: the longer axis sets the pass count and the
+/// other copies through once its passes are done, so sigma 16 by 0 is four
+/// passes blurring x by 8 and y not at all, 16 by 4 blurs y by 4 in the first
+/// of them, and 0 by 23 nine passes of y 23/3 - the squares still summing to
+/// the requested sigma on each axis.
+#[test]
+fn a_blur_splits_each_axis_on_its_own() {
+    let sigmas = |sigma_x: f32, sigma_y: f32| -> Vec<(f32, f32)> {
+        blur_passes(sigma_x, sigma_y)
+            .map(|f| match f {
+                ImageFilter::GaussianBlur { sigma_x, sigma_y } => (sigma_x, sigma_y),
+                _ => unreachable!(),
+            })
+            .collect()
+    };
+    assert_eq!(sigmas(16.0, 0.0), vec![(8.0, 0.0); 4]);
+    assert_eq!(sigmas(0.0, 16.0), vec![(0.0, 8.0); 4]);
+    assert_eq!(sigmas(16.0, 4.0), vec![(8.0, 4.0), (8.0, 0.0), (8.0, 0.0), (8.0, 0.0)]);
+    assert_eq!(sigmas(3.0, 5.0), vec![(3.0, 5.0)]);
+    let nine = sigmas(0.0, 23.0);
+    assert_eq!(nine.len(), 9);
+    assert!(nine.iter().all(|(x, y)| *x == 0.0 && (y - 23.0 / 3.0).abs() < 1e-5));
+    let composed: f32 = nine.iter().map(|(_, y)| y * y).sum::<f32>().sqrt();
+    assert!((composed - 23.0).abs() < 1e-4, "{composed}");
+    // The plan counts the passes of the longer axis, plus the parity identity.
+    assert_eq!(
+        filter_passes(&[ImageFilter::GaussianBlur {
+            sigma_x: 16.0,
+            sigma_y: 0.0
+        }])
+        .unwrap()
+        .len(),
+        5
+    );
 }
 
 /// Gaussians compose in quadrature, so a blur above the bound B = 8 is
@@ -675,13 +730,16 @@ fn a_blur_above_the_bound_splits_into_quadrature_passes() {
             .unwrap()
             .iter()
             .filter_map(|f| match f {
-                ImageFilter::GaussianBlur { sigma } => Some(*sigma),
+                ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
+                    assert_eq!(sigma_x, sigma_y);
+                    Some(*sigma_x)
+                }
                 _ => None,
             })
             .collect()
     };
-    assert_eq!(blur_sigmas(&[ImageFilter::GaussianBlur { sigma: 16.0 }]), vec![8.0; 4]);
-    let nine = blur_sigmas(&[ImageFilter::GaussianBlur { sigma: 23.0 }]);
+    assert_eq!(blur_sigmas(&[ImageFilter::gaussian_blur(16.0)]), vec![8.0; 4]);
+    let nine = blur_sigmas(&[ImageFilter::gaussian_blur(23.0)]);
     assert_eq!(nine.len(), 9);
     for sigma in &nine {
         assert!((sigma - 23.0 / 3.0).abs() < 1e-5, "{sigma}");
@@ -690,14 +748,14 @@ fn a_blur_above_the_bound_splits_into_quadrature_passes() {
     let composed: f32 = nine.iter().map(|s| s * s).sum::<f32>().sqrt();
     assert!((composed - 23.0).abs() < 1e-4, "{composed}");
     // Just past the bound: two passes, neither above it.
-    let (passes, sigma) = blur_passes(8.5);
+    let (passes, sigma) = axis_passes(8.5);
     assert_eq!(passes, 2);
     assert!((sigma - 8.5 / 2f32.sqrt()).abs() < 1e-5);
     // The ceiling bounds the plan: an infinite sigma is 128's 256 passes,
     // not 2^56 of them.
-    assert_eq!(blur_passes(f32::INFINITY), blur_passes(128.0));
-    assert_eq!(blur_passes(128.0), (256, 8.0));
-    assert_eq!(blur_passes(1e9), blur_passes(128.0));
+    assert_eq!(axis_passes(f32::INFINITY), axis_passes(128.0));
+    assert_eq!(axis_passes(128.0), (256, 8.0));
+    assert_eq!(axis_passes(1e9), axis_passes(128.0));
 }
 
 /// The split changes the pass count, not the chain's shape: a blur pass
@@ -714,8 +772,8 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
             Some(ImageFilter::ColorMatrix { matrix }) if *matrix == ImageFilter::IDENTITY_MATRIX
         )
     };
-    let small = ImageFilter::GaussianBlur { sigma: 8.0 };
-    let big = ImageFilter::GaussianBlur { sigma: 16.0 };
+    let small = ImageFilter::gaussian_blur(8.0);
+    let big = ImageFilter::gaussian_blur(16.0);
     let bright = ImageFilter::brightness(1.2);
     assert!(ends_with_identity(&[small]) && ends_with_identity(&[big]));
     assert!(!ends_with_identity(&[small, bright]) && !ends_with_identity(&[big, bright]));
@@ -747,8 +805,20 @@ fn a_split_blur_keeps_the_chain_parity_and_scratch_count() {
 
 #[test]
 fn filter_work_matches_shader_sampling_and_resets_at_flush() {
-    let blur = ImageFilter::GaussianBlur { sigma: 8.0 };
+    let blur = ImageFilter::gaussian_blur(8.0);
     assert_eq!(filter_work(&[blur], 10, 10), 9_400);
+    // One axis blurred, the other copied: 47 taps plus the copy's one.
+    assert_eq!(
+        filter_work(
+            &[ImageFilter::GaussianBlur {
+                sigma_x: 8.0,
+                sigma_y: 0.0
+            }],
+            10,
+            10
+        ),
+        4_800
+    );
     let turbulence = |num_octaves| ImageFilter::Turbulence {
         base_frequency: [0.1, 0.1],
         num_octaves,

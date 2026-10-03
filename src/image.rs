@@ -391,18 +391,23 @@ impl BlendMode {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub enum ImageFilter {
-    /// Applies a Gaussian blur filter with the specified standard deviation.
+    /// Applies a Gaussian blur with a standard deviation per axis: the SVG
+    /// `feGaussianBlur` with its two-valued `stdDeviation`, so a motion
+    /// streak or a vertical glow blurs along one axis only.
+    /// [`gaussian_blur`](Self::gaussian_blur) is the isotropic blur of CSS
+    /// and Canvas `blur()`.
     ///
     /// One shader pass covers a standard deviation of at most 8 device
-    /// pixels: `Canvas::filter_image` clamps a larger one to 8, while
-    /// `Canvas::filter_image_chain`, a layer filter and a shadow blur split
-    /// it into passes that compose to the requested value (Gaussians add in
-    /// quadrature), up to a sigma of 128.
+    /// pixels on an axis: `Canvas::filter_image` clamps a larger one to 8,
+    /// while `Canvas::filter_image_chain`, a layer filter and a shadow blur
+    /// split each axis into passes that compose to the requested value
+    /// (Gaussians add in quadrature), up to a sigma of 128.
     GaussianBlur {
-        /// The standard deviation of the Gaussian blur filter, in device
-        /// pixels. Zero, negative or non-finite values leave the image
-        /// unchanged.
-        sigma: f32,
+        /// The standard deviation along x, in device pixels. Zero, negative
+        /// or non-finite values leave that axis unblurred.
+        sigma_x: f32,
+        /// The standard deviation along y, in device pixels, likewise.
+        sigma_y: f32,
     },
     /// Applies a 4x5 color matrix, the operation behind SVG `feColorMatrix` and
     /// the CSS/Canvas `filter` color functions (`grayscale`, `sepia`, ...).
@@ -515,6 +520,15 @@ pub enum TurbulenceKind {
 }
 
 impl ImageFilter {
+    /// A Gaussian blur of `sigma` on both axes: CSS and Canvas `blur()`,
+    /// SVG `feGaussianBlur` with a single `stdDeviation` value.
+    pub fn gaussian_blur(sigma: f32) -> Self {
+        Self::GaussianBlur {
+            sigma_x: sigma,
+            sigma_y: sigma,
+        }
+    }
+
     /// The identity color matrix (leaves an image unchanged).
     pub const IDENTITY_MATRIX: [f32; 20] = [
         1.0, 0.0, 0.0, 0.0, 0.0, //
@@ -1058,7 +1072,7 @@ mod filter_fold_tests {
     /// Blurs cannot fold - the chain executor must run them as passes.
     #[test]
     fn blur_does_not_fold() {
-        let blur = ImageFilter::GaussianBlur { sigma: 2.0 };
+        let blur = ImageFilter::gaussian_blur(2.0);
         assert!(blur.fold_with(ImageFilter::sepia(1.0)).is_none());
         assert!(ImageFilter::sepia(1.0).fold_with(blur).is_none());
     }
