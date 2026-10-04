@@ -2105,7 +2105,7 @@ where
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let text_context = self.text_context.clone();
-        let mut text_context = text_context.borrow_mut();
+        let text_context = text_context.borrow();
 
         // How this glyph run is rasterized for the current canvas transform.
         #[derive(Clone, Copy)]
@@ -2168,7 +2168,7 @@ where
         let mut stroke = paint.stroke.clone();
         stroke.line_width *= effective_scale;
 
-        let Some(font) = text_context.font_mut(font_id) else {
+        let Some(font) = text_context.font(font_id) else {
             return Err(ErrorKind::NoFontFound);
         };
 
@@ -4530,6 +4530,101 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         2,
         "expected underline + strikethrough rects in one fill, got {fills:?}"
     );
+}
+
+/// Builds a font whose only glyph is a PNG bitmap in an `sbix` strike.
+#[cfg(all(test, feature = "textlayout"))]
+fn png_glyph_font() -> Vec<u8> {
+    let mut png = std::io::Cursor::new(Vec::new());
+    ::image::RgbaImage::from_pixel(24, 24, ::image::Rgba([255, 0, 64, 255]))
+        .write_to(&mut png, ::image::ImageFormat::Png)
+        .unwrap();
+    let png = png.into_inner();
+
+    let mut head = [0; 54];
+    head[1] = 1; // majorVersion
+    head[12..16].copy_from_slice(&[0x5F, 0x0F, 0x3C, 0xF5]); // magicNumber
+    head[18] = 4; // unitsPerEm = 1024
+    let mut hhea = [0; 36];
+    hhea[1] = 1; // majorVersion
+    let maxp = [0, 0, 0x50, 0, 0, 1]; // version 0.5, numGlyphs = 1
+
+    // Header: version, flags, one strike at offset 12. Strike: ppem, ppi, the
+    // data range of the glyph, then its origin offset, graphic type and data.
+    let mut sbix = vec![0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 12, 0, 24, 0, 72, 0, 0, 0, 12];
+    sbix.extend_from_slice(&(12 + 8 + png.len() as u32).to_be_bytes());
+    sbix.extend_from_slice(&[0; 4]);
+    sbix.extend_from_slice(b"png ");
+    sbix.extend_from_slice(&png);
+
+    // Table records are sorted by tag; parsers do not verify the checksums.
+    let tables: [(&[u8; 4], &[u8]); 4] = [(b"head", &head), (b"hhea", &hhea), (b"maxp", &maxp), (b"sbix", &sbix)];
+    let mut font = vec![0, 1, 0, 0, 0, 4, 0, 64, 0, 2, 0, 0]; // sfntVersion, numTables, search hints
+    let mut body = Vec::new();
+    for (tag, table) in tables {
+        font.extend_from_slice(tag);
+        font.extend_from_slice(&[0; 4]);
+        font.extend_from_slice(&((12 + 16 * 4 + body.len()) as u32).to_be_bytes());
+        font.extend_from_slice(&(table.len() as u32).to_be_bytes());
+        body.extend_from_slice(table);
+        body.resize(body.len().next_multiple_of(4), 0);
+    }
+    font.extend_from_slice(&body);
+    font
+}
+
+/// Glyphs are drawn directly instead of through the shared atlas when the
+/// transform is more than a uniform scale and translation, when they are too
+/// large to cache, or when a gradient or image paint is scaled. PNG glyphs
+/// have no outline to draw, so they go through an atlas that lives from the
+/// first such draw of a frame until the flush.
+#[cfg(feature = "textlayout")]
+#[test]
+fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
+    use crate::paint::GlyphTexture;
+
+    let font_data = png_glyph_font();
+    let solid = Paint::color(Color::black());
+    let gradient = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    let cases = [
+        ("rotated", Transform2D::rotation(0.2), &solid, 24.0),
+        ("oversized", Transform2D::identity(), &solid, 96.0),
+        ("scaled gradient", Transform2D::scaling(2.0, 2.0), &gradient, 24.0),
+    ];
+    for (case, transform, paint, font_size) in cases {
+        let paint = paint.clone().with_font_size(font_size);
+        let renderer = RecordingRenderer::default();
+        let recorded_commands = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas.add_font_mem(&font_data).unwrap();
+        canvas.set_transform(&transform);
+        let glyph = PositionedGlyph {
+            x: 50.0,
+            y: 100.0,
+            glyph_id: 0,
+        };
+
+        for _frame in 0..2 {
+            for _draw in 0..2 {
+                canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+                assert!(canvas.ephemeral_glyph_atlas.is_some(), "{case}");
+                canvas.stroke_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+            }
+            canvas.flush_to_output(());
+            assert!(canvas.ephemeral_glyph_atlas.is_none(), "{case}");
+
+            // Every fill and stroke draws the bitmap, which takes
+            // `image-loading` to decode.
+            if cfg!(feature = "image-loading") {
+                let commands = recorded_commands.borrow();
+                let color_draws = commands
+                    .iter()
+                    .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)));
+                assert_eq!(color_draws.count(), 4, "{case}");
+            }
+        }
+    }
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /
