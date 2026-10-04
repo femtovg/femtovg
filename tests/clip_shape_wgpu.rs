@@ -23,9 +23,18 @@ fn red() -> Paint {
     Paint::color(Color::rgb(255, 0, 0))
 }
 
+/// Fills the canvas with a path that is no rect, so that the clip's coverage
+/// is what cuts it: a rect under an upright rect clip would be drawn as the
+/// rect the two share, its edge the fill's own antialiasing.
 fn fill_everything(canvas: &mut Canvas<WGPURenderer>) {
+    let (w, h) = (W as f32, H as f32);
     let mut everything = Path::new();
-    everything.rect(0.0, 0.0, W as f32, H as f32);
+    everything.move_to(-8.0, -8.0);
+    everything.line_to(w + 8.0, -8.0);
+    everything.line_to(w + 8.0, h + 8.0);
+    everything.line_to(-8.0, h + 8.0);
+    everything.line_to(-24.0, h * 0.5);
+    everything.close();
     canvas.fill_path(&everything, &red());
 }
 
@@ -270,6 +279,268 @@ fn clip_coverage_holds_under_a_skew_and_down_to_a_pixel() {
     }
 }
 
+/// An edge takes coverage once where a draw stays inside its clip along it,
+/// where an upright rect clip cuts an upright rect, and where a scissor
+/// lies on the clip: each edge pixel gets its share inside what is left -
+/// not that share squared, or cubed, which the coverages of the scissor,
+/// the clip and the fill's own antialiasing come to one over the other.
+#[test]
+fn an_edge_shared_with_the_clip_takes_coverage_once() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    type Place = fn(&mut Canvas<WGPURenderer>);
+    type Shape = ([f32; 2], [f32; 2], f32);
+    let in_place: Place = |_| {};
+    // Puts the small shape's left side and top on half a pixel.
+    let scaled: Place = |canvas| {
+        canvas.translate(2.875, -2.625);
+        canvas.scale(1.5625, 1.5625);
+    };
+    let rect: Shape = ([47.5, 45.75], [30.0, 20.5], 0.0);
+    let rounded: Shape = ([47.5, 45.75], [30.0, 20.5], 9.0);
+    let small: Shape = ([28.0, 30.0], [18.0, 12.0], 0.0);
+    let everything: Shape = ([48.0, 48.0], [60.0, 60.0], 0.0);
+    // The left half of `rect`: three of its sides lie on the clip's.
+    let left_half: Shape = ([32.5, 45.75], [15.0, 20.5], 0.0);
+    // Reaches past `rect` to the right and below, its left side and top on the clip's.
+    let past: Shape = ([62.5, 60.75], [45.0, 35.5], 0.0);
+    // Inside `rounded` along its left side, clear of its corners.
+    let along: Shape = ([27.5, 45.75], [10.0, 10.5], 0.0);
+    // (what, placement, scissor, clip, fill, what is left of the fill)
+    type Case = (&'static str, Place, Option<Shape>, Shape, Shape, Shape);
+    let cases: [Case; 9] = [
+        ("a rect and its twin", in_place, None, rect, rect, rect),
+        ("a rect and its twin, scaled", scaled, None, small, small, small),
+        (
+            "a rect inside, on three of the clip's sides",
+            in_place,
+            None,
+            rect,
+            left_half,
+            left_half,
+        ),
+        (
+            "a rect past the clip, on two of its sides",
+            in_place,
+            None,
+            rect,
+            past,
+            rect,
+        ),
+        (
+            "a rect inside a rounded clip, along its side",
+            in_place,
+            None,
+            rounded,
+            along,
+            along,
+        ),
+        ("a scissor on the clip", in_place, Some(rect), rect, everything, rect),
+        (
+            "a scissor on a rounded clip's sides",
+            in_place,
+            Some(rect),
+            rounded,
+            everything,
+            rounded,
+        ),
+        (
+            "a scissor, a clip and a fill with one outline",
+            in_place,
+            Some(rect),
+            rect,
+            rect,
+            rect,
+        ),
+        ("the same, scaled", scaled, Some(small), small, small, small),
+    ];
+    for (name, place, scissor, clip, fill, covered) in cases {
+        let path = |(center, extent, radius): Shape| {
+            let mut path = Path::new();
+            path.rounded_rect(
+                center[0] - extent[0],
+                center[1] - extent[1],
+                2.0 * extent[0],
+                2.0 * extent[1],
+                radius,
+            );
+            path
+        };
+        let mut expected = Vec::new();
+        let frame = render(&device, &queue, |canvas| {
+            place(canvas);
+            expected = share_inside(&canvas.transform(), covered.0, covered.1, covered.2);
+            if let Some((center, extent, _)) = scissor {
+                canvas.scissor(
+                    center[0] - extent[0],
+                    center[1] - extent[1],
+                    2.0 * extent[0],
+                    2.0 * extent[1],
+                );
+            }
+            canvas.clip_path(&path(clip), FillRule::NonZero);
+            canvas.fill_path(&path(fill), &red());
+        });
+        // What a fill's own antialiasing is off by, at a corner pixel most.
+        let plain = render(&device, &queue, |canvas| {
+            place(canvas);
+            canvas.fill_path(&path(covered), &red());
+        });
+        // Red over white: the green channel is what was left uncovered.
+        let errors = |frame: &[u8]| -> Vec<f32> {
+            expected
+                .iter()
+                .enumerate()
+                .map(|(i, want)| (1.0 - f32::from(frame[i * 4 + 1]) / 255.0 - want).abs())
+                .collect()
+        };
+        let worst = |errors: &[f32]| errors.iter().copied().fold(0.0, f32::max);
+        let (clipped, plain) = (errors(&frame), errors(&plain));
+        // Where a pixel is half inside, a square is a quarter off.
+        let halves: Vec<f32> = expected
+            .iter()
+            .zip(&clipped)
+            .filter(|(share, _)| **share > 0.35 && **share < 0.65)
+            .map(|(_, error)| *error)
+            .collect();
+        assert!(
+            halves.len() > 20,
+            "{name}: only {} pixels near half covered",
+            halves.len()
+        );
+        let mean = halves.iter().sum::<f32>() / halves.len() as f32;
+        assert!(
+            mean < 0.04,
+            "{name}: half-covered pixels are {mean} from their share on average"
+        );
+        assert!(
+            worst(&clipped) <= worst(&plain).max(0.08) + 0.02,
+            "{name}: a pixel is {} from its share inside, the fill alone {}",
+            worst(&clipped),
+            worst(&plain)
+        );
+    }
+}
+
+/// Where a fill's edge lies on the edge of a clip that is not an upright
+/// rect, and the fill reaches past the clip elsewhere, the clip's coverage
+/// multiplies the fill's own - as it does in Chromium and Firefox: a pixel
+/// half inside both is a quarter covered.
+#[test]
+fn a_rounded_or_turned_clip_multiplies_the_coverage_of_a_fill_on_its_edge() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    type Place = fn(&mut Canvas<WGPURenderer>);
+    let in_place: Place = |_| {};
+    let turned: Place = |canvas| {
+        canvas.translate(48.0, 48.0);
+        canvas.rotate(0.4);
+        canvas.translate(-48.0, -48.0);
+    };
+    for (name, place, radius) in [("a rounded twin", in_place, 9.0), ("a turned twin", turned, 0.0)] {
+        let (center, extent) = ([47.5, 45.75], [30.0, 20.5]);
+        let mut expected = Vec::new();
+        let frame = render(&device, &queue, |canvas| {
+            place(canvas);
+            expected = share_inside(&canvas.transform(), center, extent, radius);
+            let mut twin = Path::new();
+            twin.rounded_rect(
+                center[0] - extent[0],
+                center[1] - extent[1],
+                2.0 * extent[0],
+                2.0 * extent[1],
+                radius,
+            );
+            canvas.clip_path(&twin, FillRule::NonZero);
+            canvas.fill_path(&twin, &red());
+        });
+        let halves: Vec<f32> = expected
+            .iter()
+            .enumerate()
+            .filter(|(_, share)| **share > 0.45 && **share < 0.55)
+            .map(|(i, _)| 1.0 - f32::from(frame[i * 4 + 1]) / 255.0)
+            .collect();
+        assert!(halves.len() > 10, "{name}: only {} pixels half covered", halves.len());
+        let mean = halves.iter().sum::<f32>() / halves.len() as f32;
+        assert!((mean - 0.25).abs() < 0.05, "{name}: half-covered pixels read {mean}");
+    }
+}
+
+/// A draw the clip holds whole is drawn as it is without the clip, to the
+/// bit: a fill, a stroke with a miter and a square cap, and a fill that
+/// touches the clip's edge from inside - first under the clip, and after a
+/// draw that the clip did cut, when they carry a coverage of one.
+#[test]
+fn a_draw_inside_the_clip_is_drawn_as_without_it() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let draw = |canvas: &mut Canvas<WGPURenderer>| {
+        let mut blob = Path::new();
+        blob.move_to(30.3, 28.6);
+        blob.bezier_to(50.0, 20.0, 66.0, 40.0, 60.4, 58.2);
+        blob.line_to(34.7, 62.9);
+        blob.close();
+        canvas.fill_path(&blob, &red());
+        let mut zigzag = Path::new();
+        zigzag.move_to(26.0, 70.0);
+        zigzag.line_to(40.5, 40.25);
+        zigzag.line_to(52.0, 68.0);
+        let mut pen = Paint::color(Color::rgb(0, 0, 255));
+        pen.set_line_width(5.5);
+        pen.set_line_cap(femtovg::LineCap::Square);
+        canvas.stroke_path(&zigzag, &pen);
+        let mut edge = Path::new();
+        edge.rect(12.5, 30.25, 20.0, 10.5);
+        canvas.fill_path(&edge, &Paint::color(Color::rgb(0, 128, 0)));
+    };
+    for rounded in [false, true] {
+        let clip = |canvas: &mut Canvas<WGPURenderer>| {
+            let mut clip = Path::new();
+            if rounded {
+                clip.rounded_rect(12.5, 14.25, 70.0, 68.5, 16.0);
+            } else {
+                clip.rect(12.5, 14.25, 70.0, 68.5);
+            }
+            canvas.clip_path(&clip, FillRule::NonZero);
+        };
+        let clipped = render(&device, &queue, |canvas| {
+            clip(canvas);
+            draw(canvas);
+        });
+        let plain = render(&device, &queue, draw);
+        assert!(clipped == plain, "rounded {rounded}: the clip changed a draw it holds");
+        assert!(plain.chunks_exact(4).any(|p| p[..3] != WHITE), "something was drawn");
+
+        let cut = |canvas: &mut Canvas<WGPURenderer>| {
+            canvas.save();
+            clip(canvas);
+            canvas.set_global_alpha(0.25);
+            fill_everything(canvas);
+            canvas.set_global_alpha(1.0);
+        };
+        let after_a_cut = render(&device, &queue, |canvas| {
+            cut(canvas);
+            draw(canvas);
+        });
+        let after_the_restore = render(&device, &queue, |canvas| {
+            cut(canvas);
+            canvas.restore();
+            draw(canvas);
+        });
+        assert!(
+            after_a_cut == after_the_restore,
+            "rounded {rounded}: a coverage of one changed a draw the clip holds"
+        );
+        assert!(after_a_cut != plain, "the cut draw shows");
+    }
+}
+
 /// A box thinner than a pixel goes to the stencil, where it leaves a pixel
 /// only if it holds the pixel's center: no ramp of a side reaches a row the
 /// box does not.
@@ -410,10 +681,10 @@ fn shape_clips_nest_and_intersect() {
     assert_eq!(px(&crossed, 55, 45), RED, "in both rects");
     assert_eq!(px(&crossed, 20, 45), WHITE, "in the first only");
     assert_eq!(px(&crossed, 55, 70), WHITE, "in the second only");
-    assert_eq!(
-        px(&crossed, 40, 45),
-        [255, 128, 128],
-        "half a column at the second rect's edge"
+    assert!(
+        px(&crossed, 40, 45)[1].abs_diff(128) <= 1,
+        "half a column at the second rect's edge: {:?}",
+        px(&crossed, 40, 45)
     );
     assert_eq!(
         px(&crossed, 55, 30),

@@ -230,7 +230,7 @@ impl Default for CompositeOperationState {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
@@ -420,6 +420,11 @@ pub struct Canvas<T: Renderer> {
     // draws into that target.
     clip_stack: Vec<ClipEntry>,
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
+    // The scissor and clip shape the last draw met together, as one box.
+    last_scissored_shape: Option<ScissoredShape>,
+    // Whether the last draw carried a clip shape: the shader variant the
+    // renderer has bound.
+    shape_carried: bool,
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -489,6 +494,8 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            last_scissored_shape: None,
+            shape_carried: false,
         };
 
         canvas.save();
@@ -530,6 +537,8 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            last_scissored_shape: None,
+            shape_carried: false,
         };
 
         canvas.save();
@@ -565,6 +574,8 @@ where
             if let Some(plane) = self.clip_planes.get_mut(&RenderTarget::Screen) {
                 plane.dirty = true;
             }
+            // Worked out for the fringe width before.
+            self.last_scissored_shape = None;
         }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
             // Same size at a frame boundary: the open layer keeps capturing
@@ -1254,6 +1265,7 @@ where
         }
 
         // The path cache saves a flattened and transformed version of the path.
+        let shared;
         let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
 
         // Early out if path is outside the canvas bounds
@@ -1268,8 +1280,14 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        let scissor = self.state().scissor;
-        let clip = self.draw_clip();
+        let (clip, scissor, rect) = self.fill_clip(|| path_cache.bounds, anti_alias.then_some((path, &transform)));
+        // An upright rect under an upright rect clip is the rect the two
+        // share: its own fringe is the clip's edge.
+        if let Some(rect) = rect {
+            drop(path_cache);
+            shared = rect.path();
+            path_cache = shared.cache(&rect.frame, self.tess_tol, self.dist_tol);
+        }
 
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
@@ -1480,9 +1498,6 @@ where
             return;
         }
 
-        let scissor = self.state().scissor;
-        let clip = self.draw_clip();
-
         // Scale stroke width by current transform scale.
         // Note: I don't know why the original author clamped the max stroke width to 200, but it didn't
         // look correct when zooming in. There was probably a good reson for doing so and I may have
@@ -1506,6 +1521,16 @@ where
 
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
+
+        let (clip, scissor) = self.draw_clip(|| {
+            let reach = stroke.reach(line_width);
+            Bounds {
+                minx: path_cache.bounds.minx - reach,
+                miny: path_cache.bounds.miny - reach,
+                maxx: path_cache.bounds.maxx + reach,
+                maxy: path_cache.bounds.maxy + reach,
+            }
+        });
 
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
@@ -2333,8 +2358,14 @@ where
         glyph_texture: GlyphTexture,
     ) {
         self.reconcile_current_clip_plane();
-        let scissor = self.state().scissor;
-        let clip = self.draw_clip();
+        let (clip, scissor) = self.draw_clip(|| {
+            verts.iter().fold(Bounds::default(), |bounds, vertex| Bounds {
+                minx: bounds.minx.min(vertex.x),
+                miny: bounds.miny.min(vertex.y),
+                maxx: bounds.maxx.max(vertex.x),
+                maxy: bounds.maxy.max(vertex.y),
+            })
+        });
 
         let params = Params::new(
             &self.images,

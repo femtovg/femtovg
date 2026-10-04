@@ -134,6 +134,11 @@ impl Path {
         self.verbs.is_empty()
     }
 
+    /// How many verbs the path has.
+    pub(crate) fn verb_count(&self) -> usize {
+        self.verbs.len()
+    }
+
     /// Sets the distance tolerance used for path operations.
     pub fn set_distance_tolerance(&mut self, value: f32) {
         self.dist_tol = value;
