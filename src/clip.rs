@@ -1,7 +1,11 @@
-//! Arbitrary-path clipping on the stencil plane: the clip stack, its
-//! replay per target and the quads that arm and resolve it.
+//! Clipping to a path: the clip stack, the stencil plane an arbitrary path
+//! is rasterized into, its replay per target and the quads that arm and
+//! resolve it, and the shapes that skip the stencil ([`shape`]).
 
 use super::*;
+
+mod shape;
+pub(crate) use shape::{ClipCoverage, RoundedBox};
 
 #[derive(Debug)]
 pub(crate) struct ClipGeometry {
@@ -10,12 +14,25 @@ pub(crate) struct ClipGeometry {
 
 #[derive(Debug)]
 pub(crate) struct ClipEntry {
-    pub(crate) geometry: Rc<ClipGeometry>,
-    pub(crate) fill_rule: FillRule,
     pub(crate) target: RenderTarget,
-    pub(crate) bounds: Bounds,
-    pub(crate) prior_armed: Rect,
-    pub(crate) armed: Rect,
+    pub(crate) kind: ClipKind,
+}
+
+#[derive(Debug)]
+pub(crate) enum ClipKind {
+    /// Rasterized into the target's stencil clip plane.
+    Stencil {
+        geometry: Rc<ClipGeometry>,
+        fill_rule: FillRule,
+        bounds: Bounds,
+        prior_armed: Rect,
+        armed: Rect,
+    },
+    /// Evaluated by each draw's fragment shader, in device space, as the
+    /// coverage worked out when the clip was taken. The innermost one on a
+    /// target is the one in force: each is stacked as what it leaves of the
+    /// one before it.
+    Shape { shape: RoundedBox, coverage: ClipCoverage },
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -38,10 +55,12 @@ where
 
         let mut removed = HashMap::<RenderTarget, (usize, Rect)>::new();
         for entry in self.clip_stack.drain(depth..) {
-            removed
-                .entry(entry.target)
-                .and_modify(|(count, _)| *count += 1)
-                .or_insert((1, entry.prior_armed));
+            if let ClipKind::Stencil { prior_armed, .. } = entry.kind {
+                removed
+                    .entry(entry.target)
+                    .and_modify(|(count, _)| *count += 1)
+                    .or_insert((1, prior_armed));
+            }
         }
         for (target, (count, armed)) in removed {
             let plane = self
@@ -81,9 +100,6 @@ where
     }
 
     pub(crate) fn forget_clip_target(&mut self, target: RenderTarget) {
-        if !self.clip_planes.contains_key(&target) {
-            return;
-        }
         let removed: Vec<usize> = self
             .clip_stack
             .iter()
@@ -104,8 +120,15 @@ where
     /// and `clip-rule`. Drawing after this call is limited to the
     /// intersection of every clip taken on the current render target.
     ///
-    /// Clip edges are not antialiased: unlike a fill or stroke edge, a pixel
-    /// is either inside the clip or outside it.
+    /// A clip whose path outlines a rectangle (under any transform), a
+    /// rounded rectangle or an ellipse is antialiased: its edge takes
+    /// coverage as a fill's does. The edge of any other clip is not: a pixel
+    /// is either inside it or outside. A shape loses its antialiasing when
+    /// it only partly overlaps a shape already clipping the target (two
+    /// rectangles with parallel sides excepted), and once something is drawn
+    /// under it with a composite operation that changes the destination
+    /// where the source is transparent ([`CompositeOperation::Copy`],
+    /// `SourceIn`, `SourceOut`, `DestinationIn`, `DestinationAtop`).
     ///
     /// Clips are part of the saved state - [`restore`](Self::restore) drops
     /// the clips taken since the matching [`save`](Self::save) - and belong
@@ -123,16 +146,12 @@ where
             // clip would only cost geometry.
             return;
         }
+        if self.clip_to_shape(path) {
+            return;
+        }
         self.reconcile_current_clip_plane();
         let target = self.current_render_target;
-        let transform = self.state().transform;
-        let (vertices, bounds) = {
-            let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
-            (path_cache.winding_triangles(), path_cache.bounds)
-        };
-        let geometry = Rc::new(ClipGeometry {
-            vertices: vertices.into_boxed_slice(),
-        });
+        let (geometry, bounds) = self.stencil_geometry(path, &self.state().transform);
         let target_rect = self.render_target_rect();
         let path_rect = Self::clip_bounds(bounds, target_rect);
         let previous_armed = self.clip_planes.get(&target).map_or(target_rect, |plane| plane.armed);
@@ -143,12 +162,14 @@ where
         self.emit_clip_fill(&geometry, fill_rule, previous_armed);
         let armed = previous_armed.intersect(path_rect);
         self.clip_stack.push(ClipEntry {
-            geometry,
-            fill_rule,
             target,
-            bounds,
-            prior_armed: previous_armed,
-            armed,
+            kind: ClipKind::Stencil {
+                geometry,
+                fill_rule,
+                bounds,
+                prior_armed: previous_armed,
+                armed,
+            },
         });
         let plane = self.clip_planes.entry(target).or_insert(ClipPlaneState {
             count: 0,
@@ -158,6 +179,105 @@ where
         plane.count += 1;
         plane.armed = armed;
         self.state_mut().clip_depth = self.clip_stack.len();
+    }
+
+    /// Takes the clip as a shape for the fragment shader, if `path` outlines
+    /// one and it combines with the shape already in force into one: a draw
+    /// carries a single shape. `false` leaves the clip to the stencil.
+    fn clip_to_shape(&mut self, path: &Path) -> bool {
+        let Some(shape) = RoundedBox::fit(path) else {
+            return false;
+        };
+        let mut shape = shape.transformed(&self.state().transform);
+        let Some(mut coverage) = shape.coverage(self.fringe_width) else {
+            return false;
+        };
+        if let Some((current, current_coverage)) = self.clip_shape() {
+            if !current_coverage.contains(&shape) {
+                if coverage.contains(&current) {
+                    // The shape in force already clips to less.
+                    return true;
+                }
+                let Some(both) = current.intersection(&shape) else {
+                    return false;
+                };
+                let Some(both_coverage) = both.coverage(self.fringe_width) else {
+                    return false;
+                };
+                (shape, coverage) = (both, both_coverage);
+            }
+        }
+        self.clip_stack.push(ClipEntry {
+            target: self.current_render_target,
+            kind: ClipKind::Shape { shape, coverage },
+        });
+        self.state_mut().clip_depth = self.clip_stack.len();
+        true
+    }
+
+    /// A path's winding fans under `transform`, for the stencil, and their bounds.
+    fn stencil_geometry(&self, path: &Path, transform: &Transform2D) -> (Rc<ClipGeometry>, Bounds) {
+        let path_cache = path.cache(transform, self.tess_tol, self.dist_tol);
+        let geometry = ClipGeometry {
+            vertices: path_cache.winding_triangles().into_boxed_slice(),
+        };
+        (Rc::new(geometry), path_cache.bounds)
+    }
+
+    /// The clip shape a draw carries. An operation that changes the
+    /// destination where its source is transparent would change the pixels
+    /// outside the shape too, so before it the shapes move to the stencil.
+    pub(crate) fn draw_clip(&mut self) -> Option<ClipCoverage> {
+        if self.state().composite_operation.takes_coverage() {
+            return self.clip_shape().map(|(_, coverage)| coverage);
+        }
+        let target = self.current_render_target;
+        // The shapes beneath the one in force contain it, but each would be
+        // in force once it is gone: all of the target's shapes move.
+        let mut moved = false;
+        for index in 0..self.clip_stack.len() {
+            let ClipEntry {
+                target: on,
+                kind: ClipKind::Shape { shape, .. },
+            } = self.clip_stack[index]
+            else {
+                continue;
+            };
+            if on != target {
+                continue;
+            }
+            let (geometry, bounds) = self.stencil_geometry(&shape.path(), &shape.frame);
+            // The replay below works out what each entry leaves armed.
+            self.clip_stack[index].kind = ClipKind::Stencil {
+                geometry,
+                fill_rule: FillRule::NonZero,
+                bounds,
+                prior_armed: Rect::default(),
+                armed: Rect::default(),
+            };
+            let armed = self.render_target_rect();
+            let plane = self.clip_planes.entry(target).or_insert(ClipPlaneState {
+                count: 0,
+                dirty: false,
+                armed,
+            });
+            plane.count += 1;
+            plane.dirty = true;
+            moved = true;
+        }
+        if moved {
+            self.reconcile_current_clip_plane();
+        }
+        None
+    }
+
+    /// The shape clip in force on the current render target, and its coverage.
+    pub(crate) fn clip_shape(&self) -> Option<(RoundedBox, ClipCoverage)> {
+        let target = self.current_render_target;
+        self.clip_stack.iter().rev().find_map(|entry| match entry.kind {
+            ClipKind::Shape { shape, coverage } if entry.target == target => Some((shape, coverage)),
+            _ => None,
+        })
     }
 
     /// Re-establishes the current render target's stencil clip plane from
@@ -170,7 +290,15 @@ where
             .clip_stack
             .iter()
             .filter(|entry| entry.target == target)
-            .map(|entry| (entry.geometry.clone(), entry.fill_rule, entry.bounds))
+            .filter_map(|entry| match &entry.kind {
+                ClipKind::Stencil {
+                    geometry,
+                    fill_rule,
+                    bounds,
+                    ..
+                } => Some((geometry.clone(), *fill_rule, *bounds)),
+                ClipKind::Shape { .. } => None,
+            })
             .collect();
         if entries.is_empty() {
             self.emit_clip_reset(false);
@@ -186,14 +314,17 @@ where
             armed_values.push((previous_armed, armed));
             previous_armed = armed;
         }
-        for (entry, (prior_armed, armed)) in self
+        let stencils = self
             .clip_stack
             .iter_mut()
             .filter(|entry| entry.target == target)
-            .zip(armed_values)
-        {
-            entry.prior_armed = prior_armed;
-            entry.armed = armed;
+            .filter_map(|entry| match &mut entry.kind {
+                ClipKind::Stencil { prior_armed, armed, .. } => Some((prior_armed, armed)),
+                ClipKind::Shape { .. } => None,
+            });
+        for ((prior_armed, armed), (prior, now)) in stencils.zip(armed_values) {
+            *prior_armed = prior;
+            *armed = now;
         }
         if let Some(plane) = self.clip_planes.get_mut(&target) {
             plane.armed = previous_armed;
@@ -266,6 +397,20 @@ where
     }
 }
 
+/// A clip only the stencil can take: the rect with a notch in its top side,
+/// so it has the rect's bounds and is no box.
+#[cfg(test)]
+pub(crate) fn notched_rect(x: f32, y: f32, w: f32, h: f32) -> Path {
+    let mut path = Path::new();
+    path.move_to(x, y);
+    path.line_to(x, y + h);
+    path.line_to(x + w, y + h);
+    path.line_to(x + w, y);
+    path.line_to(x + w * 0.5, y + h * 0.25);
+    path.close();
+    path
+}
+
 /// `clear_rect` clears the whole stencil unless a clip is armed on the
 /// target it clears, when only the winding bits may go: the command carries
 /// that decision so a tiler takes its tile clear whenever it can.
@@ -294,8 +439,7 @@ fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
         "no clip: the whole stencil is cleared"
     );
 
-    let mut clip = Path::new();
-    clip.rect(10.0, 10.0, 50.0, 50.0);
+    let clip = notched_rect(10.0, 10.0, 50.0, 50.0);
     canvas.save();
     canvas.clip_path(&clip, FillRule::NonZero);
     canvas.clear_rect(0, 0, 100, 100, Color::white());
@@ -330,8 +474,7 @@ fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
 fn consecutive_clip_restores_replay_once_before_the_next_draw() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(100, 100, 1.0);
-    let mut clip = Path::new();
-    clip.rect(10.0, 10.0, 80.0, 80.0);
+    let clip = notched_rect(10.0, 10.0, 80.0, 80.0);
 
     for _ in 0..64 {
         canvas.save();
@@ -362,8 +505,7 @@ fn consecutive_clip_restores_replay_once_before_the_next_draw() {
 fn same_size_set_size_does_not_replay_a_clip() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(100, 100, 1.0);
-    let mut clip = Path::new();
-    clip.rect(10.0, 10.0, 80.0, 80.0);
+    let clip = notched_rect(10.0, 10.0, 80.0, 80.0);
     canvas.clip_path(&clip, FillRule::NonZero);
     canvas.flush_to_output(());
 
@@ -393,10 +535,8 @@ fn same_size_set_size_does_not_replay_a_clip() {
 fn nested_clip_resolve_is_bounded_by_the_outer_clip() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(100, 100, 1.0);
-    let mut outer = Path::new();
-    outer.rect(10.0, 20.0, 30.0, 40.0);
-    let mut inner = Path::new();
-    inner.rect(15.0, 25.0, 10.0, 10.0);
+    let outer = notched_rect(10.0, 20.0, 30.0, 40.0);
+    let inner = notched_rect(15.0, 25.0, 10.0, 10.0);
     canvas.clip_path(&outer, FillRule::NonZero);
     canvas.clip_path(&inner, FillRule::NonZero);
 
@@ -442,8 +582,7 @@ fn reallocating_an_image_marks_its_clip_plane_for_replay() {
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
     canvas.set_render_target(RenderTarget::Image(image));
-    let mut clip = Path::new();
-    clip.rect(0.0, 0.0, 16.0, 32.0);
+    let clip = notched_rect(0.0, 0.0, 16.0, 32.0);
     canvas.clip_path(&clip, FillRule::NonZero);
     canvas.flush_to_output(());
 
@@ -471,8 +610,7 @@ fn filtering_an_image_marks_its_clip_plane_for_replay() {
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
     canvas.set_render_target(RenderTarget::Image(target));
-    let mut clip = Path::new();
-    clip.rect(0.0, 0.0, 16.0, 32.0);
+    let clip = notched_rect(0.0, 0.0, 16.0, 32.0);
     canvas.clip_path(&clip, FillRule::NonZero);
     canvas.flush_to_output(());
 
@@ -513,8 +651,7 @@ fn filter_passes_are_not_gated_by_the_active_clip() {
         .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
 
-    let mut clip = Path::new();
-    clip.rect(0.0, 0.0, 50.0, 50.0);
+    let clip = notched_rect(0.0, 0.0, 50.0, 50.0);
     canvas.clip_path(&clip, FillRule::NonZero);
     canvas.filter_image(target, ImageFilter::gaussian_blur(2.0), source);
     let mut path = Path::new();
@@ -543,12 +680,10 @@ fn a_suppressed_draw_does_not_consume_a_dirty_clip_replay() {
         .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
 
-    let mut outer = Path::new();
-    outer.rect(4.0, 4.0, 56.0, 56.0);
+    let outer = notched_rect(4.0, 4.0, 56.0, 56.0);
     canvas.clip_path(&outer, FillRule::NonZero);
     canvas.save();
-    let mut inner = Path::new();
-    inner.rect(8.0, 8.0, 32.0, 32.0);
+    let inner = notched_rect(8.0, 8.0, 32.0, 32.0);
     canvas.clip_path(&inner, FillRule::NonZero);
     canvas.flush_to_output(());
     canvas.restore();
@@ -586,8 +721,7 @@ fn clips_past_the_depth_limit_cost_nothing_and_reset_clears_the_overflow() {
     while canvas.state_stack.len() < MAX_STATE_DEPTH {
         canvas.save();
     }
-    let mut clip = Path::new();
-    clip.rect(0.0, 0.0, 32.0, 64.0);
+    let clip = notched_rect(0.0, 0.0, 32.0, 64.0);
     for _ in 0..32 {
         canvas.save();
         canvas.clip_path(&clip, FillRule::NonZero);
@@ -606,4 +740,320 @@ fn clips_past_the_depth_limit_cost_nothing_and_reset_clears_the_overflow() {
     assert!(!canvas.saturated());
     assert!(canvas.layers.is_empty());
     assert!(canvas.warned_overflow, "one warning per canvas");
+}
+
+/// What the draws of a flush carried as their clip shape, in order.
+#[cfg(test)]
+fn drawn_clips(commands: &[Command]) -> Vec<Option<ClipCoverage>> {
+    commands
+        .iter()
+        .filter_map(|cmd| match &cmd.cmd_type {
+            CommandType::ConvexFill { params }
+            | CommandType::Stroke { params }
+            | CommandType::Triangles { params }
+            | CommandType::ConcaveFill {
+                fill_params: params, ..
+            }
+            | CommandType::StencilStroke { params1: params, .. } => Some(params.clip),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn stencil_clip_commands(commands: &[Command]) -> usize {
+    commands
+        .iter()
+        .filter(|cmd| matches!(cmd.cmd_type, CommandType::ClipFill | CommandType::ClipReset { .. }))
+        .count()
+}
+
+/// A rectangle, a rounded rectangle and an ellipse clip without the stencil:
+/// the draws under them carry the shape, in device pixels, until the restore.
+#[test]
+fn a_box_clip_is_a_shape_on_the_draws_under_it() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(200, 200, 2.0);
+    let mut fill = Path::new();
+    fill.rect(0.0, 0.0, 200.0, 200.0);
+    let mut stroke = Path::new();
+    stroke.move_to(0.0, 0.0);
+    stroke.line_to(200.0, 200.0);
+    let paint = Paint::color(Color::black());
+
+    let mut rounded = Path::new();
+    rounded.rounded_rect(20.0, 40.0, 80.0, 40.0, 10.0);
+    let mut circle = Path::new();
+    circle.circle(50.0, 50.0, 30.0);
+    let mut rect = Path::new();
+    rect.rect(20.0, 40.0, 80.0, 40.0);
+    let half_pixel = 0.5; // the fringe at a device pixel ratio of two
+    for (clip, extent, radii) in [
+        (&rect, [20.0, 40.0], [0.0, 0.0]), // a rect's first side runs down
+        (&rounded, [40.0, 20.0], [10.0, 10.0]),
+        (&circle, [30.0, 30.0], [30.0, 30.0]),
+    ] {
+        canvas.save();
+        canvas.translate(10.0, 0.0);
+        canvas.clip_path(clip, FillRule::NonZero);
+        assert!(!canvas.clip_active(), "the stencil plane is not armed");
+        canvas.reset_transform();
+        canvas.fill_path(&fill, &paint);
+        canvas.stroke_path(&stroke, &paint);
+        canvas.restore();
+        canvas.fill_path(&fill, &paint);
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        assert_eq!(stencil_clip_commands(&commands), 0);
+        let clips = drawn_clips(&commands);
+        let [Some(filled), Some(stroked), None] = clips[..] else {
+            panic!("fill and stroke clipped, the fill after the restore not: {clips:?}");
+        };
+        assert_eq!(filled, stroked);
+        for (got, want) in filled
+            .extent
+            .iter()
+            .chain(&filled.radii)
+            .zip(extent.iter().chain(&radii))
+        {
+            assert!((got - want / half_pixel).abs() < 1e-2, "{filled:?}");
+        }
+        // Taken under the translation, 10 further right: the point lies 15
+        // units inside the boxes and 25 inside the circle, two pixels a unit.
+        let (center_x, depth) = if radii[0] == 30.0 { (60.0, 50.0) } else { (70.0, 30.0) };
+        assert!((filled.distance([center_x, 55.0]) + depth).abs() < 1e-2, "{filled:?}");
+    }
+}
+
+/// One shape per draw: a shape inside the one in force takes its place, one
+/// around it adds nothing, a rect across a rect leaves their intersection,
+/// and any other overlap goes to the stencil.
+#[test]
+fn nested_shape_clips_keep_one_shape_in_force() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let rect = |x: f32, y: f32, w: f32, h: f32| {
+        let mut path = Path::new();
+        path.rect(x, y, w, h);
+        path
+    };
+    let fill = rect(0.0, 0.0, 100.0, 100.0);
+    let paint = Paint::color(Color::black());
+    let half_width_in_force = |canvas: &mut Canvas<RecordingRenderer>| {
+        canvas.fill_path(&fill, &paint);
+        canvas.flush_to_output(());
+        drawn_clips(&recorded.borrow()).last().unwrap().unwrap().extent[0]
+    };
+
+    canvas.clip_path(&rect(10.0, 10.0, 80.0, 80.0), FillRule::NonZero);
+    canvas.save();
+    canvas.clip_path(&rect(20.0, 20.0, 40.0, 40.0), FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 2, "inside: stacked");
+    assert_eq!(half_width_in_force(&mut canvas), 20.0);
+    canvas.clip_path(&rect(0.0, 0.0, 100.0, 100.0), FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 2, "around: nothing to add");
+    assert_eq!(half_width_in_force(&mut canvas), 20.0);
+    canvas.restore();
+    assert_eq!(half_width_in_force(&mut canvas), 40.0, "the outer shape is back");
+
+    // Overlapping rects with parallel sides: what both cover, x 50..90.
+    canvas.clip_path(&rect(50.0, 50.0, 80.0, 80.0), FillRule::NonZero);
+    assert_eq!(half_width_in_force(&mut canvas), 20.0);
+    assert!(!canvas.clip_active(), "still no stencil");
+
+    // A circle that overlaps the rect is no single shape with it.
+    let mut circle = Path::new();
+    circle.circle(50.0, 50.0, 30.0);
+    canvas.clip_path(&circle, FillRule::NonZero);
+    assert!(canvas.clip_active(), "the stencil takes it");
+    assert_eq!(half_width_in_force(&mut canvas), 20.0, "the rect stays in force");
+    assert_eq!(stencil_clip_commands(&recorded.borrow()), 2, "armed and filled");
+}
+
+/// A rounded rect nested in its twin, or in one a fraction of a pixel off -
+/// the double clip design tools export - stays one shape.
+#[test]
+fn a_rounded_clip_nested_in_its_twin_stays_a_shape() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let rounded = |x: f32| {
+        let mut path = Path::new();
+        path.rounded_rect(x, 10.0, 80.0, 60.0, 16.0);
+        path
+    };
+    canvas.clip_path(&rounded(10.0), FillRule::NonZero);
+    canvas.clip_path(&rounded(10.0), FillRule::NonZero);
+    canvas.clip_path(&rounded(10.3), FillRule::NonZero);
+    assert!(!canvas.clip_active());
+    let radii = canvas.clip_shape().unwrap().0.radii;
+    assert!(
+        (radii[0] - 16.0).abs() < 1e-3 && (radii[1] - 16.0).abs() < 1e-3,
+        "{radii:?}"
+    );
+
+    canvas.clip_path(&rounded(14.0), FillRule::NonZero);
+    assert!(
+        canvas.clip_active(),
+        "four pixels across is another region: the stencil's"
+    );
+}
+
+/// A composite operation that changes the destination where the source is
+/// transparent cannot be held to a shape by coverage: the target's shapes
+/// move to the stencil before the draw and stay there.
+#[test]
+fn a_draw_coverage_cannot_bound_moves_the_shapes_to_the_stencil() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut fill = Path::new();
+    fill.rect(0.0, 0.0, 100.0, 100.0);
+    let paint = Paint::color(Color::black());
+    let mut outer = Path::new();
+    outer.circle(50.0, 50.0, 45.0);
+    let mut inner = Path::new();
+    inner.rect(40.0, 40.0, 20.0, 20.0);
+
+    canvas.save();
+    canvas.clip_path(&outer, FillRule::NonZero);
+    canvas.clip_path(&inner, FillRule::NonZero);
+    for operation in [
+        CompositeOperation::SourceOver,
+        CompositeOperation::Atop,
+        CompositeOperation::DestinationOver,
+        CompositeOperation::DestinationOut,
+        CompositeOperation::Lighter,
+        CompositeOperation::Xor,
+    ] {
+        canvas.global_composite_operation(operation);
+        canvas.fill_path(&fill, &paint);
+    }
+    assert!(!canvas.clip_active(), "coverage bounds all of these");
+
+    canvas.global_composite_operation(CompositeOperation::Copy);
+    canvas.fill_path(&fill, &paint);
+    assert_eq!(canvas.clip_planes[&RenderTarget::Screen].count, 2, "both shapes moved");
+    assert_eq!(canvas.clip_shape(), None);
+    canvas.global_composite_operation(CompositeOperation::SourceOver);
+    canvas.fill_path(&fill, &paint);
+    canvas.flush_to_output(());
+    {
+        let commands = recorded.borrow();
+        let clips = drawn_clips(&commands);
+        assert_eq!(clips.iter().filter(|clip| clip.is_some()).count(), 6);
+        assert_eq!(
+            clips[6..],
+            [None, None],
+            "the copy and what follows it are gated by the stencil"
+        );
+        assert_eq!(stencil_clip_commands(&commands), 3, "armed once, filled twice");
+        let copy = commands
+            .iter()
+            .rposition(|cmd| matches!(cmd.cmd_type, CommandType::ClipFill))
+            .unwrap();
+        assert!(
+            commands[copy + 1..].iter().all(|cmd| cmd.clip_active),
+            "after the clip fills every draw is stencil-gated"
+        );
+    }
+
+    canvas.restore();
+    canvas.fill_path(&fill, &paint);
+    assert!(
+        canvas.clip_stack.is_empty() && !canvas.clip_active(),
+        "the restore pops them as stencil clips"
+    );
+
+    for operation in [
+        CompositeOperation::SourceIn,
+        CompositeOperation::SourceOut,
+        CompositeOperation::DestinationIn,
+        CompositeOperation::DestinationAtop,
+    ] {
+        assert!(
+            !CompositeOperationState::new(operation).takes_coverage(),
+            "{operation:?}"
+        );
+    }
+}
+
+/// A shape belongs to the target it was taken on, as a stencil clip does:
+/// it gates a layer's composite and not its content, and a shape taken
+/// inside the layer gates only that.
+#[test]
+fn a_shape_clip_gates_only_draws_into_its_target() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut fill = Path::new();
+    fill.rect(0.0, 0.0, 100.0, 100.0);
+    let paint = Paint::color(Color::black());
+    let mut outer = Path::new();
+    outer.circle(50.0, 50.0, 40.0);
+    let mut inner = Path::new();
+    inner.rect(60.0, 60.0, 30.0, 30.0);
+
+    canvas.clip_path(&outer, FillRule::NonZero);
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    canvas.fill_path(&fill, &paint);
+    canvas.clip_path(&inner, FillRule::NonZero);
+    canvas.fill_path(&fill, &paint);
+    canvas.end_layer();
+    canvas.flush_to_output(());
+    let clips = drawn_clips(&recorded.borrow());
+    let [None, Some(in_layer), Some(composite)] = clips[..] else {
+        panic!("{clips:?}");
+    };
+    assert_eq!(in_layer.radii, [0.0, 0.0], "the layer's own rect, in its store's space");
+    assert_eq!(composite.radii, [40.0, 40.0], "the canvas's circle on the composite");
+
+    // An image target's shape leaves with the image.
+    let image = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    canvas.set_render_target(RenderTarget::Image(image));
+    canvas.clip_path(&inner, FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 2);
+    canvas.set_render_target(RenderTarget::Screen);
+    canvas.delete_image(image);
+    assert_eq!(canvas.clip_stack.len(), 1, "only the screen's circle is left");
+}
+
+/// The unclipped image blit would bypass a shape as it would the stencil.
+#[test]
+fn an_image_blit_under_a_shape_clip_takes_the_masked_path() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let image = canvas
+        .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
+        .unwrap();
+    let mut clip = Path::new();
+    clip.circle(16.0, 16.0, 12.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    let mut blit = Path::new();
+    blit.rect(0.0, 0.0, 32.0, 32.0);
+    let mut paint = Paint::image(image, 0.0, 0.0, 32.0, 32.0, 0.0, 1.0);
+    paint.set_anti_alias(false);
+    canvas.fill_path(&blit, &paint);
+    canvas.flush_to_output(());
+    let clips = drawn_clips(&recorded.borrow());
+    assert!(matches!(clips[..], [Some(_)]), "{clips:?}");
+    assert!(recorded.borrow().iter().all(|cmd| !matches!(
+        cmd.cmd_type,
+        CommandType::Triangles {
+            params: Params {
+                shader_type: ShaderType::TextureCopyUnclipped,
+                ..
+            }
+        }
+    )));
 }

@@ -596,8 +596,7 @@ fn end_layer_past_the_depth_limit_without_a_layer_pops_nothing() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
     canvas.save();
-    let mut clip = Path::new();
-    clip.rect(0.0, 0.0, 32.0, 64.0);
+    let clip = notched_rect(0.0, 0.0, 32.0, 64.0);
     canvas.clip_path(&clip, FillRule::NonZero);
     while canvas.state_stack.len() < MAX_STATE_DEPTH {
         canvas.save();

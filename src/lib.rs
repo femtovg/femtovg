@@ -209,6 +209,21 @@ impl CompositeOperationState {
     }
 }
 
+impl CompositeOperationState {
+    /// Whether a source scaled by a coverage of zero leaves the destination
+    /// as it was: the destination factor is then one. `Copy`, `SourceIn`,
+    /// `SourceOut`, `DestinationIn` and `DestinationAtop` change it instead.
+    pub(crate) fn takes_coverage(&self) -> bool {
+        let kept = |factor| {
+            matches!(
+                factor,
+                BlendFactor::One | BlendFactor::OneMinusSrcAlpha | BlendFactor::OneMinusSrcColor
+            )
+        };
+        kept(self.dst_rgb) && kept(self.dst_alpha)
+    }
+}
+
 impl Default for CompositeOperationState {
     fn default() -> Self {
         Self::new(CompositeOperation::SourceOver)
@@ -1254,6 +1269,7 @@ where
         paint_flavor.mul_alpha(self.state().alpha);
 
         let scissor = self.state().scissor;
+        let clip = self.draw_clip();
 
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
@@ -1267,10 +1283,10 @@ where
             path_cache.path_fill_is_rect(),
             scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
-            // The unclipped blit bypasses the stencil clip plane (the #292
-            // rounded-scissor precedent): route clipped blits through the
-            // normal masked path.
-            !self.clip_active(),
+            // The unclipped blit bypasses the stencil clip plane and the
+            // clip shape (the #292 rounded-scissor precedent): route clipped
+            // blits through the normal masked path.
+            !self.clip_active() && clip.is_none(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
@@ -1292,7 +1308,8 @@ where
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
-            );
+            )
+            .with_clip(clip);
 
             CommandType::ConvexFill { params }
         } else {
@@ -1307,7 +1324,8 @@ where
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
-            );
+            )
+            .with_clip(clip);
 
             CommandType::ConcaveFill {
                 stencil_params,
@@ -1463,6 +1481,7 @@ where
         }
 
         let scissor = self.state().scissor;
+        let clip = self.draw_clip();
 
         // Scale stroke width by current transform scale.
         // Note: I don't know why the original author clamped the max stroke width to 200, but it didn't
@@ -1511,7 +1530,8 @@ where
             line_width,
             self.fringe_width,
             -1.0,
-        );
+        )
+        .with_clip(clip);
 
         let flavor = if stroke.stencil_strokes {
             let params2 = Params::new(
@@ -1523,7 +1543,8 @@ where
                 line_width,
                 self.fringe_width,
                 1.0 - 0.5 / 255.0,
-            );
+            )
+            .with_clip(clip);
 
             CommandType::StencilStroke {
                 params1: params,
@@ -2313,6 +2334,7 @@ where
     ) {
         self.reconcile_current_clip_plane();
         let scissor = self.state().scissor;
+        let clip = self.draw_clip();
 
         let params = Params::new(
             &self.images,
@@ -2323,7 +2345,8 @@ where
             1.0,
             self.fringe_width,
             -1.0,
-        );
+        )
+        .with_clip(clip);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
@@ -4616,10 +4639,20 @@ fn random_api_sequences_keep_one_consistent_stack() {
                     }
                 }
                 4 => {
-                    let mut clip = Path::new();
-                    clip.rect(rng.random_range(0.0..40.0), rng.random_range(0.0..40.0), 60.0, 60.0);
+                    // A box is taken as a shape - stacked, or dropped when it
+                    // contains the one in force - and a notched rect on the
+                    // stencil.
+                    let (x, y) = (rng.random_range(0.0..40.0), rng.random_range(0.0..40.0));
+                    let clip = if rng.random_bool(0.5) {
+                        let mut clip = Path::new();
+                        clip.rect(x, y, 60.0, 60.0);
+                        clip
+                    } else {
+                        notched_rect(x, y, 60.0, 60.0)
+                    };
+                    let before = canvas.clip_stack.len();
                     canvas.clip_path(&clip, FillRule::NonZero);
-                    model.last_mut().unwrap().clips += 1;
+                    model.last_mut().unwrap().clips += canvas.clip_stack.len() - before;
                 }
                 5 => canvas.fill_path(&rect, &Paint::color(Color::black())),
                 6 => canvas.flush_to_output(()),
@@ -4657,13 +4690,13 @@ fn random_api_sequences_keep_one_consistent_stack() {
                 let entries = canvas
                     .clip_stack
                     .iter()
-                    .filter(|entry| entry.target == *plane_target)
+                    .filter(|entry| entry.target == *plane_target && matches!(entry.kind, ClipKind::Stencil { .. }))
                     .count();
                 assert_eq!(plane.count, entries, "{at}: plane count for {plane_target:?}");
             }
             for entry in &canvas.clip_stack {
                 assert!(
-                    canvas.clip_planes.contains_key(&entry.target),
+                    matches!(entry.kind, ClipKind::Shape { .. }) || canvas.clip_planes.contains_key(&entry.target),
                     "{at}: plane for {:?}",
                     entry.target
                 );

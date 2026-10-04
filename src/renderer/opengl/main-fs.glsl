@@ -1,7 +1,7 @@
 
 precision highp float;
 
-#define UNIFORMARRAY_SIZE 14
+#define UNIFORMARRAY_SIZE 16
 
 #define TAU 6.28318530717958647692528676655900577
 
@@ -26,6 +26,10 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define imageBlurFilterCoeff frag[12].xyz
 #define scissorRadius frag[12].w
 #define conicStartAngle frag[13].x
+#define clipInner frag[13].zw
+#define clipLinear frag[14]
+#define clipOffset frag[15].xy
+#define clipOuter frag[15].zw
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -70,6 +74,32 @@ float scissorMask(vec2 p) {
     sc = vec2(0.5,0.5) - sc * scissorScale;
     return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
 }
+
+#ifdef CLIP_SHAPE
+// The clip taken as a shape, in the programs of the draws under one:
+// coverage of a box with elliptical corners, in a frame where one unit is
+// one fringe width across each side. clipInner is where the corners'
+// ellipses are centered and clipOuter the half extents plus half a fringe.
+// Past a corner's center the distance is the first-order one to its ellipse,
+// exact for a circle: k1 is one on the ellipse, and its gradient in device
+// pixels is g along the frame's rows - unit vectors, at a right angle only
+// without a skew. A box with square corners has their centers out of reach.
+float clipMask(vec2 p) {
+    vec2 at = vec2(dot(clipLinear.xy, p), dot(clipLinear.zw, p)) + clipOffset;
+    vec2 reach = abs(at);
+    vec2 corner = reach - clipInner;
+    if (corner.x > 0.0 && corner.y > 0.0) {
+        vec2 radii = clipOuter - vec2(0.5, 0.5) - clipInner;
+        vec2 k = corner / radii;
+        float k1 = length(k);
+        vec2 g = k / radii;
+        float lean = dot(clipLinear.xy, clipLinear.zw) * sign(at.x) * sign(at.y);
+        return clamp(0.5 - (k1 - 1.0) * k1 / sqrt(dot(g, g) + 2.0 * g.x * g.y * lean), 0.0, 1.0);
+    }
+    vec2 cover = clamp(clipOuter - reach, 0.0, 1.0);
+    return cover.x * cover.y;
+}
+#endif
 
 #ifdef EDGE_AA
 // Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
@@ -361,6 +391,9 @@ void main(void) {
 #endif
 
     float scissor = scissorMask(fpos);
+#ifdef CLIP_SHAPE
+    scissor *= clipMask(fpos);
+#endif
 
 #ifdef ENABLE_GLYPH_TEXTURE
 #if SELECT_SHADER != SHADER_TYPE_FilterImageBlend
