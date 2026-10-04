@@ -332,10 +332,6 @@ impl TextContextImpl {
         self.fonts.get(id.0)
     }
 
-    pub fn font_mut(&mut self, id: FontId) -> Option<&mut Font> {
-        self.fonts.get_mut(id.0)
-    }
-
     #[cfg(feature = "textlayout")]
     pub fn find_font<F, T>(&mut self, font_ids: &[Option<FontId>; 8], mut callback: F) -> Result<T, ErrorKind>
     where
