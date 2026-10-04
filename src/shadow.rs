@@ -210,7 +210,7 @@ where
         // without it the shadow is mirrored about its rect's horizontal midline.
         // A blur pass keeps that orientation (its two draws flip twice); each
         // identity pass of a pyramid turns it over once, so the blurred image
-        // declares FLIP_Y only when the plan's flips come out even.
+        // declares FLIP_Y only when the plan leaves it stored that way.
         let image_flags = ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y;
         // Both come from the transient pool: past the budget the shadow is
         // skipped rather than allocated, like a layer degrading.
@@ -222,8 +222,7 @@ where
         // the filter pass entirely — and with it the second offscreen image.
         let (blurred_image, scratch) = match &blur_plan {
             Some(passes) => {
-                let flips = passes.iter().filter(|pass| pass.filter.flips_output()).count();
-                let blurred_flags = if flips.is_multiple_of(2) {
+                let blurred_flags = if plan_stores_flipped(passes, true) {
                     image_flags
                 } else {
                     ImageFlags::PREMULTIPLIED

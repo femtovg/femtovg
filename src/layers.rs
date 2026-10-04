@@ -640,8 +640,8 @@ where
         // Run the filter chain, if any, through the images reserved for it at
         // begin_layer: the chain releases the scratches, the result goes back
         // with the composite. The result's FLIP_Y flag was chosen at
-        // begin_layer from the plan's parity, so the composite, the mask and
-        // the blend read it the right way up through it.
+        // begin_layer from how the plan's passes leave it, so the composite,
+        // the mask and the blend read it the right way up through it.
         let filtered = match record.filter_images.take() {
             Some(FilterImages { target, scratch }) => {
                 let passes =
@@ -864,7 +864,7 @@ where
         // The capture is stored the way a render target is; the result is
         // read through FLIP_Y when the chain's passes leave it that way too,
         // so the chain never spends a pass on orientation.
-        let flags = if plan_flips(&passes).is_multiple_of(2) {
+        let flags = if plan_stores_flipped(&passes, true) {
             ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y
         } else {
             ImageFlags::PREMULTIPLIED
@@ -1835,15 +1835,25 @@ fn a_layer_pads_by_a_dilation_and_an_offset() {
     canvas.restore();
 }
 
-/// A filtered layer reads its result through the flag its chain's parity
-/// calls for: a lone blur leaves the capture's flipped storage as it is,
+/// A filtered layer reads its result through the flag its chain's passes
+/// call for: a lone blur leaves the capture's flipped storage as it is,
 /// so the result carries FLIP_Y like the capture; a matrix turns it over
-/// once, so the result carries none - and neither spends a pass on it.
+/// once, so the result carries none; noise lands the way the capture's
+/// own draws did, and a matrix after it turns that over - and none spends
+/// a pass on it.
 #[test]
-fn a_filtered_layer_reads_its_result_through_the_flag_its_parity_needs() {
-    use crate::ImageFilter;
+fn a_filtered_layer_reads_its_result_through_the_flag_its_passes_need() {
+    use crate::{ImageFilter, TurbulenceKind};
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
+    let noise = ImageFilter::Turbulence {
+        base_frequency: [0.1, 0.1],
+        num_octaves: 1,
+        seed: 1,
+        stitch_tiles: false,
+        kind: TurbulenceKind::FractalNoise,
+        transform: Transform2D::identity(),
+    };
     for (filters, flipped) in [
         (&[ImageFilter::gaussian_blur(2.0)][..], true),
         (&[ImageFilter::brightness(0.5)][..], false),
@@ -1852,6 +1862,8 @@ fn a_filtered_layer_reads_its_result_through_the_flag_its_parity_needs() {
             false,
         ),
         (&[ImageFilter::brightness(2.0), ImageFilter::invert(1.0)][..], true),
+        (&[noise][..], true),
+        (&[noise, ImageFilter::brightness(0.5)][..], false),
     ] {
         assert!(canvas.begin_layer(&LayerEffects::new().with_filters(filters)));
         let target = canvas.layers.last().unwrap().filter_images.as_ref().unwrap().target;

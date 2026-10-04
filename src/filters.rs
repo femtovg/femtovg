@@ -278,9 +278,9 @@ pub(crate) fn filter_work(passes: &[Pass], width: usize, height: usize) -> u64 {
 /// run down the pyramid and back ([`blur_passes`]), each morphology as the
 /// passes its radii need ([`morphology_passes`]), and a matrix beside a
 /// pyramid's halving or scale back up folded into that pass, which is a
-/// matrix too. The plan says nothing about orientation: [`plan_flips`]
-/// counts the passes that turn the image over, and the caller reads its
-/// target the way that parity leaves it. An empty list plans no pass;
+/// matrix too. The plan says nothing about orientation:
+/// [`plan_stores_flipped`] follows the image through the passes, and the
+/// caller reads its target the way they leave it. An empty list plans no pass;
 /// `None` rejects a plan above [`MAX_FILTER_PASSES`]. What
 /// [`Canvas::filter_image_chain`] executes and what a layer's scratch
 /// reservation is sized from, so the two cannot disagree.
@@ -393,11 +393,13 @@ fn alpha_only(matrix: &[f32; 20]) -> bool {
     matrix[..15].iter().all(|v| *v == 0.0) && matrix[15..] == [0.0, 0.0, 0.0, 1.0, 0.0]
 }
 
-/// How many of a plan's passes turn the image over: a single draw stores
-/// its result the way a render target does, the other way up from what it
-/// read, and the two-draw filters turn it over twice.
-pub(crate) fn plan_flips(passes: &[Pass]) -> usize {
-    passes.iter().filter(|pass| pass.filter.flips_output()).count()
+/// Whether a plan leaves its result stored the way a render target is, rows
+/// bottom up, given whether its source is: each pass in turn by
+/// [`ImageFilter::stores_flipped`].
+pub(crate) fn plan_stores_flipped(passes: &[Pass], source_flipped: bool) -> bool {
+    passes
+        .iter()
+        .fold(source_flipped, |flipped, pass| pass.filter.stores_flipped(flipped))
 }
 
 impl<T> Canvas<T>
@@ -632,10 +634,11 @@ where
     /// ImageFlags::FLIP_Y`, the convention of a single color-matrix
     /// [`filter_image`](Self::filter_image) call, composites upright, and so
     /// does one without `FLIP_Y`. Every single draw turns the stored image
-    /// over and the two-draw filters leave it as it was, so the chain adds
-    /// one copy pass when its own parity would store the result the other
-    /// way from the flag - a lone blur into a `FLIP_Y` target, say - and
-    /// none otherwise. An empty list is one copy under the `FLIP_Y`
+    /// over, the two-draw filters leave it as it was and noise lands the
+    /// way any draw into an image does, so the chain adds one copy pass
+    /// when its passes would store the result the other way from the flag -
+    /// a lone blur into a `FLIP_Y` target, say - and none otherwise. An
+    /// empty list is one copy under the `FLIP_Y`
     /// convention. Create targets premultiplied so semi-transparent results
     /// composite once, not twice.
     ///
@@ -678,10 +681,10 @@ where
                 .info(image)
                 .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y))
         };
-        // The parity the passes leave the result in against how the target
-        // is read; an empty list is the one copy it always was.
-        let other_way = (stored_flipped(self, source_image) ^ !plan_flips(&passes).is_multiple_of(2))
-            != stored_flipped(self, target_image);
+        // How the passes leave the result stored against how the target is
+        // read; an empty list is the one copy it always was.
+        let other_way =
+            plan_stores_flipped(&passes, stored_flipped(self, source_image)) != stored_flipped(self, target_image);
         if passes.is_empty() || other_way {
             if passes.len() == MAX_FILTER_PASSES {
                 return Err(ErrorKind::FilterPassLimitExceeded);
@@ -804,8 +807,8 @@ where
         debug_assert!(!target_as_scratch || target_image != source_image);
         let mut src = source_image;
         // Storage orientation of `src` at each pass: a render target (FLIP_Y)
-        // holds its rows the other way up from an upload, and every pass but
-        // a blur turns the result over once.
+        // holds its rows the other way up from an upload, and each pass
+        // leaves it as `ImageFilter::stores_flipped` says.
         let mut src_flipped = self
             .images
             .info(source_image)
@@ -867,9 +870,7 @@ where
                 _ => None,
             };
             let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused);
-            if filter.flips_output() {
-                src_flipped = !src_flipped;
-            }
+            src_flipped = filter.stores_flipped(src_flipped);
             src = dst;
         }
         debug_assert_eq!(src, target_image, "the plan's last pass lands in the target");
@@ -1211,12 +1212,12 @@ fn a_morphology_splits_in_whole_pixels_and_an_offset_is_one_pass() {
     };
     let passes = filter_passes(&[dilate]).unwrap();
     assert_eq!(passes.len(), 1, "the morphology alone");
-    assert!(!passes[0].filter.flips_output() && passes[0].filter.two_pass());
-    assert_eq!(plan_flips(&passes), 0);
+    assert!(passes[0].filter.two_pass());
+    assert!(plan_stores_flipped(&passes, true) && !plan_stores_flipped(&passes, false));
 
     let shift = ImageFilter::Offset { dx: 3.0, dy: -4.0 };
     assert_eq!(filter_passes(&[shift]).unwrap().len(), 1);
-    assert!(shift.flips_output() && !shift.two_pass());
+    assert!(shift.stores_flipped(false) && !shift.stores_flipped(true) && !shift.two_pass());
     let still = ImageFilter::Offset { dx: 0.0, dy: f32::NAN };
     let passes = filter_passes(&[ImageFilter::brightness(0.5), still]).unwrap();
     assert_eq!(passes.len(), 1, "a zero offset folds into the matrix before it");
@@ -1347,7 +1348,7 @@ fn the_matrices_beside_a_two_draw_filter_ride_its_draws() {
     assert!(matches!(sketch[0].filter, ImageFilter::Morphology { .. }));
     assert!(sketch[0].fused.source_alpha);
     assert!(matches!(sketch[0].fused.post_matrix, Some(m) if m[18] == 0.25));
-    assert_eq!(plan_flips(&sketch), 0);
+    assert!(plan_stores_flipped(&sketch, true));
 
     let blurred = filter_passes(&[alpha, ImageFilter::gaussian_blur(2.0), ImageFilter::brightness(0.5)]).unwrap();
     assert_eq!(blurred.len(), 1);
@@ -1366,6 +1367,42 @@ fn the_matrices_beside_a_two_draw_filter_ride_its_draws() {
     assert!(two
         .iter()
         .all(|pass| !pass.fused.source_alpha && pass.fused.post_matrix.is_none()));
+}
+
+/// A plan's result is stored the way its passes leave it: a single draw
+/// turns the image over and a two-draw filter does not, from either kind of
+/// source, while the noise generator reads nothing and stores the way a
+/// draw into a target lands whatever its source - so the passes after it
+/// count from there.
+#[test]
+fn a_plan_follows_the_image_through_its_passes() {
+    use crate::{ImageFilter, TurbulenceKind};
+    let noise = ImageFilter::Turbulence {
+        base_frequency: [0.1, 0.1],
+        num_octaves: 1,
+        seed: 1,
+        stitch_tiles: false,
+        kind: TurbulenceKind::FractalNoise,
+        transform: crate::Transform2D::identity(),
+    };
+    let bright = ImageFilter::brightness(0.5);
+    let blur = ImageFilter::gaussian_blur(2.0);
+    let stored = |filters: &[ImageFilter], source_flipped: bool| {
+        plan_stores_flipped(&filter_passes(filters).unwrap(), source_flipped)
+    };
+    for source_flipped in [false, true] {
+        assert_eq!(stored(&[bright], source_flipped), !source_flipped);
+        assert_eq!(stored(&[blur], source_flipped), source_flipped);
+        assert_eq!(
+            stored(&[bright, blur, ImageFilter::LinearRgbToSrgb], source_flipped),
+            source_flipped
+        );
+        assert!(stored(&[noise], source_flipped));
+        assert!(stored(&[noise, blur], source_flipped));
+        assert!(!stored(&[noise, bright], source_flipped));
+        assert!(stored(&[noise, bright, ImageFilter::LinearRgbToSrgb], source_flipped));
+        assert!(!stored(&[bright, noise, ImageFilter::LinearRgbToSrgb], source_flipped));
+    }
 }
 
 /// A chain copies its result once more only when the passes would leave it

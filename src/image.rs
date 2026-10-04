@@ -853,20 +853,22 @@ impl ImageFilter {
         Some(Self::ColorMatrix { matrix: m })
     }
 
-    /// Whether one pass of this filter flips the image's stored orientation:
-    /// a color-matrix pass renders through the render-target convention once
-    /// (flipped), while the two-pass Gaussian blur and morphology flip twice
-    /// and preserve it. Exhaustive on purpose - a new variant must declare
-    /// its parity here.
-    pub(crate) fn flips_output(&self) -> bool {
+    /// How one pass of this filter leaves its result stored, given how its
+    /// source is (`true`: the way a render target is, rows bottom up). A
+    /// single draw stores the other way up from the texel rows it read; the
+    /// two-draw Gaussian blur and morphology turn the image over twice; the
+    /// turbulence generator reads nothing, so its noise lands the way any
+    /// draw into a target does whatever its source. Exhaustive on purpose -
+    /// a new variant must declare itself here.
+    pub(crate) fn stores_flipped(&self, source_flipped: bool) -> bool {
         match self {
+            Self::Turbulence { .. } => true,
             Self::ColorMatrix { .. }
-            | Self::Turbulence { .. }
             | Self::LinearRgbToSrgb
             | Self::SrgbToLinearRgb
             | Self::Blend { .. }
-            | Self::Offset { .. } => true,
-            Self::GaussianBlur { .. } | Self::Morphology { .. } => false,
+            | Self::Offset { .. } => !source_flipped,
+            Self::GaussianBlur { .. } | Self::Morphology { .. } => source_flipped,
         }
     }
 
