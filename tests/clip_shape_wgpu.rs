@@ -437,6 +437,43 @@ fn shape_clips_nest_and_intersect() {
     assert_eq!(px(&overlapping, 80, 40), WHITE, "in the second circle only");
 }
 
+/// Two frames that all but coincide clip to what both cover: where the
+/// inner one reaches a fraction of a pixel past the outer, the outer's edge
+/// is the one that counts, and on the other sides the inner's.
+#[test]
+fn nested_frames_that_nearly_coincide_clip_to_what_both_cover() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let frame = |x: f32, y: f32, w: f32, h: f32| {
+        let mut path = Path::new();
+        path.rounded_rect(x, y, w, h, 14.0);
+        path
+    };
+    let buf = render(&device, &queue, |canvas| {
+        // x 10..80 and y 10..80, then x 10.6..80.4 and y 10..79.6.
+        canvas.clip_path(&frame(10.0, 10.0, 70.0, 70.0), FillRule::NonZero);
+        canvas.clip_path(&frame(10.6, 10.0, 69.8, 69.6), FillRule::NonZero);
+        fill_everything(canvas);
+    });
+    let covered = |x: u32, y: u32| 1.0 - f32::from(px(&buf, x, y)[1]) / 255.0;
+    for (x, y, want, what) in [
+        (80, 45, 0.0, "past the outer frame's right side"),
+        (79, 45, 1.0, "inside both"),
+        (10, 45, 0.4, "the inner frame's left side"),
+        (45, 79, 0.6, "the inner frame's bottom side"),
+        (45, 80, 0.0, "below the inner frame"),
+        (45, 10, 1.0, "the top side they share"),
+    ] {
+        assert!(
+            (covered(x, y) - want).abs() < 0.03,
+            "{what}: ({x},{y}) is {}",
+            covered(x, y)
+        );
+    }
+}
+
 /// A shape belongs to its target: on the canvas it gates a layer's
 /// composite and not its content, inside the layer only the content, and
 /// on an image nothing drawn to the screen.

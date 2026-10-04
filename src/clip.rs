@@ -193,18 +193,19 @@ where
             return false;
         };
         if let Some((current, current_coverage)) = self.clip_shape() {
-            if !current_coverage.contains(&shape) {
-                if coverage.contains(&current) {
+            if let Some(both) = current.intersection(&shape, self.fringe_width) {
+                if both == current {
                     // The shape in force already clips to less.
                     return true;
                 }
-                let Some(both) = current.intersection(&shape) else {
-                    return false;
-                };
                 let Some(both_coverage) = both.coverage(self.fringe_width) else {
                     return false;
                 };
                 (shape, coverage) = (both, both_coverage);
+            } else if coverage.contains(&current) {
+                return true;
+            } else if !current_coverage.contains(&shape) {
+                return false;
             }
         }
         self.clip_stack.push(ClipEntry {
@@ -881,25 +882,29 @@ fn nested_shape_clips_keep_one_shape_in_force() {
 fn a_rounded_clip_nested_in_its_twin_stays_a_shape() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(100, 100, 1.0);
-    let rounded = |x: f32| {
+    let rounded = |x: f32, y: f32| {
         let mut path = Path::new();
-        path.rounded_rect(x, 10.0, 80.0, 60.0, 16.0);
+        path.rounded_rect(x, y, 80.0, 60.0, 16.0);
         path
     };
-    canvas.clip_path(&rounded(10.0), FillRule::NonZero);
-    canvas.clip_path(&rounded(10.0), FillRule::NonZero);
-    canvas.clip_path(&rounded(10.3), FillRule::NonZero);
+    canvas.clip_path(&rounded(10.0, 10.0), FillRule::NonZero);
+    canvas.clip_path(&rounded(10.0, 10.0), FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 1, "its twin adds nothing");
+    // Shifted along a side, the two share a narrower box with the same
+    // corners: the left ones of one, the right ones of the other.
+    canvas.clip_path(&rounded(10.3, 10.0), FillRule::NonZero);
+    canvas.clip_path(&rounded(14.0, 10.0), FillRule::NonZero);
     assert!(!canvas.clip_active());
-    let radii = canvas.clip_shape().unwrap().0.radii;
+    let (shape, _) = canvas.clip_shape().unwrap();
     assert!(
-        (radii[0] - 16.0).abs() < 1e-3 && (radii[1] - 16.0).abs() < 1e-3,
-        "{radii:?}"
+        (shape.extent[0] - 38.0).abs() < 1e-3 && (shape.radii[0] - 16.0).abs() < 1e-3,
+        "{shape:?}"
     );
 
-    canvas.clip_path(&rounded(14.0), FillRule::NonZero);
+    canvas.clip_path(&rounded(18.0, 14.0), FillRule::NonZero);
     assert!(
         canvas.clip_active(),
-        "four pixels across is another region: the stencil's"
+        "shifted across a corner, what they share has corners of its own: the stencil's"
     );
 }
 

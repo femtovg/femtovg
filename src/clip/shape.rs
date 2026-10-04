@@ -26,9 +26,9 @@ const CURVE_SAMPLES: usize = 7;
 /// Points taken along each corner when asking whether a box lies in another.
 const CORNER_SAMPLES: usize = 9;
 
-/// How far, in fringe widths, a box may leave another and still count as
-/// inside it: the stencil a finer answer would fall back to resolves a
-/// clip's edge to the pixel center, no closer than this.
+/// How far, in fringe widths, the one box nested clips are combined into
+/// may stray from what they cover together: half a pixel, no further than
+/// the stencil the pair would otherwise go to resolves an edge.
 const CONTAINMENT_SLACK: f32 = 0.5;
 
 /// The corner radius, in fringe widths, under which a corner is taken as
@@ -286,24 +286,29 @@ impl RoundedBox {
         })
     }
 
-    /// The box both this one and `other` cover, when both are parallelograms
-    /// with parallel sides: then their intersection is one too. `None` when
-    /// either has round corners, their sides are not parallel, or they do
-    /// not overlap.
-    pub(crate) fn intersection(&self, other: &Self) -> Option<Self> {
-        if self.radii != [0.0, 0.0] || other.radii != [0.0, 0.0] {
-            return None;
-        }
-        // `other` in this box's frame: its center, and its half sides, which
-        // must each run along one of this frame's axes.
+    /// What both this box and `other` cover, as one box, when their sides
+    /// are parallel: exactly for two parallelograms; with round corners, the
+    /// box with the nearer of each pair of sides and the corners of one of
+    /// the two, when its outline stays within [`CONTAINMENT_SLACK`] of the
+    /// real intersection's - one box inside the other, or two that all but
+    /// coincide. `None` for any other overlap, or none.
+    pub(crate) fn intersection(&self, other: &Self, fringe_width: f32) -> Option<Self> {
+        // `other` in this box's frame: its center, and its half sides and
+        // radii, which must each run along one of this frame's axes.
         let to_frame = other.frame / self.frame;
         let Transform2D([a, b, c, d, x, y]) = to_frame;
         let scale = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
         let aligned = |along: f32, across: f32| across.abs() <= 1e-4 * scale && along.abs() > 0.0;
-        let half = if aligned(a, b) && aligned(d, c) {
-            [a.abs() * other.extent[0], d.abs() * other.extent[1]]
+        let (half, radii) = if aligned(a, b) && aligned(d, c) {
+            (
+                [a.abs() * other.extent[0], d.abs() * other.extent[1]],
+                [a.abs() * other.radii[0], d.abs() * other.radii[1]],
+            )
         } else if aligned(b, a) && aligned(c, d) {
-            [c.abs() * other.extent[1], b.abs() * other.extent[0]]
+            (
+                [c.abs() * other.extent[1], b.abs() * other.extent[0]],
+                [c.abs() * other.radii[1], b.abs() * other.radii[0]],
+            )
         } else {
             return None;
         };
@@ -313,10 +318,21 @@ impl RoundedBox {
             return None;
         }
         let center = Transform2D::translation((low[0] + high[0]) * 0.5, (low[1] + high[1]) * 0.5);
-        Some(Self {
+        let extent = [(high[0] - low[0]) * 0.5, (high[1] - low[1]) * 0.5];
+        let with_corners = |radii: [f32; 2]| Self {
             frame: center * self.frame,
-            extent: [(high[0] - low[0]) * 0.5, (high[1] - low[1]) * 0.5],
-            radii: [0.0, 0.0],
+            extent,
+            radii: [radii[0].min(extent[0]), radii[1].min(extent[1])],
+        };
+        if self.radii == [0.0, 0.0] && other.radii == [0.0, 0.0] {
+            return Some(with_corners([0.0, 0.0]));
+        }
+        // On the real intersection's outline the further of the two boxes'
+        // edges is the one a point is on.
+        let (mine, theirs) = (self.coverage(fringe_width)?, other.coverage(fringe_width)?);
+        [radii, self.radii].into_iter().map(with_corners).find(|both| {
+            both.outline()
+                .all(|point| mine.distance(point).max(theirs.distance(point)).abs() <= CONTAINMENT_SLACK)
         })
     }
 
@@ -864,7 +880,7 @@ mod tests {
             RoundedBox::fit(&path).unwrap()
         };
         let corners = |a: RoundedBox, b: RoundedBox| {
-            let mut corners = a.intersection(&b).unwrap().corners().to_vec();
+            let mut corners = a.intersection(&b, 1.0).unwrap().corners().to_vec();
             corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
             corners
         };
@@ -885,7 +901,7 @@ mod tests {
         // Under one transform the sides stay parallel.
         let mut spin = Transform2D::rotation(0.7);
         spin.scale(2.0, 0.5);
-        let both = a.transformed(&spin).intersection(&b.transformed(&spin)).unwrap();
+        let both = a.transformed(&spin).intersection(&b.transformed(&spin), 1.0).unwrap();
         let mut spun = both.corners().to_vec();
         spun.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let mut expected_spun = expected.map(|[x, y]| {
@@ -897,18 +913,64 @@ mod tests {
             assert_close(*corner, expected);
         }
 
-        assert_eq!(a.intersection(&rect(70.0, 10.0, 10.0, 10.0)), None, "apart");
+        assert_eq!(a.intersection(&rect(70.0, 10.0, 10.0, 10.0), 1.0), None, "apart");
         assert_eq!(
-            a.intersection(&b.transformed(&Transform2D::rotation(0.3))),
+            a.intersection(&b.transformed(&Transform2D::rotation(0.3)), 1.0),
             None,
             "not parallel"
         );
         let mut circle = Path::new();
-        circle.circle(30.0, 30.0, 20.0);
+        circle.circle(55.0, 45.0, 20.0);
         assert_eq!(
-            a.intersection(&RoundedBox::fit(&circle).unwrap()),
+            a.intersection(&RoundedBox::fit(&circle).unwrap(), 1.0),
             None,
-            "round corners"
+            "a circle across a corner: what they share is no box"
         );
+    }
+
+    #[test]
+    fn boxes_with_round_corners_intersect_as_one_when_one_all_but_holds_the_other() {
+        let rounded = |x0: f32, y0: f32, x1: f32, y1: f32, radius: f32| RoundedBox {
+            frame: Transform2D::translation((x0 + x1) * 0.5, (y0 + y1) * 0.5),
+            extent: [(x1 - x0) * 0.5, (y1 - y0) * 0.5],
+            radii: [radius, radius],
+        };
+        let sides = |shape: RoundedBox| {
+            let (x, y) = shape.frame.transform_point(0.0, 0.0);
+            [
+                x - shape.extent[0],
+                y - shape.extent[1],
+                x + shape.extent[0],
+                y + shape.extent[1],
+            ]
+        };
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-3);
+
+        // An icon's frame and a second one a fraction of a pixel smaller and
+        // a quarter pixel further right: each side of what they share is
+        // the nearer one, which is neither frame.
+        let outer = rounded(131.94, 33.23, 325.49, 226.78, 41.47);
+        let inner = rounded(132.72, 33.23, 325.72, 226.22, 41.36);
+        for (first, second) in [(outer, inner), (inner, outer)] {
+            let both = first.intersection(&second, 1.0).unwrap();
+            assert!(near(sides(both), [132.72, 33.23, 325.49, 226.22]), "{:?}", sides(both));
+            assert!((41.3..41.5).contains(&both.radii[0]));
+        }
+
+        // One inside the other is the inner one, whichever is asked.
+        let small = rounded(150.0, 60.0, 300.0, 200.0, 12.0);
+        assert_eq!(outer.intersection(&small, 1.0), Some(small));
+        assert_eq!(small.intersection(&outer, 1.0), Some(small));
+
+        // A band across the straight part of a rounded box is a rect; one
+        // that cuts through its corners shares no box with it.
+        let band = rounded(100.0, 100.0, 400.0, 180.0, 0.0);
+        let cut = outer.intersection(&band, 1.0).unwrap();
+        assert!(near(sides(cut), [131.94, 100.0, 325.49, 180.0]) && cut.radii == [0.0, 0.0]);
+        let across = rounded(100.0, 50.0, 400.0, 180.0, 0.0);
+        assert_eq!(outer.intersection(&across, 1.0), None);
+        // Nor do two frames a pixel apart at a corner.
+        let shifted = rounded(132.94, 34.23, 326.49, 227.78, 41.47);
+        assert_eq!(outer.intersection(&shifted, 1.0), None);
     }
 }
