@@ -2162,7 +2162,7 @@ where
         // TODO: Early out if text is outside the canvas bounds, or maybe even check for each character in layout.
 
         let text_context = self.text_context.clone();
-        let mut text_context = text_context.borrow_mut();
+        let text_context = text_context.borrow();
 
         // How this glyph run is rasterized for the current canvas transform.
         #[derive(Clone, Copy)]
@@ -2225,7 +2225,7 @@ where
         let mut stroke = paint.stroke.clone();
         stroke.line_width *= effective_scale;
 
-        let Some(font) = text_context.font_mut(font_id) else {
+        let Some(font) = text_context.font(font_id) else {
             return Err(ErrorKind::NoFontFound);
         };
 
@@ -4464,65 +4464,6 @@ fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
     assert_eq!(stroke_params(3.0, 1.0, true).inner_col[3], 1.0);
 }
 
-/// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables
-/// removed, so the fallback metric paths can be exercised on real assets.
-#[cfg(all(test, feature = "textlayout"))]
-fn font_without_tables(data: &[u8], drop_tags: &[&[u8; 4]]) -> Vec<u8> {
-    let read_u16 = |buf: &[u8], at: usize| u16::from_be_bytes([buf[at], buf[at + 1]]);
-    let read_u32 =
-        |buf: &[u8], at: usize| u32::from_be_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]) as usize;
-
-    let num_tables = read_u16(data, 4) as usize;
-
-    // Collect (tag, offset, length) for the tables we keep, in directory order.
-    let mut kept: Vec<([u8; 4], usize, usize)> = Vec::new();
-    for i in 0..num_tables {
-        let rec = 12 + i * 16;
-        let tag = [data[rec], data[rec + 1], data[rec + 2], data[rec + 3]];
-        if drop_tags.iter().any(|d| **d == tag) {
-            continue;
-        }
-        let offset = read_u32(data, rec + 8);
-        let length = read_u32(data, rec + 12);
-        kept.push((tag, offset, length));
-    }
-
-    let new_num = kept.len();
-    let mut out = Vec::new();
-    // Offset table header: keep the original sfnt version, fix up the table count
-    // and the binary-search hint fields for the new count.
-    out.extend_from_slice(&data[0..4]);
-    out.extend_from_slice(&(new_num as u16).to_be_bytes());
-    let max_pow2: u16 = 1 << (15 - (new_num.max(1) as u16).leading_zeros());
-    out.extend_from_slice(&(max_pow2 * 16).to_be_bytes());
-    out.extend_from_slice(&(15 - max_pow2.leading_zeros() as u16).to_be_bytes());
-    out.extend_from_slice(&((new_num as u16 * 16).wrapping_sub(max_pow2 * 16)).to_be_bytes());
-
-    let mut data_offset = 12 + new_num * 16;
-    let mut records = Vec::new();
-    let mut blobs = Vec::new();
-    for (tag, offset, length) in kept {
-        let padded = (length + 3) & !3;
-        let mut blob = data[offset..offset + length].to_vec();
-        blob.resize(padded, 0);
-        let mut rec = Vec::new();
-        rec.extend_from_slice(&tag);
-        rec.extend_from_slice(&0u32.to_be_bytes()); // checksum (ignored by ttf-parser)
-        rec.extend_from_slice(&(data_offset as u32).to_be_bytes());
-        rec.extend_from_slice(&(length as u32).to_be_bytes());
-        records.push(rec);
-        blobs.push(blob);
-        data_offset += padded;
-    }
-    for rec in records {
-        out.extend_from_slice(&rec);
-    }
-    for blob in blobs {
-        out.extend_from_slice(&blob);
-    }
-    out
-}
-
 /// A font without an OS/2 table (so no strikeout metric) and without a post
 /// table (so no underline metric) must still yield sensible, finite, positive
 /// decoration metrics via the ascender/descender-derived fallbacks — and never
@@ -4530,6 +4471,8 @@ fn font_without_tables(data: &[u8], drop_tags: &[&[u8; 4]]) -> Vec<u8> {
 #[cfg(feature = "textlayout")]
 #[test]
 fn decoration_metrics_fall_back_without_os2_and_post() {
+    use crate::text::test_fonts::font_without_tables;
+
     let original = include_bytes!("../examples/assets/amiri-regular.ttf");
 
     // Sanity: ttf-parser sees no strikeout/underline once the tables are gone.
@@ -4599,6 +4542,68 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
         2,
         "expected underline + strikethrough rects in one fill, got {fills:?}"
     );
+}
+
+/// Glyphs are drawn directly instead of through the shared atlas when the
+/// transform is more than a uniform scale and translation, when they are too
+/// large to cache, or when a gradient or image paint is scaled. PNG glyphs
+/// have no outline to draw, so they go through an atlas that lives from the
+/// first such draw of a frame until the flush.
+#[cfg(feature = "textlayout")]
+#[test]
+fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::png_glyph_font;
+
+    let font_data = png_glyph_font();
+    let solid = Paint::color(Color::black());
+    let gradient = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    // `draw_glyph_run` draws a run directly when its font size times the scale
+    // of the canvas transform is above 92.
+    let small = 24.0;
+    let oversized = 96.0;
+    let cases = [
+        ("rotated", Transform2D::rotation(0.2), &solid, small),
+        ("oversized", Transform2D::identity(), &solid, oversized),
+        ("scaled gradient", Transform2D::scaling(2.0, 2.0), &gradient, small),
+    ];
+    // A frame fills the glyph this many times and strokes it after each fill.
+    let fills_per_frame = 2;
+    for (case, transform, paint, font_size) in cases {
+        let paint = paint.clone().with_font_size(font_size);
+        let renderer = RecordingRenderer::default();
+        let recorded_commands = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas.add_font_mem(&font_data).unwrap();
+        canvas.set_transform(&transform);
+        let glyph = PositionedGlyph {
+            x: 50.0,
+            y: 100.0,
+            glyph_id: 0,
+        };
+
+        for _frame in 0..2 {
+            for _draw in 0..fills_per_frame {
+                canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+                assert!(canvas.ephemeral_glyph_atlas.is_some(), "{case}");
+                canvas.stroke_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+            }
+            canvas.flush_to_output(());
+            assert!(canvas.ephemeral_glyph_atlas.is_none(), "{case}");
+
+            // Every fill and stroke draws the bitmap, which takes
+            // `image-loading` to decode.
+            if cfg!(feature = "image-loading") {
+                let commands = recorded_commands.borrow();
+                let color_draws = commands
+                    .iter()
+                    .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)));
+                let fills_and_strokes = 2 * fills_per_frame;
+                assert_eq!(color_draws.count(), fills_and_strokes, "{case}");
+            }
+        }
+    }
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /

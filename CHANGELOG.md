@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a panic with the `swash` and `textlayout` features when text with PNG
+  bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
+  rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
+  pixels, or scaled with a gradient or image paint.
 - Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
   `feMorphology` and `feOffset` primitives: a dilation grows the opaque
   regions of an image by a whole-pixel radius per axis and an erosion
