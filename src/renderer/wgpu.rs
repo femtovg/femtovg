@@ -204,6 +204,15 @@ impl UniformArray {
             self.0[53] = f32::from(u8::from(mask.hard));
         }
     }
+
+    /// An image paint's transfer, in the paint matrix's first column's w
+    /// (`paint_mat[0].w`), which no image paint reads. Written only for a
+    /// paint that has one: a filter pass keeps its own values in that column.
+    pub fn set_image_transfer(&mut self, transfer: Option<crate::paint::Transfer>) {
+        if let Some(transfer) = transfer {
+            self.0[15] = transfer.uniform();
+        }
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -231,6 +240,7 @@ impl From<&Params> for UniformArray {
         arr.set_conic_start_angle(params.conic_start_angle);
         arr.set_clip(params.clip.as_ref());
         arr.set_clip_mask(params.clip_mask.as_ref());
+        arr.set_image_transfer(params.image_transfer);
 
         arr
     }

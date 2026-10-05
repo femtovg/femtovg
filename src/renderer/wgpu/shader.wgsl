@@ -465,6 +465,41 @@ fn renderImageGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
 }
 
+// The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
+// the unpremultiplied color, alpha untouched: to sRGB when to_srgb, else to
+// linearRGB.
+fn transferColor(color: vec4<f32>, to_srgb: bool) -> vec4<f32> {
+    var c: vec4<f32> = color;
+    if (c.a > 0.0) {
+        c = vec4<f32>(c.rgb / c.a, c.a);
+    }
+    let x = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var y: vec3<f32>;
+    if (to_srgb) {
+        y = mix(x * 12.92, 1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, step(vec3<f32>(0.0031308), x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3<f32>(2.4)), step(vec3<f32>(0.04045), x));
+    }
+    return vec4<f32>(y * c.a, c.a);
+}
+
+// A sampled image texel as the paint uses it: premultiplied, converted by
+// the paint's transfer if it has one - rounded to 8 bits, as the transfer's
+// pass stores its result - then tinted.
+fn paintTexel(texel: vec4<f32>, params: Params) -> vec4<f32> {
+    var color: vec4<f32> = texel;
+    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
+    if (params.tex_type == 2) { color = vec4(color.x); }
+    // The transfer is the paint matrix's first column's w (0 none, 1 to
+    // sRGB, 2 to linearRGB), which no image paint reads.
+    let transfer = params.paint_mat[0].w;
+    if (transfer > 0.5) {
+        color = floor(transferColor(color, transfer < 1.5) * 255.0 + 0.5) / 255.0;
+    }
+    // Apply color tint and alpha.
+    return color * params.inner_col;
+}
+
 fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate color from texture
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy / params.extent;
@@ -472,24 +507,11 @@ fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Half a level toward the larger mip: browsers minify sharper than plain
     // trilinear (Chromium samples the larger level, Firefox downsamples
     // directly); no effect without mipmaps or under magnification.
-    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, pt, -0.5);
-
-    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
-    if (params.tex_type == 2) { color = vec4(color.x); }
-
-    // Apply color tint and alpha.
-    color *= params.inner_col;
-    return color;
+    return paintTexel(textureSampleBias(image_texture, image_sampler, pt, -0.5), params);
 }
 
 fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, vertex.ftcoord, -0.5);
-
-    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
-    if (params.tex_type == 2) { color = vec4(color.x); }
-    // Apply color tint and alpha.
-    color *= params.inner_col;
-    return color;
+    return paintTexel(textureSampleBias(image_texture, image_sampler, vertex.ftcoord, -0.5), params);
 }
 
 // A blur tap, premultiplied: a straight-alpha source is converted per tap,
