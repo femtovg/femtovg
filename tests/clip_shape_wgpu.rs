@@ -872,6 +872,60 @@ fn a_shape_clip_belongs_to_the_target_it_was_taken_on() {
     assert_eq!(px(&on_image, 4, 4), RED, "the image's clip does not gate the screen");
 }
 
+/// A draw under a small shape is scissored to the pixels the shape reaches,
+/// its stencil draws with it: a concave fill that spans the target leaves
+/// no winding outside the shape for the next fill to take as its own, and
+/// the scissor ends with the draw. On the screen and in a layer, whose
+/// image is stored bottom up.
+#[test]
+fn a_fill_under_a_small_shape_leaves_the_rest_of_the_target_alone() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let scene = |canvas: &mut Canvas<WGPURenderer>| {
+        let mut clip = Path::new();
+        clip.rounded_rect(8.0, 10.0, 30.0, 20.0, 6.0);
+        let mut dented = Path::new();
+        dented.move_to(-8.0, -8.0);
+        dented.line_to(104.0, -8.0);
+        dented.line_to(104.0, 104.0);
+        dented.line_to(-8.0, 104.0);
+        dented.line_to(4.0, 48.0);
+        dented.close();
+        let mut ring = Path::new();
+        ring.rect(44.0, 34.0, 48.0, 58.0);
+        ring.rect(54.0, 44.0, 28.0, 38.0);
+        canvas.save();
+        canvas.clip_path(&clip, FillRule::NonZero);
+        canvas.fill_path(&dented, &red());
+        canvas.restore();
+        canvas.fill_path(
+            &ring,
+            &Paint::color(Color::rgb(0, 0, 255)).with_fill_rule(FillRule::EvenOdd),
+        );
+    };
+    let check = |frame: &[u8], red: [u8; 3], blue: [u8; 3], on: &str| {
+        assert_eq!(px(frame, 22, 20), red, "{on}: the fill, inside the shape");
+        assert_eq!(px(frame, 22, 60), WHITE, "{on}: nothing of it below the shape");
+        assert_eq!(px(frame, 48, 60), blue, "{on}: the ring, drawn whole after it");
+        assert_eq!(px(frame, 88, 88), blue, "{on}: the ring's far corner");
+        for y in 46..80 {
+            for x in 56..80 {
+                assert_eq!(px(frame, x, y), WHITE, "{on}: the ring's hole at {x},{y}");
+            }
+        }
+    };
+    let on_screen = render(&device, &queue, scene);
+    check(&on_screen, RED, [0, 0, 255], "screen");
+    let in_layer = render(&device, &queue, |canvas| {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        scene(canvas);
+        canvas.end_layer();
+    });
+    check(&in_layer, [255, 128, 128], [128, 128, 255], "layer");
+}
+
 /// `Copy` replaces what it covers, transparent source included, so coverage
 /// cannot hold it to a shape: under one the shape is cut on the stencil,
 /// nothing outside it changes, and the winding a concave fill leaves there

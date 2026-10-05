@@ -616,6 +616,7 @@ impl Renderer for WGPURenderer {
 
         let mut current_render_target = RenderTarget::Screen;
         for command in commands {
+            render_pass_builder.set_clip_bounds(&command);
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
                     current_render_target = render_target;
@@ -2041,6 +2042,8 @@ struct RenderPassBuilder<'a> {
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
     current_bound_offset: Option<u32>,
+    // The scissor rect set on the open pass; none is the whole target.
+    current_clip_bounds: Option<[u32; 4]>,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -2076,7 +2079,23 @@ impl<'a> RenderPassBuilder<'a> {
             current_pipeline_state: None,
             current_stencil_reference: None,
             current_bound_offset: None,
+            current_clip_bounds: None,
         }
+    }
+
+    /// Scissors the open pass's draws to the pixels `command`'s clip
+    /// leaves them, or to the whole target again.
+    fn set_clip_bounds(&mut self, command: &super::Command) {
+        let (width, height) = (self.viewport[0] as u32, self.viewport[1] as u32);
+        let bounds = command.clip_bounds([width, height]);
+        if self.current_clip_bounds == bounds {
+            return;
+        }
+        self.current_clip_bounds = bounds;
+        let [x, y, w, h] = bounds.unwrap_or([0, 0, width, height]);
+        // An image target stores its rows bottom up.
+        let y = if self.rendering_to_texture { height - (y + h) } else { y };
+        self.rpass.as_mut().unwrap().set_scissor_rect(x, y, w, h);
     }
 
     fn set_viewport(&mut self, viewport: [f32; 2]) {
@@ -2244,6 +2263,7 @@ impl<'a> RenderPassBuilder<'a> {
         self.current_pipeline_state = None;
         self.current_stencil_reference = None;
         self.current_bound_offset = None;
+        self.current_clip_bounds = None;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer

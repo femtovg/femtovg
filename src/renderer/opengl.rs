@@ -48,6 +48,8 @@ pub struct OpenGl {
     // The programs of draws under a clip shape, by shader type and glyph texture use, each built when first drawn
     // with (None if that failed): no other program evaluates a shape, and few of them are ever drawn under one.
     clip_shape_programs: FnvHashMap<(u8, bool), Option<MainProgram>>,
+    // The scissor rect of the draws under a clip shape; none is no scissor.
+    current_clip_bounds: Option<[u32; 4]>,
     current_program: u8,
     current_program_needs_glyph_texture: bool,
     current_program_clips: bool,
@@ -294,6 +296,7 @@ impl OpenGl {
             main_programs_with_glyph_texture,
             main_programs_without_glyph_texture,
             clip_shape_programs,
+            current_clip_bounds: None,
             current_program: 0,
             current_program_needs_glyph_texture: true,
             current_program_clips: false,
@@ -1041,6 +1044,29 @@ impl OpenGl {
         });
     }
 
+    /// Scissors the draws that follow to `bounds` - x, y, width and height
+    /// from the target's top left - or lifts the scissor.
+    fn set_clip_bounds(&mut self, bounds: Option<[u32; 4]>) {
+        if self.current_clip_bounds == bounds {
+            return;
+        }
+        self.current_clip_bounds = bounds;
+        unsafe {
+            match bounds {
+                Some([x, y, width, height]) => {
+                    self.context.enable(glow::SCISSOR_TEST);
+                    self.context.scissor(
+                        x as i32,
+                        self.view[1] as i32 - (y + height) as i32,
+                        width as i32,
+                        height as i32,
+                    );
+                }
+                None => self.context.disable(glow::SCISSOR_TEST),
+            }
+        }
+    }
+
     fn main_program(&self) -> &MainProgram {
         if self.current_program_clips {
             return self
@@ -1179,6 +1205,7 @@ impl Renderer for OpenGl {
         self.check_error("render prepare");
 
         for cmd in commands {
+            self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
             self.set_composite_operation(cmd.composite_operation);
 
             match cmd.cmd_type {
@@ -1219,6 +1246,9 @@ impl Renderer for OpenGl {
                 }
             }
         }
+
+        // No scissor of a clipped draw outlives the frame.
+        self.set_clip_bounds(None);
 
         unsafe {
             self.context.disable_vertex_attrib_array(0);

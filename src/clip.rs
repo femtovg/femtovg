@@ -1511,6 +1511,77 @@ fn a_shape_clip_gates_only_draws_into_its_target() {
     assert_eq!(canvas.clip_stack.len(), 1, "only the screen's circle is left");
 }
 
+/// A command whose draws carry a shape is bounded by the pixels the shape
+/// reaches - its fringe included, cut to the target, and never less than a
+/// pixel of it; a draw that carries none, or a coverage of one everywhere,
+/// is not bounded.
+#[test]
+fn a_draw_under_a_shape_is_bounded_by_the_pixels_the_shape_reaches() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 80, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut clip = Path::new();
+    clip.rounded_rect(20.25, 30.5, 40.5, 20.0, 5.0);
+    let mut dented = Path::new();
+    dented.move_to(-8.0, -8.0);
+    dented.line_to(108.0, -8.0);
+    dented.line_to(108.0, 88.0);
+    dented.line_to(-8.0, 88.0);
+    dented.line_to(30.0, 40.0);
+    dented.close();
+    let mut triangle = Path::new();
+    triangle.move_to(0.0, 0.0);
+    triangle.line_to(90.0, 40.0);
+    triangle.line_to(0.0, 70.0);
+    triangle.close();
+    let mut held = Path::new();
+    held.rect(30.0, 35.0, 10.0, 10.0);
+    let mut line = Path::new();
+    line.move_to(0.0, 40.0);
+    line.line_to(100.0, 40.0);
+
+    canvas.fill_path(&dented, &paint); // before the clip
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.fill_path(&dented, &paint); // concave
+    canvas.fill_path(&triangle, &paint); // convex
+    canvas.stroke_path(&line, &paint.clone().with_line_width(3.0));
+    canvas.fill_path(&held, &paint); // carries a coverage of one everywhere
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let bounds: Vec<_> = commands
+        .iter()
+        .filter(|cmd| {
+            !matches!(
+                cmd.cmd_type,
+                CommandType::SetRenderTarget(_) | CommandType::ClearRect { .. }
+            )
+        })
+        .map(|cmd| cmd.clip_bounds([100, 80]))
+        .collect();
+    // The clip spans 20.25 to 60.75 and 30.5 to 50.5, and half a pixel of ramp.
+    let reached = Some([19, 30, 43, 21]);
+    assert_eq!(bounds, [None, reached, reached, reached, None]);
+    let concave = commands
+        .iter()
+        .find(|cmd| cmd.clip_bounds([100, 80]).is_some())
+        .unwrap();
+    assert!(matches!(concave.cmd_type, CommandType::ConcaveFill { .. }));
+    assert_eq!(
+        concave.clip_bounds([40, 40]),
+        Some([19, 30, 21, 10]),
+        "cut to the target"
+    );
+    assert_eq!(
+        concave.clip_bounds([10, 10]),
+        Some([9, 9, 1, 1]),
+        "a pixel of a target it misses"
+    );
+    assert_eq!(concave.clip_bounds([0, 0]), None);
+}
+
 /// The unclipped image blit would bypass a shape as it would the stencil.
 #[test]
 fn an_image_blit_under_a_shape_clip_takes_the_masked_path() {

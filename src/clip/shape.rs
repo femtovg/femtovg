@@ -561,6 +561,34 @@ impl ClipCoverage {
         }
     }
 
+    /// The device rectangle outside which the coverage is zero - the box out
+    /// to where its sides' ramps end - or `None` for a coverage of one
+    /// everywhere.
+    pub(crate) fn reach(&self) -> Option<Bounds> {
+        let [a, b, c, d] = self.linear;
+        let determinant = a * d - b * c;
+        if determinant == 0.0 {
+            return None;
+        }
+        // The inverse of the linear part takes the box's half sides, each
+        // with its half fringe, back to device pixels.
+        let outer = [self.extent[0] + 0.5, self.extent[1] + 0.5];
+        let half = [
+            (d.abs() * outer[0] + b.abs() * outer[1]) / determinant.abs(),
+            (c.abs() * outer[0] + a.abs() * outer[1]) / determinant.abs(),
+        ];
+        let center = [
+            (b * self.offset[1] - d * self.offset[0]) / determinant,
+            (c * self.offset[0] - a * self.offset[1]) / determinant,
+        ];
+        Some(Bounds {
+            minx: center[0] - half[0],
+            miny: center[1] - half[1],
+            maxx: center[0] + half[0],
+            maxy: center[1] + half[1],
+        })
+    }
+
     /// Whether the box holds a rectangle of device pixels whole, within
     /// [`DRAW_SLACK`]: a draw that stays inside it has nothing clipped, and
     /// along an edge it shares with the box its own antialiasing is its
@@ -655,6 +683,48 @@ mod tests {
         }
         path.close();
         path
+    }
+
+    /// A coverage is zero outside its reach, and the reach is no wider than
+    /// that: the box grown by the half fringe its sides' ramps run past it.
+    #[test]
+    fn a_coverage_reaches_as_far_as_its_ramps_and_no_further() {
+        let mut turned = Transform2D::identity();
+        turned.rotate(0.4);
+        turned.translate(31.0, 47.5);
+        let mut skewed = Transform2D::new(3.0, 0.5, -1.25, 0.75, 0.0, 0.0);
+        skewed.translate(40.25, 52.0);
+        for frame in [Transform2D::translation(40.25, 30.5), turned, skewed] {
+            for radius in [0.0, 6.0] {
+                let shape = RoundedBox {
+                    frame,
+                    extent: [20.0, 12.5],
+                    radii: [radius; 2],
+                };
+                let coverage = shape.coverage(1.0).unwrap();
+                let reach = coverage.reach().unwrap();
+                let per_fringe = shape.per_fringe(1.0);
+                let ramps = RoundedBox {
+                    extent: [20.0 + 0.5 * per_fringe[0], 12.5 + 0.5 * per_fringe[1]],
+                    radii: [0.0; 2],
+                    ..shape
+                }
+                .corners();
+                let pick = |f: fn(f32, f32) -> f32, axis: usize| ramps.iter().map(|c| c[axis]).reduce(f).unwrap();
+                assert_close([reach.minx, reach.miny], [pick(f32::min, 0), pick(f32::min, 1)]);
+                assert_close([reach.maxx, reach.maxy], [pick(f32::max, 0), pick(f32::max, 1)]);
+                for step in 0..(200 * 200) {
+                    let at = [(step % 200) as f32 * 0.75 - 40.0, (step / 200) as f32 * 0.75 - 40.0];
+                    let inside =
+                        reach.minx <= at[0] && at[0] <= reach.maxx && reach.miny <= at[1] && at[1] <= reach.maxy;
+                    assert!(
+                        inside || coverage.distance(at) >= 0.5,
+                        "{at:?} is covered outside {reach:?}"
+                    );
+                }
+            }
+        }
+        assert!(ClipCoverage::EVERYWHERE.reach().is_none());
     }
 
     #[test]
