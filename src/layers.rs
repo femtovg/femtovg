@@ -776,6 +776,7 @@ where
             None,
             Some((images.backdrop, pass)),
             Fused::default(),
+            None,
         )
         .then_some(target)
     }
@@ -987,6 +988,7 @@ where
                             None,
                             None,
                             Fused::default(),
+                            None,
                         );
                         converted
                     }

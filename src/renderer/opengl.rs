@@ -758,6 +758,31 @@ impl OpenGl {
         }
     }
 
+    /// Limits the draws that follow to `crop` - x, y, width and height in
+    /// the target's texel rows - until [`end_crop`](Self::end_crop), and says
+    /// whether that leaves anything to draw.
+    fn begin_crop(&self, crop: Option<[u32; 4]>) -> bool {
+        let Some([x, y, width, height]) = crop else {
+            return true;
+        };
+        if width == 0 || height == 0 {
+            return false;
+        }
+        unsafe {
+            self.context.enable(glow::SCISSOR_TEST);
+            self.context.scissor(x as i32, y as i32, width as i32, height as i32);
+        }
+        true
+    }
+
+    fn end_crop(&self, crop: Option<[u32; 4]>) {
+        if crop.is_some() {
+            unsafe {
+                self.context.disable(glow::SCISSOR_TEST);
+            }
+        }
+    }
+
     fn set_target(&mut self, images: &ImageStore<GlTexture>, target: RenderTarget) {
         self.current_render_target = target;
         match (target, &self.screen_target) {
@@ -899,7 +924,10 @@ impl OpenGl {
             Color::rgbaf(0., 0., 0., 0.),
             false,
         );
-        self.triangles(images, &cmd, &params);
+        if self.begin_crop(cmd.crop) {
+            self.triangles(images, &cmd, &params);
+        }
+        self.end_crop(cmd.crop);
 
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
@@ -990,7 +1018,10 @@ impl OpenGl {
 
         cmd.image = Some(horizontal_buffer);
 
-        self.triangles(images, &cmd, &params);
+        if self.begin_crop(cmd.crop) {
+            self.triangles(images, &cmd, &params);
+        }
+        self.end_crop(cmd.crop);
 
         // restore previous render target and view
         self.set_target(images, original_render_target);

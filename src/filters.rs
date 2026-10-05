@@ -68,6 +68,9 @@ pub(crate) struct Pass {
     pub(crate) level: Level,
     /// The matrices a two-draw filter carries in its draws.
     pub(crate) fused: Fused,
+    /// The rect the pass's result is clipped to ([`ImageFilter::Crop`]), as
+    /// given: x, y, width, height.
+    pub(crate) crop: Option<[f32; 4]>,
 }
 
 impl Pass {
@@ -76,6 +79,7 @@ impl Pass {
             filter,
             level,
             fused: Fused::default(),
+            crop: None,
         }
     }
 
@@ -312,6 +316,15 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         }
         folded.push(filter);
     }
+    // A crop rides the pass before it: that pass draws inside the rect only.
+    // With no pass before it, it is a copy of its own.
+    let crop_onto = |passes: &mut Vec<Pass>, rect: [f32; 4]| match passes.last_mut() {
+        Some(last) if last.level == FULL => last.crop = Some(last.crop.map_or(rect, |first| crop_both(first, rect))),
+        _ => passes.push(Pass {
+            crop: Some(rect),
+            ..Pass::at(ImageFilter::identity(), FULL)
+        }),
+    };
     let mut passes: Vec<Pass> = Vec::with_capacity(folded.len() + MAX_LEVELS + 2);
     for filter in folded {
         match filter {
@@ -321,6 +334,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
                 radius_y,
                 operator,
             } => passes.extend(morphology_passes(radius_x, radius_y, operator)),
+            ImageFilter::Crop { x, y, width, height } => crop_onto(&mut passes, [x, y, width, height]),
             other => passes.push(Pass::at(other, FULL)),
         }
         if passes.len() > MAX_FILTER_PASSES {
@@ -339,8 +353,12 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         if let Some(prev) = folded_passes.last_mut() {
             let one_size = previous_in == prev.level || prev.level == pass.level;
             if one_size {
-                if let Some(merged) = prev.filter.fold_with(pass.filter) {
-                    *prev = Pass::at(merged, pass.level);
+                let merged = prev.filter.fold_with(pass.filter);
+                if let (Some(merged), Some(crop)) = (merged, folded_crop(prev.crop, &pass)) {
+                    *prev = Pass {
+                        crop,
+                        ..Pass::at(merged, pass.level)
+                    };
                     continue;
                 }
             }
@@ -359,8 +377,11 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         if let Some(prev) = fused.last_mut() {
             if let ImageFilter::ColorMatrix { matrix } = pass.filter {
                 if prev.filter.two_pass() && prev.level == pass.level && prev.fused.post_matrix.is_none() {
-                    prev.fused.post_matrix = Some(matrix);
-                    continue;
+                    if let Some(crop) = folded_crop(prev.crop, &pass) {
+                        prev.fused.post_matrix = Some(matrix);
+                        prev.crop = crop;
+                        continue;
+                    }
                 }
             }
             if let ImageFilter::ColorMatrix { matrix } = prev.filter {
@@ -369,6 +390,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
                     && previous_in == prev.level
                     && alpha_only(&matrix)
                     && !pass.fused.source_alpha
+                    && prev.crop.is_none()
                 {
                     *prev = Pass {
                         fused: Fused {
@@ -385,6 +407,47 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         fused.push(pass);
     }
     Some(fused)
+}
+
+/// What two crops, one after the other, leave: the rect both hold.
+fn crop_both([ax, ay, aw, ah]: [f32; 4], [bx, by, bw, bh]: [f32; 4]) -> [f32; 4] {
+    let (x, y) = (ax.max(bx), ay.max(by));
+    let (right, bottom) = ((ax + aw).min(bx + bw), (ay + ah).min(by + bh));
+    [x, y, (right - x).max(0.0), (bottom - y).max(0.0)]
+}
+
+/// The crop of the one pass that a pass cropped to `first` and `then`, a
+/// pass after it that maps each pixel by itself, make together - or `None`
+/// when no one crop leaves what the two do. Where `then`'s own crop lies
+/// inside `first` the first crop took nothing that is left. Anywhere else
+/// it left transparent black, which `then` must leave as it is for the
+/// crop to come after it instead: a color matrix does unless it adds to
+/// alpha, a transfer always. A crop is a rect of full-size pixels, so the
+/// pass that takes it over must draw at full size: a pyramid's first
+/// halving does not.
+fn folded_crop(first: Option<[f32; 4]>, then: &Pass) -> Option<Option<[f32; 4]>> {
+    let Some(first) = first else {
+        return Some(then.crop);
+    };
+    if then.level != FULL {
+        return None;
+    }
+    let [ax, ay, aw, ah] = first;
+    let inside = then
+        .crop
+        .is_some_and(|[bx, by, bw, bh]| ax <= bx && ay <= by && bx + bw <= ax + aw && by + bh <= ay + ah);
+    let keeps_clear = match then.filter {
+        ImageFilter::ColorMatrix { matrix } => matrix[19] <= 0.0,
+        ImageFilter::LinearRgbToSrgb | ImageFilter::SrgbToLinearRgb => true,
+        _ => false,
+    };
+    if inside {
+        Some(then.crop)
+    } else if keeps_clear {
+        Some(Some(then.crop.map_or(first, |then| crop_both(first, then))))
+    } else {
+        None
+    }
 }
 
 /// Whether a matrix keeps alpha and nothing else - `SourceAlpha` as a
@@ -429,9 +492,10 @@ where
     /// Unsafe in-place sampling filters, over-budget work and a blur that
     /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
-        if let ImageFilter::Blend { .. } = filter {
-            // A blend places its backdrop in a scratch first: the chain owns
-            // that, and a one-blend chain is the one pass.
+        if matches!(filter, ImageFilter::Blend { .. } | ImageFilter::Crop { .. }) {
+            // A blend places its backdrop in a scratch first, and a crop is
+            // the rect a pass of the plan draws inside: the chain owns both,
+            // and a chain of the one filter is the one pass.
             let _ = self.filter_image_chain(target_image, std::slice::from_ref(&filter), source_image);
             return;
         }
@@ -480,8 +544,15 @@ where
         } else {
             None
         };
-        let recorded =
-            self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None, Fused::default());
+        let recorded = self.filter_image_with_scratch(
+            target_image,
+            filter,
+            source_image,
+            blur_scratch,
+            None,
+            Fused::default(),
+            None,
+        );
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -500,6 +571,8 @@ where
         backdrop: Option<(ImageId, BlendPass)>,
         // The matrices a two-draw filter carries in its draws.
         fused: Fused,
+        // The rect the result is drawn inside, in the target's texel rows.
+        crop: Option<[u32; 4]>,
     ) -> bool {
         debug_assert_eq!(filter.two_pass(), blur_scratch.is_some());
         debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
@@ -532,6 +605,7 @@ where
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
         cmd.fused = fused;
+        cmd.crop = crop;
         if let Some((placed, pass)) = backdrop {
             cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
             cmd.blend_pass = pass;
@@ -869,7 +943,30 @@ where
                 }
                 _ => None,
             };
-            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused);
+            // The crop in the rows the pass's result is stored in, rounded
+            // out to whole pixels and cut to the image.
+            let crop = pass.crop.map(|[x, y, width, height]| {
+                let (image_width, image_height) = self.image_size(dst).unwrap_or((0, 0));
+                let (image_width, image_height) = (image_width as f32, image_height as f32);
+                // `max` and `min` pass over an edge that is no number, so a
+                // rect with one holds no pixel.
+                let left = (x - origin.0).floor().max(0.0).min(image_width);
+                let top = (y - origin.1).floor().max(0.0).min(image_height);
+                let right = (x + width - origin.0).ceil().max(left).min(image_width);
+                let bottom = (y + height - origin.1).ceil().max(top).min(image_height);
+                let first_row = if filter.stores_flipped(src_flipped) {
+                    image_height - bottom
+                } else {
+                    top
+                };
+                [
+                    left as u32,
+                    first_row as u32,
+                    (right - left) as u32,
+                    (bottom - top) as u32,
+                ]
+            });
+            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused, crop);
             src_flipped = filter.stores_flipped(src_flipped);
             src = dst;
         }
@@ -1528,4 +1625,166 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     canvas.flush_to_output(());
     assert_eq!(canvas.filter_work, 0);
     canvas.filter_image_chain(target, &[color], source).unwrap();
+}
+
+/// A crop rides the pass before it - a blur's second draw, the scale back
+/// up of a blur run down the pyramid - and with no pass before it is a copy
+/// of its own; two in a row leave what both hold. What a pass clipped away
+/// stays away: a pass after a crop folds into the cropped one only where
+/// one crop leaves what the two would ([`folded_crop`]).
+#[test]
+fn a_crop_rides_the_pass_before_it_and_passes_fold_across_it_where_one_crop_does() {
+    use crate::ImageFilter;
+    let crop = |x: f32, width: f32| ImageFilter::Crop {
+        x,
+        y: 2.0,
+        width,
+        height: 10.0,
+    };
+    let (bright, gray) = (ImageFilter::brightness(0.5), ImageFilter::grayscale(1.0));
+    let blur = ImageFilter::gaussian_blur(2.0);
+    // Each pass: whether it is two draws, its crop, whether a matrix rides its second draw.
+    let plan = |filters: &[ImageFilter]| -> Vec<(bool, Option<[f32; 4]>, bool)> {
+        filter_passes(filters)
+            .unwrap()
+            .iter()
+            .map(|pass| (pass.filter.two_pass(), pass.crop, pass.fused.post_matrix.is_some()))
+            .collect()
+    };
+    let rect = Some([4.0, 2.0, 20.0, 10.0]);
+    assert_eq!(plan(&[bright, crop(4.0, 20.0)]), [(false, rect, false)]);
+    assert_eq!(plan(&[blur, crop(4.0, 20.0)]), [(true, rect, false)]);
+    assert_eq!(plan(&[crop(4.0, 20.0)]), [(false, rect, false)], "alone: a copy");
+    assert_eq!(plan(&[crop(4.0, 20.0), bright]), [(false, rect, false)]);
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), crop(10.0, 30.0)]),
+        [(false, Some([10.0, 2.0, 14.0, 10.0]), false)],
+        "what both hold"
+    );
+
+    // A matrix after a crop folds into the cropped pass, or into a blur's
+    // second draw, when one crop leaves what the two passes would: its own
+    // crop lies inside the first, or it leaves transparent black as it is,
+    // as a matrix that adds nothing to alpha does.
+    let mut opaque = [0.0; 20];
+    (opaque[0], opaque[6], opaque[12], opaque[19]) = (1.0, 1.0, 1.0, 1.0);
+    let opaque = ImageFilter::ColorMatrix { matrix: opaque };
+    let narrow = Some([10.0, 2.0, 14.0, 10.0]);
+    assert_eq!(plan(&[bright, gray]).len(), 1);
+    assert_eq!(plan(&[bright, gray, crop(4.0, 20.0)]), [(false, rect, false)]);
+    assert_eq!(plan(&[bright, crop(4.0, 20.0), gray]), [(false, rect, false)]);
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), gray, crop(10.0, 30.0)]),
+        [(false, narrow, false)],
+        "a matrix that keeps transparent black: what both crops hold"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque]),
+        [(false, rect, false), (false, None, false)],
+        "outside the crop the second matrix draws"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(10.0, 30.0)]),
+        [(false, rect, false), (false, Some([10.0, 2.0, 30.0, 10.0]), false)],
+        "and inside its own crop, past the first one's edge"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(4.0, 20.0)]),
+        [(false, rect, false)],
+        "the same crop twice is one crop"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(10.0, 14.0)]),
+        [(false, narrow, false)]
+    );
+    assert_eq!(plan(&[blur, gray]), [(true, None, true)]);
+    assert_eq!(plan(&[blur, gray, crop(4.0, 20.0)]), [(true, rect, true)]);
+    assert_eq!(plan(&[blur, crop(4.0, 20.0), gray]), [(true, rect, true)]);
+    assert_eq!(
+        plan(&[blur, crop(4.0, 20.0), gray, crop(4.0, 20.0)]),
+        [(true, rect, true)]
+    );
+    assert_eq!(
+        plan(&[blur, crop(4.0, 20.0), opaque]),
+        [(true, rect, false), (false, None, false)]
+    );
+    // A blur reads past its own pixels, so nothing before it gives up its crop.
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), blur, crop(4.0, 20.0)]),
+        [(false, rect, false), (true, rect, false)]
+    );
+
+    let wide = filter_passes(&[ImageFilter::gaussian_blur(40.0), crop(4.0, 20.0)]).unwrap();
+    assert!(wide.len() > 2, "run down the pyramid");
+    assert_eq!(wide.iter().filter(|pass| pass.crop.is_some()).count(), 1);
+    let last = wide.last().unwrap();
+    assert_eq!((last.level, last.crop), (FULL, rect));
+
+    // A matrix rides a pyramid's first halving, but not with its crop: the
+    // rect is of full-size pixels, and the halving draws at half size.
+    let uncropped = filter_passes(&[bright, ImageFilter::gaussian_blur(40.0)]).unwrap();
+    let cropped = filter_passes(&[bright, crop(4.0, 20.0), ImageFilter::gaussian_blur(40.0)]).unwrap();
+    assert_eq!(cropped.len(), uncropped.len() + 1);
+    assert_eq!((cropped[0].level, cropped[0].crop), (FULL, rect));
+    assert!(cropped[1..].iter().all(|pass| pass.crop.is_none()));
+}
+
+/// A pass draws inside its crop only: the command carries the rect, rounded
+/// out to whole pixels and cut to the image, in the rows the pass's result
+/// is stored in - counted from the bottom when a single draw from an upload
+/// stores it the way a render target is, from the top when a blur's two
+/// draws leave it as the source was.
+#[test]
+fn a_cropped_pass_carries_the_rect_in_the_rows_it_stores() {
+    use crate::ImageFilter;
+    let crops = |filters: &[ImageFilter]| -> Vec<Option<[u32; 4]>> {
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        let source = canvas
+            .create_image_empty(64, 32, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        let target = canvas
+            .create_image_empty(
+                64,
+                32,
+                PixelFormat::Rgba8,
+                ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.filter_image_chain(target, filters, source).unwrap();
+        canvas
+            .commands
+            .iter()
+            .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+            .map(|command| command.crop)
+            .collect()
+    };
+    let crop = |x: f32, y: f32, width: f32, height: f32| ImageFilter::Crop { x, y, width, height };
+    let bright = ImageFilter::brightness(0.5);
+    let blur = ImageFilter::gaussian_blur(2.0);
+    assert_eq!(
+        crops(&[bright, crop(4.0, 2.0, 20.0, 10.0)]),
+        [Some([4, 20, 20, 10])],
+        "one draw from an upload: rows from the bottom"
+    );
+    assert_eq!(
+        crops(&[blur, crop(4.0, 2.0, 20.0, 10.0)]),
+        [Some([4, 2, 20, 10]), None],
+        "two draws, then the copy that turns the result over for its target"
+    );
+    assert_eq!(
+        crops(&[blur, crop(4.3, 2.6, 20.5, 10.25)]),
+        [Some([4, 2, 21, 11]), None],
+        "rounded out"
+    );
+    assert_eq!(
+        crops(&[blur, crop(-5.0, -5.0, 1000.0, 1000.0)])[0],
+        Some([0, 0, 64, 32])
+    );
+    assert_eq!(crops(&[blur, crop(100.0, 2.0, 20.0, 10.0)])[0], Some([64, 2, 0, 10]));
+    assert_eq!(
+        crops(&[blur, crop(f32::NAN, 2.0, 20.0, 10.0)])[0].map(|rect| rect[2]),
+        Some(0)
+    );
+    assert_eq!(crops(&[bright]), [None]);
 }
