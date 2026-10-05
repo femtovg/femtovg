@@ -94,6 +94,16 @@ pub enum CommandType {
     },
 }
 
+/// The colour matrices a two-draw filter pass carries in its draws: an
+/// alpha-only matrix before it, so every tap of the first draw reads
+/// (0, 0, 0, a), and any matrix after it, applied by the second draw to its
+/// result before storing it - each one draw fewer than its own pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Fused {
+    pub(crate) source_alpha: bool,
+    pub(crate) post_matrix: Option<[f32; 20]>,
+}
+
 /// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
 /// texture) is stored the other way up from the image, the alpha the image
 /// is scaled by first, and whether to write the image's contribution over
@@ -129,6 +139,8 @@ pub struct Command {
     pub(crate) glyph_texture: GlyphTexture,
     // A blend pass's inputs beyond its mode; the backdrop is the glyph texture.
     pub(crate) blend_pass: BlendPass,
+    // The matrices a two-draw filter pass folds into its draws.
+    pub(crate) fused: Fused,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -145,6 +157,7 @@ impl Command {
             filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
             blend_pass: BlendPass::default(),
+            fused: Fused::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }

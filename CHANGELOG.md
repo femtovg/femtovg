@@ -34,8 +34,8 @@ All notable changes to this project will be documented in this file.
   its image along that axis until the sigma fits one pass, blurs there and
   scales the result back up bilinearly,
   instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
-  1080p layer is four halvings, a blur over a sixteenth of the pixels and
-  one copy where it was 93 full-size blurs, so it no longer exceeds the
+  1080p layer is four halvings, a blur over a sixteenth of the pixels
+  where it was 93 full-size blurs, so it no longer exceeds the
   filter work budget, which had left the layer unblurred; the sigma ceiling
   rises from 128 to 512; blurs within the bound render as before. The blur
   shader also reads transparent beyond the image it samples instead of

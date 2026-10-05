@@ -1178,6 +1178,11 @@ fn separable_filter(
     );
     axis_params(&mut params, 0);
     params.image_blur_filter_direction = [1.0, 0.0];
+    // The fused matrices ride parameters a filter draw leaves unused: an
+    // alpha-only matrix before the filter is the `radius` flag on the first
+    // draw, a matrix after it the `feather` flag and the matrix slots on
+    // the second.
+    params.radius = f32::from(u8::from(command.fused.source_alpha));
 
     let horizontal_buffer = command
         .filter_scratch
@@ -1206,6 +1211,12 @@ fn separable_filter(
     // The horizontal draw stored premultiplied RGBA regardless of the source
     // image's format or premultiplication flag.
     params.tex_type = 0.0;
+    params.radius = 0.0;
+    if let Some(matrix) = command.fused.post_matrix {
+        params.scissor_mat.copy_from_slice(&matrix[..12]);
+        params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+        params.feather = 1.0;
+    }
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(

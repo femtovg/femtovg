@@ -1,13 +1,15 @@
 // The image filter passes: color matrix, feTurbulence, the sRGB transfer
 // curves, feBlend, feMorphology and feOffset. Included after shader.wgsl.
 
-fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    // The 4x5 color matrix is packed into the scissor/paint matrix slots (dead
-    // during a filter pass): scissor_mat columns 0..2 hold the first 12 values,
-    // paint_mat columns 0..1 the last 8. Apply in unpremultiplied sRGB space,
-    // clamp to [0,1], then re-premultiply — unpremultiplying avoids edge halos
-    // and the clamp keeps overflowing matrices from producing out-of-range/NaN.
-    var c: vec4<f32> = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent);
+// The 4x5 color matrix in the scissor/paint matrix slots (dead during a
+// filter pass: scissor_mat columns 0..2 hold the first 12 values, paint_mat
+// columns 0..1 the last 8) applied to a premultiplied color: in
+// unpremultiplied sRGB space, clamped to [0,1], re-premultiplied -
+// unpremultiplying avoids edge halos and the clamp keeps overflowing
+// matrices from producing out-of-range/NaN. The color-matrix pass and the
+// second draw of a two-draw filter with a matrix fused into it share it.
+fn colorMatrixOn(premultiplied: vec4<f32>, params: Params) -> vec4<f32> {
+    var c: vec4<f32> = premultiplied;
     if (c.a > 0.0) {
         c = vec4<f32>(c.rgb / c.a, c.a);
     }
@@ -22,6 +24,10 @@ fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let a = m3.w * c.r + m4.x * c.g + m4.y * c.b + m4.z * c.a + m4.w;
     let outc = clamp(vec4<f32>(r, g, b, a), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec4<f32>(outc.rgb * outc.a, outc.a);
+}
+
+fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    return colorMatrixOn(textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent), params);
 }
 
 // SVG feTurbulence (SVG 1.1 section 15.19), all four channels at once. The
@@ -269,6 +275,8 @@ fn renderMorphology(vertex: VertexOutput, params: Params) -> vec4<f32> {
             acc = min(acc, min(before, after));
         }
     }
+    // A color matrix fused into this second draw.
+    if (params.feather > 0.5) { acc = colorMatrixOn(acc, params); }
     if (params.tex_type == 2) { acc = vec4<f32>(acc.x); }
     return acc;
 }

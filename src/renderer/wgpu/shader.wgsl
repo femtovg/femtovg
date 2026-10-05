@@ -417,11 +417,14 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
 // weight stays in the sum, so an edge fades.
+// With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
+// an alpha-only color matrix fused into the filter's first draw.
 fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
     let uv = pos / params.extent;
     let inside = all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0));
     var color: vec4<f32> = textureSample(image_texture, image_sampler, uv);
     if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
+    if (params.radius > 0.5) { color = vec4<f32>(0.0, 0.0, 0.0, color.w); }
     return color * select(0.0, 1.0, inside);
 }
 
@@ -455,6 +458,8 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
 
     var color: vec4<f32> = color_sum / coefficient_sum;
 
+    // A color matrix fused into this second draw.
+    if (params.feather > 0.5) { color = colorMatrixOn(color, params); }
     if (params.tex_type == 2) { color = vec4<f32>(color.x); }
 
     return color;
