@@ -388,7 +388,10 @@ fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate color from texture
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy / params.extent;
 
-    var color: vec4<f32> = textureSample(image_texture, image_sampler, pt);
+    // Half a level toward the larger mip: browsers minify sharper than plain
+    // trilinear (Chromium samples the larger level, Firefox downsamples
+    // directly); no effect without mipmaps or under magnification.
+    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, pt, -0.5);
 
     if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
     if (params.tex_type == 2) { color = vec4(color.x); }
@@ -399,7 +402,7 @@ fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
 }
 
 fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    var color: vec4<f32> = textureSample(image_texture, image_sampler, vertex.ftcoord);
+    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, vertex.ftcoord, -0.5);
 
     if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
     if (params.tex_type == 2) { color = vec4(color.x); }

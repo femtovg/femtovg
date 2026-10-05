@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
+  created with it now gets its mip levels, filled after every upload the way
+  the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
+  mipmap filtering, so a raster drawn smaller than its size is box-filtered
+  instead of point-sampled from the base level. Both backends now sample an
+  image half a level toward the larger mip, where the browsers' minification
+  sits (Chromium samples the larger level, Firefox downsamples directly).
+  The levels cost a third more texture memory for those images only; the
+  downsample pipeline is built on the first such upload.
 - Fixed a panic with the `swash` and `textlayout` features when text with PNG
   bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
   rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
