@@ -3,6 +3,7 @@
 //! resolve it, and the shapes that skip the stencil ([`shape`]).
 
 use super::*;
+use crate::path::PathCache;
 
 mod shape;
 pub(crate) use shape::{ClipCoverage, RectFill, RoundedBox};
@@ -207,13 +208,18 @@ where
     /// one and it combines with the shape already in force into one: a draw
     /// carries a single shape. `false` leaves the clip to the stencil.
     fn clip_to_shape(&mut self, path: &Path) -> bool {
-        let Some(shape) = RoundedBox::fit(path) else {
+        let Some((shape, strays)) = RoundedBox::fit_outline(path) else {
             return false;
         };
-        let mut shape = shape.transformed(&self.state().transform);
+        let transform = self.state().transform;
+        let mut shape = shape.transformed(&transform);
         let Some(mut coverage) = shape.coverage(self.fringe_width) else {
             return false;
         };
+        // A unit of the path is no longer on the target than the longer of
+        // the transform's axes.
+        let scale = transform[0].hypot(transform[1]).max(transform[2].hypot(transform[3]));
+        coverage.strays = strays * scale / self.fringe_width;
         if let Some((current, current_coverage)) = self.clip_shape() {
             if let Some(both) = current.intersection(&shape, self.fringe_width) {
                 if both == current {
@@ -223,7 +229,15 @@ where
                 let Some(both_coverage) = both.coverage(self.fringe_width) else {
                     return false;
                 };
-                (shape, coverage) = (both, both_coverage);
+                // Each side of what the two leave is a side of one of them.
+                let strays = coverage.strays.max(current_coverage.strays);
+                (shape, coverage) = (
+                    both,
+                    ClipCoverage {
+                        strays,
+                        ..both_coverage
+                    },
+                );
             } else if coverage.contains(&current) {
                 return true;
             } else if !current_coverage.contains(&shape) {
@@ -262,10 +276,22 @@ where
             extent,
             radii: [scissor.radius; 2],
         });
-        let both = match (shape, scissor_box) {
-            (Some((shape, _)), Some(scissor_box)) => shape.with_scissor(&scissor_box, self.fringe_width),
-            _ => None,
-        };
+        let both =
+            match (shape, scissor_box) {
+                (Some((shape, coverage)), Some(scissor_box)) => shape
+                    .with_scissor(&scissor_box, self.fringe_width)
+                    .map(|(both, both_coverage)| {
+                        let strays = coverage.strays;
+                        (
+                            both,
+                            ClipCoverage {
+                                strays,
+                                ..both_coverage
+                            },
+                        )
+                    }),
+                _ => None,
+            };
         let boxes = match both {
             Some(both) => ClipBoxes {
                 of,
@@ -286,9 +312,14 @@ where
     }
 
     /// The clip shape and the scissor a draw over `bounds` carries; `bounds`
-    /// is asked for only under a shape or a scissor.
-    pub(crate) fn draw_clip(&mut self, bounds: impl FnOnce() -> Bounds) -> (Option<ClipCoverage>, Scissor) {
-        let (clip, scissor, _) = self.fill_clip(bounds, None);
+    /// is asked for only under a shape or a scissor. `outline` is the draw's
+    /// path, flattened, and how far the draw reaches around it.
+    pub(crate) fn draw_clip(
+        &mut self,
+        bounds: impl FnOnce() -> Bounds,
+        outline: Option<(&PathCache, f32)>,
+    ) -> (Option<ClipCoverage>, Scissor) {
+        let (clip, scissor, _) = self.fill_clip(bounds, outline, None);
         (clip, scissor)
     }
 
@@ -297,8 +328,9 @@ where
     /// in the path's place when it is an upright rect ([`RectFill`]).
     ///
     /// A box - the shape, the scissor, or the one the two make - takes
-    /// nothing from a draw it holds whole, or from the rect such a fill
-    /// shares with it, so an edge the draw has in common with the box is
+    /// nothing from a draw it holds whole - by its bounds or, failing that,
+    /// by the points of its outline - or from the rect such a fill shares
+    /// with it, so an edge the draw has in common with the box is
     /// antialiased once. Such a draw carries no scissor, and no shape - or,
     /// after a draw that carried one, a coverage of one everywhere, so that
     /// the renderer goes on with the shader variant it has bound. An
@@ -308,6 +340,7 @@ where
     pub(crate) fn fill_clip(
         &mut self,
         bounds: impl FnOnce() -> Bounds,
+        outline: Option<(&PathCache, f32)>,
         fill: Option<(&Path, &Transform2D)>,
     ) -> (Option<ClipCoverage>, Scissor, Option<RectFill>) {
         if self.state().scissor.extent.is_none() && self.clip_stack.is_empty() {
@@ -320,10 +353,17 @@ where
             return (None, boxes.scissor, None);
         }
         let bounds = bounds();
+        let fringe_width = self.fringe_width;
+        let holds = |coverage: &ClipCoverage| {
+            coverage.holds(&bounds)
+                || outline.is_some_and(|(path, spread)| {
+                    coverage.holds_outline(&bounds, path.positions(), spread / fringe_width)
+                })
+        };
         let mut scissor = boxes.scissor;
         let mut rect = None;
         if let Some((scissor_box, coverage)) = boxes.scissor_box {
-            if coverage.holds(&bounds) {
+            if holds(&coverage) {
                 scissor = Scissor::default();
             } else if let (None, Some((path, transform))) = (boxes.shape, fill) {
                 rect = scissor_box.rect_fill(path, transform, self.fringe_width);
@@ -336,7 +376,7 @@ where
             self.shape_carried = false;
             return (None, scissor, rect);
         };
-        let held = coverage.holds(&bounds);
+        let held = holds(&coverage);
         let rect = match fill {
             Some((path, transform)) if !held => shape.rect_fill(path, transform, self.fringe_width),
             _ => None,
@@ -967,8 +1007,8 @@ fn a_box_clip_is_a_shape_on_the_draws_under_it() {
 }
 
 /// A draw the shape holds whole carries no shape - a fill, a stroke with its
-/// width and its miters, glyph quads - and one that reaches past the shape
-/// carries it. After a draw that carried the shape, a held one carries a
+/// width and its miters, glyph quads, by their bounds or by the points of
+/// their outline - and one that reaches past the shape carries it. After a draw that carried the shape, a held one carries a
 /// coverage of one, for the renderer to stay on the variant it has bound.
 /// Held, a draw under an operation coverage cannot bound leaves the shape a
 /// shape.
@@ -1006,16 +1046,24 @@ fn a_draw_the_shape_holds_carries_no_shape() {
     };
     let flavor = PaintFlavor::Color(Color::black());
 
-    // Held: inside the straight sides, clear of the corner arcs.
+    // The clip's outline set in by half the wide stroke's width.
+    let mut inset = Path::new();
+    inset.rounded_rect(13.0, 13.0, 74.0, 74.0, 17.0);
+
+    // Held: inside the straight sides, clear of the corner arcs - and a
+    // stroke along the clip's edge from inside, by its outline.
     canvas.fill_path(&triangle(30.0, 30.0, 40.0), &paint);
     canvas.stroke_path(&line(30.0, 40.0, 50.0, 60.0, 70.0, 40.0), &wide);
     canvas.render_triangles(&quad(40.0, 40.0), &Transform2D::identity(), &flavor, GlyphTexture::None);
+    canvas.stroke_path(&inset, &wide);
     // Not held: past a side, in a corner the arc cuts, a stroke whose width
-    // or whose miter reaches out, and a quad on the edge.
+    // or whose miter reaches out - a miter's limit counts, drawn or not -
+    // and a quad on the edge.
     canvas.fill_path(&triangle(30.0, 30.0, 70.0), &paint);
     canvas.fill_path(&triangle(11.0, 11.0, 10.0), &paint);
     canvas.stroke_path(&line(12.0, 40.0, 12.0, 50.0, 12.0, 60.0), &wide);
     canvas.stroke_path(&line(30.0, 16.0, 50.0, 22.0, 70.0, 16.0), &mitered);
+    canvas.stroke_path(&inset, &mitered);
     canvas.render_triangles(&quad(86.0, 40.0), &Transform2D::identity(), &flavor, GlyphTexture::None);
 
     canvas.global_composite_operation(CompositeOperation::Copy);
@@ -1037,6 +1085,8 @@ fn a_draw_the_shape_holds_carries_no_shape() {
             "none",
             "none",
             "none",
+            "none",
+            "shape",
             "shape",
             "shape",
             "shape",
@@ -1045,7 +1095,7 @@ fn a_draw_the_shape_holds_carries_no_shape() {
             "everywhere",
             "none"
         ],
-        "three held, five not, and the two copies: one held, one on the stencil"
+        "four held, six not, and the two copies: one held, one on the stencil"
     );
 
     // Past the clip's restore a draw carries nothing again.
@@ -1064,9 +1114,10 @@ fn a_draw_the_shape_holds_carries_no_shape() {
 /// rect the two share, with no clip: one convex fill with its fringe. Under
 /// an upright clip with round corners that it covers it is drawn as the
 /// clip: a quad without a fringe, a fringe's width around the clip, under
-/// the clip's coverage. A fill without antialiasing, one that is no rect, the clip's
-/// rounded twin and a rect across part of it keep their outline, and their
-/// fringe, and carry the shape.
+/// the clip's coverage. A fill without antialiasing, one that is no rect
+/// and a rect across part of the rounded clip keep their outline, and their
+/// fringe, and carry the shape. The rounded clip's twin lies inside it: it
+/// keeps its outline and its fringe, and the clip takes nothing from it.
 #[test]
 fn an_upright_rect_under_an_upright_clip_is_what_they_share_or_the_clip_it_covers() {
     let renderer = RecordingRenderer::default();
@@ -1119,8 +1170,8 @@ fn an_upright_rect_under_an_upright_clip_is_what_they_share_or_the_clip_it_cover
         .collect();
     assert_eq!(
         carried(&commands),
-        ["none", "none", "shape", "shape", "shape", "shape", "shape"],
-        "what the clip cuts to a rect carries nothing"
+        ["none", "none", "shape", "shape", "shape", "everywhere", "shape"],
+        "what the clip cuts to a rect carries nothing, and what lies inside it a coverage of one"
     );
     let fringed: Vec<bool> = fills
         .iter()
@@ -1214,7 +1265,8 @@ fn a_scissor_and_the_shape_reach_a_draw_as_one_box() {
     );
 }
 
-/// The scissor meets a draw as a clip shape does: a draw it holds whole
+/// The scissor meets a draw as a clip shape does: a draw it holds whole -
+/// by its bounds, or by its outline as a rounded scissor's twin is -
 /// carries none, an antialiased upright rect under an upright scissor is
 /// filled as the rect the two share with no scissor, and one that covers a
 /// rounded scissor as a quad without a fringe around it, under the scissor.
@@ -1274,6 +1326,9 @@ fn a_scissor_meets_a_draw_as_a_clip_shape_does() {
     canvas.fill_path(&rect(10.0, 20.0, 80.0, 60.0), &paint); // covers the rounded scissor
     canvas.fill_path(&rect(10.0, 20.0, 80.0, 30.0), &paint); // across its top
     canvas.fill_path(&rect(30.0, 30.0, 20.0, 20.0), &paint); // inside
+    let mut twin = Path::new();
+    twin.rounded_rect(10.0, 20.0, 80.0, 60.0, 15.0);
+    canvas.fill_path(&twin, &paint); // its outline: inside, though its bounds are not
     canvas.flush_to_output(());
 
     let commands = recorded.borrow();
@@ -1281,8 +1336,9 @@ fn a_scissor_meets_a_draw_as_a_clip_shape_does() {
     let carried: Vec<bool> = draws.iter().map(|cmd| scissored(cmd).unwrap()).collect();
     assert_eq!(
         carried,
-        [false, true, false, false, false, true, false, true, true, true, false]
+        [false, true, false, false, false, true, false, true, true, true, false, false]
     );
+    assert!(fringed(draws[11]), "the rounded twin keeps its own fringe");
     assert_eq!(bounds_drawn(draws[2]), [10.5, 20.5, 89.5, 79.5], "the twin: as it is");
     assert_eq!(
         bounds_drawn(draws[3]),

@@ -1280,7 +1280,11 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        let (clip, scissor, rect) = self.fill_clip(|| path_cache.bounds, anti_alias.then_some((path, &transform)));
+        let (clip, scissor, rect) = self.fill_clip(
+            || path_cache.bounds,
+            Some((&path_cache, 0.0)),
+            anti_alias.then_some((path, &transform)),
+        );
         // An upright rect under an upright clip shape is filled as the rect
         // the two share, or as the shape it covers: an edge they have in
         // common is antialiased once, by the rect's fringe or by the shape.
@@ -1528,15 +1532,16 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        let (clip, scissor) = self.draw_clip(|| {
-            let reach = stroke.reach(line_width);
-            Bounds {
+        let reach = stroke.reach(line_width);
+        let (clip, scissor) = self.draw_clip(
+            || Bounds {
                 minx: path_cache.bounds.minx - reach,
                 miny: path_cache.bounds.miny - reach,
                 maxx: path_cache.bounds.maxx + reach,
                 maxy: path_cache.bounds.maxy + reach,
-            }
-        });
+            },
+            Some((&path_cache, reach)),
+        );
 
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
@@ -2364,14 +2369,17 @@ where
         glyph_texture: GlyphTexture,
     ) {
         self.reconcile_current_clip_plane();
-        let (clip, scissor) = self.draw_clip(|| {
-            verts.iter().fold(Bounds::default(), |bounds, vertex| Bounds {
-                minx: bounds.minx.min(vertex.x),
-                miny: bounds.miny.min(vertex.y),
-                maxx: bounds.maxx.max(vertex.x),
-                maxy: bounds.maxy.max(vertex.y),
-            })
-        });
+        let (clip, scissor) = self.draw_clip(
+            || {
+                verts.iter().fold(Bounds::default(), |bounds, vertex| Bounds {
+                    minx: bounds.minx.min(vertex.x),
+                    miny: bounds.miny.min(vertex.y),
+                    maxx: bounds.maxx.max(vertex.x),
+                    maxy: bounds.maxy.max(vertex.y),
+                })
+            },
+            None,
+        );
 
         let params = Params::new(
             &self.images,

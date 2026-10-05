@@ -110,6 +110,10 @@ pub(crate) struct ClipCoverage {
     pub(crate) offset: [f32; 2],
     pub(crate) extent: [f32; 2],
     pub(crate) radii: [f32; 2],
+    /// How far outside the box, in fringe widths, the outline it was fitted
+    /// to strays ([`RoundedBox::fit_outline`]): a draw that goes no further
+    /// is inside the clip as it was given.
+    pub(crate) strays: f32,
 }
 
 enum Segment {
@@ -122,9 +126,18 @@ impl RoundedBox {
     /// once around a parallelogram, or around an axis-aligned rounded
     /// rectangle or ellipse within [`FIT_TOLERANCE`].
     pub(crate) fn fit(path: &Path) -> Option<Self> {
+        Self::fit_outline(path).map(|(shape, _)| shape)
+    }
+
+    /// The box `path` outlines ([`Self::fit`]), and how far outside the box
+    /// the outline strays, in the path's units: nothing for straight sides,
+    /// and for corners drawn as Bezier curves what those are off an ellipse
+    /// by - 0.03 % of the radius for the usual cubic, 0.3 % for a quadratic
+    /// an eighth of the way around.
+    pub(crate) fn fit_outline(path: &Path) -> Option<(Self, f32)> {
         let (start, segments) = contour(path)?;
         if segments.iter().all(|segment| matches!(segment, Segment::Line(_))) {
-            return Self::parallelogram(start, &segments);
+            return Self::parallelogram(start, &segments).map(|shape| (shape, 0.0));
         }
         Self::rounded(start, &segments)
     }
@@ -174,7 +187,7 @@ impl RoundedBox {
         })
     }
 
-    fn rounded(start: [f32; 2], segments: &[Segment]) -> Option<Self> {
+    fn rounded(start: [f32; 2], segments: &[Segment]) -> Option<(Self, f32)> {
         // The outline in order - each segment's interior samples, then its
         // end - and the segment ends alone, where straight sides meet corners.
         let mut outline = vec![start];
@@ -243,6 +256,10 @@ impl RoundedBox {
             return None;
         }
 
+        // How far outside the box the outline's samples lie, to first order
+        // at a corner; the curve between two samples may reach a little
+        // further, which the tenth on top allows for.
+        let mut strays = 0.0f32;
         let on_box = outline.iter().all(|p| {
             let side = [
                 (p[0] - center[0]).abs() - extent[0],
@@ -250,8 +267,12 @@ impl RoundedBox {
             ];
             let corner = [side[0] + radii[0], side[1] + radii[1]];
             if radii[0] > 0.0 && corner[0] > 0.0 && corner[1] > 0.0 {
-                ((corner[0] / radii[0]).hypot(corner[1] / radii[1]) - 1.0).abs() <= FIT_TOLERANCE
+                let k = [corner[0] / radii[0], corner[1] / radii[1]];
+                let k1 = k[0].hypot(k[1]);
+                strays = strays.max((k1 - 1.0) * k1 / (k[0] / radii[0]).hypot(k[1] / radii[1]));
+                (k1 - 1.0).abs() <= FIT_TOLERANCE
             } else {
+                strays = strays.max(side[0].max(side[1]));
                 side[0].max(side[1]).abs() <= slack
             }
         });
@@ -273,11 +294,12 @@ impl RoundedBox {
             backward += usize::from(step < -1e-4);
         }
         let once = (turned.abs() - std::f32::consts::TAU).abs() < 0.01 && (forward == 0 || backward == 0);
-        (on_box && once).then_some(Self {
+        let shape = Self {
             frame: Transform2D::translation(center[0], center[1]),
             extent,
             radii,
-        })
+        };
+        (on_box && once).then_some((shape, strays * 1.1))
     }
 
     /// The box under `transform`: its frame carried along.
@@ -317,6 +339,7 @@ impl RoundedBox {
             offset: [ix / per_unit[0], iy / per_unit[1]],
             extent,
             radii,
+            strays: 0.0,
         })
     }
 
@@ -506,6 +529,7 @@ impl ClipCoverage {
         offset: [0.0; 2],
         extent: [1.0; 2],
         radii: [0.0; 2],
+        strays: 0.0,
     };
 
     /// The ten floats both backends' shaders read (`clipMask`): where the
@@ -562,14 +586,20 @@ impl ClipCoverage {
     /// to where its sides' ramps end - or `None` for a coverage of one
     /// everywhere.
     pub(crate) fn reach(&self) -> Option<Bounds> {
+        self.bounds(0.5)
+    }
+
+    /// The device bounds of the box with each side `margin` fringe widths
+    /// further out; `None` for a coverage of one everywhere.
+    fn bounds(&self, margin: f32) -> Option<Bounds> {
         let [a, b, c, d] = self.linear;
         let determinant = a * d - b * c;
         if determinant == 0.0 {
             return None;
         }
-        // The inverse of the linear part takes the box's half sides, each
-        // with its half fringe, back to device pixels.
-        let outer = [self.extent[0] + 0.5, self.extent[1] + 0.5];
+        // The inverse of the linear part takes the box's half sides back
+        // to device pixels.
+        let outer = [self.extent[0] + margin, self.extent[1] + margin];
         let half = [
             (d.abs() * outer[0] + b.abs() * outer[1]) / determinant.abs(),
             (c.abs() * outer[0] + a.abs() * outer[1]) / determinant.abs(),
@@ -586,8 +616,15 @@ impl ClipCoverage {
         })
     }
 
+    /// How far past the box's edge, in fringe widths, a draw still counts
+    /// as inside it: [`DRAW_SLACK`], and what the outline the box was fitted
+    /// to strays outside it.
+    fn slack(&self) -> f32 {
+        DRAW_SLACK + self.strays
+    }
+
     /// Whether the box holds a rectangle of device pixels whole, within
-    /// [`DRAW_SLACK`]: a draw that stays inside it has nothing clipped, and
+    /// [`Self::slack`]: a draw that stays inside it has nothing clipped, and
     /// along an edge it shares with the box its own antialiasing is its
     /// coverage.
     pub(crate) fn holds(&self, bounds: &Bounds) -> bool {
@@ -599,7 +636,7 @@ impl ClipCoverage {
             return [0, 1].into_iter().all(|axis| {
                 let [a, b] = [self.linear[2 * axis], self.linear[2 * axis + 1]];
                 let at = a * center[0] + b * center[1] + self.offset[axis];
-                at.abs() + a.abs() * half[0] + b.abs() * half[1] - self.extent[axis] <= DRAW_SLACK
+                at.abs() + a.abs() * half[0] + b.abs() * half[1] - self.extent[axis] <= self.slack()
             });
         }
         [
@@ -609,7 +646,38 @@ impl ClipCoverage {
             [bounds.minx, bounds.maxy],
         ]
         .into_iter()
-        .all(|corner| self.distance(corner) <= DRAW_SLACK)
+        .all(|corner| self.distance(corner) <= self.slack())
+    }
+
+    /// Whether the box holds a draw whole, within [`Self::slack`], by the
+    /// points of its outline: each one inside, with the `spread` - in
+    /// fringe widths - the draw reaches around it, a stroke's half width.
+    /// The box is convex, so what lies between the points is inside with
+    /// them; a rounded rect filled under its own outline as a clip is held
+    /// where its bounds, which stand past the corners, are not. The points
+    /// are looked at only where they can tell more than `bounds`, the
+    /// draw's, do: not for a draw that reaches past the box's own bounds,
+    /// nor under an upright box with square corners, which holds the points
+    /// when it holds the bounds. Around a point the distance must be exact,
+    /// which it is with square or circular corners and no skew: no other
+    /// box holds a stroke this way.
+    pub(crate) fn holds_outline(&self, bounds: &Bounds, points: impl Iterator<Item = [f32; 2]>, spread: f32) -> bool {
+        let Some(own) = self.bounds(self.slack()) else {
+            return true;
+        };
+        let [a, b, c, d] = self.linear;
+        let upright = (b == 0.0 && c == 0.0) || (a == 0.0 && d == 0.0);
+        let square = self.radii == [0.0; 2];
+        let past = bounds.minx < own.minx || bounds.miny < own.miny || bounds.maxx > own.maxx || bounds.maxy > own.maxy;
+        if past || (upright && square) {
+            return false;
+        }
+        let exact = square || (self.radii[0] == self.radii[1] && (a * c + b * d).abs() <= 1e-4);
+        if spread > 0.0 && !exact {
+            return false;
+        }
+        let mut points = points.peekable();
+        points.peek().is_some() && points.all(|point| self.distance(point) + spread <= self.slack())
     }
 
     /// Whether `other` lies inside this box, within [`CONTAINMENT_SLACK`],
@@ -691,6 +759,142 @@ mod tests {
         }
         path.close();
         path
+    }
+
+    /// The fit tells how far the outline strays outside the box it found:
+    /// nothing for straight sides, 0.03 % of the radius for corners drawn as
+    /// the usual cubics and 0.3 % for an ellipse of eight quadratics - and a
+    /// coverage that carries that holds the outline it was fitted to.
+    #[test]
+    fn a_fit_tells_how_far_the_outline_strays_outside_the_box() {
+        let mut rect = Path::new();
+        rect.rect(10.0, 20.0, 30.0, 40.0);
+        assert_eq!(RoundedBox::fit_outline(&rect).unwrap().1, 0.0);
+        let mut rounded = Path::new();
+        rounded.rounded_rect(10.0, 20.0, 300.0, 400.0, 100.0);
+        let (_, cubic) = RoundedBox::fit_outline(&rounded).unwrap();
+        assert!((0.02..0.04).contains(&cubic), "{cubic} of a radius of 100");
+        let (shape, quadratic) = RoundedBox::fit_outline(&quad_ellipse(200.0, 150.0, 100.0, 100.0)).unwrap();
+        assert!((0.3..0.4).contains(&quadratic), "{quadratic} of a radius of 100");
+
+        // The quadratics' own points, flattened: outside the circle by more
+        // than the slack every draw has, and held once the coverage knows.
+        let outline: Vec<[f32; 2]> = (0..64)
+            .map(|i| {
+                let (segment, t) = (i / 8, (i % 8) as f32 / 8.0);
+                let at = |j: usize, scale: f32| {
+                    let a = j as f32 * std::f32::consts::FRAC_PI_4;
+                    [200.0 + 100.0 * scale * a.cos(), 150.0 + 100.0 * scale * a.sin()]
+                };
+                let a = (segment as f32 + 0.5) * std::f32::consts::FRAC_PI_4;
+                let reach = 100.0 / std::f32::consts::FRAC_PI_8.cos();
+                let (p0, c, p2) = (
+                    at(segment, 1.0),
+                    [200.0 + reach * a.cos(), 150.0 + reach * a.sin()],
+                    at(segment + 1, 1.0),
+                );
+                let s = 1.0 - t;
+                [
+                    s * s * p0[0] + 2.0 * s * t * c[0] + t * t * p2[0],
+                    s * s * p0[1] + 2.0 * s * t * c[1] + t * t * p2[1],
+                ]
+            })
+            .collect();
+        let bounds = outline.iter().fold(Bounds::default(), |bounds, [x, y]| Bounds {
+            minx: bounds.minx.min(*x),
+            miny: bounds.miny.min(*y),
+            maxx: bounds.maxx.max(*x),
+            maxy: bounds.maxy.max(*y),
+        });
+        let coverage = shape.coverage(1.0).unwrap();
+        assert!(!coverage.holds_outline(&bounds, outline.iter().copied(), 0.0));
+        let knowing = ClipCoverage {
+            strays: quadratic,
+            ..coverage
+        };
+        assert!(knowing.holds_outline(&bounds, outline.iter().copied(), 0.0));
+    }
+
+    /// A box holds a draw by the points of its outline where its bounds
+    /// stand past the box's corners: the box's own outline, as a fill, under
+    /// any frame, and not once a point is a sixteenth of a pixel out. A
+    /// stroke is held with its half width around every point, by a box whose
+    /// distance is exact - not by one with elliptical corners or a skew.
+    #[test]
+    fn a_box_holds_its_own_outline_and_a_stroke_set_in_from_it() {
+        let mut turned = Transform2D::identity();
+        turned.rotate(0.4);
+        turned.translate(31.0, 47.5);
+        let skewed = Transform2D::new(1.0, 0.0, 0.5, 1.0, 40.0, 30.0);
+        let bounds_of = |points: &[[f32; 2]]| {
+            points.iter().fold(Bounds::default(), |bounds, [x, y]| Bounds {
+                minx: bounds.minx.min(*x),
+                miny: bounds.miny.min(*y),
+                maxx: bounds.maxx.max(*x),
+                maxy: bounds.maxy.max(*y),
+            })
+        };
+        for (frame, radii, strokes) in [
+            (Transform2D::translation(40.25, 30.5), [6.0, 6.0], true),
+            (Transform2D::translation(40.25, 30.5), [0.0, 0.0], true),
+            (turned, [6.0, 6.0], true),
+            (turned, [8.0, 3.0], false),
+            (skewed, [0.0, 0.0], true),
+            (skewed, [6.0, 6.0], false),
+        ] {
+            let shape = RoundedBox {
+                frame,
+                extent: [20.0, 12.5],
+                radii,
+            };
+            let coverage = shape.coverage(1.0).unwrap();
+            let outline: Vec<[f32; 2]> = shape.outline().collect();
+            let bounds = bounds_of(&outline);
+            // An upright box with square corners holds the points when it
+            // holds the bounds, and is not asked about them.
+            let by_bounds = radii == [0.0, 0.0] && frame[1] == 0.0 && frame[2] == 0.0;
+            assert_eq!(coverage.holds(&bounds), by_bounds, "{frame:?} {radii:?}");
+            assert_eq!(
+                coverage.holds_outline(&bounds, outline.iter().copied(), 0.0),
+                !by_bounds,
+                "{frame:?} {radii:?}"
+            );
+            // One point a sixteenth of a pixel further from the center.
+            let mut out = outline.clone();
+            let (cx, cy) = frame.transform_point(0.0, 0.0);
+            let [x, y] = out[3];
+            let away = 0.0625 / (x - cx).hypot(y - cy);
+            out[3] = [x + (x - cx) * away, y + (y - cy) * away];
+            let leaves = coverage.distance(out[3]) > DRAW_SLACK;
+            assert!(leaves && !coverage.holds_outline(&bounds_of(&out), out.iter().copied(), 0.0));
+            assert!(
+                !coverage.holds_outline(&bounds, std::iter::empty(), 0.0),
+                "no points, nothing held"
+            );
+
+            // The outline of the box two pixels in from each side, stroked
+            // four wide.
+            let per_fringe = shape.per_fringe(1.0);
+            let inset = RoundedBox {
+                extent: [20.0 - 2.0 * per_fringe[0], 12.5 - 2.0 * per_fringe[1]],
+                radii: [(radii[0] - 2.0).max(0.0), (radii[1] - 2.0).max(0.0)],
+                ..shape
+            };
+            let path: Vec<[f32; 2]> = inset.outline().collect();
+            let stroke_bounds = bounds_of(&path);
+            let stroke_bounds = Bounds {
+                minx: stroke_bounds.minx - 2.0,
+                miny: stroke_bounds.miny - 2.0,
+                maxx: stroke_bounds.maxx + 2.0,
+                maxy: stroke_bounds.maxy + 2.0,
+            };
+            assert_eq!(
+                coverage.holds(&stroke_bounds) || coverage.holds_outline(&stroke_bounds, path.iter().copied(), 2.0),
+                strokes,
+                "{frame:?} {radii:?}: a stroke on the box's edge from inside"
+            );
+            assert!(!coverage.holds_outline(&stroke_bounds, path.iter().copied(), 2.1));
+        }
     }
 
     /// A coverage is zero outside its reach, and the reach is no wider than

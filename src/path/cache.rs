@@ -341,6 +341,11 @@ impl PathCache {
         vertices
     }
 
+    /// The points of every contour: the flattened outline.
+    pub(crate) fn positions(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
+        self.points.iter().map(|point| [point.pos.x, point.pos.y])
+    }
+
     fn add_contour(&mut self) {
         let mut contour = Contour::default();
 

@@ -7,8 +7,8 @@
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
-    renderer::WGPURenderer, Canvas, Color, CompositeOperation, FillRule, ImageFlags, LayerEffects, Paint, Path,
-    PixelFormat, RenderTarget, Transform2D,
+    renderer::WGPURenderer, Canvas, Color, CompositeOperation, FillRule, ImageFlags, LayerEffects, LineJoin, Paint,
+    Path, PixelFormat, RenderTarget, Transform2D,
 };
 
 mod common;
@@ -502,12 +502,13 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
     }
 }
 
-/// Where a fill's edge lies on the edge of a clip that is not an upright
-/// rect, and the fill reaches past the clip elsewhere, the clip's coverage
-/// multiplies the fill's own - as it does in Chromium and Firefox: a pixel
-/// half inside both is a quarter covered.
+/// Where a fill reaches past a clip that is not an upright rect and has an
+/// edge on the clip's edge elsewhere, the clip's coverage multiplies the
+/// fill's own along that edge - as it does in Chromium, WebKit and Firefox: a
+/// pixel half inside both is a quarter covered. Along the side the fill
+/// reaches past, the clip's coverage is all there is.
 #[test]
-fn a_rounded_or_turned_clip_multiplies_the_coverage_of_a_fill_on_its_edge() {
+fn a_clip_multiplies_the_coverage_of_a_fill_that_shares_part_of_its_edge() {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;
@@ -519,32 +520,124 @@ fn a_rounded_or_turned_clip_multiplies_the_coverage_of_a_fill_on_its_edge() {
         canvas.rotate(0.4);
         canvas.translate(-48.0, -48.0);
     };
-    for (name, place, radius) in [("a rounded twin", in_place, 9.0), ("a turned twin", turned, 0.0)] {
+    for (name, place, radius) in [("a rounded clip", in_place, 9.0), ("a turned clip", turned, 0.0)] {
         let (center, extent) = ([47.5, 45.75], [30.0, 20.5]);
         let mut expected = Vec::new();
+        let mut to_local = Transform2D::identity();
         let frame = render(&device, &queue, |canvas| {
             place(canvas);
             expected = share_inside(&canvas.transform(), center, extent, radius);
-            let mut twin = Path::new();
-            twin.rounded_rect(
-                center[0] - extent[0],
-                center[1] - extent[1],
-                2.0 * extent[0],
-                2.0 * extent[1],
-                radius,
-            );
-            canvas.clip_path(&twin, FillRule::NonZero);
-            canvas.fill_path(&twin, &red());
+            to_local = canvas.transform().inverse();
+            let (x, y) = (center[0] - extent[0], center[1] - extent[1]);
+            let mut clip = Path::new();
+            clip.rounded_rect(x, y, 2.0 * extent[0], 2.0 * extent[1], radius);
+            // The clip's outline with its right side sixty units further out.
+            let mut wider = Path::new();
+            wider.rounded_rect(x, y, 2.0 * extent[0] + 60.0, 2.0 * extent[1], radius);
+            canvas.clip_path(&clip, FillRule::NonZero);
+            canvas.fill_path(&wider, &red());
         });
-        let halves: Vec<f32> = expected
-            .iter()
-            .enumerate()
-            .filter(|(_, share)| **share > 0.45 && **share < 0.55)
-            .map(|(i, _)| 1.0 - f32::from(frame[i * 4 + 1]) / 255.0)
-            .collect();
-        assert!(halves.len() > 10, "{name}: only {} pixels half covered", halves.len());
-        let mean = halves.iter().sum::<f32>() / halves.len() as f32;
-        assert!((mean - 0.25).abs() < 0.05, "{name}: half-covered pixels read {mean}");
+        let (mut shared, mut passed) = (Vec::new(), Vec::new());
+        for (i, share) in expected.iter().enumerate() {
+            if *share > 0.45 && *share < 0.55 {
+                let (px, py) = ((i as u32 % W) as f32 + 0.5, (i as u32 / W) as f32 + 0.5);
+                let (local_x, _) = to_local.transform_point(px, py);
+                let covered = 1.0 - f32::from(frame[i * 4 + 1]) / 255.0;
+                if local_x > center[0] + extent[0] - 1.5 {
+                    passed.push(covered);
+                } else if local_x < center[0] + extent[0] - radius - 1.5 {
+                    shared.push(covered);
+                }
+            }
+        }
+        let mean = |values: &[f32]| values.iter().sum::<f32>() / values.len() as f32;
+        assert!(
+            shared.len() > 10 && passed.len() > 2,
+            "{name}: {} and {} pixels",
+            shared.len(),
+            passed.len()
+        );
+        assert!(
+            (mean(&shared) - 0.25).abs() < 0.05,
+            "{name}: on the shared edge {}",
+            mean(&shared)
+        );
+        assert!(
+            (mean(&passed) - 0.5).abs() < 0.05,
+            "{name}: on the side passed {}",
+            mean(&passed)
+        );
+    }
+}
+
+/// A draw whose outline lies inside the clip is drawn as without it, to the
+/// bit, though its bounds stand past the clip's corners: the clip's own
+/// outline filled under it - rounded, turned, an ellipse - and a stroke set
+/// in from that outline by half its width. An edge the two have in common is
+/// antialiased once, by the draw.
+#[test]
+fn a_twin_of_the_clip_is_drawn_as_without_it() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let turn = |canvas: &mut Canvas<WGPURenderer>, angle: f32| {
+        canvas.translate(48.0, 48.0);
+        canvas.rotate(angle);
+        canvas.translate(-48.0, -48.0);
+    };
+    let mut rounded = Path::new();
+    rounded.rounded_rect(17.5, 25.25, 60.0, 41.0, 9.0);
+    let mut rect = Path::new();
+    rect.rect(17.5, 25.25, 60.0, 41.0);
+    let mut ellipse = Path::new();
+    ellipse.ellipse(48.3, 47.6, 38.4, 21.7);
+    let mut inset = Path::new();
+    inset.rounded_rect(19.5, 27.25, 56.0, 37.0, 7.0);
+    // Corners wide enough for their cubics to stray from the ellipse the
+    // clip is by more than a 64th of a pixel, and an ellipse of eight
+    // quadratics, which strays ten times as far.
+    let mut wide = Path::new();
+    wide.rounded_rect(-60.0, -70.0, 150.0, 160.0, 72.0);
+    let mut quadratics = Path::new();
+    let on = |i: usize, scale: f32| {
+        let a = i as f32 * std::f32::consts::FRAC_PI_4;
+        (48.3 + 42.0 * scale * a.cos(), 47.6 + 31.0 * scale * a.sin())
+    };
+    quadratics.move_to(on(0, 1.0).0, on(0, 1.0).1);
+    for i in 0..8 {
+        let a = (i as f32 + 0.5) * std::f32::consts::FRAC_PI_4;
+        let reach = 1.0 / std::f32::consts::FRAC_PI_8.cos();
+        let (x, y) = on(i + 1, 1.0);
+        quadratics.quad_to(48.3 + 42.0 * reach * a.cos(), 47.6 + 31.0 * reach * a.sin(), x, y);
+    }
+    quadratics.close();
+    // A round join: a miter's limit counts toward how far a stroke reaches.
+    let line = red().with_line_width(4.0).with_line_join(LineJoin::Round);
+    for (name, clip, angle) in [
+        ("a rounded twin", &rounded, 0.0),
+        ("a rounded twin, turned", &rounded, 0.4),
+        ("a turned twin", &rect, 0.4),
+        ("an ellipse twin", &ellipse, 0.0),
+        ("a twin with wide corners", &wide, 0.0),
+        ("an ellipse of quadratics", &quadratics, 0.0),
+    ] {
+        let draw = |clipped: bool| {
+            render(&device, &queue, |canvas| {
+                turn(canvas, angle);
+                if clipped {
+                    canvas.clip_path(clip, FillRule::NonZero);
+                }
+                canvas.fill_path(clip, &red());
+                if std::ptr::eq(clip, &rounded) {
+                    canvas.stroke_path(&inset, &line);
+                }
+            })
+        };
+        let (under, without) = (draw(true), draw(false));
+        let partial = without.chunks_exact(4).filter(|p| p[1] != 0 && p[1] != 255).count();
+        assert!(partial > 60, "{name}: only {partial} edge pixels");
+        assert!(under == without, "{name}: the clip changed its twin");
     }
 }
 
