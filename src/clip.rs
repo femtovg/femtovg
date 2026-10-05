@@ -5,7 +5,7 @@
 use super::*;
 
 mod shape;
-pub(crate) use shape::{ClipCoverage, RoundedBox};
+pub(crate) use shape::{ClipCoverage, RectFill, RoundedBox};
 
 #[derive(Debug)]
 pub(crate) struct ClipGeometry {
@@ -280,36 +280,36 @@ where
     }
 
     /// The clip shape and the scissor a draw over `bounds` carries, and for
-    /// an antialiased fill - `fill`, its path and transform - the rect to
-    /// fill in the path's place ([`RoundedBox::shared_rect`]).
+    /// an antialiased fill - `fill`, its path and transform - what to fill
+    /// in the path's place when it is an upright rect ([`RectFill`]).
     ///
-    /// The shape takes nothing from a draw it holds whole, or from that rect:
-    /// such a draw carries no shape - or, after a draw that carried one, a
-    /// coverage of one everywhere, so that the renderer goes on with the
-    /// shader variant it has bound. An operation that changes the
-    /// destination where its source is transparent would change the pixels
-    /// outside the shape too, so before a draw that reaches them the shapes
-    /// move to the stencil.
+    /// The shape takes nothing from a draw it holds whole, or from the rect
+    /// such a fill shares with it: these carry no shape - or, after a draw
+    /// that carried one, a coverage of one everywhere, so that the renderer
+    /// goes on with the shader variant it has bound. An operation that
+    /// changes the destination where its source is transparent would change
+    /// the pixels outside the shape too, so before a draw that reaches them
+    /// the shapes move to the stencil.
     pub(crate) fn fill_clip(
         &mut self,
         bounds: impl FnOnce() -> Bounds,
         fill: Option<(&Path, &Transform2D)>,
-    ) -> (Option<ClipCoverage>, Scissor, Option<RoundedBox>) {
+    ) -> (Option<ClipCoverage>, Scissor, Option<RectFill>) {
         let Some((shape, coverage, scissor)) = self.scissored_shape() else {
             self.shape_carried = false;
             return (None, self.state().scissor, None);
         };
         let held = coverage.holds(&bounds());
         let rect = match fill {
-            Some((path, transform)) if !held => shape.shared_rect(path, transform, self.fringe_width),
+            Some((path, transform)) if !held => shape.rect_fill(path, transform, self.fringe_width),
             _ => None,
         };
-        if held || rect.is_some() {
+        if held || matches!(rect, Some(RectFill::Shared(_))) {
             return (self.shape_carried.then_some(ClipCoverage::EVERYWHERE), scissor, rect);
         }
         self.shape_carried = self.state().composite_operation.takes_coverage();
         if self.shape_carried {
-            return (Some(coverage), scissor, None);
+            return (Some(coverage), scissor, rect);
         }
         let target = self.current_render_target;
         // The shapes beneath the one in force contain it, but each would be
@@ -1017,11 +1017,14 @@ fn a_draw_the_shape_holds_carries_no_shape() {
 }
 
 /// An antialiased upright rect under an upright rect clip is drawn as the
-/// rect the two share, with no clip: one convex fill with its fringe. A
-/// rounded twin, a fill without antialiasing and a fill that is no rect keep
-/// their outline and carry the shape.
+/// rect the two share, with no clip: one convex fill with its fringe. Under
+/// an upright clip with round corners that it covers it is drawn as the
+/// clip: a quad with no fringe a fringe around it, under the clip's
+/// coverage. A fill without antialiasing, one that is no rect, the clip's
+/// rounded twin and a rect across part of it keep their outline, and their
+/// fringe, and carry the shape.
 #[test]
-fn an_upright_rect_under_an_upright_rect_clip_is_what_they_share() {
+fn an_upright_rect_under_an_upright_clip_is_what_they_share_or_the_clip_it_covers() {
     let renderer = RecordingRenderer::default();
     let recorded = renderer.last_commands.clone();
     let drawn = renderer.last_verts.clone();
@@ -1060,8 +1063,9 @@ fn an_upright_rect_under_an_upright_rect_clip_is_what_they_share() {
     let mut rounded = Path::new();
     rounded.rounded_rect(10.0, 20.0, 80.0, 60.0, 15.0);
     canvas.clip_path(&rounded, FillRule::NonZero);
-    canvas.fill_path(&rounded, &paint);
     canvas.fill_path(&rect(10.0, 20.0, 80.0, 60.0), &paint);
+    canvas.fill_path(&rounded, &paint);
+    canvas.fill_path(&rect(10.0, 20.0, 80.0, 30.0), &paint);
     canvas.flush_to_output(());
 
     let commands = recorded.borrow();
@@ -1071,10 +1075,15 @@ fn an_upright_rect_under_an_upright_rect_clip_is_what_they_share() {
         .collect();
     assert_eq!(
         carried(&commands),
-        ["none", "none", "shape", "shape", "shape", "shape"],
+        ["none", "none", "shape", "shape", "shape", "shape", "shape"],
         "what the clip cuts to a rect carries nothing"
     );
-    // The fill's own vertices are a half fringe inside its outline.
+    let fringed: Vec<bool> = fills
+        .iter()
+        .map(|cmd| cmd.drawables[0].stroke_verts.is_some())
+        .collect();
+    assert_eq!(fringed, [true, true, false, true, false, true, true]);
+    // A fringed fill's own vertices are a half fringe inside its outline.
     assert_eq!(
         bounds_drawn(fills[0]),
         [10.5, 20.5, 89.5, 79.5],
@@ -1089,6 +1098,16 @@ fn an_upright_rect_under_an_upright_rect_clip_is_what_they_share() {
         bounds_drawn(fills[2]),
         [0.0, 0.0, 100.0, 100.0],
         "without antialiasing: as it is"
+    );
+    assert_eq!(
+        bounds_drawn(fills[4]),
+        [9.0, 19.0, 91.0, 81.0],
+        "covering: a fringe around the clip"
+    );
+    assert_eq!(
+        bounds_drawn(fills[6]),
+        [10.5, 20.5, 89.5, 49.5],
+        "across the top: its own outline"
     );
     assert!(
         canvas.clip_shape().is_some() && !canvas.clip_active(),

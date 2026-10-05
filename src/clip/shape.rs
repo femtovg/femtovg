@@ -87,6 +87,18 @@ pub(crate) struct RoundedBox {
     pub(crate) radii: [f32; 2],
 }
 
+/// What an upright rect filled under a clip is drawn as in its place
+/// ([`RoundedBox::rect_fill`]).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) enum RectFill {
+    /// The rect the fill shares with a rect clip, antialiased by its own
+    /// fringe, with no clip.
+    Shared(RoundedBox),
+    /// A rect a fringe width around the clip the fill covers, with no fringe
+    /// of its own, under the clip's coverage.
+    Covered(RoundedBox),
+}
+
 /// A [`RoundedBox`] as a draw's fragment shader takes it: the map from
 /// device pixels to the box's frame scaled so that one unit is one fringe
 /// width across each side, and the box in those units - its corners square
@@ -334,29 +346,56 @@ impl RoundedBox {
         }
     }
 
-    /// Whether the box is a rect with its sides along the device axes.
+    /// Whether the box's sides lie along the device axes.
     fn upright(&self) -> bool {
         let Transform2D([a, b, c, d, ..]) = self.frame;
         let scale = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
         let none = |v: f32| v.abs() <= 1e-4 * scale;
-        self.radii == [0.0, 0.0] && ((none(b) && none(c)) || (none(a) && none(d)))
+        (none(b) && none(c)) || (none(a) && none(d))
     }
 
-    /// What this clip leaves of a fill of `path` under `transform`, when
-    /// both are upright rects and what they share is at least a pixel thick:
-    /// the rect to fill in the path's place with no clip, so that an edge
-    /// the two have in common is antialiased once, by the fill. Any other
-    /// fill keeps its own outline under the clip's coverage.
-    pub(crate) fn shared_rect(&self, path: &Path, transform: &Transform2D, fringe_width: f32) -> Option<Self> {
+    /// One fringe width in the box's own coordinates, across each pair of
+    /// its sides.
+    fn per_fringe(&self, fringe_width: f32) -> [f32; 2] {
+        let Transform2D([ia, ib, ic, id, ..]) = self.frame.inverse();
+        [ia.hypot(ic) * fringe_width, ib.hypot(id) * fringe_width]
+    }
+
+    /// What an upright rect filled under this clip is drawn as, so that an
+    /// edge the two have in common is antialiased once: under an upright
+    /// rect clip, the rect the two share, when it is at least a pixel thick;
+    /// under an upright box with round corners that the rect covers whole,
+    /// the box itself. `None` for any other fill, which keeps its outline
+    /// under the clip's coverage.
+    pub(crate) fn rect_fill(&self, path: &Path, transform: &Transform2D, fringe_width: f32) -> Option<RectFill> {
         if !self.upright() || path.verb_count() > MAX_FILL_VERBS {
             return None;
         }
         let fill = Self::fit(path)?.transformed(transform);
-        if !fill.upright() {
+        if !fill.upright() || fill.radii != [0.0, 0.0] {
             return None;
         }
-        let both = self.intersection_within(&fill, fringe_width, DRAW_SLACK)?;
-        both.coverage(fringe_width).map(|_| both)
+        if self.radii == [0.0, 0.0] {
+            let both = self.intersection_within(&fill, fringe_width, DRAW_SLACK)?;
+            return both.coverage(fringe_width).map(|_| RectFill::Shared(both));
+        }
+        // The rect covers the box when each of its sides lies at or past
+        // the box's.
+        let ([x, y], half, _) = self.alongside(&fill)?;
+        let per_fringe = self.per_fringe(fringe_width);
+        let covers = [(x, half[0], 0), (y, half[1], 1)]
+            .into_iter()
+            .all(|(center, half, axis)| {
+                let reach = self.extent[axis] - DRAW_SLACK * per_fringe[axis];
+                center - half <= -reach && center + half >= reach
+            });
+        covers.then(|| {
+            RectFill::Covered(Self {
+                frame: self.frame,
+                extent: [self.extent[0] + per_fringe[0], self.extent[1] + per_fringe[1]],
+                radii: [0.0, 0.0],
+            })
+        })
     }
 
     /// What both this box and `other` cover, as one box, when their sides
@@ -1014,86 +1053,122 @@ mod tests {
         assert!(!coverage.holds(&bounds(cx - 38.0, cy - 28.0, cx + 38.0, cy + 28.0)));
     }
 
-    /// An upright rect clip leaves of an upright rect fill the rect the two
+    /// An upright rect filled under an upright rect clip is the rect the two
     /// share - the clip's twin, a fill around it, one across its corner -
-    /// whatever the scale; a turned pair, a rounded clip or fill, a fill
-    /// that is no box and a sliver under a pixel keep the clip's coverage.
+    /// whatever the scale, and under an upright box with round corners that
+    /// it covers, the box a fringe larger. A turned pair, a rounded fill, a
+    /// rect that leaves part of a rounded clip out, a fill that is no box
+    /// and a sliver under a pixel keep their outline.
     #[test]
-    fn an_upright_rect_fill_shares_a_rect_with_an_upright_rect_clip() {
+    fn an_upright_rect_fill_is_what_it_shares_with_the_clip_or_the_clip_it_covers() {
         let rect = |x: f32, y: f32, w: f32, h: f32| {
             let mut path = Path::new();
             path.rect(x, y, w, h);
             path
         };
         let clip_of = |path: &Path, transform: &Transform2D| RoundedBox::fit(path).unwrap().transformed(transform);
-        let bounds = |shared: Option<RoundedBox>| {
-            shared.map(|shared| {
-                let corners = shared.corners();
-                let pick = |k: usize, f: fn(f32, f32) -> f32, seed: f32| corners.iter().map(|c| c[k]).fold(seed, f);
-                [
-                    pick(0, f32::min, f32::INFINITY),
-                    pick(1, f32::min, f32::INFINITY),
-                    pick(0, f32::max, f32::NEG_INFINITY),
-                    pick(1, f32::max, f32::NEG_INFINITY),
-                ]
-                .map(|v| (v * 100.0).round() / 100.0)
-            })
+        let bounds = |drawn: RoundedBox| {
+            let corners = drawn.corners();
+            let pick = |k: usize, f: fn(f32, f32) -> f32, seed: f32| corners.iter().map(|c| c[k]).fold(seed, f);
+            [
+                pick(0, f32::min, f32::INFINITY),
+                pick(1, f32::min, f32::INFINITY),
+                pick(0, f32::max, f32::NEG_INFINITY),
+                pick(1, f32::max, f32::NEG_INFINITY),
+            ]
+            .map(|v| (v * 100.0).round() / 100.0)
+        };
+        let shared = |fill: Option<RectFill>| match fill {
+            Some(RectFill::Shared(rect)) => Some(bounds(rect)),
+            other => panic!("{other:?}"),
+        };
+        let covered = |fill: Option<RectFill>| match fill {
+            Some(RectFill::Covered(rect)) => Some(bounds(rect)),
+            other => panic!("{other:?}"),
         };
         let identity = Transform2D::identity();
         let clip = clip_of(&rect(10.0, 10.0, 80.0, 60.0), &identity);
-        let shared = |fill: &Path| bounds(clip.shared_rect(fill, &identity, 1.0));
+        let under = |fill: &Path| clip.rect_fill(fill, &identity, 1.0);
         assert_eq!(
-            shared(&rect(10.0, 10.0, 80.0, 60.0)),
+            shared(under(&rect(10.0, 10.0, 80.0, 60.0))),
             Some([10.0, 10.0, 90.0, 70.0]),
             "twin"
         );
         assert_eq!(
-            shared(&rect(0.0, 0.0, 100.0, 100.0)),
+            shared(under(&rect(0.0, 0.0, 100.0, 100.0))),
             Some([10.0, 10.0, 90.0, 70.0]),
             "around"
         );
         assert_eq!(
-            shared(&rect(50.0, 10.0, 80.0, 30.0)),
+            shared(under(&rect(50.0, 10.0, 80.0, 30.0))),
             Some([50.0, 10.0, 90.0, 40.0]),
             "across"
         );
-        assert_eq!(shared(&rect(89.5, 0.0, 50.0, 100.0)), None, "half a pixel shared");
-        assert_eq!(shared(&rect(120.0, 0.0, 50.0, 100.0)), None, "apart");
+        assert_eq!(under(&rect(89.5, 0.0, 50.0, 100.0)), None, "half a pixel shared");
+        assert_eq!(under(&rect(120.0, 0.0, 50.0, 100.0)), None, "apart");
 
         // A quarter turn keeps both upright; the scale is the fill's own.
         let quarter = Transform2D::rotation(std::f32::consts::FRAC_PI_2);
         let scaled = Transform2D::new(2.0, 0.0, 0.0, 2.0, 5.0, 5.0);
         assert_eq!(
-            bounds(clip.shared_rect(&rect(20.0, -60.0, 100.0, 30.0), &quarter, 1.0)),
+            shared(clip.rect_fill(&rect(20.0, -60.0, 100.0, 30.0), &quarter, 1.0)),
             Some([30.0, 20.0, 60.0, 70.0])
         );
         assert_eq!(
-            bounds(clip.shared_rect(&rect(0.0, 0.0, 20.0, 20.0), &scaled, 1.0)),
+            shared(clip.rect_fill(&rect(0.0, 0.0, 20.0, 20.0), &scaled, 1.0)),
             Some([10.0, 10.0, 45.0, 45.0])
         );
 
-        let turned = Transform2D::rotation(0.3);
+        let mut rounded = Path::new();
+        rounded.rounded_rect(10.0, 10.0, 80.0, 60.0, 14.0);
         let twin = rect(10.0, 10.0, 80.0, 60.0);
+        let round = clip_of(&rounded, &identity);
         assert_eq!(
-            clip_of(&twin, &turned).shared_rect(&twin, &turned, 1.0),
+            covered(round.rect_fill(&twin, &identity, 1.0)),
+            Some([9.0, 9.0, 91.0, 71.0]),
+            "on its sides"
+        );
+        assert_eq!(
+            covered(round.rect_fill(&rect(0.0, 0.0, 100.0, 100.0), &identity, 1.0)),
+            Some([9.0, 9.0, 91.0, 71.0])
+        );
+        assert_eq!(
+            covered(round.rect_fill(&twin, &identity, 0.5)),
+            Some([9.5, 9.5, 90.5, 70.5]),
+            "at a device pixel ratio of two the fringe is half a unit"
+        );
+        assert_eq!(
+            round.rect_fill(&rect(10.1, 10.0, 80.0, 60.0), &identity, 1.0),
+            None,
+            "a tenth of a unit short"
+        );
+        assert_eq!(
+            round.rect_fill(&rect(10.0, 10.0, 80.0, 30.0), &identity, 1.0),
+            None,
+            "its top half only"
+        );
+        assert_eq!(round.rect_fill(&rounded, &identity, 1.0), None, "its rounded twin");
+        let mut circle = Path::new();
+        circle.circle(50.0, 40.0, 30.0);
+        assert_eq!(
+            covered(clip_of(&circle, &identity).rect_fill(&rect(0.0, 0.0, 100.0, 100.0), &identity, 1.0)),
+            Some([19.0, 9.0, 81.0, 71.0])
+        );
+
+        let turned = Transform2D::rotation(0.3);
+        assert_eq!(
+            clip_of(&twin, &turned).rect_fill(&twin, &turned, 1.0),
             None,
             "a turned pair"
         );
-        assert_eq!(clip.shared_rect(&twin, &turned, 1.0), None, "a turned fill");
-        let mut rounded = Path::new();
-        rounded.rounded_rect(10.0, 10.0, 80.0, 60.0, 14.0);
-        assert_eq!(clip.shared_rect(&rounded, &identity, 1.0), None, "a rounded fill");
-        assert_eq!(
-            clip_of(&rounded, &identity).shared_rect(&twin, &identity, 1.0),
-            None,
-            "a rounded clip"
-        );
+        assert_eq!(clip.rect_fill(&twin, &turned, 1.0), None, "a turned fill");
+        assert_eq!(clip.rect_fill(&rounded, &identity, 1.0), None, "a rounded fill");
         let mut triangle = Path::new();
         triangle.move_to(0.0, 0.0);
         triangle.line_to(100.0, 0.0);
         triangle.line_to(0.0, 100.0);
         triangle.close();
-        assert_eq!(clip.shared_rect(&triangle, &identity, 1.0), None, "no box");
+        assert_eq!(clip.rect_fill(&triangle, &identity, 1.0), None, "no box");
         let mut long = Path::new();
         long.move_to(0.0, 0.0);
         for step in 1..=20 {
@@ -1107,7 +1182,7 @@ mod tests {
             "a rect with its top side in twenty pieces"
         );
         assert_eq!(
-            clip.shared_rect(&long, &identity, 1.0),
+            clip.rect_fill(&long, &identity, 1.0),
             None,
             "too many verbs to ask on every fill"
         );

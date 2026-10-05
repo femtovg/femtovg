@@ -280,8 +280,9 @@ fn clip_coverage_holds_under_a_skew_and_down_to_a_pixel() {
 }
 
 /// An edge takes coverage once where a draw stays inside its clip along it,
-/// where an upright rect clip cuts an upright rect, and where a scissor
-/// lies on the clip: each edge pixel gets its share inside what is left -
+/// where an upright rect clip cuts an upright rect, where an upright rect
+/// covers a clip with round corners, and where a scissor lies on the clip:
+/// each edge pixel gets its share inside what is left -
 /// not that share squared, or cubed, which the coverages of the scissor,
 /// the clip and the fill's own antialiasing come to one over the other.
 #[test]
@@ -301,6 +302,7 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
     let rect: Shape = ([47.5, 45.75], [30.0, 20.5], 0.0);
     let rounded: Shape = ([47.5, 45.75], [30.0, 20.5], 9.0);
     let small: Shape = ([28.0, 30.0], [18.0, 12.0], 0.0);
+    let small_rounded: Shape = ([28.0, 30.0], [18.0, 12.0], 5.0);
     let everything: Shape = ([48.0, 48.0], [60.0, 60.0], 0.0);
     // The left half of `rect`: three of its sides lie on the clip's.
     let left_half: Shape = ([32.5, 45.75], [15.0, 20.5], 0.0);
@@ -310,8 +312,24 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
     let along: Shape = ([27.5, 45.75], [10.0, 10.5], 0.0);
     // (what, placement, scissor, clip, fill, what is left of the fill)
     type Case = (&'static str, Place, Option<Shape>, Shape, Shape, Shape);
-    let cases: [Case; 9] = [
+    let cases: [Case; 11] = [
         ("a rect and its twin", in_place, None, rect, rect, rect),
+        (
+            "a rect on a rounded clip's sides",
+            in_place,
+            None,
+            rounded,
+            rect,
+            rounded,
+        ),
+        (
+            "a rect around a rounded clip, scaled",
+            scaled,
+            None,
+            small_rounded,
+            everything,
+            small_rounded,
+        ),
         ("a rect and its twin, scaled", scaled, None, small, small, small),
         (
             "a rect inside, on three of the clip's sides",

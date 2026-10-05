@@ -1281,8 +1281,14 @@ where
         paint_flavor.mul_alpha(self.state().alpha);
 
         let (clip, scissor, rect) = self.fill_clip(|| path_cache.bounds, anti_alias.then_some((path, &transform)));
-        // An upright rect under an upright rect clip is the rect the two
-        // share: its own fringe is the clip's edge.
+        // An upright rect under an upright clip shape is filled as the rect
+        // the two share, or as the shape it covers: an edge they have in
+        // common is antialiased once, by the rect's fringe or by the shape.
+        let (rect, fringed) = match rect {
+            Some(RectFill::Shared(rect)) => (Some(rect), anti_alias),
+            Some(RectFill::Covered(rect)) => (Some(rect), false),
+            None => (None, anti_alias),
+        };
         if let Some(rect) = rect {
             drop(path_cache);
             shared = rect.path();
@@ -1292,7 +1298,7 @@ where
         // Calculate fill vertices.
         // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
         // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_width = if anti_alias { self.fringe_width } else { 0.0 };
+        let fringe_width = if fringed { self.fringe_width } else { 0.0 };
         path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
 
         // Detect if this path fill is in fact just an unclipped image copy
