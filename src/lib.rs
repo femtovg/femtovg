@@ -2445,6 +2445,8 @@ pub struct RecordingRenderer {
     pub max_texture_size: usize,
     /// Makes image allocation fail for resource-pressure tests.
     pub fail_image_allocations: bool,
+    /// Makes image updates fail for upload-failure tests.
+    pub fail_image_updates: bool,
     /// Number of image allocation attempts.
     pub image_allocation_attempts: usize,
     /// Number of backend images released.
@@ -2503,7 +2505,11 @@ impl Renderer for RecordingRenderer {
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        data.check_update(&image.info, x, y)
+        data.check_update(&image.info, x, y)?;
+        if self.fail_image_updates {
+            return Err(ErrorKind::UnknownError);
+        }
+        Ok(())
     }
 
     fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {

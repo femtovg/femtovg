@@ -6,6 +6,7 @@ use rustybuzz::ttf_parser;
 use slotmap::{DefaultKey, SlotMap};
 
 use crate::{
+    geometry::Transform2D,
     paint::{FontVariations, PaintFlavor, StrokeSettings},
     Canvas, Color, ErrorKind, FillRule, ImageFlags, ImageId, ImageInfo, Paint, PixelFormat, PositionedGlyph,
     RenderTarget, Renderer,
@@ -17,6 +18,9 @@ pub use atlas::Atlas;
 mod font;
 use font::{Font, GlyphRendering};
 pub use font::{FontMetrics, VariationAxisInfo};
+
+#[cfg(all(test, any(feature = "textlayout", feature = "swash")))]
+mod glyph_atlas_tests;
 
 #[cfg(feature = "textlayout")]
 mod textlayout;
@@ -435,6 +439,77 @@ pub struct GlyphDrawCommands {
     pub color_glyphs: Vec<DrawCommand>,
 }
 
+// A path glyph that has an atlas cell reserved but has not been drawn into it yet.
+struct PendingMask<'a> {
+    path: std::cell::Ref<'a, crate::Path>,
+    image_id: ImageId,
+    // Arguments for clear_rect(): x, y, width, height.
+    cell: (u32, u32, u32, u32),
+    // Translation to the glyph's origin in the atlas texture.
+    origin: Transform2D,
+    scale: f32,
+    // Stroke width in font units.
+    line_width: f32,
+}
+
+impl PendingMask<'_> {
+    // Clears the glyph's atlas cell and draws the path into it with 8x supersampling.
+    // Must be called inside an offscreen_pass() with the atlas texture as the render target,
+    // because it changes the current state.
+    fn draw<T: Renderer>(&self, canvas: &mut Canvas<T>, mode: RenderMode) {
+        // clear_rect() records the current composite operation, which the previous mask left
+        // additive. Reset the state so the clear is queued with the default one.
+        canvas.enter_offscreen_state(self.origin);
+        let (x, y, width, height) = self.cell;
+        canvas.clear_rect(x, y, width, height, Color::black());
+        canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
+
+        let factor = 1.0 / 8.0;
+
+        let mask_color = Color::rgbf(factor, factor, factor);
+
+        // 4x
+        // let points = [
+        //     (-3.0/8.0, 1.0/8.0),
+        //     (1.0/8.0, 3.0/8.0),
+        //     (3.0/8.0, -1.0/8.0),
+        //     (-1.0/8.0, -3.0/8.0),
+        // ];
+
+        // 8x
+        let points = [
+            (-7.0 / 16.0, -1.0 / 16.0),
+            (-1.0 / 16.0, -5.0 / 16.0),
+            (3.0 / 16.0, -7.0 / 16.0),
+            (5.0 / 16.0, -3.0 / 16.0),
+            (7.0 / 16.0, 1.0 / 16.0),
+            (1.0 / 16.0, 5.0 / 16.0),
+            (-3.0 / 16.0, 7.0 / 16.0),
+            (-5.0 / 16.0, 3.0 / 16.0),
+        ];
+
+        for point in &points {
+            canvas.state_mut().transform = self.origin;
+            canvas.translate(point.0, point.1);
+            canvas.scale(self.scale, self.scale);
+
+            if mode == RenderMode::Stroke {
+                canvas.stroke_path_internal(
+                    &self.path,
+                    &PaintFlavor::Color(mask_color),
+                    false,
+                    &StrokeSettings {
+                        line_width: self.line_width,
+                        ..Default::default()
+                    },
+                );
+            } else {
+                canvas.fill_path_internal(&self.path, &PaintFlavor::Color(mask_color), false, FillRule::NonZero);
+            }
+        }
+    }
+}
+
 pub struct GlyphAtlas {
     pub rendered_glyphs: RefCell<FnvHashMap<RenderedGlyphId, Option<RenderedGlyph>>>,
     pub glyph_textures: RefCell<Vec<FontTexture>>,
@@ -470,7 +545,7 @@ impl GlyphAtlas {
         font_id: FontId,
         font: &Font,
         font_face: &font::FontFaceRef<'_>,
-        glyphs: impl Iterator<Item = PositionedGlyph>,
+        mut glyphs: impl Iterator<Item = PositionedGlyph>,
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
@@ -485,9 +560,7 @@ impl GlyphAtlas {
             0.0
         };
 
-        let initial_render_target = canvas.current_render_target;
-
-        for glyph in glyphs {
+        let mut add_glyph = |canvas: &mut Canvas<T>, glyph: PositionedGlyph| -> Result<(), ErrorKind> {
             let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
 
             let id = RenderedGlyphId::new(
@@ -505,7 +578,7 @@ impl GlyphAtlas {
             let glyph_cache_entry = match glyph_cache_entry {
                 std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
                 std::collections::hash_map::Entry::Vacant(_) => {
-                    let result = self.render_glyph(
+                    let placed = self.place_glyph(
                         canvas,
                         font_size,
                         line_width,
@@ -516,12 +589,17 @@ impl GlyphAtlas {
                         subpixel_location / 10.0,
                         normalized_coords,
                     )?;
-                    glyph_cache_entry.insert_entry(result)
+                    if let Some((_, Some(mask))) = &placed {
+                        // The masks of one run can be in different atlas textures.
+                        canvas.set_render_target(RenderTarget::Image(mask.image_id));
+                        mask.draw(canvas, mode);
+                    }
+                    glyph_cache_entry.insert_entry(placed.map(|(rendered, _)| rendered))
                 }
             };
 
             let Some(rendered) = glyph_cache_entry.get() else {
-                continue;
+                return Ok(());
             };
 
             if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
@@ -557,9 +635,17 @@ impl GlyphAtlas {
 
                 cmd.quads.push(q);
             }
-        }
 
-        canvas.set_render_target(initial_render_target);
+            Ok(())
+        };
+
+        // Glyph masks are drawn inside one offscreen_pass(). The pass restores the caller's state
+        // and render target when it ends, also when a glyph fails. It is opened on the caller's
+        // own render target, so no target switch is queued unless a mask is drawn.
+        let target = canvas.current_render_target;
+        canvas.offscreen_pass(target, Transform2D::identity(), |canvas| {
+            glyphs.try_for_each(|glyph| add_glyph(canvas, glyph))
+        })?;
 
         Ok(GlyphDrawCommands {
             alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
@@ -567,33 +653,36 @@ impl GlyphAtlas {
         })
     }
 
-    // Renders the glyph into the atlas and returns the RenderedGlyph struct for it.
+    // Reserves a cell in the atlas for the glyph and returns its RenderedGlyph.
+    // Image glyphs are uploaded here. A path glyph is not drawn here: its PendingMask is
+    // returned with the RenderedGlyph and the caller draws it. This function does not change
+    // the canvas state or render target.
     // Returns Ok(None) if there exists no path or image for the glyph in the font (missing glyph).
     #[allow(clippy::too_many_arguments)]
-    fn render_glyph<T: Renderer>(
+    fn place_glyph<'a, T: Renderer>(
         &self,
         canvas: &mut Canvas<T>,
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        font: &Font,
+        font: &'a Font,
         font_face: &font::FontFaceRef<'_>,
         glyph_id: u16,
         _subpixel_x: f32,
         normalized_coords: &[i16],
-    ) -> Result<Option<RenderedGlyph>, ErrorKind> {
+    ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
         #[cfg(feature = "swash")]
         if mode == RenderMode::Fill {
             if let Some(result) =
                 self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, normalized_coords)?
             {
-                return Ok(Some(result));
+                return Ok(Some((result, None)));
             }
         }
 
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
-        let (mut glyph_representation, glyph_metrics, scale) = {
+        let (glyph_representation, glyph_metrics, scale) = {
             let scale = font.scale(font_size);
             let maybe_glyph_metrics = font
                 .glyph(font_face, glyph_id, normalized_coords)
@@ -628,10 +717,6 @@ impl GlyphAtlas {
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
             self.find_texture_or_alloc(canvas, width as usize, height as usize)?;
 
-        // render glyph to image
-        canvas.save();
-        canvas.reset();
-
         let rendered_bearing_x = (glyph_metrics.bearing_x * scale).round();
         let rendered_bearing_y = (glyph_metrics.bearing_y * scale).round();
         let x = dst_x as f32 - rendered_bearing_x + line_width_offset + padding as f32;
@@ -648,73 +733,15 @@ impl GlyphAtlas {
             color_glyph,
         };
 
-        match glyph_representation {
-            GlyphRendering::RenderAsPath(ref mut path) => {
-                canvas.translate(x, y);
-
-                canvas.set_render_target(RenderTarget::Image(dst_image_id));
-                canvas.clear_rect(
-                    dst_x as u32,
-                    TEXTURE_SIZE as u32 - dst_y as u32 - height,
-                    width,
-                    height,
-                    Color::black(),
-                );
-                let factor = 1.0 / 8.0;
-
-                let mask_color = Color::rgbf(factor, factor, factor);
-
-                let mut line_width = line_width;
-
-                if mode == RenderMode::Stroke {
-                    line_width /= scale;
-                }
-
-                canvas.global_composite_blend_func(crate::BlendFactor::SrcAlpha, crate::BlendFactor::One);
-
-                // 4x
-                // let points = [
-                //     (-3.0/8.0, 1.0/8.0),
-                //     (1.0/8.0, 3.0/8.0),
-                //     (3.0/8.0, -1.0/8.0),
-                //     (-1.0/8.0, -3.0/8.0),
-                // ];
-
-                // 8x
-                let points = [
-                    (-7.0 / 16.0, -1.0 / 16.0),
-                    (-1.0 / 16.0, -5.0 / 16.0),
-                    (3.0 / 16.0, -7.0 / 16.0),
-                    (5.0 / 16.0, -3.0 / 16.0),
-                    (7.0 / 16.0, 1.0 / 16.0),
-                    (1.0 / 16.0, 5.0 / 16.0),
-                    (-3.0 / 16.0, 7.0 / 16.0),
-                    (-5.0 / 16.0, 3.0 / 16.0),
-                ];
-
-                for point in &points {
-                    canvas.save();
-                    canvas.translate(point.0, point.1);
-
-                    canvas.scale(scale, scale);
-
-                    if mode == RenderMode::Stroke {
-                        canvas.stroke_path_internal(
-                            path,
-                            &PaintFlavor::Color(mask_color),
-                            false,
-                            &StrokeSettings {
-                                line_width,
-                                ..Default::default()
-                            },
-                        );
-                    } else {
-                        canvas.fill_path_internal(path, &PaintFlavor::Color(mask_color), false, FillRule::NonZero);
-                    }
-
-                    canvas.restore();
-                }
-            }
+        let pending_mask = match glyph_representation {
+            GlyphRendering::RenderAsPath(path) => Some(PendingMask {
+                path,
+                image_id: dst_image_id,
+                cell: (dst_x as u32, TEXTURE_SIZE as u32 - dst_y as u32 - height, width, height),
+                origin: Transform2D::translation(x, y),
+                scale,
+                line_width: line_width / scale,
+            }),
             #[cfg(feature = "image-loading")]
             GlyphRendering::RenderAsImage(image_buffer) => {
                 let target_x = rendered_glyph.atlas_x as usize;
@@ -725,14 +752,13 @@ impl GlyphAtlas {
                 let image_buffer =
                     image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
                 if let Ok(image) = crate::image::ImageSource::try_from(&image_buffer) {
-                    canvas.update_image(dst_image_id, image, target_x, target_y).unwrap();
+                    canvas.update_image(dst_image_id, image, target_x, target_y)?;
                 }
+                None
             }
-        }
+        };
 
-        canvas.restore();
-
-        Ok(Some(rendered_glyph))
+        Ok(Some((rendered_glyph, pending_mask)))
     }
 
     #[cfg(feature = "swash")]
@@ -874,46 +900,15 @@ impl GlyphAtlas {
             #[cfg(feature = "debug_inspector")]
             if cfg!(debug_assertions) {
                 // Fill the texture with red pixels only in debug builds.
-                if let Ok(size) = canvas.image_size(image_id) {
-                    // With image-loading we then subsequently support color fonts, where
-                    // the color glyphs are uploaded directly. Since that's immediately and
-                    // the clear_rect() is run much later, it would overwrite any uploaded
-                    // glyphs. So then when for the debug-inspector, use an image to clear.
-                    #[cfg(feature = "image-loading")]
-                    {
-                        use rgb::FromSlice;
-                        let clear_image = image::RgbaImage::from_pixel(
-                            size.0 as u32,
-                            size.1 as u32,
-                            image::Rgba::<u8>([255, 0, 0, 0]),
-                        );
-                        canvas
-                            .update_image(
-                                image_id,
-                                crate::image::ImageSource::from(imgref::Img::new(
-                                    clear_image.as_rgba(),
-                                    clear_image.width() as usize,
-                                    clear_image.height() as usize,
-                                )),
-                                0,
-                                0,
-                            )
-                            .unwrap();
-                    }
-                    #[cfg(not(feature = "image-loading"))]
-                    {
-                        canvas.save();
-                        canvas.reset();
-                        canvas.set_render_target(RenderTarget::Image(image_id));
-                        canvas.clear_rect(
-                            0,
-                            0,
-                            size.0 as u32,
-                            size.1 as u32,
-                            Color::rgb(255, 0, 0), // Shown as white if using Gray8.,
-                        );
-                        canvas.restore();
-                    }
+                // This has to be an upload, not clear_rect(): clear_rect() runs at flush,
+                // after glyphs have already been uploaded, and would overwrite them.
+                let (width, height) = atlas.size();
+                let fill = vec![rgb::RGBA8::new(255, 0, 0, 0); width * height];
+                let fill = imgref::Img::new(&fill[..], width, height);
+                if let Err(error) = canvas.update_image(image_id, crate::image::ImageSource::from(fill), 0, 0) {
+                    // The texture was never added to glyph_textures, so delete its image here.
+                    canvas.delete_image(image_id);
+                    return Err(error);
                 }
             }
 
