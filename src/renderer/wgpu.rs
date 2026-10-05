@@ -40,7 +40,7 @@ impl From<&wgpu::Texture> for WGPURenderOutput {
     fn from(texture: &wgpu::Texture) -> Self {
         let size = texture.size();
         Self {
-            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            view: texture.create_view(&base_level()),
             width: size.width,
             height: size.height,
             format: texture.format(),
@@ -247,7 +247,8 @@ pub struct Image {
 // Only these flags change a sampler descriptor; the rest would split the cache for nothing.
 const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
     .union(crate::ImageFlags::REPEAT_Y)
-    .union(crate::ImageFlags::NEAREST);
+    .union(crate::ImageFlags::NEAREST)
+    .union(crate::ImageFlags::GENERATE_MIPMAPS);
 
 type SamplerCache = Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>;
 
@@ -278,6 +279,8 @@ pub struct WGPURenderer {
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
+    /// Built on the first upload of an image with `GENERATE_MIPMAPS`.
+    mipmaps: Option<MipmapGenerator>,
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
@@ -313,7 +316,7 @@ impl WGPURenderer {
     /// Uploads a browser-side image source straight into an image's texture.
     #[cfg(wasm_unknown)]
     fn copy_external_image(
-        &self,
+        &mut self,
         image: &Image,
         source: wgpu::ExternalImageSource,
         size: crate::image::Size,
@@ -347,6 +350,7 @@ impl WGPURenderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.generate_mipmaps(texture);
         Ok(())
     }
 
@@ -496,7 +500,177 @@ impl WGPURenderer {
             viewport_bind_group_layout,
             pipeline_layout,
             pipeline_cache: Default::default(),
+            mipmaps: None,
         }
+    }
+
+    /// Fills the levels below the base of an image created with
+    /// `GENERATE_MIPMAPS`, after each upload as the OpenGL backend does.
+    fn generate_mipmaps(&mut self, texture: &wgpu::Texture) {
+        if texture.mip_level_count() < 2 || !texture.usage().contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+            return;
+        }
+        let (device, queue) = (&self.device, &self.queue);
+        self.mipmaps
+            .get_or_insert_with(|| MipmapGenerator::new(device))
+            .generate(device, queue, texture);
+    }
+}
+
+/// A view of a texture's base level alone: what a render pass attaches,
+/// since an attachment holds one level while a sampled view holds them all.
+fn base_level() -> wgpu::TextureViewDescriptor<'static> {
+    wgpu::TextureViewDescriptor {
+        mip_level_count: Some(1),
+        ..Default::default()
+    }
+}
+
+/// The mip levels an image gets: every halving down to one texel with
+/// `GENERATE_MIPMAPS`, the base level alone without.
+fn mip_level_count(info: &crate::ImageInfo) -> u32 {
+    if info.flags().contains(crate::ImageFlags::GENERATE_MIPMAPS) {
+        1 + (info.width().max(info.height()).max(1) as u32).ilog2()
+    } else {
+        1
+    }
+}
+
+/// Fills an image's mip levels: each is the level above sampled bilinearly
+/// at its own texel centres, the 2x2 box average `glGenerateMipmap`
+/// produces, so both backends minify alike. One render pass per level on
+/// a pipeline per texture format, built on first use.
+#[derive(Debug)]
+struct MipmapGenerator {
+    module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    sampler: wgpu::Sampler,
+    pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+}
+
+impl MipmapGenerator {
+    fn new(device: &wgpu::Device) -> Self {
+        let module = device.create_shader_module(wgpu::include_wgsl!("wgpu/mipmap.wgsl"));
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("femtovg mipmap"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("femtovg mipmap"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("femtovg mipmap"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            sampler,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    fn generate(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) {
+        let Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            sampler,
+            pipelines,
+        } = self;
+        let pipeline = pipelines.entry(texture.format()).or_insert_with(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("femtovg mipmap"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module,
+                    entry_point: Some("vs_mipmap"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module,
+                    entry_point: Some("fs_mipmap"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(texture.format().into())],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        let level = |level| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("femtovg mipmap"),
+        });
+        for target in 1..texture.mip_level_count() {
+            let (source, target) = (level(target - 1), level(target));
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("femtovg mipmap"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 }
 
@@ -769,7 +943,7 @@ impl Renderer for WGPURenderer {
                     height: info.height() as u32,
                     depth_or_array_layers: 1,
                 },
-                mip_level_count: 1,
+                mip_level_count: mip_level_count(&info),
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: match info.format() {
@@ -874,6 +1048,7 @@ impl Renderer for WGPURenderer {
                     depth_or_array_layers: 1,
                 },
             );
+            self.generate_mipmaps(texture);
         }
         Ok(())
     }
@@ -2155,6 +2330,13 @@ impl<'a> RenderPassBuilder<'a> {
                     address_mode_w: wgpu::AddressMode::ClampToEdge,
                     mag_filter: filter_mode,
                     min_filter: filter_mode,
+                    // Across the levels the way OpenGL's LINEAR_MIPMAP_LINEAR
+                    // and NEAREST_MIPMAP_NEAREST go; a single-level image
+                    // has nothing to filter between.
+                    mipmap_filter: match (flags.contains(crate::ImageFlags::GENERATE_MIPMAPS), filter_mode) {
+                        (true, wgpu::FilterMode::Linear) => wgpu::MipmapFilterMode::Linear,
+                        _ => wgpu::MipmapFilterMode::Nearest,
+                    },
                     ..Default::default()
                 })
             })
@@ -2180,7 +2362,7 @@ impl<'a> RenderPassBuilder<'a> {
         stencil_buffer: Option<wgpu::Texture>,
         load: wgpu::LoadOp<wgpu::Color>,
     ) {
-        self.texture_view = texture.create_view(&Default::default());
+        self.texture_view = texture.create_view(&base_level());
         self.set_viewport([texture.width() as f32, texture.height() as f32]);
         self.stencil_buffer = stencil_buffer;
         self.surface_format = texture.format();

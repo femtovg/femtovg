@@ -34,7 +34,8 @@ bitflags! {
     /// Represents a set of flags that modify the behavior of an image.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ImageFlags: u32 {
-        /// Generates mipmaps during the creation of the image.
+        /// Generates mipmaps when the image is created and after each update;
+        /// a minified draw then samples them half a level toward the larger one.
         const GENERATE_MIPMAPS = 1;
         /// Repeats the image in the X direction when rendered.
         const REPEAT_X = 1 << 1;
