@@ -34,7 +34,8 @@ bitflags! {
     /// Represents a set of flags that modify the behavior of an image.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct ImageFlags: u32 {
-        /// Generates mipmaps during the creation of the image.
+        /// Generates mipmaps when the image is created and after each update;
+        /// a minified draw then samples them half a level toward the larger one.
         const GENERATE_MIPMAPS = 1;
         /// Repeats the image in the X direction when rendered.
         const REPEAT_X = 1 << 1;
@@ -391,18 +392,55 @@ impl BlendMode {
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub enum ImageFilter {
-    /// Applies a Gaussian blur filter with the specified standard deviation.
+    /// Applies a Gaussian blur with a standard deviation per axis: the SVG
+    /// `feGaussianBlur` with its two-valued `stdDeviation`, so a motion
+    /// streak or a vertical glow blurs along one axis only.
+    /// [`gaussian_blur`](Self::gaussian_blur) is the isotropic blur of CSS
+    /// and Canvas `blur()`.
     ///
     /// One shader pass covers a standard deviation of at most 8 device
-    /// pixels: `Canvas::filter_image` clamps a larger one to 8, while
-    /// `Canvas::filter_image_chain`, a layer filter and a shadow blur split
-    /// it into passes that compose to the requested value (Gaussians add in
-    /// quadrature), up to a sigma of 128.
+    /// pixels on an axis: `Canvas::filter_image` clamps a larger one to 8,
+    /// while `Canvas::filter_image_chain`, a layer filter and a shadow blur
+    /// render it at a size halved along that axis until it fits one pass
+    /// and scale the result back up, up to a sigma of 512. Taps beyond the
+    /// image read transparent.
     GaussianBlur {
-        /// The standard deviation of the Gaussian blur filter, in device
-        /// pixels. Zero, negative or non-finite values leave the image
-        /// unchanged.
-        sigma: f32,
+        /// The standard deviation along x, in device pixels. Zero, negative
+        /// or non-finite values leave that axis unblurred.
+        sigma_x: f32,
+        /// The standard deviation along y, in device pixels, likewise.
+        sigma_y: f32,
+    },
+    /// Grows (dilate) or shrinks (erode) the opaque regions of an image by
+    /// a radius per axis, the SVG `feMorphology` primitive - a design tool's
+    /// shadow spread: each output pixel is the per-channel maximum (dilate)
+    /// or minimum (erode) of the premultiplied pixels within the radius
+    /// along x and along y, a rectangle of `2 rx + 1` by `2 ry + 1` pixels.
+    /// The radii are in device pixels and round to whole pixels, as Skia
+    /// rounds them (Gecko takes the ceiling); a radius that rounds to zero
+    /// leaves that axis alone, and both zero copies the image. Pixels beyond
+    /// the image read transparent, so an erosion eats into the border. One
+    /// shader pass covers a radius of at most 24 on an axis:
+    /// `Canvas::filter_image` clamps a larger one to 24, while a chain and a
+    /// layer filter run it as passes whose radii sum to it, which is exact.
+    Morphology {
+        /// The radius along x, in device pixels.
+        radius_x: f32,
+        /// The radius along y, in device pixels.
+        radius_y: f32,
+        /// Whether the opaque regions grow or shrink.
+        operator: MorphologyOperator,
+    },
+    /// Shifts the image by a device-pixel offset, the SVG `feOffset`
+    /// primitive: the output at (x, y) is the input at (x - dx, y - dy),
+    /// sampled bilinearly, and what shifts in from beyond the image is
+    /// transparent. A non-finite offset is zero, and a zero offset is the
+    /// copy it describes.
+    Offset {
+        /// The shift along x, in device pixels; positive moves content right.
+        dx: f32,
+        /// The shift along y, in device pixels; positive moves content down.
+        dy: f32,
     },
     /// Applies a 4x5 color matrix, the operation behind SVG `feColorMatrix` and
     /// the CSS/Canvas `filter` color functions (`grayscale`, `sepia`, ...).
@@ -514,7 +552,26 @@ pub enum TurbulenceKind {
     Turbulence,
 }
 
+/// What an [`ImageFilter::Morphology`] does to the opaque regions of an
+/// image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MorphologyOperator {
+    /// Shrinks them: each pixel takes the minimum within the radius.
+    Erode,
+    /// Grows them: each pixel takes the maximum within the radius.
+    Dilate,
+}
+
 impl ImageFilter {
+    /// A Gaussian blur of `sigma` on both axes: CSS and Canvas `blur()`,
+    /// SVG `feGaussianBlur` with a single `stdDeviation` value.
+    pub fn gaussian_blur(sigma: f32) -> Self {
+        Self::GaussianBlur {
+            sigma_x: sigma,
+            sigma_y: sigma,
+        }
+    }
+
     /// The identity color matrix (leaves an image unchanged).
     pub const IDENTITY_MATRIX: [f32; 20] = [
         1.0, 0.0, 0.0, 0.0, 0.0, //
@@ -797,24 +854,47 @@ impl ImageFilter {
         Some(Self::ColorMatrix { matrix: m })
     }
 
-    /// Whether one pass of this filter flips the image's stored orientation:
-    /// a color-matrix pass renders through the render-target convention once
-    /// (flipped), while the two-pass Gaussian blur flips twice and preserves
-    /// it. Exhaustive on purpose - a new variant must declare its parity here.
-    pub(crate) fn flips_output(&self) -> bool {
+    /// How one pass of this filter leaves its result stored, given how its
+    /// source is (`true`: the way a render target is, rows bottom up). A
+    /// single draw stores the other way up from the texel rows it read; the
+    /// two-draw Gaussian blur and morphology turn the image over twice; the
+    /// turbulence generator reads nothing, so its noise lands the way any
+    /// draw into a target does whatever its source. Exhaustive on purpose -
+    /// a new variant must declare itself here.
+    pub(crate) fn stores_flipped(&self, source_flipped: bool) -> bool {
         match self {
+            Self::Turbulence { .. } => true,
             Self::ColorMatrix { .. }
-            | Self::Turbulence { .. }
             | Self::LinearRgbToSrgb
             | Self::SrgbToLinearRgb
-            | Self::Blend { .. } => true,
-            Self::GaussianBlur { .. } => false,
+            | Self::Blend { .. }
+            | Self::Offset { .. } => !source_flipped,
+            Self::GaussianBlur { .. } | Self::Morphology { .. } => source_flipped,
+        }
+    }
+
+    /// Whether this filter runs as two draws along the axes through a
+    /// horizontal scratch image: the Gaussian blur and the morphology.
+    pub(crate) fn two_pass(&self) -> bool {
+        matches!(self, Self::GaussianBlur { .. } | Self::Morphology { .. })
+    }
+
+    /// This filter as it must run over a source stored the way a render
+    /// target is (`source_flipped`, rows bottom up) to mean what it means
+    /// over an upright one: a pass samples texel rows as they are stored, so
+    /// an offset's `dy` points the other way in such storage; every other
+    /// filter is the same either way.
+    pub(crate) fn oriented(self, source_flipped: bool) -> Self {
+        match self {
+            Self::Offset { dx, dy } if source_flipped => Self::Offset { dx, dy: -dy },
+            other => other,
         }
     }
 
     /// The shader and its 20 parameter slots for a filter that runs as one
     /// full-image pass over a `width` x `height` target; `None` for the
-    /// two-pass Gaussian blur, which the renderers drive themselves.
+    /// two-pass Gaussian blur and morphology, which the renderers drive
+    /// themselves.
     ///
     /// The slots ride the scissor and paint matrix uniforms, which are dead
     /// during a filter pass (no scissor, no paint gradient): the first 12
@@ -830,8 +910,14 @@ impl ImageFilter {
             (ShaderType::FilterImageTransfer, slots)
         };
         match *self {
-            Self::GaussianBlur { .. } => None,
+            Self::GaussianBlur { .. } | Self::Morphology { .. } => None,
             Self::ColorMatrix { matrix } => Some((ShaderType::FilterImageColorMatrix, matrix)),
+            Self::Offset { dx, dy } => {
+                let mut slots = [0.0f32; 20];
+                slots[0] = dx;
+                slots[1] = dy;
+                Some((ShaderType::FilterImageOffset, slots))
+            }
             Self::Turbulence { .. } => Some((
                 ShaderType::FilterImageTurbulence,
                 crate::turbulence::shader_slots(self, width, height),
@@ -1058,7 +1144,7 @@ mod filter_fold_tests {
     /// Blurs cannot fold - the chain executor must run them as passes.
     #[test]
     fn blur_does_not_fold() {
-        let blur = ImageFilter::GaussianBlur { sigma: 2.0 };
+        let blur = ImageFilter::gaussian_blur(2.0);
         assert!(blur.fold_with(ImageFilter::sepia(1.0)).is_none());
         assert!(ImageFilter::sepia(1.0).fold_with(blur).is_none());
     }

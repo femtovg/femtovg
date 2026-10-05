@@ -40,7 +40,7 @@ impl From<&wgpu::Texture> for WGPURenderOutput {
     fn from(texture: &wgpu::Texture) -> Self {
         let size = texture.size();
         Self {
-            view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
+            view: texture.create_view(&base_level()),
             width: size.width,
             height: size.height,
             format: texture.format(),
@@ -247,7 +247,8 @@ pub struct Image {
 // Only these flags change a sampler descriptor; the rest would split the cache for nothing.
 const SAMPLER_FLAGS: crate::ImageFlags = crate::ImageFlags::REPEAT_X
     .union(crate::ImageFlags::REPEAT_Y)
-    .union(crate::ImageFlags::NEAREST);
+    .union(crate::ImageFlags::NEAREST)
+    .union(crate::ImageFlags::GENERATE_MIPMAPS);
 
 type SamplerCache = Rc<RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>>;
 
@@ -278,6 +279,8 @@ pub struct WGPURenderer {
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
+    /// Built on the first upload of an image with `GENERATE_MIPMAPS`.
+    mipmaps: Option<MipmapGenerator>,
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
@@ -313,7 +316,7 @@ impl WGPURenderer {
     /// Uploads a browser-side image source straight into an image's texture.
     #[cfg(wasm_unknown)]
     fn copy_external_image(
-        &self,
+        &mut self,
         image: &Image,
         source: wgpu::ExternalImageSource,
         size: crate::image::Size,
@@ -347,12 +350,23 @@ impl WGPURenderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.generate_mipmaps(texture);
         Ok(())
     }
 
     /// Creates a new renderer for the device.
     pub fn new(device: wgpu::Device, queue: wgpu::Queue) -> Self {
-        let module = wgpu::include_wgsl!("wgpu/shader.wgsl");
+        let module = wgpu::ShaderModuleDescriptor {
+            label: Some("femtovg"),
+            source: wgpu::ShaderSource::Wgsl(
+                concat!(
+                    include_str!("wgpu/shader.wgsl"),
+                    "\n",
+                    include_str!("wgpu/filters.wgsl")
+                )
+                .into(),
+            ),
+        };
         let shader_module = Rc::new(device.create_shader_module(module));
 
         let texture_descriptor = wgpu::TextureDescriptor {
@@ -486,7 +500,177 @@ impl WGPURenderer {
             viewport_bind_group_layout,
             pipeline_layout,
             pipeline_cache: Default::default(),
+            mipmaps: None,
         }
+    }
+
+    /// Fills the levels below the base of an image created with
+    /// `GENERATE_MIPMAPS`, after each upload as the OpenGL backend does.
+    fn generate_mipmaps(&mut self, texture: &wgpu::Texture) {
+        if texture.mip_level_count() < 2 || !texture.usage().contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+            return;
+        }
+        let (device, queue) = (&self.device, &self.queue);
+        self.mipmaps
+            .get_or_insert_with(|| MipmapGenerator::new(device))
+            .generate(device, queue, texture);
+    }
+}
+
+/// A view of a texture's base level alone: what a render pass attaches,
+/// since an attachment holds one level while a sampled view holds them all.
+fn base_level() -> wgpu::TextureViewDescriptor<'static> {
+    wgpu::TextureViewDescriptor {
+        mip_level_count: Some(1),
+        ..Default::default()
+    }
+}
+
+/// The mip levels an image gets: every halving down to one texel with
+/// `GENERATE_MIPMAPS`, the base level alone without.
+fn mip_level_count(info: &crate::ImageInfo) -> u32 {
+    if info.flags().contains(crate::ImageFlags::GENERATE_MIPMAPS) {
+        1 + (info.width().max(info.height()).max(1) as u32).ilog2()
+    } else {
+        1
+    }
+}
+
+/// Fills an image's mip levels: each is the level above sampled bilinearly
+/// at its own texel centres, the 2x2 box average `glGenerateMipmap`
+/// produces, so both backends minify alike. One render pass per level on
+/// a pipeline per texture format, built on first use.
+#[derive(Debug)]
+struct MipmapGenerator {
+    module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    sampler: wgpu::Sampler,
+    pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+}
+
+impl MipmapGenerator {
+    fn new(device: &wgpu::Device) -> Self {
+        let module = device.create_shader_module(wgpu::include_wgsl!("wgpu/mipmap.wgsl"));
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("femtovg mipmap"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("femtovg mipmap"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("femtovg mipmap"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            sampler,
+            pipelines: HashMap::new(),
+        }
+    }
+
+    fn generate(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) {
+        let Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            sampler,
+            pipelines,
+        } = self;
+        let pipeline = pipelines.entry(texture.format()).or_insert_with(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("femtovg mipmap"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module,
+                    entry_point: Some("vs_mipmap"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module,
+                    entry_point: Some("fs_mipmap"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(texture.format().into())],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        let level = |level| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("femtovg mipmap"),
+        });
+        for target in 1..texture.mip_level_count() {
+            let (source, target) = (level(target - 1), level(target));
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("femtovg mipmap"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 }
 
@@ -690,20 +874,33 @@ impl Renderer for WGPURenderer {
                     );
                 }
                 super::CommandType::RenderFilteredImage { target_image, filter } => match filter {
-                    crate::ImageFilter::GaussianBlur { sigma } => {
+                    crate::ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
                         let mut pass = FilterPass {
                             images,
                             current_render_target: &mut current_render_target,
                             render_pass_builder: &mut render_pass_builder,
                             pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                         };
-                        gaussian_blur_filter(&mut pass, command, sigma, target_image);
+                        gaussian_blur_filter(&mut pass, command, [sigma_x, sigma_y], target_image);
+                    }
+                    crate::ImageFilter::Morphology {
+                        radius_x,
+                        radius_y,
+                        operator,
+                    } => {
+                        let mut pass = FilterPass {
+                            images,
+                            current_render_target: &mut current_render_target,
+                            render_pass_builder: &mut render_pass_builder,
+                            pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                        };
+                        morphology_filter(&mut pass, command, [radius_x, radius_y], operator, target_image);
                     }
                     single_pass => {
                         let target_info = images.get(target_image).unwrap().info;
                         let (shader_type, slots) = single_pass
                             .single_pass(target_info.width() as f32, target_info.height() as f32)
-                            .expect("every filter but the Gaussian blur runs as one pass");
+                            .expect("every filter but the Gaussian blur and the morphology runs as one pass");
                         let mut pass = FilterPass {
                             images,
                             current_render_target: &mut current_render_target,
@@ -746,7 +943,7 @@ impl Renderer for WGPURenderer {
                     height: info.height() as u32,
                     depth_or_array_layers: 1,
                 },
-                mip_level_count: 1,
+                mip_level_count: mip_level_count(&info),
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: match info.format() {
@@ -851,6 +1048,7 @@ impl Renderer for WGPURenderer {
                     depth_or_array_layers: 1,
                 },
             );
+            self.generate_mipmaps(texture);
         }
         Ok(())
     }
@@ -905,8 +1103,6 @@ mod transient_cost_tests {
     }
 }
 
-/// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
-/// into its reserved transient scratch, then vertical into the target.
 /// The render-loop state an image-filter pass draws through: the images,
 /// the target it must restore when done, the open pass builder and the
 /// pipeline mapper.
@@ -934,7 +1130,16 @@ impl FilterPass<'_, '_> {
     }
 }
 
-fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, sigma: f32, target_image: ImageId) {
+/// A filter of two draws along the axes: the horizontal one, with the
+/// parameters `axis_params(params, 0)` sets, into the command's reserved
+/// transient scratch, then the vertical one, with `axis_params(params, 1)`,
+/// from the scratch into `target_image`.
+fn separable_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    target_image: ImageId,
+    mut axis_params: impl FnMut(&mut Params, usize),
+) {
     let FilterPass {
         images,
         current_render_target,
@@ -961,7 +1166,7 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
         1.,
     );
 
-    let mut blur_params = Params::new(
+    let mut params = Params::new(
         images,
         &Default::default(),
         &image_paint.flavor,
@@ -971,21 +1176,18 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
         0.,
         0.,
     );
-    blur_params.shader_type = ShaderType::FilterImage;
+    axis_params(&mut params, 0);
+    params.image_blur_filter_direction = [1.0, 0.0];
+    // The fused matrices ride parameters a filter draw leaves unused: an
+    // alpha-only matrix before the filter is the `radius` flag on the first
+    // draw, a matrix after it the `feather` flag and the matrix slots on
+    // the second.
+    params.radius = f32::from(u8::from(command.fused.source_alpha));
 
-    let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma);
-    blur_params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
-    blur_params.image_blur_filter_direction = [1.0, 0.0];
-    blur_params.image_blur_filter_sigma = sigma;
-
-    let horizontal_blur_buffer = command
+    let horizontal_buffer = command
         .filter_scratch
-        .expect("a Gaussian blur has a reserved scratch image");
-    render_pass_builder.set_filter_target_image(
-        images,
-        horizontal_blur_buffer,
-        wgpu::LoadOp::Clear(wgpu::Color::default()),
-    );
+        .expect("a two-pass filter has a reserved scratch image");
+    render_pass_builder.set_filter_target_image(images, horizontal_buffer, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -994,7 +1196,7 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
             wgpu::PrimitiveTopology::TriangleList,
             StencilTest::Disabled,
             Some(wgpu::Face::Back),
-            &blur_params,
+            &params,
             images,
             command.image,
             command.glyph_texture,
@@ -1004,10 +1206,17 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
 
     render_pass_builder.set_filter_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
-    blur_params.image_blur_filter_direction = [0.0, 1.0];
-    // The horizontal pass stored premultiplied RGBA regardless of the source
+    axis_params(&mut params, 1);
+    params.image_blur_filter_direction = [0.0, 1.0];
+    // The horizontal draw stored premultiplied RGBA regardless of the source
     // image's format or premultiplication flag.
-    blur_params.tex_type = 0.0;
+    params.tex_type = 0.0;
+    params.radius = 0.0;
+    if let Some(matrix) = command.fused.post_matrix {
+        params.scissor_mat.copy_from_slice(&matrix[..12]);
+        params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+        params.feather = 1.0;
+    }
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1016,15 +1225,50 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
             wgpu::PrimitiveTopology::TriangleList,
             StencilTest::Disabled,
             Some(wgpu::Face::Back),
-            &blur_params,
+            &params,
             images,
-            Some(horizontal_blur_buffer),
+            Some(horizontal_buffer),
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 
     pass.restore_target(previous_render_target);
+}
+
+/// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
+/// by `sigma[0]`, then vertical by `sigma[1]`. A degenerate sigma makes that
+/// draw a copy.
+fn gaussian_blur_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    sigma: [f32; 2],
+    target_image: ImageId,
+) {
+    separable_filter(pass, command, target_image, |params, axis| {
+        params.shader_type = ShaderType::FilterImage;
+        let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma[axis]);
+        params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
+        params.image_blur_filter_sigma = sigma;
+    });
+}
+
+/// Two-pass morphology of `command.image` into `target_image`: the
+/// per-channel maximum (dilate) or minimum (erode) over `radius[0]` whole
+/// pixels either side along x, then over `radius[1]` along y. The radius
+/// rides the blur's sigma parameter and the operator its first coefficient.
+fn morphology_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    radius: [f32; 2],
+    operator: crate::MorphologyOperator,
+    target_image: ImageId,
+) {
+    separable_filter(pass, command, target_image, |params, axis| {
+        params.shader_type = ShaderType::FilterImageMorphology;
+        params.image_blur_filter_sigma = radius[axis];
+        params.image_blur_filter_coeff[0] = f32::from(u8::from(operator == crate::MorphologyOperator::Dilate));
+    });
 }
 
 /// Single-pass color-matrix filter: sample the source once and apply the 4x5
@@ -1764,10 +2008,9 @@ fn clip_guard(active: bool) -> StencilTest {
     }
 }
 
+// Only what materialize() reads belongs in the key; anything else would split the cache for nothing.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct PipelineState {
-    shader_type: ShaderType,
-    enable_glyph_texture: bool,
     render_to_texture: bool,
     color_target_state: wgpu::ColorTargetState,
     primitive_topology: wgpu::PrimitiveTopology,
@@ -1780,8 +2023,6 @@ impl PipelineState {
         color_blend: Option<wgpu::BlendState>,
         stencil_test: StencilTest,
         format: wgpu::TextureFormat,
-        shader_type: ShaderType,
-        enable_glyph_texture: bool,
         render_to_texture: bool,
         primitive_topology: wgpu::PrimitiveTopology,
         cull_mode: Option<wgpu::Face>,
@@ -1815,8 +2056,6 @@ impl PipelineState {
             ),
         };
         Self {
-            shader_type,
-            enable_glyph_texture,
             render_to_texture,
             color_target_state,
             primitive_topology,
@@ -1825,13 +2064,22 @@ impl PipelineState {
         }
     }
 
+    #[deny(unused_variables)]
     fn materialize(
         &self,
         device: &wgpu::Device,
         pipeline_layout: &wgpu::PipelineLayout,
         shader_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
-        let vertex_entry_point = if self.render_to_texture {
+        // Exhaustively bind the key so adding a field or leaving one unused here is a compile error.
+        let Self {
+            render_to_texture,
+            color_target_state,
+            primitive_topology,
+            cull_mode,
+            stencil_state,
+        } = self;
+        let vertex_entry_point = if *render_to_texture {
             "vs_main_texture"
         } else {
             "vs_main"
@@ -1854,28 +2102,25 @@ impl PipelineState {
                 module: shader_module,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(self.color_target_state.clone())],
+                targets: &[Some(color_target_state.clone())],
             }),
             primitive: wgpu::PrimitiveState {
-                topology: self.primitive_topology,
-                front_face: if self.render_to_texture {
+                topology: *primitive_topology,
+                front_face: if *render_to_texture {
                     wgpu::FrontFace::Cw
                 } else {
                     wgpu::FrontFace::Ccw
                 },
-                cull_mode: self.cull_mode,
+                cull_mode: *cull_mode,
                 ..Default::default()
             },
-            depth_stencil: self
-                .stencil_state
-                .as_ref()
-                .map(|stencil_state| wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Stencil8,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
-                    stencil: stencil_state.clone(),
-                    bias: Default::default(),
-                }),
+            depth_stencil: stencil_state.as_ref().map(|stencil_state| wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Stencil8,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: stencil_state.clone(),
+                bias: Default::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
@@ -2079,6 +2324,13 @@ impl<'a> RenderPassBuilder<'a> {
                     address_mode_w: wgpu::AddressMode::ClampToEdge,
                     mag_filter: filter_mode,
                     min_filter: filter_mode,
+                    // Across the levels the way OpenGL's LINEAR_MIPMAP_LINEAR
+                    // and NEAREST_MIPMAP_NEAREST go; a single-level image
+                    // has nothing to filter between.
+                    mipmap_filter: match (flags.contains(crate::ImageFlags::GENERATE_MIPMAPS), filter_mode) {
+                        (true, wgpu::FilterMode::Linear) => wgpu::MipmapFilterMode::Linear,
+                        _ => wgpu::MipmapFilterMode::Nearest,
+                    },
                     ..Default::default()
                 })
             })
@@ -2104,7 +2356,7 @@ impl<'a> RenderPassBuilder<'a> {
         stencil_buffer: Option<wgpu::Texture>,
         load: wgpu::LoadOp<wgpu::Color>,
     ) {
-        self.texture_view = texture.create_view(&Default::default());
+        self.texture_view = texture.create_view(&base_level());
         self.set_viewport([texture.width() as f32, texture.height() as f32]);
         self.stencil_buffer = stencil_buffer;
         self.surface_format = texture.format();
@@ -2321,8 +2573,6 @@ impl CommandToPipelineAndBindGroupMapper {
             color_blend,
             stencil_test,
             render_pass_builder.surface_format,
-            params.shader_type,
-            params.uses_glyph_texture(),
             render_pass_builder.rendering_to_texture,
             primitive_topology,
             cull_mode,

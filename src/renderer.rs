@@ -94,6 +94,16 @@ pub enum CommandType {
     },
 }
 
+/// The colour matrices a two-draw filter pass carries in its draws: an
+/// alpha-only matrix before it, so every tap of the first draw reads
+/// (0, 0, 0, a), and any matrix after it, applied by the second draw to its
+/// result before storing it - each one draw fewer than its own pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Fused {
+    pub(crate) source_alpha: bool,
+    pub(crate) post_matrix: Option<[f32; 20]>,
+}
+
 /// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
 /// texture) is stored the other way up from the image, the alpha the image
 /// is scaled by first, and whether to write the image's contribution over
@@ -129,6 +139,8 @@ pub struct Command {
     pub(crate) glyph_texture: GlyphTexture,
     // A blend pass's inputs beyond its mode; the backdrop is the glyph texture.
     pub(crate) blend_pass: BlendPass,
+    // The matrices a two-draw filter pass folds into its draws.
+    pub(crate) fused: Fused,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -145,6 +157,7 @@ impl Command {
             filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
             blend_pass: BlendPass::default(),
+            fused: Fused::default(),
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
@@ -334,6 +347,11 @@ pub enum ShaderType {
     /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
     /// glyph-texture slot, with one of the sixteen blend modes.
     FilterImageBlend,
+    /// Morphology shader (SVG `feMorphology`), one axis per draw like the
+    /// blur: the per-channel maximum or minimum within a radius.
+    FilterImageMorphology,
+    /// Offset shader (SVG `feOffset`): the image shifted by a pixel offset.
+    FilterImageOffset,
 }
 
 impl ShaderType {
@@ -356,6 +374,8 @@ impl ShaderType {
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
             Self::FilterImageBlend => 15,
+            Self::FilterImageMorphology => 16,
+            Self::FilterImageOffset => 17,
         }
     }
 
@@ -369,9 +389,9 @@ impl ShaderType {
 /// fragment shader's blur loop is bounded at 24 taps per side (GLES 2.0 needs
 /// a constant loop bound) and the kernel reaches 3 sigma, so a pass covers
 /// sigma 8 exactly and no more. A blur above it is not clamped away: the chain
-/// planner (`filter_passes` in lib.rs) runs it as several passes of at most
-/// this sigma, which compose in quadrature to the requested one. The
-/// coefficients below and the shader's tap count agree on this value.
+/// planner (`blur_passes` in filters.rs) halves the image until the sigma
+/// fits one pass and scales the result back up. The coefficients below and
+/// the shader's tap count agree on this value.
 pub(crate) const MAX_BLUR_SIGMA: f32 = 8.0;
 
 /// Gaussian blur coefficients for `sigma`, sanitized the same way for every
