@@ -310,6 +310,10 @@ where
         bounds: impl FnOnce() -> Bounds,
         fill: Option<(&Path, &Transform2D)>,
     ) -> (Option<ClipCoverage>, Scissor, Option<RectFill>) {
+        if self.state().scissor.extent.is_none() && self.clip_stack.is_empty() {
+            self.shape_carried = false;
+            return (None, self.state().scissor, None);
+        }
         let boxes = self.clip_boxes();
         if boxes.shape.is_none() && boxes.scissor_box.is_none() {
             self.shape_carried = false;

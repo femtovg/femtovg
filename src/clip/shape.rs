@@ -130,32 +130,29 @@ impl RoundedBox {
     }
 
     fn parallelogram(start: [f32; 2], segments: &[Segment]) -> Option<Self> {
-        let mut points = vec![start];
-        for segment in segments {
+        // The contour is closed: the last segment ends on the start again.
+        let mut points = Vec::with_capacity(segments.len());
+        points.push(start);
+        for segment in &segments[..segments.len() - 1] {
             if let Segment::Line(end) = segment {
                 points.push(*end);
             }
         }
-        points.pop(); // the contour is closed: the last point is the start again
         let size = points
             .iter()
             .map(|p| (p[0] - start[0]).abs().max((p[1] - start[1]).abs()))
             .fold(0.0, f32::max);
         // Corners only: a point on the line through its neighbours adds nothing.
-        let turns = |points: &[[f32; 2]]| -> Vec<[f32; 2]> {
-            let n = points.len();
-            (0..n)
-                .filter(|&i| {
-                    let (a, b, c) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
-                    let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
-                    cross.abs() > CORNER_TOLERANCE * size * size
-                })
-                .map(|i| points[i])
-                .collect()
-        };
-        let &[p0, p1, p2, p3] = turns(&points).as_slice() else {
+        let n = points.len();
+        let mut turns = (0..n).filter(|&i| {
+            let (a, b, c) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
+            let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+            cross.abs() > CORNER_TOLERANCE * size * size
+        });
+        let [p0, p1, p2, p3] = [turns.next()?, turns.next()?, turns.next()?, turns.next()?].map(|i| points[i]);
+        if turns.next().is_some() {
             return None;
-        };
+        }
         let close = |a: f32, b: f32| (a - b).abs() <= CORNER_TOLERANCE * size;
         if !close(p0[0] + p2[0], p1[0] + p3[0]) || !close(p0[1] + p2[1], p1[1] + p3[1]) {
             return None;
@@ -616,7 +613,7 @@ impl ClipCoverage {
 fn contour(path: &Path) -> Option<([f32; 2], Vec<Segment>)> {
     let mut start: Option<[f32; 2]> = None;
     let mut last = [0.0, 0.0];
-    let mut segments = Vec::new();
+    let mut segments = Vec::with_capacity(path.verb_count());
     let mut closed = false;
     for verb in path.verbs() {
         match verb {
