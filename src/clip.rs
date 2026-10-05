@@ -1063,8 +1063,8 @@ fn a_draw_the_shape_holds_carries_no_shape() {
 /// An antialiased upright rect under an upright rect clip is drawn as the
 /// rect the two share, with no clip: one convex fill with its fringe. Under
 /// an upright clip with round corners that it covers it is drawn as the
-/// clip: a quad with no fringe a fringe around it, under the clip's
-/// coverage. A fill without antialiasing, one that is no rect, the clip's
+/// clip: a quad without a fringe, a fringe's width around the clip, under
+/// the clip's coverage. A fill without antialiasing, one that is no rect, the clip's
 /// rounded twin and a rect across part of it keep their outline, and their
 /// fringe, and carry the shape.
 #[test]
