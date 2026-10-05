@@ -219,7 +219,7 @@ where
         // A unit of the path is no longer on the target than the longer of
         // the transform's axes.
         let scale = transform[0].hypot(transform[1]).max(transform[2].hypot(transform[3]));
-        coverage.strays = strays * scale / self.fringe_width;
+        coverage = coverage.straying(strays * scale / self.fringe_width);
         if let Some((current, current_coverage)) = self.clip_shape() {
             if let Some(both) = current.intersection(&shape, self.fringe_width) {
                 if both == current {
@@ -229,15 +229,10 @@ where
                 let Some(both_coverage) = both.coverage(self.fringe_width) else {
                     return false;
                 };
-                // Each side of what the two leave is a side of one of them.
+                // Each corner of what the two leave is a corner of one of
+                // them.
                 let strays = coverage.strays.max(current_coverage.strays);
-                (shape, coverage) = (
-                    both,
-                    ClipCoverage {
-                        strays,
-                        ..both_coverage
-                    },
-                );
+                (shape, coverage) = (both, both_coverage.straying(strays));
             } else if coverage.contains(&current) {
                 return true;
             } else if !current_coverage.contains(&shape) {
@@ -276,22 +271,21 @@ where
             extent,
             radii: [scissor.radius; 2],
         });
-        let both =
-            match (shape, scissor_box) {
-                (Some((shape, coverage)), Some(scissor_box)) => shape
+        // The round corners a square scissor leaves are the shape's; a
+        // rounded scissor's own are exact.
+        let both = match (shape, scissor_box) {
+            (Some((shape, coverage)), Some(scissor_box)) => {
+                let strays = if scissor_box.radii == [0.0; 2] {
+                    coverage.strays
+                } else {
+                    0.0
+                };
+                shape
                     .with_scissor(&scissor_box, self.fringe_width)
-                    .map(|(both, both_coverage)| {
-                        let strays = coverage.strays;
-                        (
-                            both,
-                            ClipCoverage {
-                                strays,
-                                ..both_coverage
-                            },
-                        )
-                    }),
-                _ => None,
-            };
+                    .map(|(both, both_coverage)| (both, both_coverage.straying(strays)))
+            }
+            _ => None,
+        };
         let boxes = match both {
             Some(both) => ClipBoxes {
                 of,
@@ -1008,8 +1002,9 @@ fn a_box_clip_is_a_shape_on_the_draws_under_it() {
 
 /// A draw the shape holds whole carries no shape - a fill, a stroke with its
 /// width and its miters, glyph quads, by their bounds or by the points of
-/// their outline - and one that reaches past the shape carries it. After a draw that carried the shape, a held one carries a
-/// coverage of one, for the renderer to stay on the variant it has bound.
+/// their outline - and one that reaches past the shape carries it. After a
+/// draw that carried the shape, a held one carries a coverage of one, for
+/// the renderer to stay on the variant it has bound.
 /// Held, a draw under an operation coverage cannot bound leaves the shape a
 /// shape.
 #[test]
@@ -1263,6 +1258,56 @@ fn a_scissor_and_the_shape_reach_a_draw_as_one_box() {
         ([40.0, 30.0], [15.0, 15.0]),
         "the clip, which the scissor holds"
     );
+}
+
+/// What a rounded clip's outline strays outside its box - cubic corners, a
+/// tenth of a pixel off the circle at this size - gives a draw no way past
+/// a scissor: not past the sides of the rect a scissor inside the clip
+/// leaves, and not past a rounded scissor's corners, which are exact.
+#[test]
+fn a_scissor_takes_no_slack_from_the_clips_outline() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 1000, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut clip = Path::new();
+    clip.rounded_rect(100.0, 100.0, 800.0, 800.0, 400.0);
+    let (_, strays) = RoundedBox::fit_outline(&clip).unwrap();
+    assert!(strays > 0.08, "{strays}");
+    let triangle = |reach: f32| {
+        let mut path = Path::new();
+        path.move_to(500.0, 400.0);
+        path.line_to(reach, 500.0);
+        path.line_to(500.0, 600.0);
+        path.close();
+        path
+    };
+
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.scissor(300.0, 300.0, 400.0, 400.0);
+    canvas.fill_path(&triangle(700.0), &paint); // to the scissor's side
+    canvas.fill_path(&triangle(700.06), &paint); // past it, by less than the outline strays
+    canvas.rounded_scissor(100.0, 100.0, 800.0, 800.0, 400.0);
+    canvas.fill_path(&clip, &paint); // the clip's twin, past the scissor's circle
+    canvas.reset_scissor();
+    canvas.fill_path(&clip, &paint); // and inside the clip alone
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let clipped: Vec<bool> = commands
+        .iter()
+        .filter_map(|cmd| match &cmd.cmd_type {
+            CommandType::ConvexFill { params }
+            | CommandType::ConcaveFill {
+                fill_params: params, ..
+            } => Some(params.scissor_mat != [0.0; 12]),
+            _ => None,
+        })
+        .zip(carried(&commands))
+        .map(|(scissored, carried)| scissored || carried == "shape")
+        .collect();
+    assert_eq!(clipped, [false, true, true, false]);
 }
 
 /// The scissor meets a draw as a clip shape does: a draw it holds whole -

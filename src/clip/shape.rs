@@ -110,9 +110,9 @@ pub(crate) struct ClipCoverage {
     pub(crate) offset: [f32; 2],
     pub(crate) extent: [f32; 2],
     pub(crate) radii: [f32; 2],
-    /// How far outside the box, in fringe widths, the outline it was fitted
-    /// to strays ([`RoundedBox::fit_outline`]): a draw that goes no further
-    /// is inside the clip as it was given.
+    /// How far outside the box's round corners, in fringe widths, the
+    /// outline it was fitted to strays ([`RoundedBox::fit_outline`]): a
+    /// draw that goes no further there is inside the clip as it was given.
     pub(crate) strays: f32,
 }
 
@@ -532,6 +532,12 @@ impl ClipCoverage {
         strays: 0.0,
     };
 
+    /// The coverage of a box whose fitted outline strays `strays` fringe
+    /// widths outside its round corners.
+    pub(crate) fn straying(self, strays: f32) -> Self {
+        Self { strays, ..self }
+    }
+
     /// The ten floats both backends' shaders read (`clipMask`): where the
     /// corners' ellipses are centered, the linear part by rows, the offset,
     /// and the half extents grown by the half fringe a side's ramp reaches.
@@ -560,14 +566,21 @@ impl ClipCoverage {
     /// Signed distance from the box's edge at a device position, in fringe
     /// widths and negative inside: what the fragment shaders' coverage is
     /// half a fringe minus.
-    pub(crate) fn distance(&self, [x, y]: [f32; 2]) -> f32 {
+    pub(crate) fn distance(&self, point: [f32; 2]) -> f32 {
+        self.locate(point).0
+    }
+
+    /// A position's [`Self::distance`], and whether it lies off one of the
+    /// box's round corners - the ends of the arc with it - or off a side.
+    fn locate(&self, [x, y]: [f32; 2]) -> (f32, bool) {
         let u = [
             self.linear[0] * x + self.linear[1] * y + self.offset[0],
             self.linear[2] * x + self.linear[3] * y + self.offset[1],
         ];
         let side = [u[0].abs() - self.extent[0], u[1].abs() - self.extent[1]];
         let corner = [side[0] + self.radii[0], side[1] + self.radii[1]];
-        if self.radii[0] > 0.0 && corner[0] > 0.0 && corner[1] > 0.0 {
+        let round = self.radii[0] > 0.0 && corner[0] >= 0.0 && corner[1] >= 0.0;
+        if round && corner[0] > 0.0 && corner[1] > 0.0 {
             // k1 is one on the corner's ellipse; its gradient in device
             // pixels is g along the frame's rows, which are unit vectors but
             // stand at a right angle only without a skew.
@@ -576,9 +589,22 @@ impl ClipCoverage {
             let g = [k[0] / self.radii[0], k[1] / self.radii[1]];
             let lean =
                 (self.linear[0] * self.linear[2] + self.linear[1] * self.linear[3]) * u[0].signum() * u[1].signum();
-            (k1 - 1.0) * k1 / (g[0] * g[0] + g[1] * g[1] + 2.0 * g[0] * g[1] * lean).sqrt()
+            let distance = (k1 - 1.0) * k1 / (g[0] * g[0] + g[1] * g[1] + 2.0 * g[0] * g[1] * lean).sqrt();
+            (distance, true)
         } else {
-            side[0].max(side[1])
+            (side[0].max(side[1]), round)
+        }
+    }
+
+    /// How far a device position is outside the clip as it was given, in
+    /// fringe widths: its [`Self::distance`] from the box, less off a round
+    /// corner what the outline the box was fitted to strays outside it.
+    fn outside(&self, point: [f32; 2]) -> f32 {
+        let (distance, round) = self.locate(point);
+        if round {
+            distance - self.strays
+        } else {
+            distance
         }
     }
 
@@ -616,17 +642,10 @@ impl ClipCoverage {
         })
     }
 
-    /// How far past the box's edge, in fringe widths, a draw still counts
-    /// as inside it: [`DRAW_SLACK`], and what the outline the box was fitted
-    /// to strays outside it.
-    fn slack(&self) -> f32 {
-        DRAW_SLACK + self.strays
-    }
-
-    /// Whether the box holds a rectangle of device pixels whole, within
-    /// [`Self::slack`]: a draw that stays inside it has nothing clipped, and
-    /// along an edge it shares with the box its own antialiasing is its
-    /// coverage.
+    /// Whether the clip as it was given ([`Self::outside`]) holds a
+    /// rectangle of device pixels whole, within [`DRAW_SLACK`]: a draw that
+    /// stays inside it has nothing clipped, and along an edge it shares
+    /// with the box its own antialiasing is its coverage.
     pub(crate) fn holds(&self, bounds: &Bounds) -> bool {
         if self.radii == [0.0; 2] {
             // Between two parallel sides the rectangle's corners reach as
@@ -636,7 +655,7 @@ impl ClipCoverage {
             return [0, 1].into_iter().all(|axis| {
                 let [a, b] = [self.linear[2 * axis], self.linear[2 * axis + 1]];
                 let at = a * center[0] + b * center[1] + self.offset[axis];
-                at.abs() + a.abs() * half[0] + b.abs() * half[1] - self.extent[axis] <= self.slack()
+                at.abs() + a.abs() * half[0] + b.abs() * half[1] - self.extent[axis] <= DRAW_SLACK
             });
         }
         [
@@ -646,15 +665,16 @@ impl ClipCoverage {
             [bounds.minx, bounds.maxy],
         ]
         .into_iter()
-        .all(|corner| self.distance(corner) <= self.slack())
+        .all(|corner| self.outside(corner) <= DRAW_SLACK)
     }
 
-    /// Whether the box holds a draw whole, within [`Self::slack`], by the
-    /// points of its outline: each one inside, with the `spread` - in
-    /// fringe widths - the draw reaches around it, a stroke's half width.
-    /// The box is convex, so what lies between the points is inside with
-    /// them; a rounded rect filled under its own outline as a clip is held
-    /// where its bounds, which stand past the corners, are not. The points
+    /// Whether the clip as it was given holds a draw whole, within
+    /// [`DRAW_SLACK`], by the points of its outline: each one inside, with
+    /// the `spread` - in fringe widths - the draw reaches around it, a
+    /// stroke's half width. The box is convex, so what lies between the
+    /// points is inside with them; a rounded rect filled under its own
+    /// outline as a clip is held where its bounds, which stand past the
+    /// corners, are not. The points
     /// are looked at only where they can tell more than `bounds`, the
     /// draw's, do: not for a draw that reaches past the box's own bounds,
     /// nor under an upright box with square corners, which holds the points
@@ -662,7 +682,7 @@ impl ClipCoverage {
     /// which it is with square or circular corners and no skew: no other
     /// box holds a stroke this way.
     pub(crate) fn holds_outline(&self, bounds: &Bounds, points: impl Iterator<Item = [f32; 2]>, spread: f32) -> bool {
-        let Some(own) = self.bounds(self.slack()) else {
+        let Some(own) = self.bounds(DRAW_SLACK + self.strays) else {
             return true;
         };
         let [a, b, c, d] = self.linear;
@@ -677,7 +697,7 @@ impl ClipCoverage {
             return false;
         }
         let mut points = points.peekable();
-        points.peek().is_some() && points.all(|point| self.distance(point) + spread <= self.slack())
+        points.peek().is_some() && points.all(|point| self.outside(point) + spread <= DRAW_SLACK)
     }
 
     /// Whether `other` lies inside this box, within [`CONTAINMENT_SLACK`],
@@ -808,10 +828,7 @@ mod tests {
         });
         let coverage = shape.coverage(1.0).unwrap();
         assert!(!coverage.holds_outline(&bounds, outline.iter().copied(), 0.0));
-        let knowing = ClipCoverage {
-            strays: quadratic,
-            ..coverage
-        };
+        let knowing = coverage.straying(quadratic);
         assert!(knowing.holds_outline(&bounds, outline.iter().copied(), 0.0));
     }
 
@@ -894,6 +911,61 @@ mod tests {
                 "{frame:?} {radii:?}: a stroke on the box's edge from inside"
             );
             assert!(!coverage.holds_outline(&stroke_bounds, path.iter().copied(), 2.1));
+        }
+    }
+
+    /// What the fitted outline strays outside the box counts off its round
+    /// corners alone. Past a straight side - a rounded box's, or a square
+    /// one's, as the box a scissor leaves of a rounded clip is - a draw is
+    /// held within [`DRAW_SLACK`] and no further.
+    #[test]
+    fn an_outlines_stray_gives_no_way_past_a_straight_side() {
+        let past_a_side = Bounds {
+            minx: 30.0,
+            miny: 25.0,
+            maxx: 60.25,
+            maxy: 35.0,
+        };
+        let corners = [[30.0, 25.0], [60.25, 25.0], [60.25, 35.0], [30.0, 35.0]];
+        for radii in [[0.0, 0.0], [6.0, 6.0]] {
+            let shape = RoundedBox {
+                frame: Transform2D::translation(40.0, 30.0),
+                extent: [20.0, 12.5],
+                radii,
+            };
+            let coverage = shape.coverage(1.0).unwrap().straying(0.5);
+            assert!(!coverage.holds(&past_a_side), "{radii:?}");
+            assert!(
+                !coverage.holds_outline(&past_a_side, corners.into_iter(), 0.0),
+                "{radii:?}"
+            );
+        }
+
+        // A quarter pixel off the corner's arc, and on the axis of a circle,
+        // where the arc of one corner ends and the next begins.
+        let rounded = RoundedBox {
+            frame: Transform2D::translation(40.0, 30.0),
+            extent: [20.0, 12.5],
+            radii: [6.0, 6.0],
+        };
+        let circle = RoundedBox {
+            frame: Transform2D::translation(40.0, 30.0),
+            extent: [20.0, 20.0],
+            radii: [20.0, 20.0],
+        };
+        let diagonal = 6.25 * std::f32::consts::FRAC_1_SQRT_2;
+        for (shape, point) in [(rounded, [54.0 + diagonal, 36.5 + diagonal]), (circle, [60.25, 30.0])] {
+            let points = [[40.0, 30.0], point, [40.0, 34.0]];
+            let bounds = Bounds {
+                minx: 40.0,
+                miny: 30.0,
+                maxx: point[0],
+                maxy: point[1].max(34.0),
+            };
+            let coverage = shape.coverage(1.0).unwrap();
+            assert!(!coverage.holds_outline(&bounds, points.into_iter(), 0.0), "{point:?}");
+            let knowing = coverage.straying(0.5);
+            assert!(knowing.holds_outline(&bounds, points.into_iter(), 0.0), "{point:?}");
         }
     }
 
