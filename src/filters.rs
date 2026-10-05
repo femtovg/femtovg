@@ -59,6 +59,17 @@ impl FilterScratchImages {
     }
 }
 
+/// What a filter pass's command carries besides its filter and images.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PassDraw {
+    /// A blend's placed backdrop and the pass's inputs beyond its mode.
+    pub(crate) backdrop: Option<(ImageId, BlendPass)>,
+    /// The matrices a two-draw filter carries in its draws.
+    pub(crate) fused: Fused,
+    /// The rect the result is drawn inside, in the target's texel rows.
+    pub(crate) crop: Option<[u32; 4]>,
+}
+
 /// One pass of a filter plan: `filter`, rendered into an image at pyramid
 /// `level` - [`FULL`] the chain's own size, `[m, n]` the chain halved m
 /// times along x and n times along y.
@@ -544,15 +555,8 @@ where
         } else {
             None
         };
-        let recorded = self.filter_image_with_scratch(
-            target_image,
-            filter,
-            source_image,
-            blur_scratch,
-            None,
-            Fused::default(),
-            None,
-        );
+        let recorded =
+            self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, PassDraw::default());
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -567,15 +571,10 @@ where
         filter: ImageFilter,
         source_image: ImageId,
         blur_scratch: Option<ImageId>,
-        // A blend's placed backdrop and the pass's inputs beyond its mode.
-        backdrop: Option<(ImageId, BlendPass)>,
-        // The matrices a two-draw filter carries in its draws.
-        fused: Fused,
-        // The rect the result is drawn inside, in the target's texel rows.
-        crop: Option<[u32; 4]>,
+        draw: PassDraw,
     ) -> bool {
         debug_assert_eq!(filter.two_pass(), blur_scratch.is_some());
-        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
+        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), draw.backdrop.is_some());
         debug_assert!(
             target_image != source_image || filter.two_pass() || matches!(filter, ImageFilter::Turbulence { .. })
         );
@@ -600,13 +599,13 @@ where
             },
             _ => source_image,
         };
-        debug_assert!(filter.two_pass() || (!fused.source_alpha && fused.post_matrix.is_none()));
+        debug_assert!(filter.two_pass() || (!draw.fused.source_alpha && draw.fused.post_matrix.is_none()));
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
-        cmd.fused = fused;
-        cmd.crop = crop;
-        if let Some((placed, pass)) = backdrop {
+        cmd.fused = draw.fused;
+        cmd.crop = draw.crop;
+        if let Some((placed, pass)) = draw.backdrop {
             cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
             cmd.blend_pass = pass;
         }
@@ -966,7 +965,12 @@ where
                     (bottom - top) as u32,
                 ]
             });
-            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused, crop);
+            let draw = PassDraw {
+                backdrop,
+                fused: pass.fused,
+                crop,
+            };
+            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, draw);
             src_flipped = filter.stores_flipped(src_flipped);
             src = dst;
         }
