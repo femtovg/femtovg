@@ -35,13 +35,16 @@ pub(crate) enum ClipKind {
     Shape { shape: RoundedBox, coverage: ClipCoverage },
 }
 
-/// The last scissor and clip shape a draw met together, and the one box
-/// they make, if they do: draws under the same two skip working it out.
+/// The boxes a draw meets: the clip shape - with the scissor, where the two
+/// make one box - and the scissor left beside it, as the scissor it is and
+/// as a box of its own. Worked out for a scissor and a shape, and kept for
+/// the draws that follow under the same two.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct ScissoredShape {
+pub(crate) struct ClipBoxes {
+    of: (Scissor, Option<RoundedBox>),
+    shape: Option<(RoundedBox, ClipCoverage)>,
     scissor: Scissor,
-    shape: RoundedBox,
-    both: Option<(RoundedBox, ClipCoverage)>,
+    scissor_box: Option<(RoundedBox, ClipCoverage)>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -244,36 +247,46 @@ where
         (Rc::new(geometry), path_cache.bounds)
     }
 
-    /// The clip shape in force as a draw meets it, and the scissor left to
-    /// apply beside it: none when the scissor and the shape make one box
-    /// ([`RoundedBox::with_scissor`]), which then stands for both.
-    fn scissored_shape(&mut self) -> Option<(RoundedBox, ClipCoverage, Scissor)> {
-        let (shape, coverage) = self.clip_shape()?;
+    /// The boxes in force as a draw meets them. The scissor is a box like
+    /// the clip shape: where the two make one ([`RoundedBox::with_scissor`])
+    /// that box stands for both, and no scissor is left beside it.
+    fn clip_boxes(&mut self) -> ClipBoxes {
         let scissor = self.state().scissor;
-        let Some(extent) = scissor.extent else {
-            return Some((shape, coverage, scissor));
+        let shape = self.clip_shape();
+        let of = (scissor, shape.map(|(shape, _)| shape));
+        if let Some(last) = self.last_clip_boxes.filter(|last| last.of == of) {
+            return last;
+        }
+        let scissor_box = scissor.extent.map(|extent| RoundedBox {
+            frame: scissor.transform,
+            extent,
+            radii: [scissor.radius; 2],
+        });
+        let both = match (shape, scissor_box) {
+            (Some((shape, _)), Some(scissor_box)) => shape.with_scissor(&scissor_box, self.fringe_width),
+            _ => None,
         };
-        let both = match self.last_scissored_shape {
-            Some(last) if last.scissor == scissor && last.shape == shape => last.both,
-            _ => {
-                let scissor_box = RoundedBox {
-                    frame: scissor.transform,
-                    extent,
-                    radii: [scissor.radius; 2],
-                };
-                let both = shape.with_scissor(&scissor_box, self.fringe_width);
-                self.last_scissored_shape = Some(ScissoredShape { scissor, shape, both });
-                both
-            }
+        let boxes = match both {
+            Some(both) => ClipBoxes {
+                of,
+                shape: Some(both),
+                scissor: Scissor::default(),
+                scissor_box: None,
+            },
+            None => ClipBoxes {
+                of,
+                shape,
+                scissor,
+                scissor_box: scissor_box
+                    .and_then(|scissor_box| Some((scissor_box, scissor_box.coverage(self.fringe_width)?))),
+            },
         };
-        Some(match both {
-            Some((both, coverage)) => (both, coverage, Scissor::default()),
-            None => (shape, coverage, scissor),
-        })
+        self.last_clip_boxes = Some(boxes);
+        boxes
     }
 
     /// The clip shape and the scissor a draw over `bounds` carries; `bounds`
-    /// is asked for only under a shape.
+    /// is asked for only under a shape or a scissor.
     pub(crate) fn draw_clip(&mut self, bounds: impl FnOnce() -> Bounds) -> (Option<ClipCoverage>, Scissor) {
         let (clip, scissor, _) = self.fill_clip(bounds, None);
         (clip, scissor)
@@ -283,23 +296,43 @@ where
     /// an antialiased fill - `fill`, its path and transform - what to fill
     /// in the path's place when it is an upright rect ([`RectFill`]).
     ///
-    /// The shape takes nothing from a draw it holds whole, or from the rect
-    /// such a fill shares with it: these carry no shape - or, after a draw
-    /// that carried one, a coverage of one everywhere, so that the renderer
-    /// goes on with the shader variant it has bound. An operation that
-    /// changes the destination where its source is transparent would change
-    /// the pixels outside the shape too, so before a draw that reaches them
-    /// the shapes move to the stencil.
+    /// A box - the shape, the scissor, or the one the two make - takes
+    /// nothing from a draw it holds whole, or from the rect such a fill
+    /// shares with it, so an edge the draw has in common with the box is
+    /// antialiased once. Such a draw carries no scissor, and no shape - or,
+    /// after a draw that carried one, a coverage of one everywhere, so that
+    /// the renderer goes on with the shader variant it has bound. An
+    /// operation that changes the destination where its source is
+    /// transparent would change the pixels outside the shape too, so before
+    /// a draw that reaches them the shapes move to the stencil.
     pub(crate) fn fill_clip(
         &mut self,
         bounds: impl FnOnce() -> Bounds,
         fill: Option<(&Path, &Transform2D)>,
     ) -> (Option<ClipCoverage>, Scissor, Option<RectFill>) {
-        let Some((shape, coverage, scissor)) = self.scissored_shape() else {
+        let boxes = self.clip_boxes();
+        if boxes.shape.is_none() && boxes.scissor_box.is_none() {
             self.shape_carried = false;
-            return (None, self.state().scissor, None);
+            return (None, boxes.scissor, None);
+        }
+        let bounds = bounds();
+        let mut scissor = boxes.scissor;
+        let mut rect = None;
+        if let Some((scissor_box, coverage)) = boxes.scissor_box {
+            if coverage.holds(&bounds) {
+                scissor = Scissor::default();
+            } else if let (None, Some((path, transform))) = (boxes.shape, fill) {
+                rect = scissor_box.rect_fill(path, transform, self.fringe_width);
+                if matches!(rect, Some(RectFill::Shared(_))) {
+                    scissor = Scissor::default();
+                }
+            }
+        }
+        let Some((shape, coverage)) = boxes.shape else {
+            self.shape_carried = false;
+            return (None, scissor, rect);
         };
-        let held = coverage.holds(&bounds());
+        let held = coverage.holds(&bounds);
         let rect = match fill {
             Some((path, transform)) if !held => shape.rect_fill(path, transform, self.fringe_width),
             _ => None,
@@ -348,7 +381,14 @@ where
         if moved {
             self.reconcile_current_clip_plane();
         }
-        (None, self.state().scissor, None)
+        // Where the scissor and the shape had made one box, the scissor
+        // clips on its own again.
+        let scissor = if boxes.scissor_box.is_some() {
+            scissor
+        } else {
+            self.state().scissor
+        };
+        (None, scissor, None)
     }
 
     /// The shape clip in force on the current render target, and its coverage.
@@ -1117,7 +1157,8 @@ fn an_upright_rect_under_an_upright_clip_is_what_they_share_or_the_clip_it_cover
 
 /// A scissor and the clip shape that make one box reach a draw as that box
 /// alone: a draw that crosses it carries the box and no scissor, one the
-/// box holds neither. A scissor that makes no one box with the shape stays.
+/// box holds neither. A scissor that makes no one box with the shape stays
+/// a box of its own, for the draws it does not hold.
 #[test]
 fn a_scissor_and_the_shape_reach_a_draw_as_one_box() {
     let renderer = RecordingRenderer::default();
@@ -1160,12 +1201,113 @@ fn a_scissor_and_the_shape_reach_a_draw_as_one_box() {
 
     let commands = recorded.borrow();
     assert_eq!(carried(&commands), ["shape", "everywhere", "shape", "everywhere"]);
-    assert_eq!(scissors(&commands), [false, false, true, true]);
+    assert_eq!(scissors(&commands), [false, false, true, false]);
     let carried = drawn_clips(&commands)[0].unwrap();
     assert_eq!(
         (carried.extent, carried.radii),
         ([40.0, 30.0], [15.0, 15.0]),
         "the clip, which the scissor holds"
+    );
+}
+
+/// The scissor meets a draw as a clip shape does: a draw it holds whole
+/// carries none, an antialiased upright rect under an upright scissor is
+/// filled as the rect the two share with no scissor, and one that covers a
+/// rounded scissor as a quad without a fringe around it, under the scissor.
+/// Everything else the scissor cuts carries it.
+#[test]
+fn a_scissor_meets_a_draw_as_a_clip_shape_does() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let drawn = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let rect = |x: f32, y: f32, w: f32, h: f32| {
+        let mut path = Path::new();
+        path.rect(x, y, w, h);
+        path
+    };
+    let triangle = |x: f32, y: f32, size: f32| {
+        let mut path = Path::new();
+        path.move_to(x, y);
+        path.line_to(x + size, y);
+        path.line_to(x, y + size);
+        path.close();
+        path
+    };
+    let scissored = |cmd: &Command| match &cmd.cmd_type {
+        CommandType::ConvexFill { params } | CommandType::Stroke { params } => Some(params.scissor_mat != [0.0; 12]),
+        CommandType::StencilStroke { params1, .. } => Some(params1.scissor_mat != [0.0; 12]),
+        _ => None,
+    };
+    let bounds_drawn = |cmd: &Command| {
+        let (start, count) = cmd.drawables[0].fill_verts.unwrap();
+        let verts = &drawn.borrow()[start..start + count];
+        let pick = |f: fn(f32, f32) -> f32, seed: f32, of: fn(&Vertex) -> f32| verts.iter().map(of).fold(seed, f);
+        [
+            pick(f32::min, f32::INFINITY, |v| v.x),
+            pick(f32::min, f32::INFINITY, |v| v.y),
+            pick(f32::max, f32::NEG_INFINITY, |v| v.x),
+            pick(f32::max, f32::NEG_INFINITY, |v| v.y),
+        ]
+    };
+    let fringed = |cmd: &Command| cmd.drawables[0].stroke_verts.is_some();
+
+    canvas.scissor(10.0, 20.0, 80.0, 60.0);
+    canvas.fill_path(&triangle(10.0, 20.0, 40.0), &paint); // on the scissor's left side and top
+    canvas.fill_path(&triangle(0.0, 20.0, 40.0), &paint); // across its left side
+    canvas.fill_path(&rect(10.0, 20.0, 80.0, 60.0), &paint); // its twin
+    canvas.fill_path(&rect(0.0, 0.0, 100.0, 100.0), &paint); // around it
+    canvas.fill_path(&rect(50.0, 0.0, 80.0, 50.0), &paint); // across its corner
+    canvas.fill_path(&rect(0.0, 0.0, 100.0, 100.0), &paint.clone().with_anti_alias(false));
+    let mut line = Path::new();
+    line.move_to(40.0, 50.0);
+    line.line_to(60.0, 50.0);
+    canvas.stroke_path(&line, &paint.clone().with_line_width(2.0)); // inside, with all a miter could reach
+    canvas.stroke_path(&line, &paint.clone().with_line_width(30.0)); // its reach crosses the scissor
+    canvas.rounded_scissor(10.0, 20.0, 80.0, 60.0, 15.0);
+    canvas.fill_path(&rect(10.0, 20.0, 80.0, 60.0), &paint); // covers the rounded scissor
+    canvas.fill_path(&rect(10.0, 20.0, 80.0, 30.0), &paint); // across its top
+    canvas.fill_path(&rect(30.0, 30.0, 20.0, 20.0), &paint); // inside
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let draws: Vec<&Command> = commands.iter().filter(|cmd| scissored(cmd).is_some()).collect();
+    let carried: Vec<bool> = draws.iter().map(|cmd| scissored(cmd).unwrap()).collect();
+    assert_eq!(
+        carried,
+        [false, true, false, false, false, true, false, true, true, true, false]
+    );
+    assert_eq!(bounds_drawn(draws[2]), [10.5, 20.5, 89.5, 79.5], "the twin: as it is");
+    assert_eq!(
+        bounds_drawn(draws[3]),
+        [10.5, 20.5, 89.5, 79.5],
+        "around: the scissor's rect"
+    );
+    assert_eq!(
+        bounds_drawn(draws[4]),
+        [50.5, 20.5, 89.5, 49.5],
+        "across: what both cover"
+    );
+    assert_eq!(
+        bounds_drawn(draws[5]),
+        [0.0, 0.0, 100.0, 100.0],
+        "without antialiasing: as it is"
+    );
+    assert_eq!(
+        bounds_drawn(draws[8]),
+        [9.0, 19.0, 91.0, 81.0],
+        "covering: a fringe around the scissor"
+    );
+    assert_eq!(
+        [2usize, 3, 4, 8, 9].map(|index| fringed(draws[index])),
+        [true, true, true, false, true],
+        "the covering quad takes its edge from the scissor alone"
+    );
+    assert!(
+        !canvas.clip_active() && canvas.clip_shape().is_none(),
+        "a scissor is no clip"
     );
 }
 

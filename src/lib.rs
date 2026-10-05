@@ -420,8 +420,8 @@ pub struct Canvas<T: Renderer> {
     // draws into that target.
     clip_stack: Vec<ClipEntry>,
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
-    // The scissor and clip shape the last draw met together, as one box.
-    last_scissored_shape: Option<ScissoredShape>,
+    // The scissor and clip shape the last draw met, as the boxes they make.
+    last_clip_boxes: Option<ClipBoxes>,
     // Whether the last draw carried a clip shape: the shader variant the
     // renderer has bound.
     shape_carried: bool,
@@ -494,7 +494,7 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
-            last_scissored_shape: None,
+            last_clip_boxes: None,
             shape_carried: false,
         };
 
@@ -537,7 +537,7 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
-            last_scissored_shape: None,
+            last_clip_boxes: None,
             shape_carried: false,
         };
 
@@ -575,7 +575,7 @@ where
                 plane.dirty = true;
             }
             // Worked out for the fringe width before.
-            self.last_scissored_shape = None;
+            self.last_clip_boxes = None;
         }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
             // Same size at a frame boundary: the open layer keeps capturing
@@ -2668,10 +2668,11 @@ fn assert_approx_eq(actual: f32, expected: f32) {
     );
 }
 
+/// Fills across the canvas with a path that is no rect, so that whatever
+/// scissor is set cuts the fill and the draw carries it.
 #[cfg(test)]
-fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
-    let mut path = Path::new();
-    path.rect(0.0, 0.0, 100.0, 100.0);
+fn fill_across_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
+    let path = clip::notched_rect(0.0, 0.0, 100.0, 100.0);
     canvas.fill_path(&path, &Paint::color(Color::white()));
     canvas.flush_to_output(());
 }
@@ -2700,7 +2701,7 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
     canvas.set_size(100, 100, 1.0);
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2748,7 +2749,7 @@ fn intersect_scissor_preserves_contained_rounded_clip() {
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 8.0);
     canvas.intersect_scissor(0.0, 0.0, 100.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2765,7 +2766,7 @@ fn intersect_scissor_inside_rounded_clip_uses_rectangular_inner_clip() {
 
     canvas.rounded_scissor(10.0, 10.0, 80.0, 80.0, 20.0);
     canvas.intersect_scissor(35.0, 35.0, 20.0, 20.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2784,7 +2785,7 @@ fn intersect_rounded_scissor_partial_overlap_falls_back_to_rectangular_intersect
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 40.0, 12.0);
     canvas.intersect_rounded_scissor(35.0, 35.0, 40.0, 40.0, 12.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2804,7 +2805,7 @@ fn rounded_scissor_captures_transform_at_clip_time() {
     canvas.scale(2.0, 3.0);
     canvas.rounded_scissor(10.0, 10.0, 20.0, 10.0, 4.0);
     canvas.reset_transform();
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2825,7 +2826,7 @@ fn intersect_rounded_scissor_uses_inner_radius_when_contained() {
 
     canvas.scissor(0.0, 0.0, 100.0, 100.0);
     canvas.intersect_rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);

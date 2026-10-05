@@ -281,10 +281,11 @@ fn clip_coverage_holds_under_a_skew_and_down_to_a_pixel() {
 
 /// An edge takes coverage once where a draw stays inside its clip along it,
 /// where an upright rect clip cuts an upright rect, where an upright rect
-/// covers a clip with round corners, and where a scissor lies on the clip:
-/// each edge pixel gets its share inside what is left -
-/// not that share squared, or cubed, which the coverages of the scissor,
-/// the clip and the fill's own antialiasing come to one over the other.
+/// covers a clip with round corners, and where a scissor lies on the clip -
+/// and the same under a scissor alone, which is a clip box like any other:
+/// each edge pixel gets its share inside what is left - not that share
+/// squared, or cubed, which the coverages of the scissor, the clip and the
+/// fill's own antialiasing come to one over the other.
 #[test]
 fn an_edge_shared_with_the_clip_takes_coverage_once() {
     let Some((device, queue)) = headless_device() else {
@@ -311,14 +312,14 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
     // Inside `rounded` along its left side, clear of its corners.
     let along: Shape = ([27.5, 45.75], [10.0, 10.5], 0.0);
     // (what, placement, scissor, clip, fill, what is left of the fill)
-    type Case = (&'static str, Place, Option<Shape>, Shape, Shape, Shape);
-    let cases: [Case; 11] = [
-        ("a rect and its twin", in_place, None, rect, rect, rect),
+    type Case = (&'static str, Place, Option<Shape>, Option<Shape>, Shape, Shape);
+    let cases: [Case; 18] = [
+        ("a rect and its twin", in_place, None, Some(rect), rect, rect),
         (
             "a rect on a rounded clip's sides",
             in_place,
             None,
-            rounded,
+            Some(rounded),
             rect,
             rounded,
         ),
@@ -326,16 +327,16 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
             "a rect around a rounded clip, scaled",
             scaled,
             None,
-            small_rounded,
+            Some(small_rounded),
             everything,
             small_rounded,
         ),
-        ("a rect and its twin, scaled", scaled, None, small, small, small),
+        ("a rect and its twin, scaled", scaled, None, Some(small), small, small),
         (
             "a rect inside, on three of the clip's sides",
             in_place,
             None,
-            rect,
+            Some(rect),
             left_half,
             left_half,
         ),
@@ -343,7 +344,7 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
             "a rect past the clip, on two of its sides",
             in_place,
             None,
-            rect,
+            Some(rect),
             past,
             rect,
         ),
@@ -351,16 +352,23 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
             "a rect inside a rounded clip, along its side",
             in_place,
             None,
-            rounded,
+            Some(rounded),
             along,
             along,
         ),
-        ("a scissor on the clip", in_place, Some(rect), rect, everything, rect),
+        (
+            "a scissor on the clip",
+            in_place,
+            Some(rect),
+            Some(rect),
+            everything,
+            rect,
+        ),
         (
             "a scissor on a rounded clip's sides",
             in_place,
             Some(rect),
-            rounded,
+            Some(rounded),
             everything,
             rounded,
         ),
@@ -368,11 +376,60 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
             "a scissor, a clip and a fill with one outline",
             in_place,
             Some(rect),
-            rect,
+            Some(rect),
             rect,
             rect,
         ),
-        ("the same, scaled", scaled, Some(small), small, small, small),
+        ("the same, scaled", scaled, Some(small), Some(small), small, small),
+        (
+            "a scissor and a rect with one outline",
+            in_place,
+            Some(rect),
+            None,
+            rect,
+            rect,
+        ),
+        ("the same, scaled", scaled, Some(small), None, small, small),
+        (
+            "a rect inside a scissor, on three of its sides",
+            in_place,
+            Some(rect),
+            None,
+            left_half,
+            left_half,
+        ),
+        (
+            "a rect past a scissor, on two of its sides",
+            in_place,
+            Some(rect),
+            None,
+            past,
+            rect,
+        ),
+        (
+            "a rounded rect inside a scissor, on its sides",
+            in_place,
+            Some(rect),
+            None,
+            rounded,
+            rounded,
+        ),
+        (
+            "a rect on a rounded scissor's sides",
+            in_place,
+            Some(rounded),
+            None,
+            rect,
+            rounded,
+        ),
+        (
+            "a rect around a rounded scissor, scaled",
+            scaled,
+            Some(small_rounded),
+            None,
+            everything,
+            small_rounded,
+        ),
     ];
     for (name, place, scissor, clip, fill, covered) in cases {
         let path = |(center, extent, radius): Shape| {
@@ -390,15 +447,18 @@ fn an_edge_shared_with_the_clip_takes_coverage_once() {
         let frame = render(&device, &queue, |canvas| {
             place(canvas);
             expected = share_inside(&canvas.transform(), covered.0, covered.1, covered.2);
-            if let Some((center, extent, _)) = scissor {
-                canvas.scissor(
+            if let Some((center, extent, radius)) = scissor {
+                canvas.rounded_scissor(
                     center[0] - extent[0],
                     center[1] - extent[1],
                     2.0 * extent[0],
                     2.0 * extent[1],
+                    radius,
                 );
             }
-            canvas.clip_path(&path(clip), FillRule::NonZero);
+            if let Some(clip) = clip {
+                canvas.clip_path(&path(clip), FillRule::NonZero);
+            }
             canvas.fill_path(&path(fill), &red());
         });
         // What a fill's own antialiasing is off by, at a corner pixel most.
