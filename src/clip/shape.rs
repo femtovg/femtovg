@@ -591,6 +591,17 @@ impl ClipCoverage {
     /// along an edge it shares with the box its own antialiasing is its
     /// coverage.
     pub(crate) fn holds(&self, bounds: &Bounds) -> bool {
+        if self.radii == [0.0; 2] {
+            // Between two parallel sides the rectangle's corners reach as
+            // far from its center as its half sides do along the row.
+            let center = [(bounds.minx + bounds.maxx) * 0.5, (bounds.miny + bounds.maxy) * 0.5];
+            let half = [(bounds.maxx - bounds.minx) * 0.5, (bounds.maxy - bounds.miny) * 0.5];
+            return [0, 1].into_iter().all(|axis| {
+                let [a, b] = [self.linear[2 * axis], self.linear[2 * axis + 1]];
+                let at = a * center[0] + b * center[1] + self.offset[axis];
+                at.abs() + a.abs() * half[0] + b.abs() * half[1] - self.extent[axis] <= DRAW_SLACK
+            });
+        }
         [
             [bounds.minx, bounds.miny],
             [bounds.maxx, bounds.miny],

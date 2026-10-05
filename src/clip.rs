@@ -254,8 +254,8 @@ where
         let scissor = self.state().scissor;
         let shape = self.clip_shape();
         let of = (scissor, shape.map(|(shape, _)| shape));
-        if let Some(last) = self.last_clip_boxes.filter(|last| last.of == of) {
-            return last;
+        if let Some(last) = self.last_clip_boxes.as_ref().filter(|last| last.of == of) {
+            return *last;
         }
         let scissor_box = scissor.extent.map(|extent| RoundedBox {
             frame: scissor.transform,
