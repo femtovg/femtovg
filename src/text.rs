@@ -23,6 +23,9 @@ mod textlayout;
 #[cfg(feature = "textlayout")]
 pub use textlayout::*;
 
+#[cfg(all(test, any(feature = "textlayout", feature = "swash")))]
+pub(crate) mod test_fonts;
+
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().
 const GLYPH_PADDING: u32 = 1;

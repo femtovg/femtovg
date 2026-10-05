@@ -4395,65 +4395,6 @@ fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
     assert_eq!(stroke_params(3.0, 1.0, true).inner_col[3], 1.0);
 }
 
-/// Rebuilds a sfnt/TrueType font byte buffer with the named 4-byte tables
-/// removed, so the fallback metric paths can be exercised on real assets.
-#[cfg(all(test, feature = "textlayout"))]
-fn font_without_tables(data: &[u8], drop_tags: &[&[u8; 4]]) -> Vec<u8> {
-    let read_u16 = |buf: &[u8], at: usize| u16::from_be_bytes([buf[at], buf[at + 1]]);
-    let read_u32 =
-        |buf: &[u8], at: usize| u32::from_be_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]) as usize;
-
-    let num_tables = read_u16(data, 4) as usize;
-
-    // Collect (tag, offset, length) for the tables we keep, in directory order.
-    let mut kept: Vec<([u8; 4], usize, usize)> = Vec::new();
-    for i in 0..num_tables {
-        let rec = 12 + i * 16;
-        let tag = [data[rec], data[rec + 1], data[rec + 2], data[rec + 3]];
-        if drop_tags.iter().any(|d| **d == tag) {
-            continue;
-        }
-        let offset = read_u32(data, rec + 8);
-        let length = read_u32(data, rec + 12);
-        kept.push((tag, offset, length));
-    }
-
-    let new_num = kept.len();
-    let mut out = Vec::new();
-    // Offset table header: keep the original sfnt version, fix up the table count
-    // and the binary-search hint fields for the new count.
-    out.extend_from_slice(&data[0..4]);
-    out.extend_from_slice(&(new_num as u16).to_be_bytes());
-    let max_pow2: u16 = 1 << (15 - (new_num.max(1) as u16).leading_zeros());
-    out.extend_from_slice(&(max_pow2 * 16).to_be_bytes());
-    out.extend_from_slice(&(15 - max_pow2.leading_zeros() as u16).to_be_bytes());
-    out.extend_from_slice(&((new_num as u16 * 16).wrapping_sub(max_pow2 * 16)).to_be_bytes());
-
-    let mut data_offset = 12 + new_num * 16;
-    let mut records = Vec::new();
-    let mut blobs = Vec::new();
-    for (tag, offset, length) in kept {
-        let padded = (length + 3) & !3;
-        let mut blob = data[offset..offset + length].to_vec();
-        blob.resize(padded, 0);
-        let mut rec = Vec::new();
-        rec.extend_from_slice(&tag);
-        rec.extend_from_slice(&0u32.to_be_bytes()); // checksum (ignored by ttf-parser)
-        rec.extend_from_slice(&(data_offset as u32).to_be_bytes());
-        rec.extend_from_slice(&(length as u32).to_be_bytes());
-        records.push(rec);
-        blobs.push(blob);
-        data_offset += padded;
-    }
-    for rec in records {
-        out.extend_from_slice(&rec);
-    }
-    for blob in blobs {
-        out.extend_from_slice(&blob);
-    }
-    out
-}
-
 /// A font without an OS/2 table (so no strikeout metric) and without a post
 /// table (so no underline metric) must still yield sensible, finite, positive
 /// decoration metrics via the ascender/descender-derived fallbacks — and never
@@ -4461,6 +4402,8 @@ fn font_without_tables(data: &[u8], drop_tags: &[&[u8; 4]]) -> Vec<u8> {
 #[cfg(feature = "textlayout")]
 #[test]
 fn decoration_metrics_fall_back_without_os2_and_post() {
+    use crate::text::test_fonts::font_without_tables;
+
     let original = include_bytes!("../examples/assets/amiri-regular.ttf");
 
     // Sanity: ttf-parser sees no strikeout/underline once the tables are gone.
@@ -4532,47 +4475,6 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
     );
 }
 
-/// Builds a font whose only glyph is a PNG bitmap in an `sbix` strike.
-#[cfg(all(test, feature = "textlayout"))]
-fn png_glyph_font() -> Vec<u8> {
-    let mut png = std::io::Cursor::new(Vec::new());
-    ::image::RgbaImage::from_pixel(24, 24, ::image::Rgba([255, 0, 64, 255]))
-        .write_to(&mut png, ::image::ImageFormat::Png)
-        .unwrap();
-    let png = png.into_inner();
-
-    let mut head = [0; 54];
-    head[1] = 1; // majorVersion
-    head[12..16].copy_from_slice(&[0x5F, 0x0F, 0x3C, 0xF5]); // magicNumber
-    head[18] = 4; // unitsPerEm = 1024
-    let mut hhea = [0; 36];
-    hhea[1] = 1; // majorVersion
-    let maxp = [0, 0, 0x50, 0, 0, 1]; // version 0.5, numGlyphs = 1
-
-    // Header: version, flags, one strike at offset 12. Strike: ppem, ppi, the
-    // data range of the glyph, then its origin offset, graphic type and data.
-    let mut sbix = vec![0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 12, 0, 24, 0, 72, 0, 0, 0, 12];
-    sbix.extend_from_slice(&(12 + 8 + png.len() as u32).to_be_bytes());
-    sbix.extend_from_slice(&[0; 4]);
-    sbix.extend_from_slice(b"png ");
-    sbix.extend_from_slice(&png);
-
-    // Table records are sorted by tag; parsers do not verify the checksums.
-    let tables: [(&[u8; 4], &[u8]); 4] = [(b"head", &head), (b"hhea", &hhea), (b"maxp", &maxp), (b"sbix", &sbix)];
-    let mut font = vec![0, 1, 0, 0, 0, 4, 0, 64, 0, 2, 0, 0]; // sfntVersion, numTables, search hints
-    let mut body = Vec::new();
-    for (tag, table) in tables {
-        font.extend_from_slice(tag);
-        font.extend_from_slice(&[0; 4]);
-        font.extend_from_slice(&((12 + 16 * 4 + body.len()) as u32).to_be_bytes());
-        font.extend_from_slice(&(table.len() as u32).to_be_bytes());
-        body.extend_from_slice(table);
-        body.resize(body.len().next_multiple_of(4), 0);
-    }
-    font.extend_from_slice(&body);
-    font
-}
-
 /// Glyphs are drawn directly instead of through the shared atlas when the
 /// transform is more than a uniform scale and translation, when they are too
 /// large to cache, or when a gradient or image paint is scaled. PNG glyphs
@@ -4582,15 +4484,22 @@ fn png_glyph_font() -> Vec<u8> {
 #[test]
 fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::png_glyph_font;
 
     let font_data = png_glyph_font();
     let solid = Paint::color(Color::black());
     let gradient = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    // `draw_glyph_run` draws a run directly when its font size times the scale
+    // of the canvas transform is above 92.
+    let small = 24.0;
+    let oversized = 96.0;
     let cases = [
-        ("rotated", Transform2D::rotation(0.2), &solid, 24.0),
-        ("oversized", Transform2D::identity(), &solid, 96.0),
-        ("scaled gradient", Transform2D::scaling(2.0, 2.0), &gradient, 24.0),
+        ("rotated", Transform2D::rotation(0.2), &solid, small),
+        ("oversized", Transform2D::identity(), &solid, oversized),
+        ("scaled gradient", Transform2D::scaling(2.0, 2.0), &gradient, small),
     ];
+    // A frame fills the glyph this many times and strokes it after each fill.
+    let fills_per_frame = 2;
     for (case, transform, paint, font_size) in cases {
         let paint = paint.clone().with_font_size(font_size);
         let renderer = RecordingRenderer::default();
@@ -4606,7 +4515,7 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
         };
 
         for _frame in 0..2 {
-            for _draw in 0..2 {
+            for _draw in 0..fills_per_frame {
                 canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
                 assert!(canvas.ephemeral_glyph_atlas.is_some(), "{case}");
                 canvas.stroke_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
@@ -4621,7 +4530,8 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
                 let color_draws = commands
                     .iter()
                     .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)));
-                assert_eq!(color_draws.count(), 4, "{case}");
+                let fills_and_strokes = 2 * fills_per_frame;
+                assert_eq!(color_draws.count(), fills_and_strokes, "{case}");
             }
         }
     }
