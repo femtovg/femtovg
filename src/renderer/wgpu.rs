@@ -874,20 +874,33 @@ impl Renderer for WGPURenderer {
                     );
                 }
                 super::CommandType::RenderFilteredImage { target_image, filter } => match filter {
-                    crate::ImageFilter::GaussianBlur { sigma } => {
+                    crate::ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
                         let mut pass = FilterPass {
                             images,
                             current_render_target: &mut current_render_target,
                             render_pass_builder: &mut render_pass_builder,
                             pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                         };
-                        gaussian_blur_filter(&mut pass, command, sigma, target_image);
+                        gaussian_blur_filter(&mut pass, command, [sigma_x, sigma_y], target_image);
+                    }
+                    crate::ImageFilter::Morphology {
+                        radius_x,
+                        radius_y,
+                        operator,
+                    } => {
+                        let mut pass = FilterPass {
+                            images,
+                            current_render_target: &mut current_render_target,
+                            render_pass_builder: &mut render_pass_builder,
+                            pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                        };
+                        morphology_filter(&mut pass, command, [radius_x, radius_y], operator, target_image);
                     }
                     single_pass => {
                         let target_info = images.get(target_image).unwrap().info;
                         let (shader_type, slots) = single_pass
                             .single_pass(target_info.width() as f32, target_info.height() as f32)
-                            .expect("every filter but the Gaussian blur runs as one pass");
+                            .expect("every filter but the Gaussian blur and the morphology runs as one pass");
                         let mut pass = FilterPass {
                             images,
                             current_render_target: &mut current_render_target,
@@ -1090,8 +1103,6 @@ mod transient_cost_tests {
     }
 }
 
-/// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
-/// into its reserved transient scratch, then vertical into the target.
 /// The render-loop state an image-filter pass draws through: the images,
 /// the target it must restore when done, the open pass builder and the
 /// pipeline mapper.
@@ -1119,7 +1130,16 @@ impl FilterPass<'_, '_> {
     }
 }
 
-fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, sigma: f32, target_image: ImageId) {
+/// A filter of two draws along the axes: the horizontal one, with the
+/// parameters `axis_params(params, 0)` sets, into the command's reserved
+/// transient scratch, then the vertical one, with `axis_params(params, 1)`,
+/// from the scratch into `target_image`.
+fn separable_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    target_image: ImageId,
+    mut axis_params: impl FnMut(&mut Params, usize),
+) {
     let FilterPass {
         images,
         current_render_target,
@@ -1146,7 +1166,7 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
         1.,
     );
 
-    let mut blur_params = Params::new(
+    let mut params = Params::new(
         images,
         &Default::default(),
         &image_paint.flavor,
@@ -1156,21 +1176,13 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
         0.,
         0.,
     );
-    blur_params.shader_type = ShaderType::FilterImage;
+    axis_params(&mut params, 0);
+    params.image_blur_filter_direction = [1.0, 0.0];
 
-    let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma);
-    blur_params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
-    blur_params.image_blur_filter_direction = [1.0, 0.0];
-    blur_params.image_blur_filter_sigma = sigma;
-
-    let horizontal_blur_buffer = command
+    let horizontal_buffer = command
         .filter_scratch
-        .expect("a Gaussian blur has a reserved scratch image");
-    render_pass_builder.set_filter_target_image(
-        images,
-        horizontal_blur_buffer,
-        wgpu::LoadOp::Clear(wgpu::Color::default()),
-    );
+        .expect("a two-pass filter has a reserved scratch image");
+    render_pass_builder.set_filter_target_image(images, horizontal_buffer, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1179,7 +1191,7 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
             wgpu::PrimitiveTopology::TriangleList,
             StencilTest::Disabled,
             Some(wgpu::Face::Back),
-            &blur_params,
+            &params,
             images,
             command.image,
             command.glyph_texture,
@@ -1189,10 +1201,11 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
 
     render_pass_builder.set_filter_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
-    blur_params.image_blur_filter_direction = [0.0, 1.0];
-    // The horizontal pass stored premultiplied RGBA regardless of the source
+    axis_params(&mut params, 1);
+    params.image_blur_filter_direction = [0.0, 1.0];
+    // The horizontal draw stored premultiplied RGBA regardless of the source
     // image's format or premultiplication flag.
-    blur_params.tex_type = 0.0;
+    params.tex_type = 0.0;
 
     if let Some((start, count)) = command.triangles_verts {
         pipeline_and_bindgroup_mapper.update_renderpass(
@@ -1201,15 +1214,50 @@ fn gaussian_blur_filter(pass: &mut FilterPass<'_, '_>, command: super::Command, 
             wgpu::PrimitiveTopology::TriangleList,
             StencilTest::Disabled,
             Some(wgpu::Face::Back),
-            &blur_params,
+            &params,
             images,
-            Some(horizontal_blur_buffer),
+            Some(horizontal_buffer),
             command.glyph_texture,
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
 
     pass.restore_target(previous_render_target);
+}
+
+/// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
+/// by `sigma[0]`, then vertical by `sigma[1]`. A degenerate sigma makes that
+/// draw a copy.
+fn gaussian_blur_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    sigma: [f32; 2],
+    target_image: ImageId,
+) {
+    separable_filter(pass, command, target_image, |params, axis| {
+        params.shader_type = ShaderType::FilterImage;
+        let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma[axis]);
+        params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
+        params.image_blur_filter_sigma = sigma;
+    });
+}
+
+/// Two-pass morphology of `command.image` into `target_image`: the
+/// per-channel maximum (dilate) or minimum (erode) over `radius[0]` whole
+/// pixels either side along x, then over `radius[1]` along y. The radius
+/// rides the blur's sigma parameter and the operator its first coefficient.
+fn morphology_filter(
+    pass: &mut FilterPass<'_, '_>,
+    command: super::Command,
+    radius: [f32; 2],
+    operator: crate::MorphologyOperator,
+    target_image: ImageId,
+) {
+    separable_filter(pass, command, target_image, |params, axis| {
+        params.shader_type = ShaderType::FilterImageMorphology;
+        params.image_blur_filter_sigma = radius[axis];
+        params.image_blur_filter_coeff[0] = f32::from(u8::from(operator == crate::MorphologyOperator::Dilate));
+    });
 }
 
 /// Single-pass color-matrix filter: sample the source once and apply the 4x5

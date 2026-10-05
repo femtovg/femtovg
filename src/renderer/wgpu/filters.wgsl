@@ -1,5 +1,5 @@
 // The image filter passes: color matrix, feTurbulence, the sRGB transfer
-// curves and feBlend. Included after shader.wgsl.
+// curves, feBlend, feMorphology and feOffset. Included after shader.wgsl.
 
 fn renderColorMatrix(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // The 4x5 color matrix is packed into the scissor/paint matrix slots (dead
@@ -244,4 +244,37 @@ fn renderBlend(vertex: VertexOutput, params: Params) -> vec4<f32> {
         return vec4<f32>(contribution, src.a);
     }
     return vec4<f32>(contribution + bd.rgb * (1.0 - src.a), src.a + bd.a - src.a * bd.a);
+}
+
+// SVG feMorphology, one axis per draw like the blur: each pixel takes the
+// per-channel maximum (dilate) or minimum (erode) of the premultiplied
+// pixels within the radius along image_blur_filter_direction, every tap
+// through blurTap, so beyond the image reads transparent and an erosion
+// eats into the border. The radius rides image_blur_filter_sigma (whole
+// pixels, at most 24, the loop's constant bound) and the operator
+// image_blur_filter_coeff.x (1 dilates).
+fn renderMorphology(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    let radius: f32 = params.image_blur_filter_sigma;
+    let dilate: bool = params.image_blur_filter_coeff.x > 0.5;
+    var acc: vec4<f32> = blurTap(vertex.fpos.xy, params);
+    for (var i: f32 = 1.0; i <= 24.0; i += 1.0) {
+        if (i > radius) {
+            break;
+        }
+        let before = blurTap(vertex.fpos.xy - i * params.image_blur_filter_direction, params);
+        let after = blurTap(vertex.fpos.xy + i * params.image_blur_filter_direction, params);
+        if (dilate) {
+            acc = max(acc, max(before, after));
+        } else {
+            acc = min(acc, min(before, after));
+        }
+    }
+    if (params.tex_type == 2) { acc = vec4<f32>(acc.x); }
+    return acc;
+}
+
+// SVG feOffset: the image shifted by the (dx, dy) in the first two
+// parameter slots; what shifts in from beyond the image is transparent.
+fn renderOffset(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    return blurTap(vertex.fpos.xy - params.scissor_mat[0].xy, params);
 }

@@ -272,7 +272,7 @@ fn chain_order_is_preserved_across_pass_boundaries() {
             src[y * W as usize + x] = femtovg::rgb::RGBA8::new(200, 200, 200, 255);
         }
     }
-    let blur = ImageFilter::GaussianBlur { sigma: 3.0 };
+    let blur = ImageFilter::gaussian_blur(3.0);
     let bright = ImageFilter::brightness(1.8);
     let ab = run_chain(&device, &queue, &src, &[blur, bright]);
     let ba = run_chain(&device, &queue, &src, &[bright, blur]);
@@ -298,7 +298,7 @@ fn chain_orientation_is_stable_across_shapes() {
         src[i] = femtovg::rgb::RGBA8::new(255, 0, 0, 255);
     }
     let cm = ImageFilter::brightness(1.0);
-    let blur = ImageFilter::GaussianBlur { sigma: 0.5 };
+    let blur = ImageFilter::gaussian_blur(0.5);
     let chains: [&[ImageFilter]; 5] = [&[], &[cm], &[cm, cm], &[blur], &[blur, cm, blur]];
     for (i, chain) in chains.iter().enumerate() {
         let out = run_chain(&device, &queue, &src, chain);
@@ -330,7 +330,7 @@ fn semitransparent_content_survives_chains() {
         &device,
         &queue,
         &src,
-        &[ImageFilter::brightness(1.0), ImageFilter::GaussianBlur { sigma: 1.0 }],
+        &[ImageFilter::brightness(1.0), ImageFilter::gaussian_blur(1.0)],
     );
     let center = px(&out, 16, 16);
     // Over white: 0.5*(40,180,40) + 0.5*255 = (147, 217, 147).
@@ -348,7 +348,7 @@ fn direct_blur_converts_straight_alpha_only_on_its_first_pass() {
     let src = solid(femtovg::rgb::RGBA8::new(40, 180, 40, 128));
     let (mut canvas, source, target) = setup(&device, &queue, &src);
     let filtered = filter_target(&mut canvas);
-    canvas.filter_image(filtered, ImageFilter::GaussianBlur { sigma: 1.0 }, source);
+    canvas.filter_image(filtered, ImageFilter::gaussian_blur(1.0), source);
     let out = finish_and_read(&device, &queue, canvas, filtered, &target);
     let center = px(&out, W / 2, H / 2);
     assert!(
@@ -375,12 +375,7 @@ fn alpha_amplifying_matrix_clamps_between_passes() {
     m[12] = 1.0;
     m[18] = 100.0;
     let amplify = ImageFilter::ColorMatrix { matrix: m };
-    let out = run_chain(
-        &device,
-        &queue,
-        &src,
-        &[amplify, ImageFilter::GaussianBlur { sigma: 1.0 }],
-    );
+    let out = run_chain(&device, &queue, &src, &[amplify, ImageFilter::gaussian_blur(1.0)]);
     let center = px(&out, 16, 16);
     // Alpha clamps to 1.0, so the composite over white shows the source color
     // itself; unclamped alpha would wash the color toward white or blow out.
@@ -392,7 +387,9 @@ fn alpha_amplifying_matrix_clamps_between_passes() {
 
 /// Degenerate blur parameters flow through chains without killing the output:
 /// sigma 0 passes through (Firefox bug 619968) and a huge sigma stays finite
-/// and bounded rather than overflowing (Firefox bug 441368).
+/// and bounded rather than overflowing (Firefox bug 441368): the solid's
+/// mass spreads far beyond its 32 px, so over the white canvas what is left
+/// at the center is a faint tint of the color, never garbage or black.
 #[test]
 fn degenerate_blur_parameters_stay_bounded() {
     let Some((device, queue)) = headless_device() else {
@@ -400,18 +397,26 @@ fn degenerate_blur_parameters_stay_bounded() {
         return;
     };
     let src = solid(femtovg::rgb::RGBA8::new(200, 60, 60, 255));
-    for chain in [
-        &[ImageFilter::GaussianBlur { sigma: 0.0 }, ImageFilter::brightness(1.0)][..],
-        &[
-            ImageFilter::GaussianBlur { sigma: 2147483648.0 },
-            ImageFilter::brightness(1.0),
-        ][..],
-    ] {
-        let out = run_chain(&device, &queue, &src, chain);
-        let center = px(&out, 16, 16);
-        assert!(
-            close(center[0], 200, 20) && close(center[1], 60, 20),
-            "degenerate-sigma chain must keep the solid color, got {center:?}"
-        );
-    }
+    let out = run_chain(
+        &device,
+        &queue,
+        &src,
+        &[ImageFilter::gaussian_blur(0.0), ImageFilter::brightness(1.0)],
+    );
+    let center = px(&out, 16, 16);
+    assert!(
+        close(center[0], 200, 20) && close(center[1], 60, 20),
+        "a sigma-0 chain must keep the solid color, got {center:?}"
+    );
+    let out = run_chain(
+        &device,
+        &queue,
+        &src,
+        &[ImageFilter::gaussian_blur(2147483648.0), ImageFilter::brightness(1.0)],
+    );
+    let center = px(&out, 16, 16);
+    assert!(
+        center[0] >= 200 && center[1] >= 60 && center[0] >= center[1],
+        "a huge sigma must leave a bounded, faint tint of the solid, got {center:?}"
+    );
 }

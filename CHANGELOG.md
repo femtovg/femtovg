@@ -12,6 +12,42 @@ All notable changes to this project will be documented in this file.
   sits (Chromium samples the larger level, Firefox downsamples directly).
   The levels cost a third more texture memory for those images only; the
   downsample pipeline is built on the first such upload.
+- Fixed a panic with the `swash` and `textlayout` features when text with PNG
+  bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
+  rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
+  pixels, or scaled with a gradient or image paint.
+- Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
+  `feMorphology` and `feOffset` primitives: a dilation grows the opaque
+  regions of an image by a whole-pixel radius per axis and an erosion
+  shrinks them (the per-channel maximum or minimum within the radius, as
+  two draws like the blur, a radius above the 24 pixels one draw covers
+  running as passes whose radii sum to it), and an offset shifts the image
+  by a device-pixel vector, transparent beyond its edge. A layer pads its
+  store by a morphology's radius - a dilation reaches that far out, an
+  erosion reads that far beyond the store - and by an offset's shift, as it
+  does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
+  shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
+  `feColorMatrix`) as one layer filter.
+- A Gaussian blur whose standard deviation on an axis is above the 8 device
+  pixels one shader pass covers now runs at a downsampled size, the way
+  Skia's GPU blur does: a filter chain, a layer filter or a shadow halves
+  its image along that axis until the sigma fits one pass, blurs there and
+  scales the result back up bilinearly,
+  instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
+  1080p layer is four halvings, a blur over a sixteenth of the pixels and
+  one copy where it was 93 full-size blurs, so it no longer exceeds the
+  filter work budget, which had left the layer unblurred; the sigma ceiling
+  rises from 128 to 512; blurs within the bound render as before. The blur
+  shader also reads transparent beyond the image it samples instead of
+  extending its edge texels, so a blurred image fades at its border as it
+  does in a browser.
+- `ImageFilter::GaussianBlur` now takes a standard deviation per axis
+  (`sigma_x`, `sigma_y`), SVG's two-valued `feGaussianBlur stdDeviation`: a
+  blur along one axis renders as a streak or a glow instead of spreading the
+  larger value both ways. Each axis splits into its own passes above the
+  per-pass bound, an unblurred axis copies through, and a layer pads each axis
+  by its own reach. `ImageFilter::gaussian_blur(sigma)` builds the isotropic
+  blur the single `sigma` field used to.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which

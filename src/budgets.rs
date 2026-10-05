@@ -16,16 +16,46 @@ pub(crate) fn bounded_pad(pad: f32, extent: f32, limit: usize, granularity: usiz
     pad.min((room * 0.5).floor().max(0.0))
 }
 
-/// A blur's reach around a store: three sigma of the quadrature sum of
-/// `sigmas` (each within the chain bound), rounded up; `None` without a
-/// blur.
-pub(crate) fn blur_reach(sigmas: impl IntoIterator<Item = f32>) -> Option<f32> {
-    let sigma_sq: f32 = sigmas
-        .into_iter()
-        .filter_map(chain_blur_sigma)
-        .map(|sigma| sigma * sigma)
-        .sum();
-    (sigma_sq > 0.0).then(|| (sigma_sq.sqrt() * 3.0).ceil())
+/// A blur's reach around a store, per axis: three sigma of the quadrature
+/// sum of each axis's `sigmas` (each within the chain bound), rounded up;
+/// `None` without a blur on either axis.
+pub(crate) fn blur_reach(sigmas: impl IntoIterator<Item = [f32; 2]>) -> Option<[f32; 2]> {
+    let mut sigma_sq = [0.0f32; 2];
+    for pair in sigmas {
+        for (sum, sigma) in sigma_sq.iter_mut().zip(pair) {
+            if let Some(sigma) = chain_blur_sigma(sigma) {
+                *sum += sigma * sigma;
+            }
+        }
+    }
+    (sigma_sq[0] > 0.0 || sigma_sq[1] > 0.0).then(|| sigma_sq.map(|sq| (sq.sqrt() * 3.0).ceil()))
+}
+
+/// A chain's reach around a store, per axis: the reach of its blurs
+/// ([`blur_reach`]) plus the radius of each morphology - a dilation carries
+/// content outward by it, an erosion reads that far beyond the store to
+/// erode the edge rightly, instead of into the transparent outside - and
+/// the magnitude of each offset, rounded up; `None` when nothing reaches.
+pub(crate) fn chain_reach(filters: &[ImageFilter]) -> Option<[f32; 2]> {
+    let mut reach = blur_reach(filters.iter().filter_map(|f| match f {
+        ImageFilter::GaussianBlur { sigma_x, sigma_y } => Some([*sigma_x, *sigma_y]),
+        _ => None,
+    }))
+    .unwrap_or([0.0; 2]);
+    for filter in filters {
+        match *filter {
+            ImageFilter::Morphology { radius_x, radius_y, .. } => {
+                reach[0] += morphology_radius(radius_x);
+                reach[1] += morphology_radius(radius_y);
+            }
+            ImageFilter::Offset { dx, dy } => {
+                reach[0] += offset_pixels(dx).abs().ceil();
+                reach[1] += offset_pixels(dy).abs().ceil();
+            }
+            _ => {}
+        }
+    }
+    (reach[0] > 0.0 || reach[1] > 0.0).then_some(reach)
 }
 
 /// The pixel a store keeps beyond its content on every side for antialiased
@@ -43,24 +73,24 @@ pub(crate) struct StoreSpan {
 }
 
 impl StoreSpan {
-    /// `x0..x1` by `y0..y1`, padded by `pad` on every side.
-    pub(crate) fn padded(x0: f32, y0: f32, x1: f32, y1: f32, pad: f32) -> Self {
+    /// `x0..x1` by `y0..y1`, padded by `pad` (per axis) on every side.
+    pub(crate) fn padded(x0: f32, y0: f32, x1: f32, y1: f32, pad: [f32; 2]) -> Self {
         Self {
-            x0: x0 - pad,
-            y0: y0 - pad,
-            x1: x1 + pad,
-            y1: y1 + pad,
+            x0: x0 - pad[0],
+            y0: y0 - pad[1],
+            x1: x1 + pad[0],
+            y1: y1 + pad[1],
         }
     }
 
-    /// Kept within `pad` of a `width` x `height` canvas: content further out
-    /// cannot reach into it.
-    pub(crate) fn clamped(self, width: f32, height: f32, pad: f32) -> Self {
+    /// Kept within `pad` (per axis) of a `width` x `height` canvas: content
+    /// further out cannot reach into it.
+    pub(crate) fn clamped(self, width: f32, height: f32, pad: [f32; 2]) -> Self {
         Self {
-            x0: self.x0.max(-pad),
-            y0: self.y0.max(-pad),
-            x1: self.x1.min(width + pad),
-            y1: self.y1.min(height + pad),
+            x0: self.x0.max(-pad[0]),
+            y0: self.y0.max(-pad[1]),
+            x1: self.x1.min(width + pad[0]),
+            y1: self.y1.min(height + pad[1]),
         }
     }
 
@@ -414,7 +444,7 @@ fn a_layer_at_the_texture_limit_keeps_its_blur_with_a_bounded_pad() {
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(1920, 1080, 1.0);
     // Sigma 40 wants 122 px of pad: 2164 px wide, past the limit.
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 40.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(40.0)]);
     assert!(
         canvas.begin_layer(&blur),
         "the layer captures instead of passing through"
@@ -594,11 +624,49 @@ fn a_blur_reach_matches_the_layer_and_shadow_pads() {
     for tenths in 1..=1280u32 {
         let sigma = tenths as f32 / 10.0;
         let shadow_pad = (sigma.min(MAX_CHAIN_BLUR_SIGMA) * 3.0).ceil();
-        assert_eq!(blur_reach([sigma]), Some(shadow_pad), "sigma {sigma}");
+        assert_eq!(blur_reach([[sigma; 2]]), Some([shadow_pad; 2]), "sigma {sigma}");
     }
-    assert_eq!(blur_reach([0.0]), None);
+    assert_eq!(blur_reach([[0.0; 2]]), None);
     assert_eq!(blur_reach([]), None);
-    assert_eq!(blur_reach([3.0, 4.0]), Some(15.0));
+    assert_eq!(blur_reach([[3.0; 2], [4.0; 2]]), Some([15.0; 2]));
+    // Each axis reaches on its own: a blur along x alone pads nothing in y.
+    assert_eq!(blur_reach([[16.0, 0.0]]), Some([48.0, 0.0]));
+    assert_eq!(blur_reach([[0.0, 3.0], [4.0, 0.0]]), Some([12.0, 9.0]));
+}
+
+/// A chain reaches as far as its blurs, plus each morphology's radius and
+/// each offset's shift on its axis: an erosion reaches as far as a
+/// dilation, since its edge pixels read that far into what lies beyond.
+#[test]
+fn a_chain_reach_adds_dilations_and_offsets_to_the_blur_reach() {
+    use crate::ImageFilter;
+    let dilate = |radius_x: f32, radius_y: f32| ImageFilter::Morphology {
+        radius_x,
+        radius_y,
+        operator: MorphologyOperator::Dilate,
+    };
+    let erode = ImageFilter::Morphology {
+        radius_x: 5.0,
+        radius_y: 5.0,
+        operator: MorphologyOperator::Erode,
+    };
+    assert_eq!(chain_reach(&[dilate(3.0, 2.0)]), Some([3.0, 2.0]));
+    assert_eq!(chain_reach(&[dilate(2.4, 2.6)]), Some([2.0, 3.0]));
+    assert_eq!(chain_reach(&[erode]), Some([5.0, 5.0]));
+    assert_eq!(
+        chain_reach(&[ImageFilter::Offset { dx: -4.5, dy: 2.0 }]),
+        Some([5.0, 2.0])
+    );
+    assert_eq!(chain_reach(&[ImageFilter::Offset { dx: 0.0, dy: f32::NAN }]), None);
+    assert_eq!(
+        chain_reach(&[
+            ImageFilter::gaussian_blur(8.0),
+            dilate(2.0, 2.0),
+            ImageFilter::Offset { dx: 1.0, dy: 0.0 }
+        ]),
+        Some([27.0, 26.0])
+    );
+    assert_eq!(chain_reach(&[ImageFilter::brightness(0.5)]), None);
 }
 
 /// The planner rounds a padded span outward and up to the granularity,
@@ -606,7 +674,7 @@ fn a_blur_reach_matches_the_layer_and_shadow_pads() {
 /// leaves.
 #[test]
 fn a_store_span_rounds_clamps_and_reaches() {
-    let span = StoreSpan::padded(10.5, 20.25, 110.5, 120.75, 3.0);
+    let span = StoreSpan::padded(10.5, 20.25, 110.5, 120.75, [3.0; 2]);
     assert_eq!(
         span.store(8),
         StorePlan {
@@ -615,9 +683,9 @@ fn a_store_span_rounds_clamps_and_reaches() {
             height: 112
         }
     );
-    let clamped = StoreSpan::padded(-50.0, 0.0, 500.0, 100.0, 4.0).clamped(400.0, 100.0, 4.0);
+    let clamped = StoreSpan::padded(-50.0, 0.0, 500.0, 100.0, [4.0; 2]).clamped(400.0, 100.0, [4.0; 2]);
     assert_eq!((clamped.x0, clamped.x1), (-4.0, 404.0));
-    let reached = StoreSpan::padded(0.0, 0.0, 1920.0, 1080.0, 0.0).with_shadow_reach([0.0, 0.0], 90.0, 2048);
+    let reached = StoreSpan::padded(0.0, 0.0, 1920.0, 1080.0, [0.0; 2]).with_shadow_reach([0.0, 0.0], 90.0, 2048);
     assert_eq!(
         reached.store(64),
         StorePlan {
@@ -627,5 +695,5 @@ fn a_store_span_rounds_clamps_and_reaches() {
         }
     );
     assert!(reached.store(64).fits(2048));
-    assert!(!StoreSpan::padded(0.0, 0.0, 2049.0, 10.0, 0.0).store(64).fits(2048));
+    assert!(!StoreSpan::padded(0.0, 0.0, 2049.0, 10.0, [0.0; 2]).store(64).fits(2048));
 }
