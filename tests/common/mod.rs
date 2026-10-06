@@ -5,7 +5,10 @@
 pub mod blend;
 pub mod pipelines;
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color};
+use femtovg::{
+    renderer::{WGPURenderOutput, WGPURenderer},
+    Canvas, Color,
+};
 
 /// Set `FEMTOVG_REQUIRE_GPU` to turn "no adapter" from a skip into a failure:
 /// any value (`1`, `true`, `any`) requires that some adapter was found, and a
@@ -107,20 +110,71 @@ pub fn render_rgba(
     clear: Color,
     draw: impl FnOnce(&mut Canvas<WGPURenderer>),
 ) -> Vec<u8> {
+    render_pixels(
+        device,
+        queue,
+        width,
+        height,
+        wgpu::TextureFormat::Rgba8Unorm,
+        clear,
+        draw,
+    )
+}
+
+/// [`render_rgba`] onto a target of `format`, a 4-byte color format; the
+/// pixels come back in that format's byte order.
+pub fn render_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    clear: Color,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> Vec<u8> {
+    render_pixels_via(device, queue, width, height, format, None, 1, clear, draw)
+}
+
+/// [`render_pixels`] through a view of `view_format` instead of the texture's
+/// own format, onto layer 0 of a texture of `layers` array layers.
+#[allow(clippy::too_many_arguments)]
+pub fn render_pixels_via(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    view_format: Option<wgpu::TextureFormat>,
+    layers: u32,
+    clear: Color,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> Vec<u8> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("femtovg test target"),
         size: wgpu::Extent3d {
             width,
             height,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: layers,
         },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
+        view_formats: view_format.as_slice(),
     });
+    let output = WGPURenderOutput {
+        view: target.create_view(&wgpu::TextureViewDescriptor {
+            format: view_format,
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: 0,
+            array_layer_count: Some(1),
+            ..Default::default()
+        }),
+        width,
+        height,
+        format: view_format.unwrap_or(format),
+    };
     let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(width, height, 1.0);
@@ -129,7 +183,7 @@ pub fn render_rgba(
     // The render and the copy that reads it back go to the queue together, so
     // the pixels cannot depend on the ordering of two separate submissions.
     let commands = canvas
-        .flush_to_output(&target)
+        .flush_to_output(output)
         .expect("flush_to_output produced no command buffer for a frame with draws");
 
     let unpadded = width * 4;

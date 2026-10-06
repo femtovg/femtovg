@@ -760,6 +760,34 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
+    /// Copies `src` of the bound framebuffer into `target_image` at `dst`.
+    /// Every OpenGL target, the screen included, holds its rows bottom-up,
+    /// so mapping both rects to GL's y-up coordinates keeps the copy upright.
+    fn copy_render_target(&self, images: &ImageStore<GlTexture>, target_image: ImageId, src: [u32; 4], dst: [u32; 2]) {
+        let Some(texture) = images.get(target_image).filter(|texture| !texture.external) else {
+            return;
+        };
+        let [x, y, width, height] = src.map(|value| value as i32);
+        let [dst_x, dst_y] = dst.map(|value| value as i32);
+        let image_height = texture.info().height() as i32;
+        unsafe {
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, Some(texture.id()));
+            self.context.copy_tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                dst_x,
+                image_height - dst_y - height,
+                x,
+                self.view[1] as i32 - y - height,
+                width,
+                height,
+            );
+            self.context.bind_texture(glow::TEXTURE_2D, None);
+        }
+        self.check_error("copy_render_target");
+    }
+
     fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color, keep_clip: bool) {
         unsafe {
             self.context.enable(glow::SCISSOR_TEST);
@@ -1295,6 +1323,9 @@ impl Renderer for OpenGl {
                 }
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
+                }
+                CommandType::CopyRenderTarget { target_image, src, dst } => {
+                    self.copy_render_target(images, target_image, src, dst)
                 }
                 CommandType::ClipFill => {
                     let stencil_params = Params::stencil();

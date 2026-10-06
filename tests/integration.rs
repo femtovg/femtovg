@@ -931,3 +931,52 @@ fn zeroed_os2_script_metrics_fall_back() {
         );
     }
 }
+
+#[test]
+fn copy_render_target_rejects_images_it_cannot_copy_into() {
+    use femtovg::{ErrorKind, ImageFlags, PixelFormat, RenderTarget};
+
+    let mut canvas = Canvas::new(Void).unwrap();
+    canvas.set_size(16, 16, 1.0);
+    let mut image = |format| canvas.create_image_empty(8, 8, format, ImageFlags::FLIP_Y).unwrap();
+    let (rgba, gray, deleted) = (
+        image(PixelFormat::Rgba8),
+        image(PixelFormat::Gray8),
+        image(PixelFormat::Rgba8),
+    );
+    canvas.delete_image(deleted);
+
+    assert!(canvas.copy_render_target(0, 0, 8, 8, rgba, 0, 0).is_ok());
+    assert!(matches!(
+        canvas.copy_render_target(0, 0, 8, 8, gray, 0, 0),
+        Err(ErrorKind::UnsupportedOperation)
+    ));
+    assert!(matches!(
+        canvas.copy_render_target(0, 0, 8, 8, deleted, 0, 0),
+        Err(ErrorKind::ImageIdNotFound)
+    ));
+    canvas.set_render_target(RenderTarget::Image(rgba));
+    assert!(matches!(
+        canvas.copy_render_target(0, 0, 8, 8, rgba, 0, 0),
+        Err(ErrorKind::UnsupportedOperation)
+    ));
+}
+
+#[test]
+fn copy_render_target_rejects_a_captured_layer() {
+    use femtovg::{ErrorKind, ImageFlags, LayerEffects, PixelFormat};
+
+    let mut canvas = Canvas::new(Void).unwrap();
+    canvas.set_size(16, 16, 1.0);
+    let image = canvas
+        .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
+        .unwrap();
+
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    assert!(matches!(
+        canvas.copy_render_target(0, 0, 8, 8, image, 0, 0),
+        Err(ErrorKind::UnsupportedOperation)
+    ));
+    canvas.end_layer();
+    assert!(canvas.copy_render_target(0, 0, 8, 8, image, 0, 0).is_ok());
+}

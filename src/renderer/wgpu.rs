@@ -381,6 +381,8 @@ pub struct WGPURenderer {
     /// Built on the first upload of an image with `GENERATE_MIPMAPS`.
     mipmaps: Option<MipmapGenerator>,
     flush_count: u64,
+    /// Built on the first `CopyRenderTarget` command.
+    target_copier: Option<TargetCopier>,
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
@@ -549,6 +551,7 @@ impl WGPURenderer {
             pipeline_cache: Default::default(),
             mipmaps: None,
             flush_count: 0,
+            target_copier: None,
         }
     }
 
@@ -719,6 +722,265 @@ impl MipmapGenerator {
             pass.draw(0..3, 0..1);
         }
         queue.submit(Some(encoder.finish()));
+    }
+}
+
+/// Runs `CopyRenderTarget` commands. A copy is a draw, not a texture copy:
+/// the screen holds its rows top-down while images hold them bottom-up, and
+/// the screen's format may differ from an image's.
+#[derive(Debug)]
+struct TargetCopier {
+    module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    /// The screen staged for a copy. Kept the output's size, as the stencil
+    /// buffer is, since copies run every frame.
+    staging: Option<wgpu::Texture>,
+    // Copies run every frame, so a skipped one logs once, not per frame.
+    warned: bool,
+}
+
+impl TargetCopier {
+    fn new(device: &wgpu::Device) -> Self {
+        let module = device.create_shader_module(wgpu::include_wgsl!("wgpu/copy.wgsl"));
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("femtovg copy"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("femtovg copy"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+        Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            pipelines: HashMap::new(),
+            staging: None,
+            warned: false,
+        }
+    }
+
+    fn warn_skipped(&mut self, reason: &str) {
+        if !std::mem::replace(&mut self.warned, true) {
+            log::warn!("copy_render_target skipped: {reason}");
+        }
+    }
+
+    /// Copies `src` of `current_render_target`, the target `render_pass_builder`
+    /// draws on, into `target_image` at `dst`, then resumes drawing on it.
+    fn copy(
+        &mut self,
+        render_pass_builder: &mut RenderPassBuilder<'_>,
+        images: &ImageStore<Image>,
+        current_render_target: RenderTarget,
+        target_image: ImageId,
+        src: [u32; 4],
+        dst: [u32; 2],
+    ) {
+        let Some(Texture::Internal(target)) = images.get(target_image).map(|image| &image.texture) else {
+            return;
+        };
+        // An image wrapping a native texture may be sample-only, and drawing
+        // into one fails validation.
+        if !target.usage().contains(wgpu::TextureUsages::RENDER_ATTACHMENT) {
+            self.warn_skipped("the image's texture lacks RENDER_ATTACHMENT usage");
+            return;
+        }
+        let [x, y, mut width, mut height] = src;
+        let [dst_x, dst_y] = dst;
+        let device = render_pass_builder.device.clone();
+
+        // The source, and the offset and row flip `copy.wgsl` maps a target texel through.
+        let (source, offset, flip_y) = match current_render_target {
+            RenderTarget::Screen => {
+                // A surface texture can be copied, not sampled, so it's
+                // staged in a texture of its format first.
+                let surface = render_pass_builder.surface_view.texture().clone();
+                if !surface.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+                    self.warn_skipped("the output texture lacks COPY_SRC usage");
+                    return;
+                }
+                // A view's mip level and array layer can't be queried. The
+                // copy reads mip 0, layer 0, so it only trusts an output
+                // that spans the whole of a single-layer texture.
+                let size = surface.size();
+                if surface.depth_or_array_layers() != 1
+                    || [size.width as f32, size.height as f32] != render_pass_builder.screen_view
+                {
+                    self.warn_skipped("the output isn't mip 0 of a single-layer texture");
+                    return;
+                }
+                // The canvas size can differ from the output's.
+                width = width.min(size.width.saturating_sub(x));
+                height = height.min(size.height.saturating_sub(y));
+                if width == 0 || height == 0 {
+                    return;
+                }
+                let extent = wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                };
+                // Draws through an sRGB view are encoded on write, so the
+                // copy decodes on read: drawing it back then encodes once.
+                let format = if render_pass_builder.screen_surface_format.is_srgb() {
+                    surface.format().add_srgb_suffix()
+                } else {
+                    surface.format().remove_srgb_suffix()
+                };
+                if self
+                    .staging
+                    .as_ref()
+                    .is_some_and(|staging| staging.format() != format || staging.size() != size)
+                {
+                    self.staging = None;
+                }
+                let staging = self.staging.get_or_insert_with(|| {
+                    device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("femtovg copy"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    })
+                });
+                render_pass_builder.end_render_pass().copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &surface,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x, y, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: staging,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    extent,
+                );
+                let offset = [-(dst_x as i32), (target.height() - dst_y - 1) as i32];
+                (staging.create_view(&Default::default()), offset, true)
+            }
+            RenderTarget::Image(source_image) => {
+                let Some(Texture::Internal(source)) = images.get(source_image).map(|image| &image.texture) else {
+                    return;
+                };
+                if !source.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING) {
+                    self.warn_skipped("the render target image can't be sampled");
+                    return;
+                }
+                let offset = [
+                    x as i32 - dst_x as i32,
+                    source.height() as i32 - y as i32 - target.height() as i32 + dst_y as i32,
+                ];
+                (source.create_view(&base_level()), offset, false)
+            }
+        };
+
+        let Self {
+            module,
+            bind_group_layout,
+            pipeline_layout,
+            pipelines,
+            ..
+        } = self;
+        let pipeline = pipelines.entry(target.format()).or_insert_with(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("femtovg copy"),
+                layout: Some(pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module,
+                    entry_point: Some("vs_copy"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module,
+                    entry_point: Some("fs_copy"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(target.format().into())],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("femtovg copy"),
+            contents: bytemuck::cast_slice(&[offset[0], offset[1], i32::from(flip_y), 0]),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params.as_entire_binding(),
+                },
+            ],
+        });
+        let target_view = target.create_view(&base_level());
+        let mut pass = render_pass_builder
+            .end_render_pass()
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("femtovg copy"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        // Images hold their rows bottom-up, so the rect's top row is near the bottom.
+        pass.set_scissor_rect(dst_x, target.height() - dst_y - height, width, height);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+
+        render_pass_builder.recreate_render_pass(wgpu::LoadOp::Load);
     }
 }
 
@@ -960,6 +1222,19 @@ impl Renderer for WGPURenderer {
                         single_pass_filter(&mut pass, command, shader_type, slots, target_image);
                     }
                 },
+                super::CommandType::CopyRenderTarget { target_image, src, dst } => {
+                    let device = &self.device;
+                    self.target_copier
+                        .get_or_insert_with(|| TargetCopier::new(device))
+                        .copy(
+                            &mut render_pass_builder,
+                            images,
+                            current_render_target,
+                            target_image,
+                            src,
+                            dst,
+                        );
+                }
             }
         }
 
@@ -2604,6 +2879,13 @@ impl<'a> RenderPassBuilder<'a> {
         self.rendering_to_texture = false;
 
         self.recreate_render_pass(wgpu::LoadOp::Load);
+    }
+
+    /// Ends the current render pass, for work the encoder records outside it;
+    /// `recreate_render_pass` resumes drawing on the same target.
+    fn end_render_pass(&mut self) -> &mut wgpu::CommandEncoder {
+        drop(self.rpass.take());
+        self.encoder
     }
 
     fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {

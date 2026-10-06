@@ -93,6 +93,17 @@ pub enum CommandType {
         /// Image filter to apply.
         filter: ImageFilter,
     },
+    /// Copy a rect of the current render target into an image, landing where
+    /// a draw of that rect into the image would. Both rects lie within their
+    /// surfaces.
+    CopyRenderTarget {
+        /// ID of the image the pixels land in.
+        target_image: ImageId,
+        /// The rect read, `[x, y, width, height]` in the render target's device pixels.
+        src: [u32; 4],
+        /// The rect's top-left corner in `target_image`.
+        dst: [u32; 2],
+    },
 }
 
 /// The colour matrices a two-draw filter pass carries in its draws: an
