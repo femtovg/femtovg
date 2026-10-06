@@ -4029,6 +4029,24 @@ fn letter_spacing_does_not_collide_in_the_shaping_cache() {
         spaced > plain + 4.0 * 6.0 - 1.0,
         "letter spacing must widen the cached word: plain {plain}, spaced {spaced}"
     );
+
+    let tight = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_letter_spacing(-2.0))
+        .unwrap()
+        .width();
+    assert!(
+        tight < plain - 4.0 * 2.0 + 1.0,
+        "negative letter spacing must narrow the cached word: plain {plain}, tight {tight}"
+    );
+
+    let slight = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_letter_spacing(0.05))
+        .unwrap()
+        .width();
+    assert!(
+        slight > plain + 4.0 * 0.05,
+        "letter spacing under a tenth must widen the cached word: plain {plain}, slight {slight}"
+    );
 }
 
 /// Bidi control characters are default-ignorable: isolate marks (U+2066..

@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed text getting the width it had at an earlier letter spacing when both
+  letter spacings were below a tenth of a device pixel (every negative one
+  included) or in the same tenth above that (e.g., 2 and 2.05):
+  `measure_text` returned the earlier width, `break_text` broke the text by
+  it, and centered or right-aligned text started in the wrong place.
 - Fixed the WGPU backend rebuilding render pipelines every frame when a frame
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
