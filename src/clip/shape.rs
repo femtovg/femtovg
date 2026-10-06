@@ -76,6 +76,13 @@ const MIN_HALF_EXTENT: f32 = 0.5;
 /// GLSL ES guarantees a highp float (2^62).
 const NO_CORNERS: f32 = 1e18;
 
+/// A box's corners in order around it, as the signs of their coordinates.
+const CORNERS: [[f32; 2]; 4] = [[1.0, 1.0], [-1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]];
+
+/// The side between corner `i` and corner `i + 1` of [`CORNERS`], as the
+/// direction it faces.
+const SIDES: [[f32; 2]; 4] = [[0.0, 1.0], [-1.0, 0.0], [0.0, -1.0], [1.0, 0.0]];
+
 /// A box with elliptical corners: zero radii make a rectangle, radii equal
 /// to the extent an ellipse.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -135,9 +142,21 @@ impl RoundedBox {
     /// by - 0.03 % of the radius for the usual cubic, 0.3 % for a quadratic
     /// an eighth of the way around.
     pub(crate) fn fit_outline(path: &Path) -> Option<(Self, f32)> {
+        match Self::fit_with_cut(path)? {
+            (shape, strays, None) => Some((shape, strays)),
+            _ => None,
+        }
+    }
+
+    /// The box `path` outlines and how far the outline strays outside it
+    /// ([`Self::fit_outline`]), or for an axis-aligned rectangle rounded at
+    /// the two corners of one side only - a tab, a sheet, a window's title
+    /// bar - a rounded box that runs on past the square side and the
+    /// rectangle with square corners that cuts it there.
+    pub(crate) fn fit_with_cut(path: &Path) -> Option<(Self, f32, Option<Self>)> {
         let (start, segments) = contour(path)?;
         if segments.iter().all(|segment| matches!(segment, Segment::Line(_))) {
-            return Self::parallelogram(start, &segments).map(|shape| (shape, 0.0));
+            return Self::parallelogram(start, &segments).map(|shape| (shape, 0.0, None));
         }
         Self::rounded(start, &segments)
     }
@@ -187,7 +206,7 @@ impl RoundedBox {
         })
     }
 
-    fn rounded(start: [f32; 2], segments: &[Segment]) -> Option<(Self, f32)> {
+    fn rounded(start: [f32; 2], segments: &[Segment]) -> Option<(Self, f32, Option<Self>)> {
         // The outline in order - each segment's interior samples, then its
         // end - and the segment ends alone, where straight sides meet corners.
         let mut outline = vec![start];
@@ -233,28 +252,64 @@ impl RoundedBox {
         let slack = FIT_TOLERANCE * extent[0].min(extent[1]);
 
         // A corner's radius along an axis is what the straight side on the
-        // other axis leaves of the extent: the side ends where its farthest
-        // anchor is. No anchor on a side means no straight side - an ellipse.
-        let radius = |along: usize| {
+        // other axis leaves of the extent on the corner's half: the side ends
+        // where its farthest anchor there is. No anchor on a side means no
+        // straight side - an ellipse.
+        let radius = |corner: [f32; 2], along: usize| {
             let across = 1 - along;
-            anchors
+            let radius = anchors
                 .iter()
-                .filter(|p| ((p[across] - center[across]).abs() - extent[across]).abs() <= slack)
+                .filter(|p| {
+                    let side = (p[across] - center[across]) * corner[across];
+                    side > 0.0
+                        && (side - extent[across]).abs() <= slack
+                        && (p[along] - center[along]) * corner[along] >= 0.0
+                })
                 .map(|p| (p[along] - center[along]).abs())
                 .reduce(f32::max)
                 .map_or(extent[along], |reach| extent[along] - reach)
-        };
-        let mut radii = [radius(0), radius(1)].map(|r| r.max(0.0));
-        for (radius, half) in radii.iter_mut().zip(extent) {
-            if half - *radius <= slack {
-                *radius = half;
+                .max(0.0);
+            if extent[along] - radius <= slack {
+                extent[along]
+            } else if radius <= slack {
+                0.0
+            } else {
+                radius
             }
-        }
-        if radii[0] <= slack && radii[1] <= slack {
-            radii = [0.0, 0.0];
-        } else if radii[0] <= slack || radii[1] <= slack {
+        };
+        let corners = CORNERS.map(|corner| [radius(corner, 0), radius(corner, 1)]);
+        let same = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() <= slack && (a[1] - b[1]).abs() <= slack;
+        let square = |r: [f32; 2]| r == [0.0, 0.0];
+        let round = |r: [f32; 2]| r[0] > 0.0 && r[1] > 0.0;
+        // The same corners all round, or one side's two square and the
+        // other two the same: that side is cut. Any other mix is no box.
+        let (radii, cut) = if corners.iter().all(|&r| same(r, corners[0])) {
+            (corners[0], None)
+        } else {
+            let side = (0..4).find(|&i| {
+                let (a, b, c, d) = (
+                    corners[i],
+                    corners[(i + 1) % 4],
+                    corners[(i + 2) % 4],
+                    corners[(i + 3) % 4],
+                );
+                square(a) && square(b) && round(c) && same(c, d)
+            })?;
+            (corners[(side + 2) % 4], Some(side))
+        };
+        if !square(radii) && !round(radii) {
             return None;
         }
+        let corner_radii = |p: &[f32; 2]| {
+            let quadrant = CORNERS
+                .iter()
+                .position(|corner| (p[0] - center[0]) * corner[0] >= 0.0 && (p[1] - center[1]) * corner[1] >= 0.0)
+                .unwrap_or(0);
+            match cut {
+                Some(side) if quadrant == side || quadrant == (side + 1) % 4 => [0.0, 0.0],
+                _ => radii,
+            }
+        };
 
         // How far outside the box the outline's samples lie, to first order
         // at a corner; the curve between two samples may reach a little
@@ -265,6 +320,7 @@ impl RoundedBox {
                 (p[0] - center[0]).abs() - extent[0],
                 (p[1] - center[1]).abs() - extent[1],
             ];
+            let radii = corner_radii(p);
             let corner = [side[0] + radii[0], side[1] + radii[1]];
             if radii[0] > 0.0 && corner[0] > 0.0 && corner[1] > 0.0 {
                 let k = [corner[0] / radii[0], corner[1] / radii[1]];
@@ -294,12 +350,31 @@ impl RoundedBox {
             backward += usize::from(step < -1e-4);
         }
         let once = (turned.abs() - std::f32::consts::TAU).abs() < 0.01 && (forward == 0 || backward == 0);
+        if !(on_box && once) {
+            return None;
+        }
         let shape = Self {
             frame: Transform2D::translation(center[0], center[1]),
             extent,
             radii,
         };
-        (on_box && once).then_some((shape, strays * 1.1))
+        let Some(side) = cut else {
+            return Some((shape, strays * 1.1, None));
+        };
+        // The rounded box runs on past the square side by twice its radius
+        // there, so that its far corners lie well outside the cut.
+        let [sx, sy] = SIDES[side];
+        let run = [2.0 * radii[0] * sx.abs(), 2.0 * radii[1] * sy.abs()];
+        let rounded = Self {
+            frame: Transform2D::translation(center[0] + sx * run[0] * 0.5, center[1] + sy * run[1] * 0.5),
+            extent: [extent[0] + run[0] * 0.5, extent[1] + run[1] * 0.5],
+            radii,
+        };
+        let cut = Self {
+            radii: [0.0, 0.0],
+            ..shape
+        };
+        Some((rounded, strays * 1.1, Some(cut)))
     }
 
     /// The box under `transform`: its frame carried along.
@@ -381,20 +456,26 @@ impl RoundedBox {
         [ia.hypot(ic) * fringe_width, ib.hypot(id) * fringe_width]
     }
 
-    /// What an upright rect filled under this clip is drawn as, so that an
-    /// edge the two have in common is antialiased once: under an upright
-    /// rect clip, the rect the two share, when it is at least a pixel thick;
-    /// under an upright box with round corners that the rect covers whole,
-    /// the box itself. `None` for any other fill, which keeps its outline
-    /// under the clip's coverage.
-    pub(crate) fn rect_fill(&self, path: &Path, transform: &Transform2D, fringe_width: f32) -> Option<RectFill> {
-        if !self.upright() || path.verb_count() > MAX_FILL_VERBS {
+    /// The upright rect `path` fills under `transform`, if it is one.
+    pub(crate) fn upright_rect(path: &Path, transform: &Transform2D) -> Option<Self> {
+        if path.verb_count() > MAX_FILL_VERBS {
             return None;
         }
         let fill = Self::fit(path)?.transformed(transform);
-        if !fill.upright() || fill.radii != [0.0, 0.0] {
+        (fill.upright() && fill.radii == [0.0, 0.0]).then_some(fill)
+    }
+
+    /// What an upright rect ([`Self::upright_rect`]) filled under this clip
+    /// is drawn as, so that an edge the two have in common is antialiased
+    /// once: under an upright rect clip, the rect the two share, when it is
+    /// at least a pixel thick; under an upright box with round corners that
+    /// the rect covers whole, the box itself. `None` for any other fill,
+    /// which keeps its outline under the clip's coverage.
+    pub(crate) fn rect_fill(&self, fill: &Self, fringe_width: f32) -> Option<RectFill> {
+        if !self.upright() {
             return None;
         }
+        let fill = *fill;
         if self.radii == [0.0, 0.0] {
             let both = self.intersection_within(&fill, fringe_width, DRAW_SLACK)?;
             return both.coverage(fringe_width).map(|_| RectFill::Shared(both));
@@ -471,6 +552,122 @@ impl RoundedBox {
     pub(crate) fn with_scissor(&self, scissor: &Self, fringe_width: f32) -> Option<(Self, ClipCoverage)> {
         let both = self.intersection_within(scissor, fringe_width, DRAW_SLACK)?;
         Some((both, both.coverage(fringe_width)?))
+    }
+
+    /// What of `scissor` - a box with square corners - still clips a draw
+    /// under this box too: each side of the scissor that this box lies
+    /// within, to [`DRAW_SLACK`], moves out past this box's reach, so that
+    /// an edge the two share is cut once, by this box. `None` when this box
+    /// lies within all four; the scissor as it is when its corners are round
+    /// or its sides are not parallel to this box's.
+    pub(crate) fn trimmed_scissor(&self, scissor: &Self, fringe_width: f32) -> Option<Self> {
+        let Some(([x, y], half, _)) = scissor.alongside(self).filter(|_| scissor.radii == [0.0, 0.0]) else {
+            return Some(*scissor);
+        };
+        let per_fringe = scissor.per_fringe(fringe_width);
+        let mut low = [-scissor.extent[0], -scissor.extent[1]];
+        let mut high = scissor.extent;
+        let mut cuts = false;
+        for (axis, (center, half)) in [(x, half[0]), (y, half[1])].into_iter().enumerate() {
+            let slack = DRAW_SLACK * per_fringe[axis];
+            // This box's coverage ends half a fringe past its side, and the
+            // scissor's ramp is half a fringe wide either side of its own.
+            let past = 2.0 * per_fringe[axis];
+            if low[axis] <= center - half + slack {
+                low[axis] = center - half - past;
+            } else {
+                cuts = true;
+            }
+            if high[axis] >= center + half - slack {
+                high[axis] = center + half + past;
+            } else {
+                cuts = true;
+            }
+        }
+        cuts.then(|| Self {
+            frame: Transform2D::translation((low[0] + high[0]) * 0.5, (low[1] + high[1]) * 0.5) * scissor.frame,
+            extent: [(high[0] - low[0]) * 0.5, (high[1] - low[1]) * 0.5],
+            radii: [0.0, 0.0],
+        })
+    }
+
+    /// What two boxes with square corners and parallel sides both cover,
+    /// exactly; `None` when their sides are not parallel, and a box with no
+    /// extent where they do not overlap.
+    pub(crate) fn rect_intersection(&self, other: &Self) -> Option<Self> {
+        if self.radii != [0.0, 0.0] || other.radii != [0.0, 0.0] {
+            return None;
+        }
+        let ([x, y], half, _) = self.alongside(other)?;
+        let low = [(x - half[0]).max(-self.extent[0]), (y - half[1]).max(-self.extent[1])];
+        let high = [(x + half[0]).min(self.extent[0]), (y + half[1]).min(self.extent[1])];
+        let high = [high[0].max(low[0]), high[1].max(low[1])];
+        Some(Self {
+            frame: Transform2D::translation((low[0] + high[0]) * 0.5, (low[1] + high[1]) * 0.5) * self.frame,
+            extent: [(high[0] - low[0]) * 0.5, (high[1] - low[1]) * 0.5],
+            radii: [0.0, 0.0],
+        })
+    }
+
+    /// Whether this box's sides are parallel to `other`'s.
+    pub(crate) fn parallel(&self, other: &Self) -> bool {
+        self.alongside(other).is_some()
+    }
+
+    /// The part of an outline - `points` in order around a convex region,
+    /// in the space this box's frame maps to - that lies inside this box
+    /// with square corners: each side drops what lies beyond it, which
+    /// leaves one convex outline (Sutherland and Hodgman).
+    pub(crate) fn cut_outline(&self, points: impl Iterator<Item = [f32; 2]>) -> Vec<[f32; 2]> {
+        let inverse = self.frame.inverse();
+        let mut outline: Vec<([f32; 2], [f32; 2])> = points
+            .map(|point| {
+                let (x, y) = inverse.transform_point(point[0], point[1]);
+                (point, [x, y])
+            })
+            .collect();
+        for (axis, sign) in [(0, 1.0), (0, -1.0), (1, 1.0), (1, -1.0)] {
+            let beyond = |at: &[f32; 2]| sign * at[axis] - self.extent[axis];
+            let mut kept = Vec::with_capacity(outline.len() + 1);
+            for (i, &(point, at)) in outline.iter().enumerate() {
+                let (next, next_at) = outline[(i + 1) % outline.len()];
+                let (here, there) = (beyond(&at), beyond(&next_at));
+                if here <= 0.0 {
+                    kept.push((point, at));
+                }
+                if (here <= 0.0) != (there <= 0.0) {
+                    let t = here / (here - there);
+                    let lerp = |a: [f32; 2], b: [f32; 2]| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    kept.push((lerp(point, next), lerp(at, next_at)));
+                }
+            }
+            outline = kept;
+            if outline.is_empty() {
+                break;
+            }
+        }
+        outline.into_iter().map(|(point, _)| point).collect()
+    }
+
+    /// The device rectangle a box's corners span, as a path's bounds are.
+    pub(crate) fn bounds(&self) -> Bounds {
+        [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+            .map(|[x, y]| self.frame.transform_point(x * self.extent[0], y * self.extent[1]))
+            .into_iter()
+            .fold(
+                Bounds {
+                    minx: f32::INFINITY,
+                    miny: f32::INFINITY,
+                    maxx: f32::NEG_INFINITY,
+                    maxy: f32::NEG_INFINITY,
+                },
+                |bounds, (x, y)| Bounds {
+                    minx: bounds.minx.min(x),
+                    miny: bounds.miny.min(y),
+                    maxx: bounds.maxx.max(x),
+                    maxy: bounds.maxy.max(y),
+                },
+            )
     }
 
     /// The box as a path in its own frame, for the stencil.
@@ -779,6 +976,138 @@ mod tests {
         }
         path.close();
         path
+    }
+
+    /// A rectangle rounded at the two corners of one side - any side - fits
+    /// as a rounded box that runs on past the square side and the rectangle
+    /// that cuts it there: inside both is inside the outline, everywhere.
+    /// It is no box on its own, and no other mix of corners fits.
+    #[test]
+    fn a_rect_rounded_on_one_side_is_a_rounded_box_and_a_cut() {
+        let (x, y, w, h, r) = (10.0, 20.0, 60.0, 30.0, 8.0);
+        // Inside the rect, and in a round corner's square inside its circle.
+        let inside_outline = |px: f32, py: f32, [tl, tr, br, bl]: [f32; 4]| {
+            let corner = |r: f32, ox: f32, oy: f32, sx: f32, sy: f32| {
+                r == 0.0 || (px - ox) * sx <= 0.0 || (py - oy) * sy <= 0.0 || (px - ox).hypot(py - oy) <= r
+            };
+            (x..=x + w).contains(&px)
+                && (y..=y + h).contains(&py)
+                && corner(tl, x + tl, y + tl, -1.0, -1.0)
+                && corner(tr, x + w - tr, y + tr, 1.0, -1.0)
+                && corner(br, x + w - br, y + h - br, 1.0, 1.0)
+                && corner(bl, x + bl, y + h - bl, -1.0, 1.0)
+        };
+        for corners in [[r, r, 0.0, 0.0], [0.0, r, r, 0.0], [0.0, 0.0, r, r], [r, 0.0, 0.0, r]] {
+            let mut path = Path::new();
+            path.rounded_rect_varying(x, y, w, h, corners[0], corners[1], corners[2], corners[3]);
+            assert!(RoundedBox::fit_outline(&path).is_none(), "{corners:?}: no box alone");
+            let (shape, _, cut) = RoundedBox::fit_with_cut(&path).unwrap();
+            let cut = cut.unwrap();
+            assert_eq!(shape.radii, [r, r], "{corners:?}");
+            assert_eq!(cut.radii, [0.0, 0.0], "{corners:?}");
+            let (shape_coverage, cut_coverage) = (shape.coverage(1.0).unwrap(), cut.coverage(1.0).unwrap());
+            for i in 0..=80 {
+                for j in 0..=50 {
+                    let (px, py) = (x - 5.0 + i as f32 * 0.875, y - 5.0 + j as f32 * 0.8);
+                    let both = shape_coverage.distance([px, py]) <= 0.0 && cut_coverage.distance([px, py]) <= 0.0;
+                    let want = inside_outline(px, py, corners);
+                    // Points within a hair of the outline may fall either way.
+                    let near = shape_coverage
+                        .distance([px, py])
+                        .abs()
+                        .min(cut_coverage.distance([px, py]).abs())
+                        < 0.05;
+                    assert!(
+                        both == want || near,
+                        "{corners:?}: ({px}, {py}) inside both {both}, the outline {want}"
+                    );
+                }
+            }
+        }
+        for corners in [[r, r, r, 0.0], [r, 0.0, r, 0.0], [r, r, 4.0, 4.0]] {
+            let mut path = Path::new();
+            path.rounded_rect_varying(x, y, w, h, corners[0], corners[1], corners[2], corners[3]);
+            assert!(
+                RoundedBox::fit_with_cut(&path).is_none(),
+                "{corners:?}: no box, cut or not"
+            );
+        }
+    }
+
+    /// A scissor keeps the sides that cut into a box and loses those the box
+    /// lies within, which move out past the box's reach; a box within all
+    /// four leaves no scissor. A rounded scissor, or one at an angle, stays
+    /// as it is.
+    #[test]
+    fn a_scissor_keeps_only_the_sides_that_cut_into_the_box() {
+        let window = RoundedBox {
+            frame: Transform2D::translation(50.0, 45.0),
+            extent: [40.0, 35.0],
+            radii: [12.0, 12.0],
+        };
+        let rect = |left: f32, top: f32, right: f32, bottom: f32| RoundedBox {
+            frame: Transform2D::translation((left + right) * 0.5, (top + bottom) * 0.5),
+            extent: [(right - left) * 0.5, (bottom - top) * 0.5],
+            radii: [0.0, 0.0],
+        };
+        let sides = |b: RoundedBox| {
+            let (x, y) = b.frame.transform_point(0.0, 0.0);
+            [x - b.extent[0], y - b.extent[1], x + b.extent[0], y + b.extent[1]]
+        };
+        let trimmed = window.trimmed_scissor(&rect(10.0, 30.5, 90.0, 100.5), 1.0).unwrap();
+        assert_eq!(sides(trimmed), [8.0, 30.5, 92.0, 82.0], "only the top cuts");
+        let trimmed = window.trimmed_scissor(&rect(25.0, 0.0, 60.0, 100.0), 1.0).unwrap();
+        assert_eq!(sides(trimmed), [25.0, 8.0, 60.0, 82.0], "the left and right cut");
+        assert!(
+            window.trimmed_scissor(&rect(0.0, 10.0, 90.0, 120.0), 1.0).is_none(),
+            "around the box"
+        );
+        let rounded = RoundedBox {
+            radii: [4.0, 4.0],
+            ..rect(10.0, 30.5, 90.0, 100.5)
+        };
+        assert_eq!(
+            window.trimmed_scissor(&rounded, 1.0),
+            Some(rounded),
+            "a rounded scissor"
+        );
+        let mut turned = Transform2D::identity();
+        turned.rotate(0.3);
+        let at_an_angle = RoundedBox {
+            frame: turned,
+            ..rect(10.0, 30.5, 90.0, 100.5)
+        };
+        assert_eq!(
+            window.trimmed_scissor(&at_an_angle, 1.0),
+            Some(at_an_angle),
+            "at an angle"
+        );
+    }
+
+    /// An outline cut by a box keeps what lies inside the box: a square cut
+    /// by a rect across one corner is the rect the two share.
+    #[test]
+    fn an_outline_cut_by_a_box_is_what_lies_inside_it() {
+        let square = [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]];
+        let cut = RoundedBox {
+            frame: Transform2D::translation(100.0, 20.0),
+            extent: [50.0, 30.0],
+            radii: [0.0, 0.0],
+        };
+        let outline = cut.cut_outline(square.into_iter());
+        let area = outline
+            .iter()
+            .zip(outline.iter().cycle().skip(1))
+            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
+            .sum::<f32>()
+            .abs()
+            * 0.5;
+        assert!((area - 50.0 * 50.0).abs() < 1e-3, "{area} {outline:?}");
+        let away = RoundedBox {
+            frame: Transform2D::translation(300.0, 300.0),
+            ..cut
+        };
+        assert!(away.cut_outline(square.into_iter()).is_empty(), "nothing inside");
     }
 
     /// The fit tells how far the outline strays outside the box it found:
@@ -1442,7 +1771,7 @@ mod tests {
         };
         let identity = Transform2D::identity();
         let clip = clip_of(&rect(10.0, 10.0, 80.0, 60.0), &identity);
-        let under = |fill: &Path| clip.rect_fill(fill, &identity, 1.0);
+        let under = |fill: &Path| RoundedBox::upright_rect(fill, &identity).and_then(|fill| clip.rect_fill(&fill, 1.0));
         assert_eq!(
             shared(under(&rect(10.0, 10.0, 80.0, 60.0))),
             Some([10.0, 10.0, 90.0, 70.0]),
@@ -1465,11 +1794,17 @@ mod tests {
         let quarter = Transform2D::rotation(std::f32::consts::FRAC_PI_2);
         let scaled = Transform2D::new(2.0, 0.0, 0.0, 2.0, 5.0, 5.0);
         assert_eq!(
-            shared(clip.rect_fill(&rect(20.0, -60.0, 100.0, 30.0), &quarter, 1.0)),
+            shared(
+                RoundedBox::upright_rect(&rect(20.0, -60.0, 100.0, 30.0), &quarter)
+                    .and_then(|fill| clip.rect_fill(&fill, 1.0))
+            ),
             Some([30.0, 20.0, 60.0, 70.0])
         );
         assert_eq!(
-            shared(clip.rect_fill(&rect(0.0, 0.0, 20.0, 20.0), &scaled, 1.0)),
+            shared(
+                RoundedBox::upright_rect(&rect(0.0, 0.0, 20.0, 20.0), &scaled)
+                    .and_then(|fill| clip.rect_fill(&fill, 1.0))
+            ),
             Some([10.0, 10.0, 45.0, 45.0])
         );
 
@@ -1478,51 +1813,75 @@ mod tests {
         let twin = rect(10.0, 10.0, 80.0, 60.0);
         let round = clip_of(&rounded, &identity);
         assert_eq!(
-            covered(round.rect_fill(&twin, &identity, 1.0)),
+            covered(RoundedBox::upright_rect(&twin, &identity).and_then(|fill| round.rect_fill(&fill, 1.0))),
             Some([9.0, 9.0, 91.0, 71.0]),
             "on its sides"
         );
         assert_eq!(
-            covered(round.rect_fill(&rect(0.0, 0.0, 100.0, 100.0), &identity, 1.0)),
+            covered(
+                RoundedBox::upright_rect(&rect(0.0, 0.0, 100.0, 100.0), &identity)
+                    .and_then(|fill| round.rect_fill(&fill, 1.0))
+            ),
             Some([9.0, 9.0, 91.0, 71.0])
         );
         assert_eq!(
-            covered(round.rect_fill(&twin, &identity, 0.5)),
+            covered(RoundedBox::upright_rect(&twin, &identity).and_then(|fill| round.rect_fill(&fill, 0.5))),
             Some([9.5, 9.5, 90.5, 70.5]),
             "at a device pixel ratio of two the fringe is half a unit"
         );
         assert_eq!(
-            round.rect_fill(&rect(10.1, 10.0, 80.0, 60.0), &identity, 1.0),
+            RoundedBox::upright_rect(&rect(10.1, 10.0, 80.0, 60.0), &identity)
+                .and_then(|fill| round.rect_fill(&fill, 1.0)),
             None,
             "a tenth of a unit short"
         );
         assert_eq!(
-            round.rect_fill(&rect(10.0, 10.0, 80.0, 30.0), &identity, 1.0),
+            RoundedBox::upright_rect(&rect(10.0, 10.0, 80.0, 30.0), &identity)
+                .and_then(|fill| round.rect_fill(&fill, 1.0)),
             None,
             "its top half only"
         );
-        assert_eq!(round.rect_fill(&rounded, &identity, 1.0), None, "its rounded twin");
+        assert_eq!(
+            RoundedBox::upright_rect(&rounded, &identity).and_then(|fill| round.rect_fill(&fill, 1.0)),
+            None,
+            "its rounded twin"
+        );
         let mut circle = Path::new();
         circle.circle(50.0, 40.0, 30.0);
         assert_eq!(
-            covered(clip_of(&circle, &identity).rect_fill(&rect(0.0, 0.0, 100.0, 100.0), &identity, 1.0)),
+            covered(
+                RoundedBox::upright_rect(&rect(0.0, 0.0, 100.0, 100.0), &identity)
+                    .and_then(|fill| clip_of(&circle, &identity).rect_fill(&fill, 1.0))
+            ),
             Some([19.0, 9.0, 81.0, 71.0])
         );
 
         let turned = Transform2D::rotation(0.3);
         assert_eq!(
-            clip_of(&twin, &turned).rect_fill(&twin, &turned, 1.0),
+            RoundedBox::upright_rect(&twin, &turned).and_then(|fill| clip_of(&twin, &turned).rect_fill(&fill, 1.0)),
             None,
             "a turned pair"
         );
-        assert_eq!(clip.rect_fill(&twin, &turned, 1.0), None, "a turned fill");
-        assert_eq!(clip.rect_fill(&rounded, &identity, 1.0), None, "a rounded fill");
+        assert_eq!(
+            RoundedBox::upright_rect(&twin, &turned).and_then(|fill| clip.rect_fill(&fill, 1.0)),
+            None,
+            "a turned fill"
+        );
+        assert_eq!(
+            RoundedBox::upright_rect(&rounded, &identity).and_then(|fill| clip.rect_fill(&fill, 1.0)),
+            None,
+            "a rounded fill"
+        );
         let mut triangle = Path::new();
         triangle.move_to(0.0, 0.0);
         triangle.line_to(100.0, 0.0);
         triangle.line_to(0.0, 100.0);
         triangle.close();
-        assert_eq!(clip.rect_fill(&triangle, &identity, 1.0), None, "no box");
+        assert_eq!(
+            RoundedBox::upright_rect(&triangle, &identity).and_then(|fill| clip.rect_fill(&fill, 1.0)),
+            None,
+            "no box"
+        );
         let mut long = Path::new();
         long.move_to(0.0, 0.0);
         for step in 1..=20 {
@@ -1536,7 +1895,7 @@ mod tests {
             "a rect with its top side in twenty pieces"
         );
         assert_eq!(
-            clip.rect_fill(&long, &identity, 1.0),
+            RoundedBox::upright_rect(&long, &identity).and_then(|fill| clip.rect_fill(&fill, 1.0)),
             None,
             "too many verbs to ask on every fill"
         );

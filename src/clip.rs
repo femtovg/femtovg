@@ -32,8 +32,15 @@ pub(crate) enum ClipKind {
     /// Evaluated by each draw's fragment shader, in device space, as the
     /// coverage worked out when the clip was taken. The innermost one on a
     /// target is the one in force: each is stacked as what it leaves of the
-    /// one before it.
-    Shape { shape: RoundedBox, coverage: ClipCoverage },
+    /// one before it. Where the clip and the shape make no one box, `cut` is
+    /// a box with square corners and parallel sides that cuts the shape,
+    /// carried by each draw in the scissor's place: the cuts on a target
+    /// clip together as what all of them cover.
+    Shape {
+        shape: RoundedBox,
+        coverage: ClipCoverage,
+        cut: Option<RoundedBox>,
+    },
 }
 
 /// The boxes a draw meets: the clip shape - with the scissor, where the two
@@ -42,7 +49,7 @@ pub(crate) enum ClipKind {
 /// the draws that follow under the same two.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct ClipBoxes {
-    of: (Scissor, Option<RoundedBox>),
+    of: (Scissor, Option<RoundedBox>, Option<RoundedBox>),
     shape: Option<(RoundedBox, ClipCoverage)>,
     scissor: Scissor,
     scissor_box: Option<(RoundedBox, ClipCoverage)>,
@@ -134,14 +141,15 @@ where
     /// intersection of every clip taken on the current render target.
     ///
     /// A clip whose path outlines a rectangle (under any transform), a
-    /// rounded rectangle or an ellipse is antialiased: its edge takes
-    /// coverage as a fill's does. The edge of any other clip is not: a pixel
-    /// is either inside it or outside. A shape loses its antialiasing when
-    /// it only partly overlaps a shape already clipping the target (two
-    /// rectangles with parallel sides excepted), and once something that
-    /// reaches past it is drawn under it with a composite operation that
-    /// changes the destination where the source is transparent
-    /// ([`CompositeOperation::Copy`], `SourceIn`, `SourceOut`,
+    /// rounded rectangle, one rounded at the two corners of a side only, or
+    /// an ellipse is antialiased: its edge takes coverage as a fill's does.
+    /// The edge of any other clip is not: a pixel is either inside it or
+    /// outside. A shape loses its antialiasing when it only partly overlaps
+    /// a shape already clipping the target - unless one of the two is a
+    /// rectangle with sides parallel to the other's, which then cuts it - and
+    /// once something that reaches past it is drawn under it with a
+    /// composite operation that changes the destination where the source is
+    /// transparent ([`CompositeOperation::Copy`], `SourceIn`, `SourceOut`,
     /// `DestinationIn`, `DestinationAtop`).
     ///
     /// A draw that stays inside an antialiased clip is not clipped: an edge
@@ -205,14 +213,17 @@ where
     }
 
     /// Takes the clip as a shape for the fragment shader, if `path` outlines
-    /// one and it combines with the shape already in force into one: a draw
-    /// carries a single shape. `false` leaves the clip to the stencil.
+    /// one - or one cut by a box with square corners, as a rectangle rounded
+    /// on one side is - and it combines with the shape already in force: a
+    /// draw carries a single shape, and the cuts in the scissor's place.
+    /// `false` leaves the clip to the stencil.
     fn clip_to_shape(&mut self, path: &Path) -> bool {
-        let Some((shape, strays)) = RoundedBox::fit_outline(path) else {
+        let Some((shape, strays, cut)) = RoundedBox::fit_with_cut(path) else {
             return false;
         };
         let transform = self.state().transform;
         let mut shape = shape.transformed(&transform);
+        let mut cut = cut.map(|cut| cut.transformed(&transform));
         let Some(mut coverage) = shape.coverage(self.fringe_width) else {
             return false;
         };
@@ -220,28 +231,64 @@ where
         // the transform's axes.
         let scale = transform[0].hypot(transform[1]).max(transform[2].hypot(transform[3]));
         coverage = coverage.straying(strays * scale / self.fringe_width);
-        if let Some((current, current_coverage)) = self.clip_shape() {
+        let in_force = self.clip_shape();
+        if let Some((current, current_coverage)) = in_force {
             if let Some(both) = current.intersection(&shape, self.fringe_width) {
                 if both == current {
                     // The shape in force already clips to less.
-                    return true;
+                    (shape, coverage) = (current, current_coverage);
+                } else {
+                    let Some(both_coverage) = both.coverage(self.fringe_width) else {
+                        return false;
+                    };
+                    // Each corner of what the two leave is a corner of one
+                    // of them.
+                    let strays = coverage.strays.max(current_coverage.strays);
+                    (shape, coverage) = (both, both_coverage.straying(strays));
                 }
-                let Some(both_coverage) = both.coverage(self.fringe_width) else {
+            } else if coverage.contains(&current) {
+                (shape, coverage) = (current, current_coverage);
+            } else if !current_coverage.contains(&shape) {
+                // The two make no one box. A box with square corners and
+                // parallel sides cuts the other one, which is in force.
+                let rect = |b: &RoundedBox| b.radii == [0.0, 0.0] && b.parallel(&current);
+                let cutting = if rect(&shape) {
+                    let cutting = shape;
+                    (shape, coverage) = (current, current_coverage);
+                    cutting
+                } else if rect(&current) {
+                    current
+                } else {
                     return false;
                 };
-                // Each corner of what the two leave is a corner of one of
-                // them.
-                let strays = coverage.strays.max(current_coverage.strays);
-                (shape, coverage) = (both, both_coverage.straying(strays));
-            } else if coverage.contains(&current) {
-                return true;
-            } else if !current_coverage.contains(&shape) {
+                cut = match cut {
+                    Some(cut) => match cut.rect_intersection(&cutting) {
+                        Some(both) => Some(both),
+                        None => return false,
+                    },
+                    None => Some(cutting),
+                };
+            }
+        }
+        if let Some(this) = cut {
+            // A cut thinner than a pixel is for the stencil, as such a
+            // shape is; one the shape lies within cuts nothing; one has to
+            // be parallel to the cuts in force to clip with them as a box.
+            let Some(this_coverage) = this.coverage(self.fringe_width) else {
+                return false;
+            };
+            if this_coverage.contains(&shape) {
+                cut = None;
+            } else if self.clip_cut().is_some_and(|cuts| !cuts.parallel(&this)) {
                 return false;
             }
         }
+        if cut.is_none() && in_force.is_some_and(|(current, _)| current == shape) {
+            return true;
+        }
         self.clip_stack.push(ClipEntry {
             target: self.current_render_target,
-            kind: ClipKind::Shape { shape, coverage },
+            kind: ClipKind::Shape { shape, coverage, cut },
         });
         self.state_mut().clip_depth = self.clip_stack.len();
         true
@@ -258,11 +305,16 @@ where
 
     /// The boxes in force as a draw meets them. The scissor is a box like
     /// the clip shape: where the two make one ([`RoundedBox::with_scissor`])
-    /// that box stands for both, and no scissor is left beside it.
+    /// that box stands for both, and no scissor is left beside it. Otherwise
+    /// the scissor, cut by the cuts in force, clips beside the shape, along
+    /// the sides of it that cut into the shape
+    /// ([`RoundedBox::trimmed_scissor`]): an edge it shares with the shape
+    /// is the shape's.
     fn clip_boxes(&mut self) -> ClipBoxes {
         let scissor = self.state().scissor;
         let shape = self.clip_shape();
-        let of = (scissor, shape.map(|(shape, _)| shape));
+        let cut = self.clip_cut();
+        let of = (scissor, shape.map(|(shape, _)| shape), cut);
         if let Some(last) = self.last_clip_boxes.as_ref().filter(|last| last.of == of) {
             return *last;
         }
@@ -271,6 +323,18 @@ where
             extent,
             radii: [scissor.radius; 2],
         });
+        let scissor_box = match (scissor_box, cut) {
+            (Some(scissor_box), Some(cut)) => match scissor_box.rect_intersection(&cut) {
+                Some(both) => Some(both),
+                None => {
+                    // A rounded scissor, or one at an angle to the cuts:
+                    // they clip on the stencil, and the shapes with them.
+                    self.shapes_to_stencil();
+                    return self.clip_boxes();
+                }
+            },
+            (scissor_box, cut) => scissor_box.or(cut),
+        };
         // The round corners a square scissor leaves are the shape's; a
         // rounded scissor's own are exact.
         let both = match (shape, scissor_box) {
@@ -293,13 +357,23 @@ where
                 scissor: Scissor::default(),
                 scissor_box: None,
             },
-            None => ClipBoxes {
-                of,
-                shape,
-                scissor,
-                scissor_box: scissor_box
-                    .and_then(|scissor_box| Some((scissor_box, scissor_box.coverage(self.fringe_width)?))),
-            },
+            None => {
+                let scissor_box = match (shape, scissor_box) {
+                    (Some((shape, _)), Some(scissor_box)) => shape.trimmed_scissor(&scissor_box, self.fringe_width),
+                    (_, scissor_box) => scissor_box,
+                };
+                ClipBoxes {
+                    of,
+                    shape,
+                    scissor: scissor_box.map_or(Scissor::default(), |scissor_box| Scissor {
+                        transform: scissor_box.frame,
+                        extent: Some(scissor_box.extent),
+                        radius: scissor_box.radii[0],
+                    }),
+                    scissor_box: scissor_box
+                        .and_then(|scissor_box| Some((scissor_box, scissor_box.coverage(self.fringe_width)?))),
+                }
+            }
         };
         self.last_clip_boxes = Some(boxes);
         boxes
@@ -355,14 +429,20 @@ where
                 })
         };
         let mut scissor = boxes.scissor;
+        let mut fill = fill.and_then(|(path, transform)| RoundedBox::upright_rect(path, transform));
         let mut rect = None;
         if let Some((scissor_box, coverage)) = boxes.scissor_box {
             if holds(&coverage) {
                 scissor = Scissor::default();
-            } else if let (None, Some((path, transform))) = (boxes.shape, fill) {
-                rect = scissor_box.rect_fill(path, transform, self.fringe_width);
-                if matches!(rect, Some(RectFill::Shared(_))) {
-                    scissor = Scissor::default();
+            } else {
+                match fill.and_then(|fill| scissor_box.rect_fill(&fill, self.fringe_width)) {
+                    // The rect the fill shares with the scissor, which then
+                    // clips no more; a shape still clips it.
+                    Some(RectFill::Shared(both)) => {
+                        (fill, rect, scissor) = (Some(both), Some(RectFill::Shared(both)), Scissor::default());
+                    }
+                    covered @ Some(RectFill::Covered(_)) if boxes.shape.is_none() => rect = covered,
+                    _ => {}
                 }
             }
         }
@@ -370,26 +450,37 @@ where
             self.shape_carried = false;
             return (None, scissor, rect);
         };
-        let held = holds(&coverage);
-        let rect = match fill {
-            Some((path, transform)) if !held => shape.rect_fill(path, transform, self.fringe_width),
+        let held = match rect {
+            Some(RectFill::Shared(both)) => coverage.holds(&both.bounds()),
+            _ => holds(&coverage),
+        };
+        let shared = match fill {
+            Some(fill) if !held => shape.rect_fill(&fill, self.fringe_width),
             _ => None,
         };
-        if held || matches!(rect, Some(RectFill::Shared(_))) {
+        let rect = shared.or(rect);
+        if held || matches!(shared, Some(RectFill::Shared(_))) {
             return (self.shape_carried.then_some(ClipCoverage::EVERYWHERE), scissor, rect);
         }
         self.shape_carried = self.state().composite_operation.takes_coverage();
         if self.shape_carried {
             return (Some(coverage), scissor, rect);
         }
+        self.shapes_to_stencil();
+        // The scissor clips on its own again, as it was set.
+        (None, self.state().scissor, None)
+    }
+
+    /// Moves the current render target's clip shapes, and their cuts, to the
+    /// stencil. The shapes beneath the one in force contain it, but each
+    /// would be in force once it is gone: all of them move.
+    fn shapes_to_stencil(&mut self) {
         let target = self.current_render_target;
-        // The shapes beneath the one in force contain it, but each would be
-        // in force once it is gone: all of the target's shapes move.
         let mut moved = false;
         for index in 0..self.clip_stack.len() {
             let ClipEntry {
                 target: on,
-                kind: ClipKind::Shape { shape, .. },
+                kind: ClipKind::Shape { shape, cut, .. },
             } = self.clip_stack[index]
             else {
                 continue;
@@ -397,7 +488,25 @@ where
             if on != target {
                 continue;
             }
-            let (geometry, bounds) = self.stencil_geometry(&shape.path(), &shape.frame);
+            let (geometry, bounds) = match cut {
+                None => self.stencil_geometry(&shape.path(), &shape.frame),
+                Some(cut) => {
+                    // What the two cover, both convex: the shape's outline,
+                    // flattened, cut by the box.
+                    let outline = shape.path();
+                    let outline = outline.cache(&shape.frame, self.tess_tol, self.dist_tol);
+                    let mut path = Path::new();
+                    for (i, [x, y]) in cut.cut_outline(outline.positions()).into_iter().enumerate() {
+                        if i == 0 {
+                            path.move_to(x, y);
+                        } else {
+                            path.line_to(x, y);
+                        }
+                    }
+                    path.close();
+                    self.stencil_geometry(&path, &Transform2D::identity())
+                }
+            };
             // The replay below works out what each entry leaves armed.
             self.clip_stack[index].kind = ClipKind::Stencil {
                 geometry,
@@ -419,23 +528,29 @@ where
         if moved {
             self.reconcile_current_clip_plane();
         }
-        // Where the scissor and the shape had made one box, the scissor
-        // clips on its own again.
-        let scissor = if boxes.scissor_box.is_some() {
-            scissor
-        } else {
-            self.state().scissor
-        };
-        (None, scissor, None)
     }
 
     /// The shape clip in force on the current render target, and its coverage.
     pub(crate) fn clip_shape(&self) -> Option<(RoundedBox, ClipCoverage)> {
         let target = self.current_render_target;
         self.clip_stack.iter().rev().find_map(|entry| match entry.kind {
-            ClipKind::Shape { shape, coverage } if entry.target == target => Some((shape, coverage)),
+            ClipKind::Shape { shape, coverage, .. } if entry.target == target => Some((shape, coverage)),
             _ => None,
         })
+    }
+
+    /// The cuts in force on the current render target, as one box: what all
+    /// of them cover. They are parallel, as each was taken.
+    pub(crate) fn clip_cut(&self) -> Option<RoundedBox> {
+        let target = self.current_render_target;
+        self.clip_stack
+            .iter()
+            .filter(|entry| entry.target == target)
+            .filter_map(|entry| match entry.kind {
+                ClipKind::Shape { cut, .. } => cut,
+                ClipKind::Stencil { .. } => None,
+            })
+            .reduce(|both, cut| both.rect_intersection(&cut).unwrap_or(both))
     }
 
     /// Re-establishes the current render target's stencil clip plane from
@@ -1418,7 +1533,7 @@ fn a_scissor_meets_a_draw_as_a_clip_shape_does() {
 
 /// One shape per draw: a shape inside the one in force takes its place, one
 /// around it adds nothing, a rect across a rect leaves their intersection,
-/// and any other overlap goes to the stencil.
+/// and a circle across a rect is in force with the rect cutting it.
 #[test]
 fn nested_shape_clips_keep_one_shape_in_force() {
     let renderer = RecordingRenderer::default();
@@ -1454,13 +1569,162 @@ fn nested_shape_clips_keep_one_shape_in_force() {
     assert_eq!(half_width_in_force(&mut canvas), 20.0);
     assert!(!canvas.clip_active(), "still no stencil");
 
-    // A circle that overlaps the rect is no single shape with it.
+    // A circle that overlaps the rect is no single shape with it: the rect
+    // cuts the circle, which is in force.
     let mut circle = Path::new();
     circle.circle(50.0, 50.0, 30.0);
     canvas.clip_path(&circle, FillRule::NonZero);
-    assert!(canvas.clip_active(), "the stencil takes it");
-    assert_eq!(half_width_in_force(&mut canvas), 20.0, "the rect stays in force");
-    assert_eq!(stencil_clip_commands(&recorded.borrow()), 2, "armed and filled");
+    assert!(!canvas.clip_active(), "still no stencil");
+    assert_eq!(half_width_in_force(&mut canvas), 30.0, "the circle in force");
+    assert_eq!(
+        drawn_scissor(recorded.borrow().last().unwrap()),
+        Some([50.0, 50.0, 32.0, 32.0]),
+        "the rect's sides that cut the circle, the others past its reach"
+    );
+    assert_eq!(stencil_clip_commands(&recorded.borrow()), 0);
+}
+
+/// Where a draw's scissor lies, as x, y, width and height, when its sides
+/// lie along the device axes.
+#[cfg(test)]
+fn drawn_scissor(cmd: &Command) -> Option<[f32; 4]> {
+    let params = match &cmd.cmd_type {
+        CommandType::ConvexFill { params } | CommandType::Stroke { params } => params,
+        CommandType::ConcaveFill { fill_params, .. } => fill_params,
+        _ => return None,
+    };
+    if params.scissor_mat == [0.0; 12] {
+        return None;
+    }
+    // The matrix takes device positions to the scissor's frame.
+    let [a, b, _, _, c, d, _, _, x, y, ..] = params.scissor_mat;
+    let device = Transform2D([a, b, c, d, x, y]).inverse();
+    let [ex, ey] = params.scissor_ext;
+    let corners = [[-ex, -ey], [ex, ey]].map(|[u, v]| device.transform_point(u, v));
+    let (left, right) = (corners[0].0.min(corners[1].0), corners[0].0.max(corners[1].0));
+    let (top, bottom) = (corners[0].1.min(corners[1].1), corners[0].1.max(corners[1].1));
+    let upright = (a == 0.0 && d == 0.0) || (b == 0.0 && c == 0.0);
+    upright.then_some([left, top, right - left, bottom - top].map(|v| (v * 1e3).round() / 1e3))
+}
+
+/// A rect clip that cuts a clip with round corners across its straight
+/// sides - the content of a window, under the window - and a rectangle
+/// rounded on one side - its title bar - clip without the stencil: the
+/// shape is in force, and the rect cuts it in the scissor's place, along the
+/// sides of it that cut into the shape. A scissor joins the cut; one at an
+/// angle to it, or a draw that coverage cannot bound, sends the clip to the
+/// stencil, as what both leave.
+#[test]
+fn a_rect_that_cuts_a_rounded_clip_clips_beside_it_in_the_scissors_place() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let drawn = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let fill = notched_rect(0.0, 0.0, 100.0, 100.0);
+    let last = |canvas: &mut Canvas<RecordingRenderer>| {
+        canvas.fill_path(&fill, &paint);
+        canvas.flush_to_output(());
+        let commands = recorded.borrow();
+        let shape = drawn_clips(&commands).last().copied().flatten();
+        (
+            shape.map(|shape| (shape.extent, shape.radii)),
+            drawn_scissor(commands.last().unwrap()),
+        )
+    };
+    let mut window = Path::new();
+    window.rounded_rect(10.0, 10.0, 80.0, 70.0, 12.0);
+    let mut content = Path::new();
+    content.rect(10.0, 30.5, 80.0, 70.0);
+
+    canvas.save();
+    canvas.clip_path(&window, FillRule::NonZero);
+    canvas.clip_path(&content, FillRule::NonZero);
+    assert!(!canvas.clip_active(), "no stencil");
+    assert_eq!(
+        last(&mut canvas),
+        (Some(([40.0, 35.0], [12.0, 12.0])), Some([8.0, 30.5, 84.0, 51.5])),
+        "the window in force; the content's top cuts it, its other sides are the window's"
+    );
+    canvas.scissor(0.0, 0.0, 50.0, 100.0);
+    assert_eq!(
+        last(&mut canvas),
+        (Some(([40.0, 35.0], [12.0, 12.0])), Some([8.0, 30.5, 42.0, 51.5])),
+        "a scissor joins the cut"
+    );
+    canvas.scissor(0.0, 0.0, 100.0, 60.0);
+    assert_eq!(
+        last(&mut canvas),
+        (Some(([40.0, 14.75], [0.0, 0.0])), None),
+        "the scissor and the cut leave a rect of the window's straight sides: one box"
+    );
+    canvas.reset_scissor();
+    // A rect whose top lies on the cut: filled as the rect it shares with
+    // the cut, whose top is its own edge, under the window and no scissor.
+    let mut on_the_cut = Path::new();
+    on_the_cut.rect(0.0, 30.5, 100.0, 90.0);
+    canvas.fill_path(&on_the_cut, &paint);
+    canvas.flush_to_output(());
+    {
+        let commands = recorded.borrow();
+        let fill = commands.last().unwrap();
+        assert_eq!(drawn_scissor(fill), None, "no scissor");
+        assert!(drawn_clips(&commands).last().copied().flatten().is_some(), "the window");
+        let (start, count) = fill.drawables[0].fill_verts.unwrap();
+        let top = drawn.borrow()[start..start + count]
+            .iter()
+            .map(|v| v.y)
+            .fold(f32::INFINITY, f32::min);
+        assert_eq!(top, 31.0, "the shared rect's top, inset by half its fringe");
+    }
+    canvas.restore();
+    assert_eq!(last(&mut canvas), (None, None), "restored: nothing clips");
+
+    // A title bar: round top corners, a square bottom.
+    let mut bar = Path::new();
+    bar.rounded_rect_varying(10.0, 10.0, 80.0, 20.25, 8.0, 8.0, 0.0, 0.0);
+    canvas.save();
+    canvas.clip_path(&bar, FillRule::NonZero);
+    assert!(!canvas.clip_active(), "no stencil");
+    let (shape, scissor) = last(&mut canvas);
+    assert_eq!(shape.map(|(_, radii)| radii), Some([8.0, 8.0]), "round corners");
+    assert_eq!(
+        scissor,
+        Some([8.0, 8.0, 84.0, 22.25]),
+        "the bar's bottom cuts the shape, which runs on past it"
+    );
+
+    // A scissor at an angle to the cut: the clip goes to the stencil.
+    canvas.save();
+    canvas.rotate(0.3);
+    canvas.scissor(0.0, 0.0, 100.0, 100.0);
+    canvas.reset_transform();
+    assert_eq!(last(&mut canvas).0, None, "no shape");
+    assert!(canvas.clip_active(), "on the stencil");
+    canvas.restore();
+    canvas.restore();
+
+    // A draw that coverage cannot bound sends the clip to the stencil, as
+    // what the window and its content both cover.
+    canvas.clip_path(&window, FillRule::NonZero);
+    canvas.clip_path(&content, FillRule::NonZero);
+    canvas.global_composite_operation(CompositeOperation::Copy);
+    canvas.fill_path(&fill, &paint);
+    let stencils: Vec<Bounds> = canvas
+        .clip_stack
+        .iter()
+        .filter_map(|entry| match entry.kind {
+            ClipKind::Stencil { bounds, .. } => Some(bounds),
+            ClipKind::Shape { .. } => None,
+        })
+        .collect();
+    assert_eq!(stencils.len(), 2);
+    let both = stencils[1];
+    assert!(
+        (both.miny - 30.5).abs() < 1e-3 && (both.maxy - 80.0).abs() < 1e-3,
+        "the content cut by the window: {both:?}"
+    );
 }
 
 /// A rounded rect nested in its twin, or in one a fraction of a pixel off -

@@ -279,6 +279,151 @@ fn clip_coverage_holds_under_a_skew_and_down_to_a_pixel() {
     }
 }
 
+/// The share of each pixel where `inside` holds, from 16 x 16 samples.
+fn share_where(inside: impl Fn(f32, f32) -> bool) -> Vec<f32> {
+    (0..W * H)
+        .map(|i| {
+            let (left, top) = ((i % W) as f32, (i / W) as f32);
+            let hits = (0..256)
+                .filter(|s| {
+                    inside(
+                        left + ((s % 16) as f32 + 0.5) / 16.0,
+                        top + ((s / 16) as f32 + 0.5) / 16.0,
+                    )
+                })
+                .count();
+            hits as f32 / 256.0
+        })
+        .collect()
+}
+
+/// A rect clip that cuts a clip with round corners across its straight
+/// sides, and a rectangle rounded on one side only, as a clip: each pixel is
+/// covered by its share inside what both leave - upright, and turned - with
+/// no stencil to take a pixel whole or not at all, and an edge the two share
+/// once; an upright rect filled under them whose side lies on the cut takes
+/// that edge's coverage once too.
+#[test]
+fn a_rounded_clip_cut_by_a_rect_covers_each_pixel_by_its_share_inside_both() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let rounded = |x: f32, y: f32, center: [f32; 2], extent: [f32; 2], r: f32| {
+        let side = [(x - center[0]).abs() - extent[0], (y - center[1]).abs() - extent[1]];
+        let corner = [side[0] + r, side[1] + r];
+        if corner[0] > 0.0 && corner[1] > 0.0 {
+            corner[0].hypot(corner[1]) <= r
+        } else {
+            side[0] <= 0.0 && side[1] <= 0.0
+        }
+    };
+    type Place = fn(&mut Canvas<WGPURenderer>);
+    let turned: Place = |canvas| {
+        canvas.translate(48.0, 48.0);
+        canvas.rotate(0.35);
+        canvas.translate(-48.0, -48.0);
+    };
+    let in_place: Place = |_| {};
+    for (name, place) in [("upright", in_place), ("turned", turned)] {
+        // A window and the rect its content is cut to: the rect shares the
+        // window's sides and leaves its bottom, and its top crosses the
+        // window's straight sides.
+        let (center, extent, r) = ([48.25, 47.5], [36.5, 30.25], 9.5);
+        let mut expected = Vec::new();
+        let cut = render(&device, &queue, |canvas| {
+            place(canvas);
+            let inverse = canvas.transform().inverse();
+            expected = share_where(|x, y| {
+                let (x, y) = inverse.transform_point(x, y);
+                rounded(x, y, center, extent, r) && y >= 31.3
+            });
+            let mut window = Path::new();
+            window.rounded_rect(
+                center[0] - extent[0],
+                center[1] - extent[1],
+                2.0 * extent[0],
+                2.0 * extent[1],
+                r,
+            );
+            canvas.clip_path(&window, FillRule::NonZero);
+            let mut content = Path::new();
+            content.rect(center[0] - extent[0], 31.3, 2.0 * extent[0], 80.0);
+            canvas.clip_path(&content, FillRule::NonZero);
+            canvas.reset_transform();
+            fill_everything(canvas);
+        });
+        // The content itself: a rect whose top lies on the cut, which it
+        // shares - the edge is the rect's, once, not its coverage squared.
+        let mut content_expected = Vec::new();
+        let content = render(&device, &queue, |canvas| {
+            place(canvas);
+            let inverse = canvas.transform().inverse();
+            content_expected = share_where(|x, y| {
+                let (x, y) = inverse.transform_point(x, y);
+                rounded(x, y, center, extent, r) && y >= 31.3
+            });
+            let mut window = Path::new();
+            window.rounded_rect(
+                center[0] - extent[0],
+                center[1] - extent[1],
+                2.0 * extent[0],
+                2.0 * extent[1],
+                r,
+            );
+            canvas.clip_path(&window, FillRule::NonZero);
+            let mut cut = Path::new();
+            cut.rect(center[0] - extent[0], 31.3, 2.0 * extent[0], 80.0);
+            canvas.clip_path(&cut, FillRule::NonZero);
+            let mut rect = Path::new();
+            rect.rect(-20.0, 31.3, 140.0, 100.0);
+            canvas.fill_path(&rect, &red());
+        });
+        // A title bar: round top corners, a square bottom.
+        let (left, top, width, height) = (12.25, 18.5, 70.5, 26.75);
+        let mut bar_expected = Vec::new();
+        let bar = render(&device, &queue, |canvas| {
+            place(canvas);
+            let inverse = canvas.transform().inverse();
+            bar_expected = share_where(|x, y| {
+                let (x, y) = inverse.transform_point(x, y);
+                let tall = [left + width * 0.5, top + height];
+                rounded(x, y, tall, [width * 0.5, height], r) && y <= top + height
+            });
+            let mut clip = Path::new();
+            clip.rounded_rect_varying(left, top, width, height, r, r, 0.0, 0.0);
+            canvas.clip_path(&clip, FillRule::NonZero);
+            canvas.reset_transform();
+            fill_everything(canvas);
+        });
+        // A rect is drawn as the rect it shares with a box only upright.
+        let content_case = (name == "upright").then_some(("content on the cut", &content, &content_expected));
+        for (what, frame, expected) in [
+            Some(("cut window", &cut, &expected)),
+            content_case,
+            Some(("title bar", &bar, &bar_expected)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            // Red over white: the green channel is what the clip left uncovered.
+            let (worst, at) = expected
+                .iter()
+                .enumerate()
+                .map(|(i, want)| ((1.0 - f32::from(frame[i * 4 + 1]) / 255.0 - want).abs(), i))
+                .fold((0.0, 0), |a, b| if b.0 > a.0 { b } else { a });
+            let partial = expected.iter().filter(|share| **share > 0.0 && **share < 1.0).count();
+            assert!(partial > 60, "{what}, {name}: only {partial} edge pixels");
+            assert!(
+                worst < 0.08,
+                "{what}, {name}: ({}, {}) is {worst} from its share inside",
+                at as u32 % W,
+                at as u32 / W
+            );
+        }
+    }
+}
+
 /// An edge takes coverage once where a draw stays inside its clip along it,
 /// where an upright rect clip cuts an upright rect, where an upright rect
 /// covers a clip with round corners, and where a scissor lies on the clip -
