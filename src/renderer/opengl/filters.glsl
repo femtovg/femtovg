@@ -2,13 +2,15 @@
 // curves and feBlend. Appended after main-fs.glsl; main() calls them
 // through the prototypes declared there.
 
-vec4 renderColorMatrix() {
-    // The 4x5 color matrix is packed row-major into frag[0..4] (the scissor/paint
-    // matrix slots, unused during a filter pass). Apply it in unpremultiplied
-    // sRGB space, clamp to [0,1], then re-premultiply: unpremultiplying avoids
-    // edge halos and the clamp keeps overflowing matrices from producing
-    // out-of-range or NaN pixels.
-    vec4 c = texture2D(tex, fpos.xy / extent);
+// The 4x5 color matrix packed row-major into frag[0..4] (the scissor/paint
+// matrix slots, unused during a filter pass) applied to a premultiplied
+// color: in unpremultiplied sRGB space, clamped to [0,1], re-premultiplied
+// - unpremultiplying avoids edge halos and the clamp keeps overflowing
+// matrices from producing out-of-range or NaN pixels. The color-matrix pass
+// and the second draw of a two-draw filter with a matrix fused into it
+// share it.
+vec4 colorMatrixOn(vec4 premultiplied) {
+    vec4 c = premultiplied;
     if (c.a > 0.0) {
         c.rgb /= c.a;
     }
@@ -19,6 +21,10 @@ vec4 renderColorMatrix() {
     vec4 outc = clamp(vec4(r, g, b, a), 0.0, 1.0);
     outc.rgb *= outc.a;
     return outc;
+}
+
+vec4 renderColorMatrix() {
+    return colorMatrixOn(texture2D(tex, fpos.xy / extent));
 }
 
 // SVG feTurbulence (SVG 1.1 section 15.19), all four channels at once. `tex`
@@ -278,6 +284,8 @@ vec4 renderMorphology() {
             acc = min(acc, min(before, after));
         }
     }
+    // A color matrix fused into this second draw.
+    if (feather > 0.5) acc = colorMatrixOn(acc);
     if (texType == 2) acc = vec4(acc.x);
     return acc;
 }

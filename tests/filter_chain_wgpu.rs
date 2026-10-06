@@ -6,7 +6,7 @@
 //! GPU adapter.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, ErrorKind, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFilter, ImageFlags, Paint, Path, PixelFormat};
 
 mod common;
 use common::headless_device;
@@ -173,8 +173,64 @@ fn close(a: u8, b: u8, tol: i32) -> bool {
     (a as i32 - b as i32).abs() <= tol
 }
 
+/// A chain whose matrices ride a blur's draws renders what the separate
+/// passes render: `SourceAlpha` read by the first draw and a colouring
+/// applied by the second, against the three `filter_image` passes, to the
+/// rounding of one more intermediate.
 #[test]
-fn in_place_sampling_filters_are_rejected_before_gpu_submission() {
+fn matrices_fused_into_a_blur_match_the_separate_passes() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let alpha = ImageFilter::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 0.0, 0.0, //
+            0.0, 0.0, 0.0, 1.0, 0.0,
+        ],
+    };
+    let colour = ImageFilter::ColorMatrix {
+        matrix: [
+            0.0, 0.0, 0.0, 0.0, 0.2, //
+            0.0, 0.0, 0.0, 0.0, 0.4, //
+            0.0, 0.0, 0.0, 0.0, 0.8, //
+            0.0, 0.0, 0.0, 0.5, 0.0,
+        ],
+    };
+    let blur = ImageFilter::gaussian_blur(2.0);
+    // Opaque red stripes over transparent ones: alpha varies across the
+    // blur, and the pattern is the same either way up, which the separate
+    // passes (two flips, read as one) need.
+    let src: Vec<femtovg::rgb::RGBA8> = (0..W * H)
+        .map(|i| {
+            let x = i % W;
+            if (x / 8) % 2 == 0 {
+                femtovg::rgb::RGBA8::new(200, 60, 60, 255)
+            } else {
+                femtovg::rgb::RGBA8::new(0, 0, 0, 0)
+            }
+        })
+        .collect();
+    let fused = run_chain(&device, &queue, &src, &[alpha, blur, colour]);
+    let separate = run_sequential(&device, &queue, &src, &[alpha, blur, colour]);
+    let worst = (0..W * H)
+        .map(|i| {
+            let (x, y) = (i % W, i / W);
+            let (a, b) = (px(&fused, x, y), px(&separate, x, y));
+            (0..3).map(|c| (a[c] as i32 - b[c] as i32).abs()).max().unwrap()
+        })
+        .max()
+        .unwrap();
+    assert!(worst <= 2, "fused draws differ from the separate passes by {worst}/255");
+}
+
+/// The single-pass `filter_image` refuses to sample what it writes, while
+/// an in-place chain runs: its one flipping pass is followed by the copy
+/// that reads the image back the right way up, through a scratch, so the
+/// image comes out filtered, not undefined.
+#[test]
+fn an_in_place_chain_runs_through_a_scratch() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
@@ -183,13 +239,12 @@ fn in_place_sampling_filters_are_rejected_before_gpu_submission() {
 
     canvas.filter_image(image, ImageFilter::identity(), image);
     canvas.filter_image_chain(image, &[], image).unwrap();
-    assert!(matches!(
-        canvas.filter_image_chain(image, &[ImageFilter::brightness(0.5)], image),
-        Err(ErrorKind::RenderTargetError(_))
-    ));
+    canvas
+        .filter_image_chain(image, &[ImageFilter::brightness(0.5)], image)
+        .unwrap();
 
     let out = finish_and_read(&device, &queue, canvas, image, &target);
-    assert_eq!(px(&out, W / 2, H / 2), [80, 120, 160]);
+    assert_eq!(px(&out, W / 2, H / 2), [40, 60, 80]);
 }
 
 /// A folded color run must render identically to running the same filters as

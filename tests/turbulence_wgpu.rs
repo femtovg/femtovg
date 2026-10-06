@@ -677,3 +677,112 @@ fn chain_with_matrix_and_transfer_matches_the_reference() {
     assert!(worst <= LATTICE_TOLERANCE + 2.0, "worst channel error {worst}/255");
     assert!(mean <= 1.0, "mean channel error {mean}/255");
 }
+
+/// Noise has an orientation of its own: the generator reads nothing, so
+/// what it stores does not depend on how its source is stored. A chain that
+/// starts with it reads upright through its target's flags whether the
+/// source is an upload, a render-target-style image or the target itself,
+/// and whether or not the target carries `FLIP_Y` - alone (one draw), with
+/// a matrix after it (two) and with a transfer after that (three) - and so
+/// does a layer whose chain it starts, where the source is the capture.
+#[test]
+fn a_noise_chain_reads_upright_whatever_its_source_and_target() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (w, h) = (48u32, 40u32);
+    let lat = init(19);
+    let frequency = [0.04, 0.11];
+    #[rustfmt::skip]
+    let half_alpha = ImageFilter::ColorMatrix { matrix: [
+        1.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.5, 0.0,
+    ] };
+    #[rustfmt::skip]
+    let opaque = ImageFilter::ColorMatrix { matrix: [
+        1.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 1.0,
+    ] };
+    let generator = noise(TurbulenceKind::FractalNoise, frequency, 2, 19);
+    // Every chain keeps the noise's red channel once alpha is divided out,
+    // so one reference serves them all; a row read from the wrong end of
+    // the image is tens of steps off.
+    let chains: [&[ImageFilter]; 3] = [
+        &[generator],
+        &[generator, opaque],
+        &[generator, half_alpha, ImageFilter::LinearRgbToSrgb],
+    ];
+    let to_srgb = |v: f64| {
+        if v <= 0.0031308 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        }
+    };
+    let worst_error = |px: &[u8], transfer: bool| {
+        let mut worst = 0.0f64;
+        for y in 0..h {
+            for x in 0..w {
+                let got = at(px, w, x, y);
+                // Dividing a small alpha out amplifies its rounding.
+                if got[3] < 64 {
+                    continue;
+                }
+                let red = f64::from(got[0]) / f64::from(got[3]);
+                let want = reference_pixel(&lat, [x as f64, y as f64], [0.04, 0.11], 2, true, None)[0];
+                let want = if transfer { to_srgb(want) } else { want };
+                worst = worst.max((red - want).abs() * 255.0);
+            }
+        }
+        worst
+    };
+    let upload = ImageFlags::PREMULTIPLIED | ImageFlags::NEAREST;
+    let render_target = upload | ImageFlags::FLIP_Y;
+    let mut failures = Vec::new();
+    for (index, chain) in chains.iter().enumerate() {
+        // (source flags, target flags; `None` runs the chain in place)
+        for (source_flags, target_flags) in [
+            (upload, Some(render_target)),
+            (upload, Some(upload)),
+            (render_target, Some(render_target)),
+            (render_target, Some(upload)),
+            (render_target, None),
+            (upload, None),
+        ] {
+            let px = common::render_rgba(&device, &queue, w, h, Color::rgba(0, 0, 0, 0), |canvas| {
+                let source = canvas
+                    .create_image_empty(w as usize, h as usize, PixelFormat::Rgba8, source_flags)
+                    .expect("source image");
+                let target = match target_flags {
+                    Some(flags) => canvas
+                        .create_image_empty(w as usize, h as usize, PixelFormat::Rgba8, flags)
+                        .expect("target image"),
+                    None => source,
+                };
+                canvas.filter_image_chain(target, chain, source).expect("filter chain");
+                let mut p = Path::new();
+                p.rect(0.0, 0.0, w as f32, h as f32);
+                canvas.fill_path(&p, &Paint::image(target, 0.0, 0.0, w as f32, h as f32, 0.0, 1.0));
+            });
+            let worst = worst_error(&px, index == 2);
+            if worst > 3.0 * LATTICE_TOLERANCE {
+                failures.push(format!(
+                    "chain {index} from {source_flags:?} into {target_flags:?}: {worst:.1}/255 from the reference"
+                ));
+            }
+        }
+        let px = common::render_rgba(&device, &queue, w, h, Color::rgba(0, 0, 0, 0), |canvas| {
+            assert!(canvas.begin_layer(&femtovg::LayerEffects::new().with_filters(chain)));
+            canvas.end_layer();
+        });
+        let worst = worst_error(&px, index == 2);
+        if worst > 3.0 * LATTICE_TOLERANCE {
+            failures.push(format!("chain {index} as a layer's: {worst:.1}/255 from the reference"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

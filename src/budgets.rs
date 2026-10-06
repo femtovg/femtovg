@@ -367,7 +367,11 @@ fn a_blends_placement_is_recorded_at_and_past_the_depth_limit() {
             .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
             .unwrap()
     };
-    let (source, target, backdrop) = (image(&mut canvas), image(&mut canvas), image(&mut canvas));
+    let (source, backdrop) = (image(&mut canvas), image(&mut canvas));
+    // Read through FLIP_Y, the way the one-flip blend leaves it: one pass.
+    let target = canvas
+        .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::FLIP_Y)
+        .unwrap();
     let blend = ImageFilter::Blend {
         mode: crate::BlendMode::Multiply,
         backdrop,
