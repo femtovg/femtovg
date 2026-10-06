@@ -255,18 +255,27 @@ impl RoundedBox {
         // other axis leaves of the extent on the corner's half: the side ends
         // where its farthest anchor there is. No anchor on a side means no
         // straight side - an ellipse.
-        let radius = |corner: [f32; 2], along: usize| {
-            let across = 1 - along;
-            let radius = anchors
-                .iter()
-                .filter(|p| {
-                    let side = (p[across] - center[across]) * corner[across];
-                    side > 0.0
-                        && (side - extent[across]).abs() <= slack
-                        && (p[along] - center[along]) * corner[along] >= 0.0
-                })
-                .map(|p| (p[along] - center[along]).abs())
-                .reduce(f32::max)
+        // One pass over the anchors: for each corner and axis, how far along
+        // that axis the straight side next to it reaches.
+        let mut reach = [[None::<f32>; 2]; 4];
+        for p in &anchors {
+            for across in 0..2 {
+                let side = p[across] - center[across];
+                if (side.abs() - extent[across]).abs() > slack {
+                    continue;
+                }
+                let along = 1 - across;
+                let at = p[along] - center[along];
+                for (corner, sign) in CORNERS.iter().zip(&mut reach) {
+                    if side * corner[across] > 0.0 && at * corner[along] >= 0.0 {
+                        let far = &mut sign[along];
+                        *far = Some(far.map_or(at.abs(), |far: f32| far.max(at.abs())));
+                    }
+                }
+            }
+        }
+        let radius = |corner: usize, along: usize| {
+            let radius = reach[corner][along]
                 .map_or(extent[along], |reach| extent[along] - reach)
                 .max(0.0);
             if extent[along] - radius <= slack {
@@ -277,7 +286,7 @@ impl RoundedBox {
                 radius
             }
         };
-        let corners = CORNERS.map(|corner| [radius(corner, 0), radius(corner, 1)]);
+        let corners = [0, 1, 2, 3].map(|corner| [radius(corner, 0), radius(corner, 1)]);
         let same = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() <= slack && (a[1] - b[1]).abs() <= slack;
         let square = |r: [f32; 2]| r == [0.0, 0.0];
         let round = |r: [f32; 2]| r[0] > 0.0 && r[1] > 0.0;
@@ -301,13 +310,19 @@ impl RoundedBox {
             return None;
         }
         let corner_radii = |p: &[f32; 2]| {
-            let quadrant = CORNERS
-                .iter()
-                .position(|corner| (p[0] - center[0]) * corner[0] >= 0.0 && (p[1] - center[1]) * corner[1] >= 0.0)
-                .unwrap_or(0);
-            match cut {
-                Some(side) if quadrant == side || quadrant == (side + 1) % 4 => [0.0, 0.0],
-                _ => radii,
+            let Some(side) = cut else {
+                return radii;
+            };
+            let quadrant = match (p[0] >= center[0], p[1] >= center[1]) {
+                (true, true) => 0,
+                (false, true) => 1,
+                (false, false) => 2,
+                (true, false) => 3,
+            };
+            if quadrant == side || quadrant == (side + 1) % 4 {
+                [0.0, 0.0]
+            } else {
+                radii
             }
         };
 

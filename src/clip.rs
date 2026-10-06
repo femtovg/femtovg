@@ -429,17 +429,21 @@ where
                 })
         };
         let mut scissor = boxes.scissor;
-        let mut fill = fill.and_then(|(path, transform)| RoundedBox::upright_rect(path, transform));
+        // The fill as an upright rect: worked out for a box that cuts it, once.
+        let mut upright: Option<Option<RoundedBox>> = None;
+        let fill_rect = |upright: &mut Option<Option<RoundedBox>>| {
+            *upright.get_or_insert_with(|| fill.and_then(|(path, transform)| RoundedBox::upright_rect(path, transform)))
+        };
         let mut rect = None;
         if let Some((scissor_box, coverage)) = boxes.scissor_box {
             if holds(&coverage) {
                 scissor = Scissor::default();
             } else {
-                match fill.and_then(|fill| scissor_box.rect_fill(&fill, self.fringe_width)) {
+                match fill_rect(&mut upright).and_then(|fill| scissor_box.rect_fill(&fill, self.fringe_width)) {
                     // The rect the fill shares with the scissor, which then
                     // clips no more; a shape still clips it.
                     Some(RectFill::Shared(both)) => {
-                        (fill, rect, scissor) = (Some(both), Some(RectFill::Shared(both)), Scissor::default());
+                        (upright, rect, scissor) = (Some(Some(both)), Some(RectFill::Shared(both)), Scissor::default());
                     }
                     covered @ Some(RectFill::Covered(_)) if boxes.shape.is_none() => rect = covered,
                     _ => {}
@@ -454,9 +458,10 @@ where
             Some(RectFill::Shared(both)) => coverage.holds(&both.bounds()),
             _ => holds(&coverage),
         };
-        let shared = match fill {
-            Some(fill) if !held => shape.rect_fill(&fill, self.fringe_width),
-            _ => None,
+        let shared = if held {
+            None
+        } else {
+            fill_rect(&mut upright).and_then(|fill| shape.rect_fill(&fill, self.fringe_width))
         };
         let rect = shared.or(rect);
         if held || matches!(shared, Some(RectFill::Shared(_))) {
