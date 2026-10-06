@@ -283,6 +283,7 @@ pub async fn start_wgpu_wasm() {
             power_preference: wgpu::PowerPreference::default(),
             force_fallback_adapter: false,
             compatible_surface: None,
+            ..Default::default()
         })
         .await
         .expect("Failed to find an appropriate adapter");

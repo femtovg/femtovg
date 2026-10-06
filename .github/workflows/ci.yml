@@ -40,6 +40,7 @@ jobs:
       - run: cargo build --verbose --examples
       - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
+      - run: cargo build --target=wasm32-unknown-unknown --example demo --features wgpu
       - run: cargo test
       - run: cargo test --lib --no-default-features --features swash
       - run: cargo test --lib --features swash
