@@ -319,10 +319,14 @@ fn renderGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f3
 
 fn renderImageGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let r: RadialT = radialTwoPointT(vertex, params);
+    // textureSample() has to come before the early return: WGSL allows it
+    // only in uniform control flow, and r.covered differs between fragments.
+    // Chrome rejects the shader module otherwise; naga accepts it either way.
+    let color: vec4<f32> = textureSample(image_texture, image_sampler, vec2<f32>(r.t, 0.0));
     if (!r.covered) {
         return vec4<f32>(0.0);
     }
-    return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(r.t, 0.0)), vertex.position.xy);
+    return ditherGradient(color, vertex.position.xy);
 }
 
 fn sdroundrect(pt: vec2<f32>, ext: vec2<f32>, rad: f32) -> f32 {
