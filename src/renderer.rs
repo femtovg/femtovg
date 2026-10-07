@@ -166,6 +166,36 @@ impl Command {
             composite_operation: CompositeOperationState::default(),
         }
     }
+
+    /// The pixels of a target of `size` that the clip shape leaves the
+    /// command's draws - x, y, width and height from the top left - when
+    /// they carry a shape that ends somewhere. Outside them its coverage is
+    /// zero, so the renderer scissors every draw of the command to them,
+    /// the ones that only write the stencil too: no fragment is shaded out
+    /// there and a tiler leaves its tiles alone, as under a clip on the
+    /// stencil. Never less than a pixel: Metal takes no empty scissor.
+    pub(crate) fn clip_bounds(&self, [width, height]: [u32; 2]) -> Option<[u32; 4]> {
+        let params = match &self.cmd_type {
+            CommandType::ConvexFill { params }
+            | CommandType::Stroke { params }
+            | CommandType::Triangles { params }
+            | CommandType::ConcaveFill {
+                fill_params: params, ..
+            }
+            | CommandType::StencilStroke { params1: params, .. } => params,
+            _ => return None,
+        };
+        let reach = params.clip?.reach()?;
+        if width == 0 || height == 0 {
+            return None;
+        }
+        // A float past either end saturates, and one that is no number is zero.
+        let left = (reach.minx.floor() as u32).min(width - 1);
+        let top = (reach.miny.floor() as u32).min(height - 1);
+        let right = (reach.maxx.ceil() as u32).clamp(left + 1, width);
+        let bottom = (reach.maxy.ceil() as u32).clamp(top + 1, height);
+        Some([left, top, right - left, bottom - top])
+    }
 }
 
 /// Represents different render targets (screen or image).

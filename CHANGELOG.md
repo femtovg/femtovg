@@ -150,7 +150,10 @@ All notable changes to this project will be documented in this file.
   `clear_rect()` stays a raw clear the clip does not affect; it clears the
   stencil with the color so a winding count a cover pass missed cannot reach
   the next frame - the whole stencil, or only the winding bits while a clip is
-  armed on the target. Clip edges are not antialiased yet.
+  armed on the target. A clip whose path outlines a rectangle (under any
+  transform), a rounded rectangle or an ellipse skips the stencil: the
+  fragment shader evaluates the shape, and its edge is antialiased like a
+  fill's. The edges of other clips are not antialiased yet.
 - Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
   a mask image placed in device space, using either its luminance times alpha
   (SVG `mask`'s default `mask-type`, via the new

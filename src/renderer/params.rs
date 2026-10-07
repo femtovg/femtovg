@@ -1,4 +1,5 @@
 use crate::{
+    clip::ClipCoverage,
     geometry::Position,
     paint::{GlyphTexture, GradientColors},
     ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
@@ -27,6 +28,8 @@ pub struct Params {
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
     pub(crate) conic_start_angle: f32,
+    /// The clip shape in force on the draw's target, if any.
+    pub(crate) clip: Option<ClipCoverage>,
 }
 
 impl Params {
@@ -38,6 +41,12 @@ impl Params {
             shader_type: ShaderType::Stencil,
             ..Self::default()
         }
+    }
+
+    /// Gates the draw by the clip shape in force on its target, if any.
+    pub(crate) fn with_clip(mut self, clip: Option<ClipCoverage>) -> Self {
+        self.clip = clip;
+        self
     }
 
     pub(crate) fn new<T>(

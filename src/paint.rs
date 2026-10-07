@@ -427,6 +427,20 @@ pub struct StrokeSettings {
     pub(crate) line_dash_offset: f32,
 }
 
+impl StrokeSettings {
+    /// How far a stroke `line_width` wide reaches from its path: half the
+    /// width, further at a miter's tip or a square cap's corner.
+    pub(crate) fn reach(&self, line_width: f32) -> f32 {
+        let join = match self.line_join {
+            LineJoin::Miter => self.miter_limit.max(1.0),
+            LineJoin::Round | LineJoin::Bevel => 1.0,
+        };
+        let square = self.line_cap_start == LineCap::Square || self.line_cap_end == LineCap::Square;
+        let cap = if square { std::f32::consts::SQRT_2 } else { 1.0 };
+        line_width * 0.5 * join.max(cap)
+    }
+}
+
 impl Default for StrokeSettings {
     fn default() -> Self {
         Self {

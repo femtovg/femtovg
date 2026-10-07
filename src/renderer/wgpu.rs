@@ -60,8 +60,9 @@ impl std::fmt::Debug for WGPURenderOutput {
 
 use super::Params;
 use super::Vertex;
+use crate::clip::ClipCoverage;
 
-const UNIFORMARRAY_SIZE: usize = 14;
+const UNIFORMARRAY_SIZE: usize = 16;
 const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 // A concave fill and a stencil stroke record two sets of params, every other command one.
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
@@ -92,11 +93,7 @@ pub struct UniformArray([f32; UNIFORMARRAY_SIZE * 4]);
 
 impl Default for UniformArray {
     fn default() -> Self {
-        Self([
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        ])
+        Self([0.0; UNIFORMARRAY_SIZE * 4])
     }
 }
 
@@ -182,6 +179,14 @@ impl UniformArray {
         // float 51 (byte offset 204) holds the scissor radius.
         self.0[52] = angle;
     }
+
+    /// The clip shape, read by the shader variant of a draw under one: the
+    /// rest of the row the conic angle starts, and the two rows after it.
+    pub fn set_clip(&mut self, clip: Option<&ClipCoverage>) {
+        if let Some(clip) = clip {
+            self.0[54..64].copy_from_slice(&clip.uniform_rows());
+        }
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -207,6 +212,7 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_sigma(params.image_blur_filter_sigma);
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
         arr.set_conic_start_angle(params.conic_start_angle);
+        arr.set_clip(params.clip.as_ref());
 
         arr
     }
@@ -784,6 +790,7 @@ impl Renderer for WGPURenderer {
 
         let mut current_render_target = RenderTarget::Screen;
         for command in commands {
+            render_pass_builder.set_clip_bounds(&command);
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
                     current_render_target = render_target;
@@ -2022,6 +2029,8 @@ struct PipelineState {
     primitive_topology: wgpu::PrimitiveTopology,
     cull_mode: Option<wgpu::Face>,
     stencil_state: Option<wgpu::StencilState>,
+    /// The draw is under a clip shape, which only its fragment entry point evaluates.
+    clip_shape: bool,
 }
 
 impl PipelineState {
@@ -2067,6 +2076,7 @@ impl PipelineState {
             primitive_topology,
             cull_mode,
             stencil_state: has_stencil_buffer.then_some(stencil_state),
+            clip_shape: false,
         }
     }
 
@@ -2084,12 +2094,14 @@ impl PipelineState {
             primitive_topology,
             cull_mode,
             stencil_state,
+            clip_shape,
         } = self;
         let vertex_entry_point = if *render_to_texture {
             "vs_main_texture"
         } else {
             "vs_main"
         };
+        let fragment_entry_point = if *clip_shape { "fs_main_clip" } else { "fs_main" };
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -2106,7 +2118,7 @@ impl PipelineState {
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader_module,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fragment_entry_point),
                 compilation_options: Default::default(),
                 targets: &[Some(color_target_state.clone())],
             }),
@@ -2222,6 +2234,8 @@ struct RenderPassBuilder<'a> {
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
     current_bound_offset: Option<u32>,
+    // The scissor rect set on the open pass; none is the whole target.
+    current_clip_bounds: Option<[u32; 4]>,
 }
 
 impl<'a> RenderPassBuilder<'a> {
@@ -2257,7 +2271,23 @@ impl<'a> RenderPassBuilder<'a> {
             current_pipeline_state: None,
             current_stencil_reference: None,
             current_bound_offset: None,
+            current_clip_bounds: None,
         }
+    }
+
+    /// Scissors the open pass's draws to the pixels `command`'s clip
+    /// leaves them, or to the whole target again.
+    fn set_clip_bounds(&mut self, command: &super::Command) {
+        let (width, height) = (self.viewport[0] as u32, self.viewport[1] as u32);
+        let bounds = command.clip_bounds([width, height]);
+        if self.current_clip_bounds == bounds {
+            return;
+        }
+        self.current_clip_bounds = bounds;
+        let [x, y, w, h] = bounds.unwrap_or([0, 0, width, height]);
+        // An image target stores its rows bottom up.
+        let y = if self.rendering_to_texture { height - (y + h) } else { y };
+        self.rpass.as_mut().unwrap().set_scissor_rect(x, y, w, h);
     }
 
     fn set_viewport(&mut self, viewport: [f32; 2]) {
@@ -2432,6 +2462,7 @@ impl<'a> RenderPassBuilder<'a> {
         self.current_pipeline_state = None;
         self.current_stencil_reference = None;
         self.current_bound_offset = None;
+        self.current_clip_bounds = None;
         drop(self.rpass.take());
         let stencil_view = self
             .stencil_buffer
@@ -2588,7 +2619,7 @@ impl CommandToPipelineAndBindGroupMapper {
             render_pass_builder.current_bound_offset = Some(offset);
         }
 
-        let pipeline_state = PipelineState::new(
+        let mut pipeline_state = PipelineState::new(
             color_blend,
             stencil_test,
             render_pass_builder.surface_format,
@@ -2597,6 +2628,9 @@ impl CommandToPipelineAndBindGroupMapper {
             cull_mode,
             render_pass_builder.stencil_buffer.is_some(),
         );
+        // Set in place: a copy of the state with the flag changed was slower
+        // to hash, by 1.3 % of the time 600 unclipped fills take to encode.
+        pipeline_state.clip_shape = params.clip.is_some();
 
         // An unchanged pipeline was looked up, and marked accessed, when it was bound.
         if render_pass_builder.current_pipeline_state.as_ref() != Some(&pipeline_state) {

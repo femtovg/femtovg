@@ -147,15 +147,36 @@ impl MainProgram {
         shader_type: ShaderType,
         with_glyph_texture: bool,
     ) -> Result<Self, ErrorKind> {
+        Self::build(context, antialias, shader_type, with_glyph_texture, false)
+    }
+
+    /// The program of a draw under a clip shape: no other program evaluates one.
+    pub(crate) fn with_clip_shape(
+        context: &Rc<glow::Context>,
+        antialias: bool,
+        shader_type: ShaderType,
+        with_glyph_texture: bool,
+    ) -> Result<Self, ErrorKind> {
+        Self::build(context, antialias, shader_type, with_glyph_texture, true)
+    }
+
+    fn build(
+        context: &Rc<glow::Context>,
+        antialias: bool,
+        shader_type: ShaderType,
+        with_glyph_texture: bool,
+        with_clip_shape: bool,
+    ) -> Result<Self, ErrorKind> {
         let shader_defs = if antialias { "#define EDGE_AA 1" } else { "" };
         let select_shader_type = format!(
-            "#define SELECT_SHADER {}\n{}",
+            "#define SELECT_SHADER {}\n{}\n{}",
             shader_type.to_u8(),
             if with_glyph_texture {
                 "#define ENABLE_GLYPH_TEXTURE"
             } else {
                 ""
-            }
+            },
+            if with_clip_shape { "#define CLIP_SHAPE" } else { "" }
         );
         let vert_shader_src = format!("{}\n{}\n{}", GLSL_VERSION, shader_defs, include_str!("main-vs.glsl"));
         let frag_shader_src = format!(

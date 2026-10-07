@@ -3,7 +3,10 @@
 //! corners (the #292 class), intersect when nested, replay on restore,
 //! honor the even-odd clip-rule, compose with clipped concave fills and
 //! stencil strokes, and clip image blits routed off the unclipped fast
-//! path. Skips without a GPU adapter.
+//! path. A clip that is a single box or ellipse would be taken as a shape
+//! (tests/clip_shape_wgpu.rs), so those here are traced twice: the same
+//! region under the nonzero rule, and no single outline. Skips without a GPU
+//! adapter.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, FillRule, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
@@ -113,6 +116,7 @@ fn rect_clip_matches_scissor() {
     let clipped = render(&device, &queue, |canvas| {
         let mut clip = Path::new();
         clip.rect(16.0, 16.0, 24.0, 24.0);
+        clip.rect(16.0, 16.0, 24.0, 24.0);
         canvas.clip_path(&clip, FillRule::NonZero);
         full_red_rect(canvas);
     });
@@ -140,6 +144,7 @@ fn circle_clip_cuts_corners() {
     let out = render(&device, &queue, |canvas| {
         let mut clip = Path::new();
         clip.circle(32.0, 32.0, 20.0);
+        clip.circle(32.0, 32.0, 20.0);
         canvas.clip_path(&clip, FillRule::NonZero);
         full_red_rect(canvas);
     });
@@ -161,11 +166,13 @@ fn nested_clips_intersect_and_restore_replays() {
     let out = render(&device, &queue, |canvas| {
         let mut a = Path::new();
         a.rect(8.0, 8.0, 32.0, 32.0); // 8..40
+        a.rect(8.0, 8.0, 32.0, 32.0);
         canvas.clip_path(&a, FillRule::NonZero);
 
         canvas.save();
         let mut b = Path::new();
         b.rect(24.0, 24.0, 32.0, 32.0); // 24..56; intersection 24..40
+        b.rect(24.0, 24.0, 32.0, 32.0);
         canvas.clip_path(&b, FillRule::NonZero);
         full_red_rect(canvas); // paints only 24..40
         canvas.restore();
@@ -252,6 +259,7 @@ fn complex_multi_contour_clip_replays_for_both_fill_rules() {
             canvas.save();
             let mut child = Path::new();
             child.rect(0.0, 0.0, 1.0, 1.0);
+            child.rect(0.0, 0.0, 1.0, 1.0);
             canvas.clip_path(&child, FillRule::NonZero);
             canvas.restore();
             full_red_rect(canvas);
@@ -279,6 +287,7 @@ fn clipped_concave_fill_keeps_winding_and_clip_separate() {
     let out = render(&device, &queue, |canvas| {
         let mut clip = Path::new();
         clip.rect(0.0, 0.0, 32.0, 64.0); // left half only
+        clip.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&clip, FillRule::NonZero);
 
         // Self-intersecting bowtie spanning the whole canvas: concave path.
@@ -312,6 +321,7 @@ fn strokes_respect_the_clip() {
     let out = render(&device, &queue, |canvas| {
         let mut clip = Path::new();
         clip.rect(0.0, 0.0, 64.0, 32.0); // top half
+        clip.rect(0.0, 0.0, 64.0, 32.0);
         canvas.clip_path(&clip, FillRule::NonZero);
         let mut line = Path::new();
         line.move_to(32.0, 0.0);
@@ -347,6 +357,7 @@ fn image_blit_respects_the_clip() {
 
         let mut clip = Path::new();
         clip.circle(32.0, 32.0, 16.0);
+        clip.circle(32.0, 32.0, 16.0);
         canvas.clip_path(&clip, FillRule::NonZero);
 
         let mut p = Path::new();
@@ -373,6 +384,7 @@ fn nested_translated_and_disjoint_clips_keep_parent_bounds() {
         let out = render(&device, &queue, |canvas| {
             let rect = |x: f32, y: f32, w: f32, h: f32| {
                 let mut p = Path::new();
+                p.rect(x, y, w, h);
                 p.rect(x, y, w, h);
                 p
             };
@@ -430,9 +442,11 @@ fn a_clip_inside_a_layer_clips_its_content() {
         canvas.save();
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&left, FillRule::NonZero);
         assert!(canvas.begin_layer(&femtovg::LayerEffects::new().with_opacity(1.0)));
         let mut band = Path::new();
+        band.rect(0.0, 16.0, 64.0, 32.0);
         band.rect(0.0, 16.0, 64.0, 32.0);
         canvas.clip_path(&band, FillRule::NonZero);
         full_red_rect(canvas);
@@ -475,6 +489,7 @@ fn clear_rect_is_unclipped_and_destination_out_is_the_clipped_clear() {
         full_red_rect(canvas);
         let mut band = Path::new();
         band.rect(8.0, 0.0, 24.0, 64.0);
+        band.rect(8.0, 0.0, 24.0, 64.0);
         canvas.clip_path(&band, FillRule::NonZero);
         canvas.clear_rect(0, 0, W, H, Color::white());
         let mut p = Path::new();
@@ -487,6 +502,7 @@ fn clear_rect_is_unclipped_and_destination_out_is_the_clipped_clear() {
     let out = render(&device, &queue, |canvas| {
         full_red_rect(canvas);
         let mut band = Path::new();
+        band.rect(8.0, 0.0, 24.0, 64.0);
         band.rect(8.0, 0.0, 24.0, 64.0);
         canvas.clip_path(&band, FillRule::NonZero);
         // Canvas clearRect ignores globalAlpha, composite operation, shadows
@@ -591,6 +607,7 @@ fn active_clip_survives_a_resize() {
     canvas.clear_rect(0, 0, 64, 64, Color::white());
     let mut left_half = Path::new();
     left_half.rect(0.0, 0.0, 32.0, 64.0);
+    left_half.rect(0.0, 0.0, 32.0, 64.0);
     canvas.clip_path(&left_half, FillRule::NonZero);
     let mut full = Path::new();
     full.rect(0.0, 0.0, 128.0, 128.0);
@@ -634,6 +651,7 @@ fn reset_drops_the_clips_of_its_level() {
     let out = render(&device, &queue, |canvas| {
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&left, FillRule::NonZero);
         canvas.reset();
         let mut full = Path::new();
@@ -660,7 +678,9 @@ fn reset_keeps_the_clips_of_outer_levels() {
     let out = render(&device, &queue, |canvas| {
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         let mut top = Path::new();
+        top.rect(0.0, 0.0, 64.0, 32.0);
         top.rect(0.0, 0.0, 64.0, 32.0);
         canvas.save();
         canvas.clip_path(&left, FillRule::NonZero);
@@ -677,7 +697,9 @@ fn reset_keeps_the_clips_of_outer_levels() {
     let out = render(&device, &queue, |canvas| {
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         let mut top = Path::new();
+        top.rect(0.0, 0.0, 64.0, 32.0);
         top.rect(0.0, 0.0, 64.0, 32.0);
         canvas.save();
         canvas.clip_path(&left, FillRule::NonZero);
@@ -749,9 +771,11 @@ fn restore_with_another_target_current_reconciles_the_image_clip() {
     let out = render_via_image(&device, &queue, |canvas, image| {
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&left, FillRule::NonZero);
         canvas.save();
         let mut band = Path::new();
+        band.rect(16.0, 0.0, 32.0, 64.0);
         band.rect(16.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&band, FillRule::NonZero);
         canvas.set_render_target(RenderTarget::Screen);
@@ -782,9 +806,11 @@ fn restore_with_an_image_current_reconciles_the_screen_clip() {
             .unwrap();
         let mut left = Path::new();
         left.rect(0.0, 0.0, 32.0, 64.0);
+        left.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&left, FillRule::NonZero);
         canvas.save();
         let mut band = Path::new();
+        band.rect(16.0, 0.0, 32.0, 64.0);
         band.rect(16.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&band, FillRule::NonZero);
         canvas.set_render_target(RenderTarget::Image(image));
@@ -814,6 +840,7 @@ fn last_clip_popped_with_another_target_current_disarms_the_image_plane() {
     let out = render_via_image(&device, &queue, |canvas, image| {
         canvas.save();
         let mut left = Path::new();
+        left.rect(0.0, 0.0, 32.0, 64.0);
         left.rect(0.0, 0.0, 32.0, 64.0);
         canvas.clip_path(&left, FillRule::NonZero);
         canvas.set_render_target(RenderTarget::Screen);
