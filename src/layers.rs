@@ -769,15 +769,12 @@ where
             source_alpha: alpha,
             contribution: true,
         };
-        self.filter_image_with_scratch(
-            target,
-            blend,
-            source,
-            None,
-            Some((images.backdrop, pass)),
-            Fused::default(),
-        )
-        .then_some(target)
+        let draw = PassDraw {
+            backdrop: Some((images.backdrop, pass)),
+            ..PassDraw::default()
+        };
+        self.filter_image_with_scratch(target, blend, source, None, draw)
+            .then_some(target)
     }
 
     /// Puts the current state into the shape every offscreen pass draws
@@ -985,8 +982,7 @@ where
                             ImageFilter::luminance_to_alpha(),
                             images.normalized,
                             None,
-                            None,
-                            Fused::default(),
+                            PassDraw::default(),
                         );
                         converted
                     }
