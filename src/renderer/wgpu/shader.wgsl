@@ -21,6 +21,12 @@ struct Params {
     // is frag[13].x in the flat uniform array written from Rust.
     scissor_radius: f32,
     conic_start_angle: f32,
+    // Whether the coverage mask of a draw under one takes a pixel whole or
+    // not at all (see clipMaskCoverage). Where the mask's corner lies and
+    // the pixels it spans are scissor_mat[0].zw and scissor_mat[1].zw, which
+    // the scissor does not read; scissor_mat[2].zw is one of them as a share
+    // of the mask's image, for a backend that cannot read a texel by index.
+    clip_mask_hard: f32,
     // The clip shape of a draw under one (see clipMask): where its corners'
     // ellipses are centered, the rows of the map from device pixels to its
     // frame, and that map's offset with the half extents plus half a fringe.
@@ -113,6 +119,10 @@ var glyph_texture: texture_2d<f32>;
 @binding(4)
 var glyph_sampler: sampler;
 
+@group(1)
+@binding(5)
+var clip_mask_texture: texture_2d<f32>;
+
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
@@ -123,6 +133,18 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 @fragment
 fn fs_main_clip(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return shade(vertex, clipMask(vertex.fpos));
+}
+
+// The entry points of a draw under a coverage mask, and under a mask and a
+// shape: no other draw reads one.
+@fragment
+fn fs_main_mask(vertex: VertexOutput) -> @location(0) vec4<f32> {
+    return shade(vertex, clipMaskCoverage(vertex.fpos));
+}
+
+@fragment
+fn fs_main_clip_mask(vertex: VertexOutput) -> @location(0) vec4<f32> {
+    return shade(vertex, clipMask(vertex.fpos) * clipMaskCoverage(vertex.fpos));
 }
 
 fn shade(vertex: VertexOutput, clip: f32) -> vec4<f32> {
@@ -384,6 +406,23 @@ fn clipMask(p: vec2<f32>) -> f32 {
     }
     let cover = clamp(params.clip_offset_outer.zw - reach, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
     return cover.x * cover.y;
+}
+
+// The clip taken as a coverage mask: the texel under the fragment, of a mask
+// that holds one for each pixel of the clip's bounds and nothing along its
+// border - what a fragment past the mask reads. An operation that coverage
+// cannot bound takes the pixels the clip covers by half or more, whole.
+fn clipMaskCoverage(p: vec2<f32>) -> f32 {
+    let size = params.scissor_mat[1].zw;
+    let at = clamp(p - params.scissor_mat[0].zw, vec2<f32>(0.5, 0.5), size - vec2<f32>(0.5, 0.5));
+    let coverage = textureLoad(clip_mask_texture, vec2<i32>(at), 0).r;
+    if (params.clip_mask_hard != 0.0) {
+        if (coverage < 0.5) {
+            discard;
+        }
+        return 1.0;
+    }
+    return coverage;
 }
 
 // Stroke - from [0..1] to clipped pyramid, where the slope is 1px.

@@ -33,6 +33,7 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
+uniform sampler2D cliptex;
 uniform vec2 viewSize;
 
 varying vec2 ftcoord;
@@ -74,6 +75,28 @@ float scissorMask(vec2 p) {
     sc = vec2(0.5,0.5) - sc * scissorScale;
     return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
 }
+
+#ifdef CLIP_MASK
+// The clip taken as a coverage mask, in the programs of the draws under one:
+// the texel under the fragment, of a mask that holds one for each pixel of
+// the clip's bounds and nothing along its border - what a fragment past the
+// mask reads. Where the mask's corner lies, the pixels it spans and what one
+// of them is of its image, which is no smaller, are the halves of the
+// scissor matrix's columns that the scissor does not read. An
+// operation that coverage cannot bound takes the pixels the clip covers by
+// half or more, whole.
+float clipMaskCoverage(vec2 p) {
+    vec2 at = clamp(p - frag[0].zw, vec2(0.5, 0.5), frag[1].zw - vec2(0.5, 0.5));
+    float coverage = texture2D(cliptex, at * frag[2].zw).r;
+    if (frag[13].y != 0.0) {
+        if (coverage < 0.5) {
+            discard;
+        }
+        return 1.0;
+    }
+    return coverage;
+}
+#endif
 
 #ifdef CLIP_SHAPE
 // The clip taken as a shape, in the programs of the draws under one:
@@ -405,6 +428,9 @@ void main(void) {
     float scissor = scissorMask(fpos);
 #ifdef CLIP_SHAPE
     scissor *= clipMask(fpos);
+#endif
+#ifdef CLIP_MASK
+    scissor *= clipMaskCoverage(fpos);
 #endif
 
 #ifdef ENABLE_GLYPH_TEXTURE

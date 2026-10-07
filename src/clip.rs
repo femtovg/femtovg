@@ -1,11 +1,17 @@
-//! Clipping to a path: the clip stack, the stencil plane an arbitrary path
-//! is rasterized into, its replay per target and the quads that arm and
-//! resolve it, and the shapes that skip the stencil ([`shape`]).
+//! Clipping to a path: the clip stack, the boxes ([`shape`]) and coverage
+//! masks ([`mask`]) that each draw's fragment shader evaluates, and the
+//! stencil plane - its replay per target and the quads that arm and resolve
+//! it - for what neither takes.
 
 use super::*;
 use crate::path::PathCache;
+use rgb::FromSlice;
 
+mod coverage;
+mod mask;
 mod shape;
+use mask::MaskOutline;
+pub(crate) use mask::{ClipMasks, MaskImage};
 pub(crate) use shape::{ClipCoverage, RectFill, RoundedBox};
 
 #[derive(Debug)]
@@ -41,6 +47,53 @@ pub(crate) enum ClipKind {
         coverage: ClipCoverage,
         cut: Option<RoundedBox>,
     },
+    /// Read by each draw's fragment shader from a coverage mask whose
+    /// corner lies at `origin` on the target. The innermost one on a target
+    /// is the one in force: each is rasterized as what it leaves of the one
+    /// before it.
+    Mask { mask: Rc<MaskImage>, origin: [i32; 2] },
+}
+
+/// How much finer than a fill's outline a mask's is flattened: at a 64th of
+/// the tolerance a curve's chords stay within a few hundredths of a pixel of
+/// it, where a fill's are up to a fifth of a pixel inside - a ring of circles
+/// 38 and 18 pixels in radius is then 0.005 of a pixel's coverage from its
+/// area on average and 0.02 at worst, against 0.064 and 0.22.
+const MASK_TESSELLATION: f32 = 1.0 / 64.0;
+
+/// The coverage mask a draw carries: the image, where its corner lies on
+/// the target, the pixels it spans there and what one of them is of the
+/// image, which is no smaller. `hard` takes a pixel whole or not at all,
+/// for an operation that coverage cannot bound.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) struct MaskCoverage {
+    pub(crate) image: ImageId,
+    pub(crate) origin: [f32; 2],
+    pub(crate) size: [f32; 2],
+    pub(crate) texel: [f32; 2],
+    pub(crate) hard: bool,
+}
+
+impl MaskCoverage {
+    /// The device rectangle outside which the mask is empty: the pixels it
+    /// spans.
+    pub(crate) fn reach(&self) -> Bounds {
+        Bounds {
+            minx: self.origin[0],
+            miny: self.origin[1],
+            maxx: self.origin[0] + self.size[0],
+            maxy: self.origin[1] + self.size[1],
+        }
+    }
+}
+
+/// What clips a draw: the clip shape and the scissor - the boxes - and the
+/// coverage mask.
+#[derive(Copy, Clone, Debug, Default)]
+pub(crate) struct DrawClip {
+    pub(crate) shape: Option<ClipCoverage>,
+    pub(crate) scissor: Scissor,
+    pub(crate) mask: Option<MaskCoverage>,
 }
 
 /// The boxes a draw meets: the clip shape - with the scissor, where the two
@@ -140,26 +193,33 @@ where
     /// and `clip-rule`. Drawing after this call is limited to the
     /// intersection of every clip taken on the current render target.
     ///
-    /// A clip whose path outlines a rectangle (under any transform), a
-    /// rounded rectangle, one rounded at the two corners of a side only, or
-    /// an ellipse is antialiased: its edge takes coverage as a fill's does.
-    /// The edge of any other clip is not: a pixel is either inside it or
-    /// outside. A shape loses its antialiasing when it only partly overlaps
-    /// a shape already clipping the target - unless one of the two is a
-    /// rectangle with sides parallel to the other's, which then cuts it - and
-    /// once something that reaches past it is drawn under it with a
-    /// composite operation that changes the destination where the source is
-    /// transparent ([`CompositeOperation::Copy`], `SourceIn`, `SourceOut`,
-    /// `DestinationIn`, `DestinationAtop`).
+    /// A clip's edge takes coverage as a fill's does. A clip whose path
+    /// outlines a rectangle (under any transform), a rounded rectangle, one
+    /// rounded at the two corners of a side only, or an ellipse is a shape
+    /// that the fragment shader of each draw under it evaluates, and a
+    /// rectangle with sides parallel to a shape that it cuts clips with it
+    /// in the scissor's place; any other clip is rasterized into a coverage
+    /// mask, one byte for each pixel of its bounds, that those shaders read.
+    /// A mask is kept, within a budget
+    /// ([`set_clip_mask_budget`](Self::set_clip_mask_budget)), while its clip
+    /// does not change or moves by whole pixels; a clip the budget has no
+    /// room for is taken on the stencil, where a pixel is either inside it or
+    /// outside. So is a shape once something that reaches past it is drawn
+    /// under it with a composite operation that changes the destination
+    /// where the source is transparent ([`CompositeOperation::Copy`],
+    /// `SourceIn`, `SourceOut`, `DestinationIn`, `DestinationAtop`); under a
+    /// mask such an operation takes each pixel whole or not at all.
     ///
-    /// A draw that stays inside an antialiased clip is not clipped: an edge
-    /// it shares with the clip is its own. A draw that reaches past the clip
-    /// takes the clip's coverage over its own, so that where the two share
-    /// an edge a pixel half inside is a quarter covered - except an upright
-    /// rectangle filled under an upright rectangular clip, which is cut to
-    /// the clip. A scissor that makes one box with the clip - around it,
+    /// A draw that stays inside a shape is not clipped: an edge it shares
+    /// with the clip is its own. A draw that reaches past it takes the
+    /// clip's coverage over its own, so that where the two share an edge a
+    /// pixel half inside is a quarter covered - except an upright rectangle
+    /// filled under an upright shape or cut, which is cut to a rectangular
+    /// one and drawn as a rounded one it covers. A scissor meets a draw as a
+    /// shape does, and one that makes one box with the shape - around it,
     /// inside it, or two rectangles with parallel sides - clips with it as
-    /// that box: an edge the two share takes coverage once.
+    /// that box: an edge the two share takes coverage once. A mask's
+    /// coverage multiplies every draw under it.
     ///
     /// Clips are part of the saved state - [`restore`](Self::restore) drops
     /// the clips taken since the matching [`save`](Self::save) - and belong
@@ -177,12 +237,78 @@ where
             // clip would only cost geometry.
             return;
         }
-        if self.clip_to_shape(path) {
+        if self.clip_to_shape(path) || self.clip_to_mask(&[(path, fill_rule)]) {
             return;
         }
+        let (geometry, bounds) = self.stencil_geometry(path, &self.state().transform);
+        self.clip_to_stencil(geometry, bounds, fill_rule);
+    }
+
+    /// Intersects the clip region with the union of `paths`, each under its
+    /// own fill rule and all under the current transform: an SVG `clipPath`
+    /// with several children, each with its `clip-rule`. One path clips as
+    /// [`clip_path`](Self::clip_path) does, none leaves nothing to draw on.
+    ///
+    /// The union is taken in a coverage mask, where children that share an
+    /// edge leave no seam along it. When the masks' budget
+    /// ([`set_clip_mask_budget`](Self::set_clip_mask_budget)) has no room
+    /// for it the children clip as one path under the first one's rule, on
+    /// the stencil: children that overlap under even-odd, or wind opposite
+    /// ways, then cut holes into one another.
+    pub fn clip_paths(&mut self, paths: &[(&Path, FillRule)]) {
+        if let [(path, fill_rule)] = paths {
+            return self.clip_path(path, *fill_rule);
+        }
+        if self.saturated() || self.clip_to_mask(paths) {
+            return;
+        }
+        let transform = self.state().transform;
+        let mut vertices = Vec::new();
+        let mut bounds = Bounds::default();
+        for (path, _) in paths {
+            let path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+            vertices.extend(path_cache.winding_triangles());
+            bounds = Bounds {
+                minx: bounds.minx.min(path_cache.bounds.minx),
+                miny: bounds.miny.min(path_cache.bounds.miny),
+                maxx: bounds.maxx.max(path_cache.bounds.maxx),
+                maxy: bounds.maxy.max(path_cache.bounds.maxy),
+            };
+        }
+        let geometry = Rc::new(ClipGeometry {
+            vertices: vertices.into_boxed_slice(),
+        });
+        let fill_rule = paths.first().map_or(FillRule::NonZero, |(_, fill_rule)| *fill_rule);
+        self.clip_to_stencil(geometry, bounds, fill_rule);
+    }
+
+    /// The masks' budget in bytes: a mask holds a byte for each pixel of
+    /// its clip's bounds, and an image of as many.
+    pub fn clip_mask_budget(&self) -> usize {
+        self.clip_masks.budget()
+    }
+
+    /// What the masks hold now, in bytes, against their budget.
+    pub fn clip_mask_bytes(&self) -> usize {
+        self.clip_masks.bytes()
+    }
+
+    /// Sets the budget of the coverage masks that antialias clips to paths
+    /// which are no rectangle, rounded rectangle or ellipse. A mask is kept
+    /// while a clip holds it and for two frames after, so that a clip which
+    /// has not changed costs a lookup; a clip the budget has no room for
+    /// beside the masks of its frame is taken on the stencil, where its
+    /// edge is not antialiased. A budget of zero takes every such clip
+    /// there.
+    pub fn set_clip_mask_budget(&mut self, bytes: usize) {
+        self.clip_masks.set_budget(bytes);
+    }
+
+    /// Intersects the stencil clip plane of the current render target with
+    /// `geometry`, the winding fans of a clip, under `fill_rule`.
+    fn clip_to_stencil(&mut self, geometry: Rc<ClipGeometry>, bounds: Bounds, fill_rule: FillRule) {
         self.reconcile_current_clip_plane();
         let target = self.current_render_target;
-        let (geometry, bounds) = self.stencil_geometry(path, &self.state().transform);
         let target_rect = self.render_target_rect();
         let path_rect = Self::clip_bounds(bounds, target_rect);
         let previous_armed = self.clip_planes.get(&target).map_or(target_rect, |plane| plane.armed);
@@ -210,6 +336,127 @@ where
         plane.count += 1;
         plane.armed = armed;
         self.state_mut().clip_depth = self.clip_stack.len();
+    }
+
+    /// Takes the clip as a coverage mask for the fragment shader: the union
+    /// of `paths`, each under its rule, cut by the mask already in force on
+    /// the target. `false` - the budget has no room, or no image could be
+    /// made - leaves the clip to the stencil.
+    fn clip_to_mask(&mut self, paths: &[(&Path, FillRule)]) -> bool {
+        if self.clip_masks.budget() == 0 {
+            return false;
+        }
+        let transform = self.state().transform;
+        // Flattened finer than a fill's outline, whose fringe hides what a
+        // mask's exact area would show: the path's own cache, kept at the
+        // fill's tolerance, is not used.
+        let tolerance = self.tess_tol * MASK_TESSELLATION;
+        let target = self.current_render_target;
+        let (width, height) = self.render_target_size();
+        let mut within = [0, 0, width as i32, height as i32];
+        let parent = self.clip_stack.iter().rev().find_map(|entry| match &entry.kind {
+            ClipKind::Mask { mask, origin } if entry.target == target => Some((mask.clone(), *origin)),
+            _ => None,
+        });
+        if let Some((parent, at)) = &parent {
+            // Outside the mask in force nothing is left to clip.
+            let [parent_width, parent_height] = parent.size();
+            within = [
+                within[0].max(at[0]),
+                within[1].max(at[1]),
+                within[2].min(at[0] + parent_width as i32),
+                within[3].min(at[1] + parent_height as i32),
+            ];
+        }
+        // The clip bit for bit: asked for as before, it has its mask.
+        let mut request = vec![paths.len() as u32];
+        for &(path, fill_rule) in paths {
+            request.push(u32::from(fill_rule == FillRule::EvenOdd));
+            path.words(&mut request);
+        }
+        request.extend(transform.0.map(f32::to_bits));
+        request.extend([tolerance.to_bits(), self.dist_tol.to_bits()]);
+        request.extend(within.map(|side| side as u32));
+        if let Some((parent, at)) = &parent {
+            request.extend([parent.id as u32, (parent.id >> 32) as u32, at[0] as u32, at[1] as u32]);
+        }
+        if let Some((mask, origin)) = self.clip_masks.asked(&request) {
+            self.clip_stack.push(ClipEntry {
+                target,
+                kind: ClipKind::Mask { mask, origin },
+            });
+            self.state_mut().clip_depth = self.clip_stack.len();
+            return true;
+        }
+        let mut outline = MaskOutline::default();
+        for &(path, fill_rule) in paths {
+            let path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
+            outline.child(fill_rule, path_cache.outlines());
+        }
+        let rect = outline.rect(within);
+        let origin = [rect[0], rect[1]];
+        let inside = parent
+            .as_ref()
+            .map(|(parent, at)| (parent.id, [origin[0] - at[0], origin[1] - at[1]]));
+        let key = outline.key(rect, inside);
+        if let Some((parent, at)) = &parent {
+            if *at == origin && parent.key.same_outline(&key) {
+                // The clip in force over again clips to no less.
+                return true;
+            }
+        }
+        let mask = match self.clip_masks.get(&key) {
+            Some(mask) => mask,
+            None => {
+                let Some(dropped) = self.clip_masks.make_room(key.size()) else {
+                    return false;
+                };
+                for image in dropped {
+                    self.images.remove(&mut self.renderer, image);
+                }
+                let mut pixels = key.rasterize(&mut self.clip_masks.coverage);
+                if let (Some((parent, _)), Some((_, offset))) = (&parent, inside) {
+                    parent.cut(&mut pixels, key.size(), offset);
+                }
+                let [mask_width, mask_height] = key.size();
+                let (image, uploaded) = match self.clip_masks.spare_image(key.size()) {
+                    Some(image) => {
+                        let source = ImageSource::Gray(imgref::Img::new(pixels.as_gray(), mask_width, mask_height));
+                        (image, self.images.update(&mut self.renderer, image, source, 0, 0))
+                    }
+                    None => {
+                        let [width, height] = mask::image_size(key.size());
+                        let info = ImageInfo::new(ImageFlags::NEAREST, width, height, PixelFormat::Gray8);
+                        let Ok(image) = self.images.alloc(&mut self.renderer, info) else {
+                            return false;
+                        };
+                        // A new image is uploaded whole, the mask in its
+                        // corner: a backend clears a texture whose first
+                        // upload leaves part of it unwritten, and on wgpu
+                        // five such textures cost every frame after 8 ms
+                        // of a 70 ms frame of blurred layers.
+                        let mut whole = vec![0; width * height];
+                        for (row, line) in pixels.chunks_exact(mask_width).enumerate() {
+                            whole[row * width..][..mask_width].copy_from_slice(line);
+                        }
+                        let source = ImageSource::Gray(imgref::Img::new(whole.as_gray(), width, height));
+                        (image, self.images.update(&mut self.renderer, image, source, 0, 0))
+                    }
+                };
+                if uploaded.is_err() {
+                    self.images.remove(&mut self.renderer, image);
+                    return false;
+                }
+                self.clip_masks.keep(key, image, pixels)
+            }
+        };
+        self.clip_masks.remember(request, &mask, origin);
+        self.clip_stack.push(ClipEntry {
+            target,
+            kind: ClipKind::Mask { mask, origin },
+        });
+        self.state_mut().clip_depth = self.clip_stack.len();
+        true
     }
 
     /// Takes the clip as a shape for the fragment shader, if `path` outlines
@@ -310,9 +557,8 @@ where
     /// the sides of it that cut into the shape
     /// ([`RoundedBox::trimmed_scissor`]): an edge it shares with the shape
     /// is the shape's.
-    fn clip_boxes(&mut self) -> ClipBoxes {
+    fn clip_boxes(&mut self, shape: Option<(RoundedBox, ClipCoverage)>) -> ClipBoxes {
         let scissor = self.state().scissor;
-        let shape = self.clip_shape();
         let cut = self.clip_cut();
         let of = (scissor, shape.map(|(shape, _)| shape), cut);
         if let Some(last) = self.last_clip_boxes.as_ref().filter(|last| last.of == of) {
@@ -330,7 +576,7 @@ where
                     // A rounded scissor, or one at an angle to the cuts:
                     // they clip on the stencil, and the shapes with them.
                     self.shapes_to_stencil();
-                    return self.clip_boxes();
+                    return self.clip_boxes(None);
                 }
             },
             (scissor_box, cut) => scissor_box.or(cut),
@@ -386,14 +632,13 @@ where
         &mut self,
         bounds: impl FnOnce() -> Bounds,
         outline: Option<(&PathCache, f32)>,
-    ) -> (Option<ClipCoverage>, Scissor) {
-        let (clip, scissor, _) = self.fill_clip(bounds, outline, None);
-        (clip, scissor)
+    ) -> DrawClip {
+        self.fill_clip(bounds, outline, None).0
     }
 
-    /// The clip shape and the scissor a draw over `bounds` carries, and for
-    /// an antialiased fill - `fill`, its path and transform - what to fill
-    /// in the path's place when it is an upright rect ([`RectFill`]).
+    /// What clips a draw over `bounds`, and for an antialiased fill -
+    /// `fill`, its path and transform - what to fill in the path's place
+    /// when it is an upright rect ([`RectFill`]).
     ///
     /// A box - the shape, the scissor, or the one the two make - takes
     /// nothing from a draw it holds whole - by its bounds or, failing that,
@@ -401,24 +646,39 @@ where
     /// with it, so an edge the draw has in common with the box is
     /// antialiased once. Such a draw carries no scissor, and no shape - or,
     /// after a draw that carried one, a coverage of one everywhere, so that
-    /// the renderer goes on with the shader variant it has bound. An
-    /// operation that changes the destination where its source is
-    /// transparent would change the pixels outside the shape too, so before
-    /// a draw that reaches them the shapes move to the stencil.
+    /// the renderer goes on with the shader variant it has bound. A mask
+    /// multiplies every draw under it. An operation that changes the
+    /// destination where its source is transparent would change the pixels
+    /// outside the clip too: before a draw that reaches them the shapes
+    /// move to the stencil, and a mask takes each pixel whole or not at all.
     pub(crate) fn fill_clip(
         &mut self,
         bounds: impl FnOnce() -> Bounds,
         outline: Option<(&PathCache, f32)>,
         fill: Option<(&Path, &Transform2D)>,
-    ) -> (Option<ClipCoverage>, Scissor, Option<RectFill>) {
+    ) -> (DrawClip, Option<RectFill>) {
         if self.state().scissor.extent.is_none() && self.clip_stack.is_empty() {
             self.shape_carried = false;
-            return (None, self.state().scissor, None);
+            let clip = DrawClip {
+                scissor: self.state().scissor,
+                ..DrawClip::default()
+            };
+            return (clip, None);
         }
-        let boxes = self.clip_boxes();
+        let (shape, mask) = self.clips_in_force();
+        let mask = mask.map(|mask| MaskCoverage {
+            hard: !self.state().composite_operation.takes_coverage(),
+            ..mask
+        });
+        let boxes = self.clip_boxes(shape);
         if boxes.shape.is_none() && boxes.scissor_box.is_none() {
             self.shape_carried = false;
-            return (None, boxes.scissor, None);
+            let clip = DrawClip {
+                shape: None,
+                scissor: boxes.scissor,
+                mask,
+            };
+            return (clip, None);
         }
         let bounds = bounds();
         let fringe_width = self.fringe_width;
@@ -452,7 +712,12 @@ where
         }
         let Some((shape, coverage)) = boxes.shape else {
             self.shape_carried = false;
-            return (None, scissor, rect);
+            let clip = DrawClip {
+                shape: None,
+                scissor,
+                mask,
+            };
+            return (clip, rect);
         };
         let held = match rect {
             Some(RectFill::Shared(both)) => coverage.holds(&both.bounds()),
@@ -465,15 +730,30 @@ where
         };
         let rect = shared.or(rect);
         if held || matches!(shared, Some(RectFill::Shared(_))) {
-            return (self.shape_carried.then_some(ClipCoverage::EVERYWHERE), scissor, rect);
+            let clip = DrawClip {
+                shape: self.shape_carried.then_some(ClipCoverage::EVERYWHERE),
+                scissor,
+                mask,
+            };
+            return (clip, rect);
         }
         self.shape_carried = self.state().composite_operation.takes_coverage();
         if self.shape_carried {
-            return (Some(coverage), scissor, rect);
+            let clip = DrawClip {
+                shape: Some(coverage),
+                scissor,
+                mask,
+            };
+            return (clip, rect);
         }
         self.shapes_to_stencil();
         // The scissor clips on its own again, as it was set.
-        (None, self.state().scissor, None)
+        let clip = DrawClip {
+            shape: None,
+            scissor: self.state().scissor,
+            mask,
+        };
+        (clip, None)
     }
 
     /// Moves the current render target's clip shapes, and their cuts, to the
@@ -535,6 +815,36 @@ where
         }
     }
 
+    /// The shape and the mask in force on the current render target: the
+    /// innermost of each.
+    fn clips_in_force(&self) -> (Option<(RoundedBox, ClipCoverage)>, Option<MaskCoverage>) {
+        let target = self.current_render_target;
+        let (mut shape, mut mask) = (None, None);
+        for entry in self.clip_stack.iter().rev().filter(|entry| entry.target == target) {
+            match &entry.kind {
+                ClipKind::Shape {
+                    shape: box_, coverage, ..
+                } if shape.is_none() => shape = Some((*box_, *coverage)),
+                ClipKind::Mask { mask: image, origin } if mask.is_none() => {
+                    let [width, height] = image.size();
+                    let [image_width, image_height] = mask::image_size(image.size());
+                    mask = Some(MaskCoverage {
+                        image: image.image,
+                        origin: [origin[0] as f32, origin[1] as f32],
+                        size: [width as f32, height as f32],
+                        texel: [1.0 / image_width as f32, 1.0 / image_height as f32],
+                        hard: false,
+                    });
+                }
+                _ => {}
+            }
+            if shape.is_some() && mask.is_some() {
+                break;
+            }
+        }
+        (shape, mask)
+    }
+
     /// The shape clip in force on the current render target, and its coverage.
     pub(crate) fn clip_shape(&self) -> Option<(RoundedBox, ClipCoverage)> {
         let target = self.current_render_target;
@@ -553,7 +863,7 @@ where
             .filter(|entry| entry.target == target)
             .filter_map(|entry| match entry.kind {
                 ClipKind::Shape { cut, .. } => cut,
-                ClipKind::Stencil { .. } => None,
+                ClipKind::Stencil { .. } | ClipKind::Mask { .. } => None,
             })
             .reduce(|both, cut| both.rect_intersection(&cut).unwrap_or(both))
     }
@@ -575,7 +885,7 @@ where
                     bounds,
                     ..
                 } => Some((geometry.clone(), *fill_rule, *bounds)),
-                ClipKind::Shape { .. } => None,
+                ClipKind::Shape { .. } | ClipKind::Mask { .. } => None,
             })
             .collect();
         if entries.is_empty() {
@@ -598,7 +908,7 @@ where
             .filter(|entry| entry.target == target)
             .filter_map(|entry| match &mut entry.kind {
                 ClipKind::Stencil { prior_armed, armed, .. } => Some((prior_armed, armed)),
-                ClipKind::Shape { .. } => None,
+                ClipKind::Shape { .. } | ClipKind::Mask { .. } => None,
             });
         for ((prior_armed, armed), (prior, now)) in stencils.zip(armed_values) {
             *prior_armed = prior;
@@ -697,6 +1007,8 @@ fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
     let renderer = RecordingRenderer::default();
     let recorded_commands = renderer.last_commands.clone();
     let mut canvas = Canvas::new(renderer).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let keep_clips = |canvas: &mut Canvas<RecordingRenderer>| -> Vec<bool> {
         canvas.flush_to_output(());
@@ -751,6 +1063,8 @@ fn clear_rect_keeps_the_clip_plane_only_while_a_clip_is_armed() {
 #[test]
 fn consecutive_clip_restores_replay_once_before_the_next_draw() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let clip = notched_rect(10.0, 10.0, 80.0, 80.0);
 
@@ -782,6 +1096,8 @@ fn consecutive_clip_restores_replay_once_before_the_next_draw() {
 #[test]
 fn same_size_set_size_does_not_replay_a_clip() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let clip = notched_rect(10.0, 10.0, 80.0, 80.0);
     canvas.clip_path(&clip, FillRule::NonZero);
@@ -812,6 +1128,8 @@ fn same_size_set_size_does_not_replay_a_clip() {
 #[test]
 fn nested_clip_resolve_is_bounded_by_the_outer_clip() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let outer = notched_rect(10.0, 20.0, 30.0, 40.0);
     let inner = notched_rect(15.0, 25.0, 10.0, 10.0);
@@ -834,6 +1152,8 @@ fn nested_clip_resolve_is_bounded_by_the_outer_clip() {
 #[test]
 fn many_contour_clip_uses_one_winding_drawable() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let mut clip = Path::new();
     for inset in 0..256 {
@@ -855,6 +1175,8 @@ fn many_contour_clip_uses_one_winding_drawable() {
 #[test]
 fn reallocating_an_image_marks_its_clip_plane_for_replay() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(64, 64, 1.0);
     let image = canvas
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
@@ -880,6 +1202,8 @@ fn reallocating_an_image_marks_its_clip_plane_for_replay() {
 #[test]
 fn filtering_an_image_marks_its_clip_plane_for_replay() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(64, 64, 1.0);
     let source = canvas
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
@@ -921,6 +1245,8 @@ fn filter_passes_are_not_gated_by_the_active_clip() {
     let renderer = RecordingRenderer::default();
     let recorded = renderer.last_commands.clone();
     let mut canvas = Canvas::new(renderer).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(100, 100, 1.0);
     let source = canvas
         .create_image_empty(16, 16, PixelFormat::Rgba8, ImageFlags::empty())
@@ -953,6 +1279,8 @@ fn filter_passes_are_not_gated_by_the_active_clip() {
 #[test]
 fn a_suppressed_draw_does_not_consume_a_dirty_clip_replay() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    // These are the stencil's workings: no clip is taken as a mask.
+    canvas.set_clip_mask_budget(0);
     canvas.set_size(64, 64, 1.0);
     let mask = canvas
         .create_image_empty(1, 1, PixelFormat::Rgba8, ImageFlags::empty())
@@ -1721,7 +2049,7 @@ fn a_rect_that_cuts_a_rounded_clip_clips_beside_it_in_the_scissors_place() {
         .iter()
         .filter_map(|entry| match entry.kind {
             ClipKind::Stencil { bounds, .. } => Some(bounds),
-            ClipKind::Shape { .. } => None,
+            ClipKind::Shape { .. } | ClipKind::Mask { .. } => None,
         })
         .collect();
     assert_eq!(stencils.len(), 2);
@@ -1759,9 +2087,10 @@ fn a_rounded_clip_nested_in_its_twin_stays_a_shape() {
 
     canvas.clip_path(&rounded(18.0, 14.0), FillRule::NonZero);
     assert!(
-        canvas.clip_active(),
-        "shifted across a corner, what they share has corners of its own: the stencil's"
+        matches!(canvas.clip_stack.last().unwrap().kind, ClipKind::Mask { .. }) && !canvas.clip_active(),
+        "shifted across a corner, what they share has corners of its own: a mask's, beside the shape"
     );
+    assert!(canvas.clip_shape().is_some());
 }
 
 /// A composite operation that changes the destination where the source is
@@ -1986,4 +2315,329 @@ fn an_image_blit_under_a_shape_clip_takes_the_masked_path() {
             }
         }
     )));
+}
+
+/// The mask each fill of a flush carried.
+#[cfg(test)]
+fn drawn_masks(commands: &[Command]) -> Vec<Option<MaskCoverage>> {
+    commands
+        .iter()
+        .filter_map(|cmd| match &cmd.cmd_type {
+            CommandType::ConvexFill { params }
+            | CommandType::ConcaveFill {
+                fill_params: params, ..
+            } => Some(params.clip_mask),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A clip to a path that is no box is a coverage mask: no stencil command,
+/// the draws under it carry the mask - where its corner lies, the pixels
+/// it spans - until the restore, and the same outline a whole number of
+/// pixels away is the same mask at another place. A fraction of a pixel
+/// away it is another.
+#[test]
+fn a_path_clip_is_a_mask_found_again_by_its_outline() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let fill = notched_rect(0.0, 0.0, 100.0, 100.0);
+    let clip = notched_rect(10.25, 20.5, 40.0, 30.0);
+
+    canvas.save();
+    canvas.clip_path(&clip, FillRule::NonZero);
+    assert!(matches!(canvas.clip_stack.last().unwrap().kind, ClipKind::Mask { .. }));
+    assert!(!canvas.clip_active(), "no stencil");
+    canvas.fill_path(&fill, &paint);
+    canvas.restore();
+    canvas.fill_path(&fill, &paint);
+    canvas.save();
+    canvas.translate(7.0, -3.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.fill_path(&fill, &paint);
+    canvas.restore();
+    assert_eq!(canvas.clip_masks.len(), 1);
+    canvas.save();
+    canvas.translate(0.5, 0.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.restore();
+    assert_eq!(canvas.clip_masks.len(), 2, "half a pixel away is another mask");
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    assert_eq!(stencil_clip_commands(&commands), 0);
+    let masks = drawn_masks(&commands);
+    let first = masks[0].expect("the fill under the clip carries its mask");
+    assert_eq!(
+        (first.origin, first.size, first.hard),
+        ([9.0, 19.0], [43.0, 33.0], false),
+        "the clip's bounds and a pixel around them"
+    );
+    assert_eq!(masks[1], None, "restored");
+    let moved = masks[2].unwrap();
+    assert_eq!(moved.image, first.image, "the same mask");
+    assert_eq!((moved.origin, moved.size), ([16.0, 16.0], [43.0, 33.0]));
+}
+
+/// A clip asked for bit for bit as before - the same path, transform and
+/// surroundings - has its mask by the request alone; moved by whole pixels
+/// it asks anew and finds the mask by its outline; and a request that goes
+/// a frame unasked is forgotten, as a mask no clip took is.
+#[test]
+fn a_clip_asked_for_as_before_has_its_mask_by_the_request() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let clip = notched_rect(10.25, 20.5, 40.0, 30.0);
+    let frame = |canvas: &mut Canvas<RecordingRenderer>, dx: f32, twice: bool| {
+        for _ in 0..if twice { 2 } else { 1 } {
+            canvas.save();
+            canvas.translate(dx, 0.0);
+            canvas.clip_path(&clip, FillRule::NonZero);
+            assert!(matches!(canvas.clip_stack.last().unwrap().kind, ClipKind::Mask { .. }));
+            canvas.restore();
+        }
+        let masks = (canvas.clip_masks.len(), canvas.clip_masks.asked_len());
+        canvas.flush_to_output(());
+        masks
+    };
+    assert_eq!(
+        frame(&mut canvas, 0.0, true),
+        (1, 1),
+        "asked twice, one request and one mask"
+    );
+    assert_eq!(frame(&mut canvas, 0.0, false), (1, 1), "and the same a frame later");
+    assert_eq!(
+        frame(&mut canvas, 3.0, false),
+        (1, 2),
+        "three pixels on: another request, the same mask"
+    );
+    assert_eq!(
+        frame(&mut canvas, 3.5, false),
+        (2, 2),
+        "half a pixel more: another mask, and the first request, a frame unasked, is forgotten"
+    );
+    assert_eq!(
+        frame(&mut canvas, 3.5, false),
+        (1, 1),
+        "as are the first mask and the second request"
+    );
+    canvas.flush_to_output(());
+    canvas.flush_to_output(());
+    assert_eq!((canvas.clip_masks.len(), canvas.clip_masks.asked_len()), (0, 0));
+
+    // A request is the clip bit for bit: another path at the same place,
+    // the same path under another rule or inside another mask asks anew.
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.reset();
+    canvas.clip_path(&clip, FillRule::EvenOdd);
+    canvas.reset();
+    canvas.clip_path(&notched_rect(10.25, 20.5, 40.0, 30.5), FillRule::NonZero);
+    canvas.reset();
+    canvas.clip_path(&notched_rect(0.0, 0.0, 90.0, 90.0), FillRule::NonZero);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    assert_eq!(canvas.clip_masks.asked_len(), 5);
+}
+
+/// A mask nests in the one in force as what both cover, cut to its bounds;
+/// its twin adds nothing; and beside a clip shape a draw carries both.
+#[test]
+fn masks_nest_and_ride_beside_a_shape() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let fill = notched_rect(0.0, 0.0, 100.0, 100.0);
+    let outer = notched_rect(10.0, 10.0, 60.0, 60.0);
+    let inner = notched_rect(40.0, 40.0, 50.0, 50.0);
+
+    canvas.clip_path(&outer, FillRule::NonZero);
+    canvas.clip_path(&outer, FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 1, "its twin adds nothing");
+    canvas.clip_path(&inner, FillRule::NonZero);
+    assert_eq!(canvas.clip_stack.len(), 2);
+    let ClipKind::Mask { mask, origin } = &canvas.clip_stack[1].kind else {
+        panic!("a mask in a mask is a mask");
+    };
+    // The inner clip's bounds, 39..91, cut to the outer mask's, 9..71.
+    assert_eq!((*origin, mask.size()), ([39, 39], [32, 32]));
+    assert_eq!(mask.pixels[16 * 32 + 16], 255, "inside both");
+    assert_eq!(mask.pixels[31 * 32 + 31], 0, "the outer mask's border");
+    let mut rounded = Path::new();
+    rounded.rounded_rect(20.0, 20.0, 60.0, 60.0, 10.0);
+    canvas.clip_path(&rounded, FillRule::NonZero);
+    canvas.fill_path(&fill, &paint);
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    assert_eq!(stencil_clip_commands(&commands), 0);
+    assert_eq!(carried(&commands), ["shape"]);
+    let mask = drawn_masks(&commands)[0].unwrap();
+    assert_eq!((mask.origin, mask.size), ([39.0, 39.0], [32.0, 32.0]));
+    // The draw is bounded by what both leave it: the mask spans 39 to 71,
+    // the shape ends, ramp included, at 80.5.
+    let bounds: Vec<_> = commands.iter().filter_map(|cmd| cmd.clip_bounds([100, 100])).collect();
+    assert_eq!(bounds, [[39, 39, 32, 32]]);
+    assert_eq!(commands.last().unwrap().clip_bounds([60, 50]), Some([39, 39, 21, 11]));
+}
+
+/// Several paths clip as one mask of their union; one path as that path
+/// would alone; none as a mask of one pixel that nothing covers. Without a
+/// budget for masks the paths are one clip on the stencil.
+#[test]
+fn clip_paths_take_one_mask_or_one_stencil_clip() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let rect = |x: f32, y: f32, w: f32, h: f32| {
+        let mut path = Path::new();
+        path.rect(x, y, w, h);
+        path
+    };
+    let (left, right) = (rect(10.0, 10.0, 30.5, 40.0), rect(40.5, 10.0, 30.0, 40.0));
+
+    canvas.save();
+    canvas.clip_paths(&[(&left, FillRule::NonZero), (&right, FillRule::EvenOdd)]);
+    assert_eq!(canvas.clip_stack.len(), 1);
+    let ClipKind::Mask { mask, origin } = &canvas.clip_stack[0].kind else {
+        panic!("the union of two boxes is a mask");
+    };
+    assert_eq!((*origin, mask.size()), ([9, 9], [63, 42]));
+    assert_eq!(
+        &mask.pixels[20 * 63 + 29..][..5],
+        [255; 5],
+        "no seam where the two meet, at 40.5"
+    );
+    canvas.restore();
+
+    canvas.save();
+    canvas.clip_paths(&[(&left, FillRule::NonZero)]);
+    assert!(canvas.clip_shape().is_some(), "one box is a shape");
+    canvas.restore();
+
+    canvas.save();
+    canvas.clip_paths(&[]);
+    let ClipKind::Mask { mask, .. } = &canvas.clip_stack[0].kind else {
+        panic!("no path is a mask");
+    };
+    assert_eq!((mask.size(), mask.pixels.as_slice()), ([1, 1], &[0u8][..]));
+    canvas.restore();
+
+    canvas.set_clip_mask_budget(0);
+    canvas.clip_paths(&[(&left, FillRule::NonZero), (&right, FillRule::EvenOdd)]);
+    assert!(canvas.clip_active(), "no budget: the stencil");
+    canvas.fill_path(&notched_rect(0.0, 0.0, 100.0, 100.0), &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    assert_eq!(
+        stencil_clip_commands(&commands),
+        2,
+        "armed, and filled once with both paths"
+    );
+    let fans = commands
+        .iter()
+        .find(|cmd| matches!(cmd.cmd_type, CommandType::ClipFill))
+        .and_then(|cmd| cmd.drawables[0].fill_verts)
+        .unwrap();
+    assert_eq!(fans.1, 12, "two triangles a rect, two rects");
+    assert_eq!(drawn_masks(&commands), [None]);
+}
+
+/// Masks are kept within their budget: a clip the budget has no room for
+/// goes to the stencil, and once a frame has passed without it a mask no
+/// clip holds makes room - its image serves the mask that takes its place.
+#[test]
+fn a_mask_the_budget_has_no_room_for_goes_to_the_stencil() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    // One mask of 43 x 33 pixels: those, and an image of 64 x 64.
+    canvas.set_clip_mask_budget(43 * 33 + 64 * 64);
+    let first = notched_rect(10.25, 20.5, 40.0, 30.0);
+    let second = notched_rect(10.5, 20.5, 40.0, 30.0);
+    let image_of = |canvas: &Canvas<RecordingRenderer>| match &canvas.clip_stack[0].kind {
+        ClipKind::Mask { mask, .. } => Some(mask.image),
+        _ => None,
+    };
+
+    canvas.save();
+    canvas.clip_path(&first, FillRule::NonZero);
+    let first_image = image_of(&canvas).expect("a mask");
+    canvas.restore();
+    canvas.save();
+    canvas.clip_path(&second, FillRule::NonZero);
+    assert!(
+        matches!(canvas.clip_stack[0].kind, ClipKind::Stencil { .. }),
+        "the first mask was used in this frame"
+    );
+    canvas.restore();
+    canvas.flush_to_output(());
+
+    let (made, deleted) = (
+        canvas.renderer.image_allocation_attempts,
+        canvas.renderer.image_deletion_count,
+    );
+    canvas.save();
+    canvas.clip_path(&second, FillRule::NonZero);
+    assert_eq!(
+        image_of(&canvas),
+        Some(first_image),
+        "a frame later, in the first mask's image"
+    );
+    assert_eq!(
+        (
+            canvas.renderer.image_allocation_attempts,
+            canvas.renderer.image_deletion_count
+        ),
+        (made, deleted),
+        "no image was made or deleted for it"
+    );
+    assert_eq!(canvas.clip_masks.len(), 1);
+    canvas.restore();
+
+    // An image that cannot be made leaves the clip to the stencil too.
+    canvas.set_clip_mask_budget(1 << 20);
+    canvas.renderer.fail_image_allocations = true;
+    canvas.clip_path(&notched_rect(10.0, 20.0, 80.0, 70.0), FillRule::NonZero);
+    assert!(matches!(canvas.clip_stack[0].kind, ClipKind::Stencil { .. }));
+    assert_eq!(canvas.clip_masks.len(), 1);
+
+    // Two frames after the last clip took it a mask is let go, and a frame
+    // after that its image.
+    canvas.renderer.fail_image_allocations = false;
+    canvas.reset();
+    canvas.flush_to_output(());
+    canvas.flush_to_output(());
+    assert_eq!(canvas.clip_masks.len(), 0);
+    assert_eq!(canvas.renderer.image_deletion_count, deleted);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.renderer.image_deletion_count, deleted + 1);
+}
+
+/// An operation that changes the destination where its source is
+/// transparent takes a mask whole or not at all - the draw says so - and
+/// leaves it a mask: the stencil is not involved.
+#[test]
+fn a_draw_coverage_cannot_bound_takes_a_mask_whole() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let fill = notched_rect(0.0, 0.0, 100.0, 100.0);
+    canvas.clip_path(&notched_rect(10.0, 10.0, 60.0, 60.0), FillRule::NonZero);
+    canvas.fill_path(&fill, &paint);
+    canvas.global_composite_operation(CompositeOperation::Copy);
+    canvas.fill_path(&fill, &paint);
+    canvas.global_composite_operation(CompositeOperation::SourceOver);
+    canvas.fill_path(&fill, &paint);
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    assert_eq!(stencil_clip_commands(&commands), 0);
+    let hard: Vec<bool> = drawn_masks(&commands).iter().map(|mask| mask.unwrap().hard).collect();
+    assert_eq!(hard, [false, true, false]);
 }

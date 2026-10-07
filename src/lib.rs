@@ -420,6 +420,8 @@ pub struct Canvas<T: Renderer> {
     // draws into that target.
     clip_stack: Vec<ClipEntry>,
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
+    // The coverage masks of the clips that are no box.
+    clip_masks: ClipMasks,
     // The scissor and clip shape the last draw met, as the boxes they make.
     last_clip_boxes: Option<ClipBoxes>,
     // Whether the last draw carried a clip shape: the shader variant the
@@ -494,6 +496,7 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            clip_masks: ClipMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -537,6 +540,7 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            clip_masks: ClipMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -666,6 +670,9 @@ where
             std::mem::take(&mut self.commands),
         );
         self.verts.clear();
+        for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -1280,7 +1287,7 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        let (clip, scissor, rect) = self.fill_clip(
+        let (clip, rect) = self.fill_clip(
             || path_cache.bounds,
             Some((&path_cache, 0.0)),
             anti_alias.then_some((path, &transform)),
@@ -1309,12 +1316,12 @@ where
 
         if let (Some(path_rect), Some(scissor_rect), true, true) = (
             path_cache.path_fill_is_rect(),
-            scissor.as_rect(canvas_width as f32, canvas_height as f32),
+            clip.scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
             // The unclipped blit bypasses the stencil clip plane and the
             // clip shape (the #292 rounded-scissor precedent): route clipped
             // blits through the normal masked path.
-            !self.clip_active() && clip.is_none(),
+            !self.clip_active() && clip.shape.is_none() && clip.mask.is_none(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
                 self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
@@ -1332,12 +1339,12 @@ where
                 &transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
             )
-            .with_clip(clip);
+            .with_clip(&clip);
 
             CommandType::ConvexFill { params }
         } else {
@@ -1348,12 +1355,12 @@ where
                 &transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
             )
-            .with_clip(clip);
+            .with_clip(&clip);
 
             CommandType::ConcaveFill {
                 stencil_params,
@@ -1533,7 +1540,7 @@ where
         paint_flavor.mul_alpha(self.state().alpha);
 
         let reach = stroke.reach(line_width);
-        let (clip, scissor) = self.draw_clip(
+        let clip = self.draw_clip(
             || Bounds {
                 minx: path_cache.bounds.minx - reach,
                 miny: path_cache.bounds.miny - reach,
@@ -1562,12 +1569,12 @@ where
             &transform,
             &paint_flavor,
             &GlyphTexture::default(),
-            &scissor,
+            &clip.scissor,
             line_width,
             self.fringe_width,
             -1.0,
         )
-        .with_clip(clip);
+        .with_clip(&clip);
 
         let flavor = if stroke.stencil_strokes {
             let params2 = Params::new(
@@ -1575,12 +1582,12 @@ where
                 &transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 line_width,
                 self.fringe_width,
                 1.0 - 0.5 / 255.0,
             )
-            .with_clip(clip);
+            .with_clip(&clip);
 
             CommandType::StencilStroke {
                 params1: params,
@@ -2369,7 +2376,7 @@ where
         glyph_texture: GlyphTexture,
     ) {
         self.reconcile_current_clip_plane();
-        let (clip, scissor) = self.draw_clip(
+        let clip = self.draw_clip(
             || {
                 verts.iter().fold(Bounds::default(), |bounds, vertex| Bounds {
                     minx: bounds.minx.min(vertex.x),
@@ -2386,12 +2393,12 @@ where
             transform,
             paint_flavor,
             &glyph_texture,
-            &scissor,
+            &clip.scissor,
             1.0,
             self.fringe_width,
             -1.0,
         )
-        .with_clip(clip);
+        .with_clip(&clip);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
@@ -2463,6 +2470,9 @@ where
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
+        for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -4632,6 +4642,9 @@ fn random_api_sequences_keep_one_consistent_stack() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
         canvas.set_size(128, 128, 1.0);
+        if seed % 2 == 1 {
+            canvas.set_clip_mask_budget(0);
+        }
         let image = canvas
             .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
             .unwrap();
@@ -4691,8 +4704,8 @@ fn random_api_sequences_keep_one_consistent_stack() {
                 }
                 4 => {
                     // A box is taken as a shape - stacked, or dropped when it
-                    // contains the one in force - and a notched rect on the
-                    // stencil.
+                    // contains the one in force - and a notched rect as a
+                    // mask, or on the stencil when the masks have no budget.
                     let (x, y) = (rng.random_range(0.0..40.0), rng.random_range(0.0..40.0));
                     let clip = if rng.random_bool(0.5) {
                         let mut clip = Path::new();
@@ -4747,7 +4760,8 @@ fn random_api_sequences_keep_one_consistent_stack() {
             }
             for entry in &canvas.clip_stack {
                 assert!(
-                    matches!(entry.kind, ClipKind::Shape { .. }) || canvas.clip_planes.contains_key(&entry.target),
+                    matches!(entry.kind, ClipKind::Shape { .. } | ClipKind::Mask { .. })
+                        || canvas.clip_planes.contains_key(&entry.target),
                     "{at}: plane for {:?}",
                     entry.target
                 );

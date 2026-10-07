@@ -139,6 +139,14 @@ impl Path {
         self.verbs.len()
     }
 
+    /// The path's verbs and coordinates, bit for bit, onto `words`: what
+    /// tells it from another path without flattening either.
+    pub(crate) fn words(&self, words: &mut Vec<u32>) {
+        words.extend([self.verbs.len() as u32, self.coords.len() as u32]);
+        words.extend(self.verbs.iter().map(|verb| *verb as u32));
+        words.extend(self.coords.iter().flat_map(|at| [at.x.to_bits(), at.y.to_bits()]));
+    }
+
     /// Sets the distance tolerance used for path operations.
     pub fn set_distance_tolerance(&mut self, value: f32) {
         self.dist_tol = value;
