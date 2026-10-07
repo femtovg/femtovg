@@ -804,7 +804,7 @@ where
         self.state_mut().alpha = 1.0;
         let mut rect = Path::new();
         rect.rect(x, y, width, height);
-        self.fill_path_internal(&rect, paint, false, FillRule::NonZero);
+        self.fill_path_internal(&rect, None, paint, false, FillRule::NonZero);
         self.state_mut().transform = saved_transform;
         self.state_mut().alpha = saved_alpha;
     }
@@ -996,7 +996,7 @@ where
                 let coverage_paint = Paint::image(coverage, 0.0, 0.0, width, height, 0.0, 1.0);
                 let mut store = Path::new();
                 store.rect(0.0, 0.0, width, height);
-                canvas.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
+                canvas.fill_path_internal(&store, None, &coverage_paint.flavor, false, FillRule::NonZero);
             },
         );
     }
