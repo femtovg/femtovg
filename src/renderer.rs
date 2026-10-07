@@ -141,6 +141,9 @@ pub struct Command {
     pub(crate) blend_pass: BlendPass,
     // The matrices a two-draw filter pass folds into its draws.
     pub(crate) fused: Fused,
+    // The rect a filter pass's result is drawn inside - x, y, width and
+    // height in the texel rows of its target - when it is cropped.
+    pub(crate) crop: Option<[u32; 4]>,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -158,6 +161,7 @@ impl Command {
             glyph_texture: GlyphTexture::default(),
             blend_pass: BlendPass::default(),
             fused: Fused::default(),
+            crop: None,
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }

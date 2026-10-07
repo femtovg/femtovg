@@ -1225,7 +1225,10 @@ fn separable_filter(
         params.feather = 1.0;
     }
 
-    if let Some((start, count)) = command.triangles_verts {
+    if let Some((start, count)) = command
+        .triangles_verts
+        .filter(|_| render_pass_builder.crop(command.crop))
+    {
         pipeline_and_bindgroup_mapper.update_renderpass(
             render_pass_builder,
             blend_state,
@@ -1343,7 +1346,10 @@ fn single_pass_filter(
 
     render_pass_builder.set_filter_target_image(images, target_image, wgpu::LoadOp::Clear(wgpu::Color::default()));
 
-    if let Some((start, count)) = command.triangles_verts {
+    if let Some((start, count)) = command
+        .triangles_verts
+        .filter(|_| render_pass_builder.crop(command.crop))
+    {
         pipeline_and_bindgroup_mapper.update_renderpass(
             render_pass_builder,
             blend_state,
@@ -2496,6 +2502,19 @@ impl<'a> RenderPassBuilder<'a> {
 
     fn draw(&mut self, vertices: std::ops::Range<u32>) {
         self.rpass.as_mut().unwrap().draw(vertices, 0..1);
+    }
+
+    /// Limits the open pass to `crop` - x, y, width and height in the
+    /// target's texel rows - and says whether that leaves anything to draw.
+    fn crop(&mut self, crop: Option<[u32; 4]>) -> bool {
+        let Some([x, y, width, height]) = crop else {
+            return true;
+        };
+        if width == 0 || height == 0 {
+            return false;
+        }
+        self.rpass.as_mut().unwrap().set_scissor_rect(x, y, width, height);
+        true
     }
 }
 

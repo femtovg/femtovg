@@ -16,8 +16,9 @@ All notable changes to this project will be documented in this file.
   bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
   rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
   pixels, or scaled with a gradient or image paint.
-- Added `ImageFilter::Morphology` and `ImageFilter::Offset`, the SVG
-  `feMorphology` and `feOffset` primitives: a dilation grows the opaque
+- Added `ImageFilter::Morphology`, `ImageFilter::Offset` and
+  `ImageFilter::Crop`, the SVG `feMorphology` and `feOffset` primitives and
+  the subregion a primitive's result is clipped to: a dilation grows the opaque
   regions of an image by a whole-pixel radius per axis and an erosion
   shrinks them (the per-channel maximum or minimum within the radius, as
   two draws like the blur, a radius above the 24 pixels one draw covers
@@ -27,7 +28,9 @@ All notable changes to this project will be documented in this file.
   erosion reads that far beyond the store - and by an offset's shift, as it
   does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
   shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
-  `feColorMatrix`) as one layer filter.
+  `feColorMatrix`) as one layer filter. A crop leaves an image transparent
+  outside a rectangle; after another filter of a chain it is that filter's
+  pass drawn inside the rectangle, at no pass of its own.
 - A Gaussian blur whose standard deviation on an axis is above the 8 device
   pixels one shader pass covers now runs at a downsampled size, the way
   Skia's GPU blur does: a filter chain, a layer filter or a shadow halves
