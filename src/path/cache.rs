@@ -209,15 +209,7 @@ impl PathCache {
                         let (x, y) = transform.transform_point(x, y);
 
                         cache.tesselate_bezier(
-                            last.pos.x,
-                            last.pos.y,
-                            c1x,
-                            c1y,
-                            c2x,
-                            c2y,
-                            x,
-                            y,
-                            0,
+                            [last.pos.x, last.pos.y, c1x, c1y, c2x, c2y, x, y],
                             PointFlags::CORNER,
                             tess_tol,
                             dist_tol,
@@ -383,78 +375,56 @@ impl PathCache {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn tesselate_bezier(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-        x4: f32,
-        y4: f32,
-        level: usize,
-        flags: PointFlags,
-        tess_tol: f32,
-        dist_tol: f32,
-    ) {
-        if level > 10 {
-            return;
+    /// Flattens a cubic into the ends of its pieces: a piece whose control
+    /// points lie close enough to the line between its ends is taken as
+    /// that line, and any other is halved, to ten halvings, the left half
+    /// first. Only the cubic's own end takes `flags`.
+    fn tesselate_bezier(&mut self, curve: [f32; 8], flags: PointFlags, tess_tol: f32, dist_tol: f32) {
+        // The right halves still to flatten, the nearest last, each with its
+        // depth and whether it ends the cubic: one at most per depth.
+        let mut pending = [([0.0; 8], 0u8, false); 10];
+        let mut count = 0;
+        let (mut piece, mut depth, mut ends) = (curve, 0u8, true);
+
+        loop {
+            let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
+            let dx = x4 - x1;
+            let dy = y4 - y1;
+            let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
+            let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
+
+            if (d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy) {
+                let flags = if ends { flags } else { PointFlags::empty() };
+                self.add_point(x4, y4, flags, dist_tol);
+            } else if depth < 10 {
+                let x12 = (x1 + x2) * 0.5;
+                let y12 = (y1 + y2) * 0.5;
+                let x23 = (x2 + x3) * 0.5;
+                let y23 = (y2 + y3) * 0.5;
+                let x34 = (x3 + x4) * 0.5;
+                let y34 = (y3 + y4) * 0.5;
+                let x123 = (x12 + x23) * 0.5;
+                let y123 = (y12 + y23) * 0.5;
+                let x234 = (x23 + x34) * 0.5;
+                let y234 = (y23 + y34) * 0.5;
+                let x1234 = (x123 + x234) * 0.5;
+                let y1234 = (y123 + y234) * 0.5;
+
+                depth += 1;
+                pending[count] = ([x1234, y1234, x234, y234, x34, y34, x4, y4], depth, ends);
+                count += 1;
+                (piece, ends) = ([x1, y1, x12, y12, x123, y123, x1234, y1234], false);
+                continue;
+            }
+
+            // A piece is taken or, past ten halvings, dropped: on to the
+            // nearest right half left.
+            let Some(next) = count.checked_sub(1) else {
+                break;
+            };
+            count = next;
+            (piece, depth, ends) = pending[count];
         }
-
-        let x12 = (x1 + x2) * 0.5;
-        let y12 = (y1 + y2) * 0.5;
-        let x23 = (x2 + x3) * 0.5;
-        let y23 = (y2 + y3) * 0.5;
-        let x34 = (x3 + x4) * 0.5;
-        let y34 = (y3 + y4) * 0.5;
-        let x123 = (x12 + x23) * 0.5;
-        let y123 = (y12 + y23) * 0.5;
-
-        let dx = x4 - x1;
-        let dy = y4 - y1;
-        let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
-        let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
-
-        if (d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy) {
-            self.add_point(x4, y4, flags, dist_tol);
-            return;
-        }
-
-        let x234 = (x23 + x34) * 0.5;
-        let y234 = (y23 + y34) * 0.5;
-        let x1234 = (x123 + x234) * 0.5;
-        let y1234 = (y123 + y234) * 0.5;
-
-        self.tesselate_bezier(
-            x1,
-            y1,
-            x12,
-            y12,
-            x123,
-            y123,
-            x1234,
-            y1234,
-            level + 1,
-            PointFlags::empty(),
-            tess_tol,
-            dist_tol,
-        );
-        self.tesselate_bezier(
-            x1234,
-            y1234,
-            x234,
-            y234,
-            x34,
-            y34,
-            x4,
-            y4,
-            level + 1,
-            flags,
-            tess_tol,
-            dist_tol,
-        );
     }
 
     // fn tesselate_bezier_afd(
@@ -1352,6 +1322,85 @@ mod tests {
 
     use super::*;
     use crate::Path;
+
+    // A fixed sequence of numbers in [0, 1), so the tests below are repeatable.
+    fn unit(seed: &mut u32) -> f32 {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (*seed >> 8) as f32 / (1 << 24) as f32
+    }
+
+    // The recursive flattener the loop replaced, as the reference it must match.
+    fn flatten_recursively(
+        points: &mut Vec<([f32; 2], PointFlags)>,
+        c: [f32; 8],
+        level: usize,
+        flags: PointFlags,
+        tol: f32,
+    ) {
+        if level > 10 {
+            return;
+        }
+        let [x1, y1, x2, y2, x3, y3, x4, y4] = c;
+        let x12 = (x1 + x2) * 0.5;
+        let y12 = (y1 + y2) * 0.5;
+        let x23 = (x2 + x3) * 0.5;
+        let y23 = (y2 + y3) * 0.5;
+        let x34 = (x3 + x4) * 0.5;
+        let y34 = (y3 + y4) * 0.5;
+        let x123 = (x12 + x23) * 0.5;
+        let y123 = (y12 + y23) * 0.5;
+        let dx = x4 - x1;
+        let dy = y4 - y1;
+        let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
+        let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
+        if (d2 + d3) * (d2 + d3) < tol * (dx * dx + dy * dy) {
+            points.push(([x4, y4], flags));
+            return;
+        }
+        let x234 = (x23 + x34) * 0.5;
+        let y234 = (y23 + y34) * 0.5;
+        let x1234 = (x123 + x234) * 0.5;
+        let y1234 = (y123 + y234) * 0.5;
+        let left = [x1, y1, x12, y12, x123, y123, x1234, y1234];
+        flatten_recursively(points, left, level + 1, PointFlags::empty(), tol);
+        let right = [x1234, y1234, x234, y234, x34, y34, x4, y4];
+        flatten_recursively(points, right, level + 1, flags, tol);
+    }
+
+    #[test]
+    fn the_loop_flattens_a_cubic_as_the_recursion_did() {
+        let mut seed = 1;
+        for case in 0..3000 {
+            let mut c: [f32; 8] = std::array::from_fn(|_| unit(&mut seed) * 400.0 - 200.0);
+            match case % 6 {
+                // Control points at the chord's ends, a closed loop, a tiny curve, and
+                // curves so large they need about ten halvings and more than ten.
+                1 => [c[2], c[3], c[4], c[5]] = [c[0], c[1], c[6], c[7]],
+                2 => [c[6], c[7]] = [c[0], c[1]],
+                3 => c.iter_mut().for_each(|v| *v *= 1e-3),
+                4 => c.iter_mut().for_each(|v| *v *= 300.0),
+                5 => c.iter_mut().for_each(|v| *v *= 3000.0),
+                _ => {}
+            }
+            let tol = [0.25, 0.0625, 0.25 / 3.0][case / 6 % 3];
+
+            let mut path = Path::new();
+            path.move_to(c[0], c[1]);
+            path.bezier_to(c[2], c[3], c[4], c[5], c[6], c[7]);
+            let cache = PathCache::new(path.verbs(), &Transform2D::identity(), tol, 0.01);
+            let mut expected = vec![([c[0], c[1]], PointFlags::CORNER)];
+            flatten_recursively(&mut expected, c, 0, PointFlags::CORNER, tol);
+
+            let bits = |(p, flags): ([f32; 2], PointFlags)| (p.map(f32::to_bits), flags);
+            let got: Vec<_> = cache
+                .points
+                .iter()
+                .map(|p| bits(([p.pos.x, p.pos.y], p.flags)))
+                .collect();
+            let expected: Vec<_> = expected.into_iter().map(bits).collect();
+            assert_eq!(got, expected, "case {case}: {c:?} at {tol}");
+        }
+    }
 
     #[test]
     fn self_intersecting_polygon_is_concave() {
