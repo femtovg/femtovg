@@ -857,29 +857,53 @@ fn a_draw_inside_the_clip_is_drawn_as_without_it() {
     }
 }
 
-/// A box thinner than a pixel goes to the stencil, where it leaves a pixel
-/// only if it holds the pixel's center: no ramp of a side reaches a row the
-/// box does not.
+/// A box thinner than a pixel is no shape for the shader - no ramp of a side
+/// may reach a row the box does not - so it is taken as a mask, which gives
+/// each row the share of it the box covers. With no budget for masks it
+/// goes to the stencil, where it leaves a pixel only if it holds the pixel's
+/// center.
 #[test]
 fn a_clip_thinner_than_a_pixel_leaves_no_ghost_of_the_fill() {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;
     };
-    let sliver = |top: f32| {
+    let sliver = |top: f32, masks: bool| {
         render(&device, &queue, |canvas| {
+            if !masks {
+                canvas.set_clip_mask_budget(0);
+            }
             let mut clip = Path::new();
             clip.rect(10.0, top, 70.0, 0.3);
             canvas.clip_path(&clip, FillRule::NonZero);
             fill_everything(canvas);
         })
     };
-    let between_centers = sliver(40.6);
+    // Red over white: the green channel is what was left uncovered.
+    let covered = |frame: &[u8], x: u32, y: u32| 1.0 - f32::from(px(frame, x, y)[1]) / 255.0;
+    for (top, rows) in [
+        (40.6, [0.0, 0.3, 0.0]),
+        (40.4, [0.0, 0.3, 0.0]),
+        (40.9, [0.0, 0.1, 0.2]),
+    ] {
+        let frame = sliver(top, true);
+        for (row, share) in (39..).zip(rows) {
+            let got = covered(&frame, 40, row);
+            assert!(
+                (got - share).abs() < 0.01,
+                "a sliver at {top}: row {row} is {got} covered"
+            );
+        }
+        assert_eq!(px(&frame, 5, 40), WHITE, "left of it");
+        assert_eq!(px(&frame, 85, 40), WHITE, "right of it");
+    }
+
+    let between_centers = sliver(40.6, false);
     assert!(
         between_centers.chunks_exact(4).all(|p| p[..3] == WHITE),
-        "a sliver that holds no pixel center leaves nothing"
+        "on the stencil a sliver that holds no pixel center leaves nothing"
     );
-    let on_a_center = sliver(40.4);
+    let on_a_center = sliver(40.4, false);
     assert_eq!(px(&on_a_center, 40, 40), RED, "the row whose centers it holds");
     assert_eq!(px(&on_a_center, 40, 39), WHITE);
     assert_eq!(px(&on_a_center, 40, 41), WHITE);

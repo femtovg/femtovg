@@ -4,8 +4,9 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
-    ImageInfo, ImageSource, ImageStore,
+    geometry::{Bounds, Position},
+    paint::GlyphTexture,
+    Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
@@ -167,13 +168,14 @@ impl Command {
         }
     }
 
-    /// The pixels of a target of `size` that the clip shape leaves the
-    /// command's draws - x, y, width and height from the top left - when
-    /// they carry a shape that ends somewhere. Outside them its coverage is
-    /// zero, so the renderer scissors every draw of the command to them,
-    /// the ones that only write the stencil too: no fragment is shaded out
-    /// there and a tiler leaves its tiles alone, as under a clip on the
-    /// stencil. Never less than a pixel: Metal takes no empty scissor.
+    /// The pixels of a target of `size` that the clip leaves the command's
+    /// draws - x, y, width and height from the top left - when they carry a
+    /// shape that ends somewhere, a mask, or both. Outside them the clip's
+    /// coverage is zero, so the renderer scissors every draw of the command
+    /// to them, the ones that only write the stencil too: no fragment is
+    /// shaded out there and a tiler leaves its tiles alone, as under a clip
+    /// on the stencil. Never less than a pixel: Metal takes no empty
+    /// scissor.
     pub(crate) fn clip_bounds(&self, [width, height]: [u32; 2]) -> Option<[u32; 4]> {
         let params = match &self.cmd_type {
             CommandType::ConvexFill { params }
@@ -185,7 +187,17 @@ impl Command {
             | CommandType::StencilStroke { params1: params, .. } => params,
             _ => return None,
         };
-        let reach = params.clip?.reach()?;
+        let shape = params.clip.and_then(|shape| shape.reach());
+        let mask = params.clip_mask.map(|mask| mask.reach());
+        let reach = match (shape, mask) {
+            (Some(shape), Some(mask)) => Bounds {
+                minx: shape.minx.max(mask.minx),
+                miny: shape.miny.max(mask.miny),
+                maxx: shape.maxx.min(mask.maxx),
+                maxy: shape.maxy.min(mask.maxy),
+            },
+            (shape, mask) => shape.or(mask)?,
+        };
         if width == 0 || height == 0 {
             return None;
         }

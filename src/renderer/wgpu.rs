@@ -60,7 +60,7 @@ impl std::fmt::Debug for WGPURenderOutput {
 
 use super::Params;
 use super::Vertex;
-use crate::clip::ClipCoverage;
+use crate::clip::{ClipCoverage, MaskCoverage};
 
 const UNIFORMARRAY_SIZE: usize = 16;
 const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
@@ -187,6 +187,20 @@ impl UniformArray {
             self.0[54..64].copy_from_slice(&clip.uniform_rows());
         }
     }
+
+    /// The coverage mask, read by the shader variant of a draw under one:
+    /// where its corner lies, the pixels it spans and what one of them is
+    /// of its image, in the halves of the scissor matrix's columns that no
+    /// shader reads, and beside the conic angle whether it takes a pixel
+    /// whole or not at all.
+    pub fn set_clip_mask(&mut self, mask: Option<&MaskCoverage>) {
+        if let Some(mask) = mask {
+            self.0[2..4].copy_from_slice(&mask.origin);
+            self.0[6..8].copy_from_slice(&mask.size);
+            self.0[10..12].copy_from_slice(&mask.texel);
+            self.0[53] = f32::from(u8::from(mask.hard));
+        }
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -213,6 +227,7 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
         arr.set_conic_start_angle(params.conic_start_angle);
         arr.set_clip(params.clip.as_ref());
+        arr.set_clip_mask(params.clip_mask.as_ref());
 
         arr
     }
@@ -281,9 +296,9 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
-    bind_group_layout: wgpu::BindGroupLayout,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
-    pipeline_layout: wgpu::PipelineLayout,
+    /// Without and with a coverage mask.
+    draw_layouts: [DrawLayout; 2],
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     /// Built on the first upload of an image with `GENERATE_MIPMAPS`.
     mipmaps: Option<MipmapGenerator>,
@@ -433,59 +448,7 @@ impl WGPURenderer {
             }],
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[Some(&viewport_bind_group_layout), Some(&bind_group_layout)],
-            immediate_size: 0,
-        });
+        let draw_layouts = [false, true].map(|mask| DrawLayout::new(&device, &viewport_bind_group_layout, mask));
 
         Self {
             device,
@@ -502,9 +465,8 @@ impl WGPURenderer {
             vertex_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
-            bind_group_layout,
             viewport_bind_group_layout,
-            pipeline_layout,
+            draw_layouts,
             pipeline_cache: Default::default(),
             mipmaps: None,
         }
@@ -783,8 +745,7 @@ impl Renderer for WGPURenderer {
             self.uniform_buffer.clone(),
             self.uniform_stride,
             self.shader_module.clone(),
-            self.bind_group_layout.clone(),
-            self.pipeline_layout.clone(),
+            self.draw_layouts.clone(),
             self.pipeline_cache.clone(),
         );
 
@@ -2031,6 +1992,8 @@ struct PipelineState {
     stencil_state: Option<wgpu::StencilState>,
     /// The draw is under a clip shape, which only its fragment entry point evaluates.
     clip_shape: bool,
+    /// The draw is under a coverage mask, which only its fragment entry point reads.
+    clip_mask: bool,
 }
 
 impl PipelineState {
@@ -2077,6 +2040,7 @@ impl PipelineState {
             cull_mode,
             stencil_state: has_stencil_buffer.then_some(stencil_state),
             clip_shape: false,
+            clip_mask: false,
         }
     }
 
@@ -2095,13 +2059,19 @@ impl PipelineState {
             cull_mode,
             stencil_state,
             clip_shape,
+            clip_mask,
         } = self;
         let vertex_entry_point = if *render_to_texture {
             "vs_main_texture"
         } else {
             "vs_main"
         };
-        let fragment_entry_point = if *clip_shape { "fs_main_clip" } else { "fs_main" };
+        let fragment_entry_point = match (*clip_shape, *clip_mask) {
+            (false, false) => "fs_main",
+            (true, false) => "fs_main_clip",
+            (false, true) => "fs_main_mask",
+            (true, true) => "fs_main_clip_mask",
+        };
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -2146,10 +2116,90 @@ impl PipelineState {
     }
 }
 
+/// The layout of the draws' second bind group - their uniforms, image and glyph texture, and under a coverage mask
+/// the mask - and the pipeline layout over it and the viewport's. A draw under no mask binds no mask texture: the
+/// group is bound again for every draw's uniforms, and a binding more costs each of those binds.
+#[derive(Clone, Debug)]
+struct DrawLayout {
+    bind_group: wgpu::BindGroupLayout,
+    pipeline: wgpu::PipelineLayout,
+}
+
+impl DrawLayout {
+    fn new(device: &wgpu::Device, viewport_bind_group_layout: &wgpu::BindGroupLayout, mask: bool) -> Self {
+        let entries = [
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(UNIFORM_BYTES),
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            // The coverage mask of a clip, read texel by texel.
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+        ];
+        let bind_group = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &entries[..if mask { 6 } else { 5 }],
+        });
+        let pipeline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(viewport_bind_group_layout), Some(&bind_group)],
+            immediate_size: 0,
+        });
+        Self { bind_group, pipeline }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct BindGroupState {
     image: Option<ImageId>,
     glyph_texture: GlyphTexture,
+    clip_mask: Option<ImageId>,
 }
 
 impl BindGroupState {
@@ -2177,38 +2227,53 @@ impl BindGroupState {
             sampler_cache,
         );
 
-        if main_texture_view.is_external() || glyph_texture_view.is_external() {
+        // The empty texture stands in for no mask, and the layout without a
+        // mask takes no entry for it.
+        let (clip_mask_view, _) = RenderPassBuilder::create_binding_resource_and_sampler(
+            device,
+            images,
+            self.clip_mask.as_ref(),
+            empty_texture_view,
+            sampler_cache,
+        );
+
+        if main_texture_view.is_external() || glyph_texture_view.is_external() || clip_mask_view.is_external() {
             unimplemented!("External texture shaders and bind groups are not implemented yet");
         }
 
+        let entries = [
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: uniform_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(UNIFORM_BYTES),
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: (&main_texture_view).into(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&main_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: (&glyph_texture_view).into(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Sampler(&glyph_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: (&clip_mask_view).into(),
+            },
+        ];
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: uniform_buffer,
-                        offset: 0,
-                        size: wgpu::BufferSize::new(UNIFORM_BYTES),
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: (&main_texture_view).into(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&main_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: (&glyph_texture_view).into(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&glyph_sampler),
-                },
-            ],
+            entries: &entries[..if self.clip_mask.is_some() { 6 } else { 5 }],
             label: None,
         })
     }
@@ -2530,9 +2595,9 @@ struct CommandToPipelineAndBindGroupMapper {
 
     current_bind_group_state: Option<BindGroupState>,
     current_bind_group: Option<wgpu::BindGroup>,
-    bind_group_layout: wgpu::BindGroupLayout,
+    /// Without and with a coverage mask.
+    draw_layouts: [DrawLayout; 2],
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
-    pipeline_layout: wgpu::PipelineLayout,
 }
 
 impl CommandToPipelineAndBindGroupMapper {
@@ -2543,8 +2608,7 @@ impl CommandToPipelineAndBindGroupMapper {
         uniform_buffer: wgpu::Buffer,
         uniform_stride: u64,
         shader_module: Rc<wgpu::ShaderModule>,
-        bind_group_layout: wgpu::BindGroupLayout,
-        pipeline_layout: wgpu::PipelineLayout,
+        draw_layouts: [DrawLayout; 2],
         pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
     ) -> Self {
         Self {
@@ -2558,9 +2622,8 @@ impl CommandToPipelineAndBindGroupMapper {
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
-            bind_group_layout,
+            draw_layouts,
             pipeline_cache,
-            pipeline_layout,
         }
     }
 
@@ -2587,7 +2650,11 @@ impl CommandToPipelineAndBindGroupMapper {
             render_pass_builder.current_stencil_reference = Some(stencil_reference);
         }
 
-        let bind_group_state = BindGroupState { image, glyph_texture };
+        let bind_group_state = BindGroupState {
+            image,
+            glyph_texture,
+            clip_mask: params.clip_mask.map(|mask| mask.image),
+        };
 
         let bind_group_changed = self.current_bind_group_state != Some(bind_group_state.clone());
         if bind_group_changed {
@@ -2595,7 +2662,7 @@ impl CommandToPipelineAndBindGroupMapper {
                 .materialize(
                     &self.device,
                     images,
-                    &self.bind_group_layout,
+                    &self.draw_layouts[usize::from(bind_group_state.clip_mask.is_some())].bind_group,
                     &self.empty_texture_view,
                     &self.sampler_cache,
                     &self.uniform_buffer,
@@ -2628,15 +2695,17 @@ impl CommandToPipelineAndBindGroupMapper {
             cull_mode,
             render_pass_builder.stencil_buffer.is_some(),
         );
-        // Set in place: a copy of the state with the flag changed was slower
+        // Set in place: a copy of the state with the flags changed was slower
         // to hash, by 1.3 % of the time 600 unclipped fills take to encode.
         pipeline_state.clip_shape = params.clip.is_some();
+        pipeline_state.clip_mask = params.clip_mask.is_some();
 
         // An unchanged pipeline was looked up, and marked accessed, when it was bound.
         if render_pass_builder.current_pipeline_state.as_ref() != Some(&pipeline_state) {
             let mut pipeline_cache = self.pipeline_cache.borrow_mut();
             let render_pipeline = pipeline_cache.entry(pipeline_state.clone()).or_insert_with(|| {
-                let pipeline = pipeline_state.materialize(&self.device, &self.pipeline_layout, &self.shader_module);
+                let layout = &self.draw_layouts[usize::from(pipeline_state.clip_mask)].pipeline;
+                let pipeline = pipeline_state.materialize(&self.device, layout, &self.shader_module);
                 CachedPipeline {
                     pipeline,
                     accessed: false,

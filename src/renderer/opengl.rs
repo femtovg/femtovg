@@ -47,12 +47,12 @@ pub struct OpenGl {
     main_programs_without_glyph_texture: [Option<MainProgram>; 18],
     // The programs of draws under a clip shape, by shader type and glyph texture use, each built when first drawn
     // with (None if that failed): no other program evaluates a shape, and few of them are ever drawn under one.
-    clip_shape_programs: FnvHashMap<(u8, bool), Option<MainProgram>>,
-    // The scissor rect of the draws under a clip shape; none is no scissor.
+    clip_programs: FnvHashMap<(u8, bool, (bool, bool)), Option<MainProgram>>,
+    // The scissor rect of the draws under a clip; none is no scissor.
     current_clip_bounds: Option<[u32; 4]>,
     current_program: u8,
     current_program_needs_glyph_texture: bool,
-    current_program_clips: bool,
+    current_program_clips: (bool, bool),
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
@@ -276,14 +276,15 @@ impl OpenGl {
         let main_programs_with_glyph_texture = generate_shader_program_variants(true)?;
         let main_programs_without_glyph_texture = generate_shader_program_variants(false)?;
         // One of them now: a driver that cannot build the clip shape's code fails here, not at a draw.
-        let mut clip_shape_programs = FnvHashMap::default();
-        clip_shape_programs.insert(
-            (ShaderType::FillColor.to_u8(), false),
-            Some(MainProgram::with_clip_shape(
+        let mut clip_programs = FnvHashMap::default();
+        clip_programs.insert(
+            (ShaderType::FillColor.to_u8(), false, (true, true)),
+            Some(MainProgram::with_clip(
                 &context,
                 antialias,
                 ShaderType::FillColor,
                 false,
+                (true, true),
             )?),
         );
 
@@ -295,11 +296,11 @@ impl OpenGl {
             screen_view: [0.0, 0.0],
             main_programs_with_glyph_texture,
             main_programs_without_glyph_texture,
-            clip_shape_programs,
+            clip_programs,
             current_clip_bounds: None,
             current_program: 0,
             current_program_needs_glyph_texture: true,
-            current_program_clips: false,
+            current_program_clips: (false, false),
             vert_arr: None,
             vert_buff: None,
             framebuffers: HashMap::default(),
@@ -748,6 +749,14 @@ impl OpenGl {
             self.context.bind_texture(glow::TEXTURE_2D, glyphtex);
         }
 
+        if let Some(mask) = paint.clip_mask {
+            let cliptex = images.get(mask.image).map(GlTexture::id);
+            unsafe {
+                self.context.active_texture(glow::TEXTURE0 + 2);
+                self.context.bind_texture(glow::TEXTURE_2D, cliptex);
+            }
+        }
+
         self.check_error("set_uniforms texture");
     }
 
@@ -1110,12 +1119,16 @@ impl OpenGl {
     }
 
     fn main_program(&self) -> &MainProgram {
-        if self.current_program_clips {
+        if self.current_program_clips != (false, false) {
             return self
-                .clip_shape_programs
-                .get(&(self.current_program, self.current_program_needs_glyph_texture))
+                .clip_programs
+                .get(&(
+                    self.current_program,
+                    self.current_program_needs_glyph_texture,
+                    self.current_program_clips,
+                ))
                 .and_then(Option::as_ref)
-                .expect("internal error: clip shape program selected before it was built");
+                .expect("internal error: clip program selected before it was built");
         }
         let programs = if self.current_program_needs_glyph_texture {
             &self.main_programs_with_glyph_texture
@@ -1127,16 +1140,17 @@ impl OpenGl {
             .expect("internal error: invalid shader program selected for given paint")
     }
 
-    /// Whether the program for `params` under a clip shape is there, building it when first asked for. Start-up
-    /// built one, so the driver can; what fails later is a lost context, which draws nothing with any program.
-    fn has_clip_shape_program(&mut self, params: &Params) -> bool {
+    /// Whether the program for `params` under `clips` - a clip shape, a coverage mask - is there, building it when
+    /// first asked for. Start-up built one, so the driver can; what fails later is a lost context, which draws
+    /// nothing with any program.
+    fn has_clip_program(&mut self, params: &Params, clips: (bool, bool)) -> bool {
         let (context, antialias) = (&self.context, self.antialias);
         let (shader_type, with_glyph_texture) = (params.shader_type, params.uses_glyph_texture());
-        self.clip_shape_programs
-            .entry((shader_type.to_u8(), with_glyph_texture))
+        self.clip_programs
+            .entry((shader_type.to_u8(), with_glyph_texture, clips))
             .or_insert_with(|| {
-                MainProgram::with_clip_shape(context, antialias, shader_type, with_glyph_texture)
-                    .map_err(|error| log::error!("clip shape program for {shader_type:?}: {error}"))
+                MainProgram::with_clip(context, antialias, shader_type, with_glyph_texture, clips)
+                    .map_err(|error| log::error!("clip program for {shader_type:?}: {error}"))
                     .ok()
             })
             .is_some()
@@ -1144,7 +1158,10 @@ impl OpenGl {
 
     fn select_main_program(&mut self, params: &Params) {
         let program_index = params.shader_type.to_u8();
-        let clips = params.clip.is_some() && self.has_clip_shape_program(params);
+        let mut clips = (params.clip.is_some(), params.clip_mask.is_some());
+        if clips != (false, false) && !self.has_clip_program(params, clips) {
+            clips = (false, false);
+        }
         if program_index != self.current_program
             || params.uses_glyph_texture() != self.current_program_needs_glyph_texture
             || clips != self.current_program_clips
@@ -1166,6 +1183,7 @@ impl OpenGl {
             // Bind the two uniform samplers to texture units
             program.set_tex(0);
             program.set_glyphtex(1);
+            program.set_cliptex(2);
             program.set_view(self.view);
         }
     }
@@ -1201,7 +1219,7 @@ impl Renderer for OpenGl {
         commands: Vec<Command>,
     ) {
         self.current_program = 0;
-        self.current_program_clips = false;
+        self.current_program_clips = (false, false);
         self.main_program().bind();
 
         unsafe {

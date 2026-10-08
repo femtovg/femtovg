@@ -142,18 +142,25 @@ All notable changes to this project will be documented in this file.
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
 - Added `Canvas::clip_path(path, fill_rule)`, which clips later drawing to any
-  path under the current transform - Canvas 2D `clip()` and SVG `clip-path`
-  with `clip-rule` - and is scoped by `save()`/`restore()`. Clips use a bit of
-  the stencil buffer both backends already have, so they add no textures or
-  render passes; a clip taken while drawing into a layer lives on the layer's
-  store and gates its content, while the clips underneath gate the composite.
-  `clear_rect()` stays a raw clear the clip does not affect; it clears the
-  stencil with the color so a winding count a cover pass missed cannot reach
-  the next frame - the whole stencil, or only the winding bits while a clip is
-  armed on the target. A clip whose path outlines a rectangle (under any
-  transform), a rounded rectangle or an ellipse skips the stencil: the
-  fragment shader evaluates the shape, and its edge is antialiased like a
-  fill's. The edges of other clips are not antialiased yet.
+  path under the current transform - Canvas 2D `clip()` and SVG `clip-path` with
+  `clip-rule` - and is scoped by `save()`/`restore()`, and
+  `Canvas::clip_paths()`, which clips to the union of several paths, each under
+  its own rule, as an SVG `clipPath` with several children does. A clip's edge
+  is antialiased like a fill's and costs no render pass: a clip whose path
+  outlines a rectangle (under any transform), a rounded rectangle - rounded at
+  all four corners or at the two of one side - or an ellipse is evaluated by the
+  fragment shader of each draw under it, a rectangle that cuts such a shape
+  clips with it in the scissor's place, and any other clip is rasterized on the
+  CPU into a coverage mask of one byte a pixel that those shaders read - kept
+  while the clip does not change or moves by whole pixels, within a budget
+  (`Canvas::set_clip_mask_budget()`, 32 MiB by default). A clip the budget has
+  no room for uses a bit of the stencil buffer both backends already have, where
+  its edge is not antialiased. A clip taken while drawing into a layer lives on
+  the layer's store and gates its content, while the clips underneath gate the
+  composite. `clear_rect()` stays a raw clear the clip does not affect; it
+  clears the stencil with the color so a winding count a cover pass missed
+  cannot reach the next frame - the whole stencil, or only the winding bits
+  while a clip is armed on the target.
 - Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
   a mask image placed in device space, using either its luminance times alpha
   (SVG `mask`'s default `mask-type`, via the new

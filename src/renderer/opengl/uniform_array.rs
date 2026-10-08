@@ -1,5 +1,5 @@
 use super::Params;
-use crate::clip::ClipCoverage;
+use crate::clip::{ClipCoverage, MaskCoverage};
 
 const UNIFORMARRAY_SIZE: usize = 16;
 
@@ -100,6 +100,20 @@ impl UniformArray {
             self.0[54..64].copy_from_slice(&clip.uniform_rows());
         }
     }
+
+    /// The coverage mask, read by the shader variant of a draw under one:
+    /// where its corner lies, the pixels it spans and what one of them is
+    /// of its image, in the halves of the scissor matrix's columns that no
+    /// shader reads, and beside the conic angle whether it takes a pixel
+    /// whole or not at all.
+    pub fn set_clip_mask(&mut self, mask: Option<&MaskCoverage>) {
+        if let Some(mask) = mask {
+            self.0[2..4].copy_from_slice(&mask.origin);
+            self.0[6..8].copy_from_slice(&mask.size);
+            self.0[10..12].copy_from_slice(&mask.texel);
+            self.0[53] = f32::from(u8::from(mask.hard));
+        }
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -126,6 +140,7 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
         arr.set_conic_start_angle(params.conic_start_angle);
         arr.set_clip(params.clip.as_ref());
+        arr.set_clip_mask(params.clip_mask.as_ref());
 
         arr
     }

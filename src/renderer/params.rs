@@ -1,5 +1,5 @@
 use crate::{
-    clip::ClipCoverage,
+    clip::{ClipCoverage, MaskCoverage},
     geometry::Position,
     paint::{GlyphTexture, GradientColors},
     ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
@@ -30,6 +30,8 @@ pub struct Params {
     pub(crate) conic_start_angle: f32,
     /// The clip shape in force on the draw's target, if any.
     pub(crate) clip: Option<ClipCoverage>,
+    /// The coverage mask in force on the draw's target, if any.
+    pub(crate) clip_mask: Option<MaskCoverage>,
 }
 
 impl Params {
@@ -43,9 +45,11 @@ impl Params {
         }
     }
 
-    /// Gates the draw by the clip shape in force on its target, if any.
-    pub(crate) fn with_clip(mut self, clip: Option<ClipCoverage>) -> Self {
-        self.clip = clip;
+    /// Gates the draw by the clip shape and the coverage mask in force on
+    /// its target, if any.
+    pub(crate) fn with_clip(mut self, clip: &crate::clip::DrawClip) -> Self {
+        self.clip = clip.shape;
+        self.clip_mask = clip.mask;
         self
     }
 
