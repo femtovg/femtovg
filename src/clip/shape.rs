@@ -810,11 +810,12 @@ impl ClipCoverage {
 
     /// How far a device position is outside the clip as it was given, in
     /// fringe widths: its [`Self::distance`] from the box, less off a round
-    /// corner what the outline the box was fitted to strays outside it.
-    fn outside(&self, point: [f32; 2]) -> f32 {
+    /// corner what the outline the box was fitted to strays outside it and
+    /// the `straddle` the point may stand off its curve.
+    fn outside(&self, point: [f32; 2], straddle: f32) -> f32 {
         let (distance, round) = self.locate(point);
         if round {
-            distance - self.strays
+            distance - self.strays - straddle
         } else {
             distance
         }
@@ -877,24 +878,32 @@ impl ClipCoverage {
             [bounds.minx, bounds.maxy],
         ]
         .into_iter()
-        .all(|corner| self.outside(corner) <= DRAW_SLACK)
+        .all(|corner| self.outside(corner, 0.0) <= DRAW_SLACK)
     }
 
     /// Whether the clip as it was given holds a draw whole, within
     /// [`DRAW_SLACK`], by the points of its outline: each one inside, with
     /// the `spread` - in fringe widths - the draw reaches around it, a
-    /// stroke's half width. The box is convex, so what lies between the
-    /// points is inside with them; a rounded rect filled under its own
-    /// outline as a clip is held where its bounds, which stand past the
-    /// corners, are not. The points
+    /// stroke's half width, and off a round corner with the `straddle` a
+    /// point between two chords may stand off its curve. The box is convex,
+    /// so what lies between the points is inside with them; a rounded rect
+    /// filled under its own outline as a clip is held where its bounds,
+    /// which stand past the corners, are not. The points
     /// are looked at only where they can tell more than `bounds`, the
     /// draw's, do: not for a draw that reaches past the box's own bounds,
     /// nor under an upright box with square corners, which holds the points
     /// when it holds the bounds. Around a point the distance must be exact,
     /// which it is with square or circular corners and no skew: no other
     /// box holds a stroke this way.
-    pub(crate) fn holds_outline(&self, bounds: &Bounds, points: impl Iterator<Item = [f32; 2]>, spread: f32) -> bool {
-        let Some(own) = self.bounds(DRAW_SLACK + self.strays) else {
+    pub(crate) fn holds_outline(
+        &self,
+        bounds: &Bounds,
+        points: impl Iterator<Item = ([f32; 2], bool)>,
+        spread: f32,
+        straddle: f32,
+    ) -> bool {
+        // The draw's bounds come from its points, so they stand out as far.
+        let Some(own) = self.bounds(DRAW_SLACK + self.strays + straddle) else {
             return true;
         };
         let [a, b, c, d] = self.linear;
@@ -909,7 +918,10 @@ impl ClipCoverage {
             return false;
         }
         let mut points = points.peekable();
-        points.peek().is_some() && points.all(|point| self.outside(point) + spread <= DRAW_SLACK)
+        points.peek().is_some()
+            && points.all(|(point, between_chords)| {
+                self.outside(point, if between_chords { straddle } else { 0.0 }) + spread <= DRAW_SLACK
+            })
     }
 
     /// Whether `other` lies inside this box, within [`CONTAINMENT_SLACK`],
@@ -1171,9 +1183,9 @@ mod tests {
             maxy: bounds.maxy.max(*y),
         });
         let coverage = shape.coverage(1.0).unwrap();
-        assert!(!coverage.holds_outline(&bounds, outline.iter().copied(), 0.0));
+        assert!(!coverage.holds_outline(&bounds, outline.iter().map(|&point| (point, false)), 0.0, 0.0));
         let knowing = coverage.straying(quadratic);
-        assert!(knowing.holds_outline(&bounds, outline.iter().copied(), 0.0));
+        assert!(knowing.holds_outline(&bounds, outline.iter().map(|&point| (point, false)), 0.0, 0.0));
     }
 
     /// A box holds a draw by the points of its outline where its bounds
@@ -1216,7 +1228,7 @@ mod tests {
             let by_bounds = radii == [0.0, 0.0] && frame[1] == 0.0 && frame[2] == 0.0;
             assert_eq!(coverage.holds(&bounds), by_bounds, "{frame:?} {radii:?}");
             assert_eq!(
-                coverage.holds_outline(&bounds, outline.iter().copied(), 0.0),
+                coverage.holds_outline(&bounds, outline.iter().map(|&point| (point, false)), 0.0, 0.0),
                 !by_bounds,
                 "{frame:?} {radii:?}"
             );
@@ -1227,9 +1239,11 @@ mod tests {
             let away = 0.0625 / (x - cx).hypot(y - cy);
             out[3] = [x + (x - cx) * away, y + (y - cy) * away];
             let leaves = coverage.distance(out[3]) > DRAW_SLACK;
-            assert!(leaves && !coverage.holds_outline(&bounds_of(&out), out.iter().copied(), 0.0));
             assert!(
-                !coverage.holds_outline(&bounds, std::iter::empty(), 0.0),
+                leaves && !coverage.holds_outline(&bounds_of(&out), out.iter().map(|&point| (point, false)), 0.0, 0.0)
+            );
+            assert!(
+                !coverage.holds_outline(&bounds, std::iter::empty(), 0.0, 0.0),
                 "no points, nothing held"
             );
 
@@ -1250,11 +1264,12 @@ mod tests {
                 maxy: stroke_bounds.maxy + 2.0,
             };
             assert_eq!(
-                coverage.holds(&stroke_bounds) || coverage.holds_outline(&stroke_bounds, path.iter().copied(), 2.0),
+                coverage.holds(&stroke_bounds)
+                    || coverage.holds_outline(&stroke_bounds, path.iter().map(|&point| (point, false)), 2.0, 0.0),
                 strokes,
                 "{frame:?} {radii:?}: a stroke on the box's edge from inside"
             );
-            assert!(!coverage.holds_outline(&stroke_bounds, path.iter().copied(), 2.1));
+            assert!(!coverage.holds_outline(&stroke_bounds, path.iter().map(|&point| (point, false)), 2.1, 0.0));
         }
     }
 
@@ -1279,10 +1294,14 @@ mod tests {
             };
             let coverage = shape.coverage(1.0).unwrap().straying(0.5);
             assert!(!coverage.holds(&past_a_side), "{radii:?}");
-            assert!(
-                !coverage.holds_outline(&past_a_side, corners.into_iter(), 0.0),
-                "{radii:?}"
-            );
+            // Nor do points between chords take their straddle there.
+            for (between_chords, straddle) in [(false, 0.0), (true, 0.5)] {
+                let points = corners.map(|point| (point, between_chords)).into_iter();
+                assert!(
+                    !coverage.holds_outline(&past_a_side, points, 0.0, straddle),
+                    "{radii:?}"
+                );
+            }
         }
 
         // A quarter pixel off the corner's arc, and on the axis of a circle,
@@ -1307,10 +1326,40 @@ mod tests {
                 maxy: point[1].max(34.0),
             };
             let coverage = shape.coverage(1.0).unwrap();
-            assert!(!coverage.holds_outline(&bounds, points.into_iter(), 0.0), "{point:?}");
+            assert!(
+                !coverage.holds_outline(&bounds, points.map(|point| (point, false)).into_iter(), 0.0, 0.0),
+                "{point:?}"
+            );
             let knowing = coverage.straying(0.5);
-            assert!(knowing.holds_outline(&bounds, points.into_iter(), 0.0), "{point:?}");
+            assert!(
+                knowing.holds_outline(&bounds, points.map(|point| (point, false)).into_iter(), 0.0, 0.0),
+                "{point:?}"
+            );
         }
+    }
+
+    /// A point between two chords may stand off a round corner by the
+    /// straddle, past the box's own bounds too; a point where the path put it
+    /// may not.
+    #[test]
+    fn only_a_point_between_chords_stands_off_by_the_straddle() {
+        let circle = RoundedBox {
+            frame: Transform2D::translation(40.0, 30.0),
+            extent: [20.0, 20.0],
+            radii: [20.0, 20.0],
+        };
+        let coverage = circle.coverage(1.0).unwrap();
+        let out = [60.04, 30.0];
+        let bounds = Bounds {
+            minx: 40.0,
+            miny: 30.0,
+            maxx: out[0],
+            maxy: 34.0,
+        };
+        let points = |between_chords| [([40.0, 30.0], false), (out, between_chords), ([40.0, 34.0], false)].into_iter();
+        assert!(coverage.holds_outline(&bounds, points(true), 0.0, 0.05));
+        assert!(!coverage.holds_outline(&bounds, points(true), 0.0, 0.0));
+        assert!(!coverage.holds_outline(&bounds, points(false), 0.0, 0.05));
     }
 
     /// A coverage is zero outside its reach, and the reach is no wider than
