@@ -138,15 +138,24 @@ impl Contour {
         self.point_range.end - self.point_range.start
     }
 
-    /// Recomputes each point's direction and length to its successor. Every
-    /// point stores the edge that leaves it, so reversing a contour leaves all
-    /// of them pointing at what is now the previous point.
-    fn recompute_directions(points: &mut [Point]) {
-        for i in 0..points.len() {
-            let next = points[(i + 1) % points.len()].pos;
-            let p = &mut points[i];
-            p.dpos = next - p.pos;
-            p.len = p.dpos.normalize();
+    /// Reverses a contour whose points know the edge that leaves each one:
+    /// reversed, a point leaves along the edge that arrived at it, negated.
+    /// That equals working the directions out again, but a zero component
+    /// can come back as -0.0; reversing twice restores every bit.
+    fn reverse(points: &mut [Point]) {
+        points.reverse();
+        let Some(first) = points.first().map(|p| (p.dpos, p.len)) else {
+            return;
+        };
+        for i in 1..points.len() {
+            let (dpos, len) = (points[i].dpos, points[i].len);
+            let p = &mut points[i - 1];
+            p.dpos = -dpos;
+            p.len = len;
+        }
+        if let Some(last) = points.last_mut() {
+            last.dpos = -first.0;
+            last.len = first.1;
         }
     }
 }
@@ -280,23 +289,22 @@ impl PathCache {
                 }
             }
 
-            for i in 0..contour.point_count() {
-                let p1 = points.get(i).copied().unwrap();
-
-                let p0 = if i == 0 {
-                    points.last_mut().unwrap()
-                } else {
-                    points.get_mut(i - 1).unwrap()
-                };
-
-                p0.dpos = p1.pos - p0.pos;
-                p0.len = p0.dpos.normalize();
-
-                bounds.minx = bounds.minx.min(p0.pos.x);
-                bounds.miny = bounds.miny.min(p0.pos.y);
-                bounds.maxx = bounds.maxx.max(p0.pos.x);
-                bounds.maxy = bounds.maxy.max(p0.pos.y);
+            // Each point's direction and length to the next, the last's to the
+            // first, and the bounds, kept in registers until the contour ends.
+            let first = points[0].pos;
+            let (mut minx, mut miny, mut maxx, mut maxy) = (bounds.minx, bounds.miny, bounds.maxx, bounds.maxy);
+            let count = points.len();
+            for i in 0..count {
+                let next = if i + 1 < count { points[i + 1].pos } else { first };
+                let p = &mut points[i];
+                p.dpos = next - p.pos;
+                p.len = p.dpos.normalize();
+                minx = minx.min(p.pos.x);
+                miny = miny.min(p.pos.y);
+                maxx = maxx.max(p.pos.x);
+                maxy = maxy.max(p.pos.y);
             }
+            *bounds = Bounds { minx, miny, maxx, maxy };
 
             true
         });
@@ -700,8 +708,7 @@ impl PathCache {
             let points = &mut self.points[contour.point_range.clone()];
             contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
             if contour.reversed {
-                points.reverse();
-                Contour::recompute_directions(points);
+                Contour::reverse(points);
             }
         }
 
@@ -816,8 +823,7 @@ impl PathCache {
         for contour in &mut self.contours {
             if contour.reversed {
                 let points = &mut self.points[contour.point_range.clone()];
-                points.reverse();
-                Contour::recompute_directions(points);
+                Contour::reverse(points);
             }
         }
     }
@@ -1365,6 +1371,81 @@ mod tests {
         flatten_recursively(points, left, level + 1, PointFlags::empty(), tol);
         let right = [x1234, y1234, x234, y234, x34, y34, x4, y4];
         flatten_recursively(points, right, level + 1, flags, tol);
+    }
+
+    // Each point's direction and length to the next, the last's to the first.
+    fn work_out_directions(points: &mut [Point]) {
+        for i in 0..points.len() {
+            let next = points[(i + 1) % points.len()].pos;
+            let p = &mut points[i];
+            p.dpos = next - p.pos;
+            p.len = p.dpos.normalize();
+        }
+    }
+
+    #[test]
+    fn reversing_gives_the_directions_worked_out_again() {
+        let mut seed = 7;
+        for case in 0..600 {
+            // Every third contour on a coarse grid, for axis-aligned edges and repeated points.
+            let grid = case % 3 == 0;
+            let mut points: Vec<Point> = (0..1 + case % 9)
+                .map(|_| {
+                    let (x, y) = (unit(&mut seed) * 50.0, unit(&mut seed) * 50.0);
+                    let (x, y) = if grid {
+                        ((x / 10.0).floor(), (y / 10.0).floor())
+                    } else {
+                        (x, y)
+                    };
+                    Point::new(x, y, PointFlags::empty())
+                })
+                .collect();
+            work_out_directions(&mut points);
+            let bits = |p: &Point| [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len].map(f32::to_bits);
+            let original: Vec<_> = points.iter().map(bits).collect();
+
+            let mut expected = points.clone();
+            expected.reverse();
+            work_out_directions(&mut expected);
+            Contour::reverse(&mut points);
+            for (p, q) in points.iter().zip(&expected) {
+                let same =
+                    [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len] == [q.pos.x, q.pos.y, q.dpos.x, q.dpos.y, q.len];
+                assert!(same, "case {case}: {p:?} reversed, {q:?} worked out again");
+            }
+
+            Contour::reverse(&mut points);
+            assert_eq!(
+                points.iter().map(bits).collect::<Vec<_>>(),
+                original,
+                "case {case}: reversed twice"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fill_hands_a_reversed_contour_back_as_it_found_it() {
+        // Wound against a solid's direction, with a curve and edges along both axes.
+        let mut path = Path::new();
+        path.move_to(10.0, 10.0);
+        path.line_to(90.0, 10.0);
+        path.bezier_to(110.0, 30.0, 110.0, 70.0, 90.0, 90.0);
+        path.line_to(10.0, 90.0);
+        path.close();
+        let mut cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let snapshot = |cache: &PathCache| {
+            let bits = |p: &Point| [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len].map(f32::to_bits);
+            cache.points.iter().map(bits).collect::<Vec<_>>()
+        };
+        let before = snapshot(&cache);
+
+        cache.expand_fill(1.0, LineJoin::Miter, 2.4, FillRule::NonZero);
+
+        assert!(
+            cache.contours[0].reversed,
+            "the fill has to reverse this contour for the test to mean anything"
+        );
+        assert_eq!(snapshot(&cache), before);
     }
 
     #[test]
