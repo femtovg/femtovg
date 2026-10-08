@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `CompositeOperation` and `BlendFactor` are now `#[non_exhaustive]`. Both
+  describe an open-ended capability space - the separable blend modes
+  (`multiply`, `screen`, `color-burn`, ...) belong in `CompositeOperation`, and
+  `BlendFactor` is a subset of what the backends expose - so adding to either
+  should not be a breaking change. Downstream `match`es on them now need a
+  wildcard arm.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
