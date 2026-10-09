@@ -720,19 +720,6 @@ impl PathCache {
 
         self.calculate_joins(fringe_width, line_join, miter_limit);
 
-        // Calculate max vertex usage.
-        for contour in &mut self.contours {
-            let point_count = contour.point_count();
-            let mut vertex_count = point_count + contour.bevel + 1;
-
-            if has_fringe {
-                vertex_count += (point_count + contour.bevel * 5 + 1) * 2;
-                contour.stroke.reserve(vertex_count);
-            }
-
-            contour.fill.reserve(vertex_count);
-        }
-
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
         for contour in &mut self.contours {
@@ -742,8 +729,13 @@ impl PathCache {
                 continue;
             }
 
-            let triangle_count = (contour.fill.capacity() - 2) * 3;
-            let mut triangle_fan_fill = Vec::with_capacity(triangle_count);
+            // The fill is a fan about its first vertex: one vertex per point,
+            // two at a bevel.
+            let point_count = contour.point_count();
+            contour.fill.reserve(point_count + contour.bevel);
+            if has_fringe {
+                contour.stroke.reserve((point_count + contour.bevel * 5 + 1) * 2);
+            }
 
             // TODO: woff = 0.0 produces no artifaacts for small sizes
             let woff = 0.5 * fringe_width;
@@ -754,45 +746,35 @@ impl PathCache {
                     if p1.flags.contains(PointFlags::BEVEL) {
                         if p1.flags.contains(PointFlags::LEFT) {
                             let lpos = p1.pos + p1.dmpos * woff;
-                            triangle_fan_fill.push(Vertex::pos(lpos, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos, 0.5, 1.0));
                         } else {
                             let lpos0 = p1.pos + p0.dpos.orthogonal() * woff;
                             let lpos1 = p1.pos + p1.dpos.orthogonal() * woff;
-                            triangle_fan_fill.push(Vertex::pos(lpos0, 0.5, 1.0));
-                            triangle_fan_fill.push(Vertex::pos(lpos1, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos0, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos1, 0.5, 1.0));
                         }
                     } else {
-                        triangle_fan_fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
+                        contour.fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
                     }
                 }
             } else {
                 let points = &self.points[contour.point_range.clone()];
 
                 for point in points {
-                    triangle_fan_fill.push(Vertex::pos(point.pos, 0.5, 1.0));
+                    contour.fill.push(Vertex::pos(point.pos, 0.5, 1.0));
                 }
             }
 
-            // convert fill triangle fan to triangles, to eliminate requirement for GL_TRIANGLE_FAN
-            // from the renderer.
-            if triangle_fan_fill.len() > 2 {
-                let center = triangle_fan_fill[0];
-                let tail = &triangle_fan_fill[1..];
+            if contour.fill.len() > 2 {
                 // Only the stencil pass reads this winding back, to tell a hole
-                // from a solid. A convex path skips the stencil and is drawn
-                // directly, where flipped triangles would just face away.
-                let flip = contour.reversed && !convex;
-                contour.fill = tail
-                    .windows(2)
-                    .flat_map(|vertices| {
-                        let (a, b) = if flip {
-                            (vertices[1], vertices[0])
-                        } else {
-                            (vertices[0], vertices[1])
-                        };
-                        IntoIterator::into_iter([center, a, b])
-                    })
-                    .collect();
+                // from a solid; reversing the rim flips every triangle. A convex
+                // path skips the stencil, where flipped triangles would just
+                // face away.
+                if contour.reversed && !convex {
+                    contour.fill[1..].reverse();
+                }
+            } else {
+                contour.fill.clear();
             }
 
             if has_fringe {
@@ -1099,32 +1081,22 @@ impl PathCache {
             return None;
         }
 
-        let vertices = &self.contours[0].fill;
-        if vertices.len() != 6 {
+        // A fan of four: the corners in turn.
+        let &[top_left, bottom_left, bottom_right, top_right] = self.contours[0].fill.as_slice() else {
             return None;
-        }
+        };
 
-        let maybe_t1_top_left = vertices[0];
-        let maybe_t1_bottom_left = vertices[1];
-        let maybe_t1_bottom_right = vertices[2];
-        let maybe_t2_top_left = vertices[3];
-        let maybe_t2_bottom_right = vertices[4];
-        let maybe_t2_top_right = vertices[5];
-
-        if maybe_t1_top_left == maybe_t2_top_left
-            && maybe_t1_bottom_right == maybe_t2_bottom_right
-            && maybe_t1_top_left.x == maybe_t1_bottom_left.x
-            && maybe_t1_top_left.y == maybe_t2_top_right.y
-            && maybe_t1_bottom_right.x == maybe_t2_top_right.x
-            && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
+        if top_left.x == bottom_left.x
+            && top_left.y == top_right.y
+            && bottom_right.x == top_right.x
+            && bottom_right.y == bottom_left.y
         {
             // A mirrored transform hands the corners over in the opposite
-            // order, so take the extent by min/max rather than by position in
-            // the strip: the fill is the same rect either way, and the blit
-            // maps its texture coordinates through the paint transform, flip
-            // included.
-            let (x0, x1) = (maybe_t1_top_left.x, maybe_t2_top_right.x);
-            let (y0, y1) = (maybe_t1_top_left.y, maybe_t1_bottom_left.y);
+            // order, so the names hold only for an upright rect: take the
+            // extent by min/max, not by place in the fan. The blit maps its
+            // texture coordinates through the paint transform, flip included.
+            let (x0, x1) = (top_left.x, top_right.x);
+            let (y0, y1) = (top_left.y, bottom_left.y);
             Some(crate::Rect::new(
                 x0.min(x1),
                 y0.min(y1),
