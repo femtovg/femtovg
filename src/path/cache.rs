@@ -323,18 +323,24 @@ impl PathCache {
     /// contours share one vertex list without introducing triangles between
     /// them.
     pub(crate) fn winding_triangles(&self) -> Vec<Vertex> {
-        let mut vertices = Vec::new();
+        let triangles = self
+            .contours
+            .iter()
+            .map(|contour| contour.point_count().saturating_sub(2))
+            .sum::<usize>();
+        let mut vertices = Vec::with_capacity(triangles * 3);
 
         for contour in &self.contours {
             let points = &self.points[contour.point_range.clone()];
-            if let Some((&center, tail)) = points.split_first() {
-                vertices.extend(tail.windows(2).flat_map(|edge| {
-                    [
-                        Vertex::pos(center.pos, 0.5, 1.0),
+            if let Some((center, tail)) = points.split_first() {
+                let center = Vertex::pos(center.pos, 0.5, 1.0);
+                for edge in tail.windows(2) {
+                    vertices.extend_from_slice(&[
+                        center,
                         Vertex::pos(edge[0].pos, 0.5, 1.0),
                         Vertex::pos(edge[1].pos, 0.5, 1.0),
-                    ]
-                }));
+                    ]);
+                }
             }
         }
 
