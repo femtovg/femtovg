@@ -3,6 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a point repeated in a path, or added within 0.01 device pixels of
+  the one before, being kept as a zero-length edge. A line to the current
+  point, the zero-length sides of a pill from `rounded_rect` (or of an SVG
+  `rect` whose radius is half its height) and segments that shrink below the
+  tolerance at small sizes all made one: a mitred join there lost its outer
+  corner, a square or round cap its extension, the fill's antialiased fringe
+  slanted along both neighbouring edges, and a convex shape was filled
+  through the stencil. The point is merged into the one before it, as in
+  nanovg.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
