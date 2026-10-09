@@ -2529,6 +2529,9 @@ pub struct RecordingRenderer {
     pub image_allocation_attempts: usize,
     /// Number of backend images released.
     pub image_deletion_count: usize,
+    /// When true, each image stores the pixels of every RGBA `update_image` call it
+    /// receives.
+    pub retain_image_updates: bool,
 }
 
 #[cfg(test)]
@@ -2557,7 +2560,10 @@ impl Renderer for RecordingRenderer {
         if self.fail_image_allocations {
             return Err(ErrorKind::UnknownError);
         }
-        Ok(Self::Image { info })
+        Ok(Self::Image {
+            info,
+            updates: Vec::new(),
+        })
     }
 
     fn create_image_from_native_texture(
@@ -2587,6 +2593,11 @@ impl Renderer for RecordingRenderer {
         if self.fail_image_updates {
             return Err(ErrorKind::UnknownError);
         }
+        if let (true, crate::ImageSource::Rgba(pixels)) = (self.retain_image_updates, data) {
+            let (pixels, width, height) = pixels.to_contiguous_buf();
+            let pixels = imgref::ImgVec::new(pixels.into_owned(), width, height);
+            image.updates.push((x, y, pixels));
+        }
         Ok(())
     }
 
@@ -2612,6 +2623,9 @@ impl Renderer for RecordingRenderer {
 #[derive(Debug)]
 pub struct DummyImage {
     info: ImageInfo,
+    /// The destination `(x, y)` and the pixels of each RGBA `update_image` call on this image,
+    /// in call order. Empty unless `RecordingRenderer::retain_image_updates` is set.
+    updates: Vec<(usize, usize, imgref::ImgVec<rgb::RGBA8>)>,
 }
 
 #[test]
