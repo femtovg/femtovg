@@ -371,6 +371,9 @@ impl Default for State {
     }
 }
 
+// The most vertices a fill's fan is drawn with.
+const MAX_FAN: usize = 65_535;
+
 /// Main 2D drawing context.
 #[derive(Debug)]
 pub struct Canvas<T: Renderer> {
@@ -1386,17 +1389,32 @@ where
         // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
-        cmd.drawables.reserve_exact(path_cache.contours.len());
+        cmd.drawables.reserve(path_cache.contours.len());
         for contour in &path_cache.contours {
             let mut drawable = Drawable::default();
 
             // Fill commands can have both fill and stroke vertices. Fill vertices are used to fill
             // the body of the shape while stroke vertices are used to prodice antialiased edges
 
-            if !contour.fill.is_empty() {
-                drawable.fill_verts = Some((offset, contour.fill.len()));
-                self.verts.extend_from_slice(&contour.fill);
-                offset += contour.fill.len();
+            if let Some((&hub, rim)) = contour.fill.split_first() {
+                // A driver may split a fan longer than MAX_FAN about the wrong vertex (Mesa's
+                // vc4 does), so a longer one goes as several about the same first vertex.
+                let mut rim = rim;
+                while rim.len() >= MAX_FAN {
+                    cmd.drawables.push(Drawable {
+                        fill_verts: Some((offset, MAX_FAN)),
+                        ..Drawable::default()
+                    });
+                    self.verts.push(hub);
+                    self.verts.extend_from_slice(&rim[..MAX_FAN - 1]);
+                    offset += MAX_FAN;
+                    // The next fan starts at this one's last vertex.
+                    rim = &rim[MAX_FAN - 2..];
+                }
+                drawable.fill_verts = Some((offset, 1 + rim.len()));
+                self.verts.push(hub);
+                self.verts.extend_from_slice(rim);
+                offset += 1 + rim.len();
             }
 
             if !contour.stroke.is_empty() {
@@ -2612,6 +2630,67 @@ impl Renderer for RecordingRenderer {
 #[derive(Debug)]
 pub struct DummyImage {
     info: ImageInfo,
+}
+
+/// A contour longer than a fan may be goes as several fans about its first
+/// vertex, none longer than [`MAX_FAN`], each starting at the last rim vertex
+/// of the one before: together they make the contour's own fan's triangles.
+#[test]
+fn a_contour_longer_than_a_fan_goes_as_several() {
+    use renderer::CommandType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1024, 1024, 1.0);
+    // Further apart than two points that count as one.
+    let points = 2 * MAX_FAN + 100;
+    let mut path = Path::new();
+    for i in 0..points {
+        let a = i as f32 / points as f32 * std::f32::consts::TAU;
+        let (x, y) = (512.0 + 450.0 * a.cos(), 512.0 + 450.0 * a.sin());
+        if i == 0 {
+            path.move_to(x, y);
+        } else {
+            path.line_to(x, y);
+        }
+    }
+    path.close();
+    canvas.fill_path(&path, &Paint::color(Color::white()));
+    let contour_fan = path
+        .cache(&Transform2D::identity(), canvas.tess_tol, canvas.dist_tol)
+        .contours[0]
+        .fill
+        .clone();
+    canvas.flush_to_output(());
+
+    let commands = recorded_commands.borrow();
+    let verts = recorded_verts.borrow();
+    let fill = commands
+        .iter()
+        .find(|command| {
+            matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            )
+        })
+        .unwrap();
+    let fans: Vec<&[Vertex]> = fill
+        .drawables
+        .iter()
+        .filter_map(|drawable| drawable.fill_verts)
+        .map(|(start, count)| &verts[start..start + count])
+        .collect();
+    assert_eq!(fans.len(), 3);
+    assert!(fans.iter().all(|fan| fan.len() <= MAX_FAN));
+    let mut joined = fans[0].to_vec();
+    for fan in &fans[1..] {
+        assert_eq!(fan[0], joined[0], "about the same first vertex");
+        assert_eq!(fan[1], *joined.last().unwrap(), "from where the last fan ended");
+        joined.extend_from_slice(&fan[2..]);
+    }
+    assert_eq!(joined, contour_fan);
 }
 
 #[test]
