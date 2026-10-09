@@ -100,7 +100,7 @@ pub struct RenderedGlyphId {
     size: u32,
     line_width: u32,
     render_mode: RenderMode,
-    subpixel_location: u8,
+    subpixel_location: i8,
     variation_hash: u64,
 }
 
@@ -111,7 +111,7 @@ impl RenderedGlyphId {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        subpixel_location: u8,
+        subpixel_location: i8,
         normalized_coords: &[i16],
     ) -> Self {
         use std::hash::Hasher;
@@ -545,111 +545,112 @@ impl GlyphAtlas {
         font_id: FontId,
         font: &Font,
         font_face: &font::FontFaceRef<'_>,
-        mut glyphs: impl Iterator<Item = PositionedGlyph>,
+        glyphs: impl Iterator<Item = PositionedGlyph>,
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
         normalized_coords: &[i16],
     ) -> Result<GlyphDrawCommands, ErrorKind> {
-        let mut alpha_cmd_map = FnvHashMap::default();
-        let mut color_cmd_map = FnvHashMap::default();
-
-        let line_width_offset = if mode == RenderMode::Stroke {
-            (line_width / 2.0).ceil()
-        } else {
-            0.0
-        };
-
-        let mut add_glyph = |canvas: &mut Canvas<T>, glyph: PositionedGlyph| -> Result<(), ErrorKind> {
-            let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
-
-            let id = RenderedGlyphId::new(
-                glyph.glyph_id,
-                font_id,
-                font_size,
-                line_width,
-                mode,
-                subpixel_location as u8,
-                normalized_coords,
-            );
-
-            let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
-            let glyph_cache_entry = rendered_glyphs.entry(id);
-            let glyph_cache_entry = match glyph_cache_entry {
-                std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
-                std::collections::hash_map::Entry::Vacant(_) => {
-                    let placed = self.place_glyph(
-                        canvas,
-                        font_size,
-                        line_width,
-                        mode,
-                        font,
-                        font_face,
-                        glyph.glyph_id,
-                        subpixel_location / 10.0,
-                        normalized_coords,
-                    )?;
-                    if let Some((_, Some(mask))) = &placed {
-                        // The masks of one run can be in different atlas textures.
-                        canvas.set_render_target(RenderTarget::Image(mask.image_id));
-                        mask.draw(canvas, mode);
-                    }
-                    glyph_cache_entry.insert_entry(placed.map(|(rendered, _)| rendered))
-                }
-            };
-
-            let Some(rendered) = glyph_cache_entry.get() else {
-                return Ok(());
-            };
-
-            if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
-                let image_id = texture.image_id;
-                let size = texture.atlas.size();
-                let itw = 1.0 / size.0 as f32;
-                let ith = 1.0 / size.1 as f32;
-
-                let cmd_map = if rendered.color_glyph {
-                    &mut color_cmd_map
-                } else {
-                    &mut alpha_cmd_map
-                };
-
-                let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
-                    image_id,
-                    quads: Vec::new(),
-                });
-
-                let mut q = Quad::default();
-
-                let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
-
-                q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.x1 = q.x0 + rendered.width as f32;
-                q.y1 = q.y0 + rendered.height as f32;
-
-                q.s0 = rendered.atlas_x as f32 * itw;
-                q.t0 = rendered.atlas_y as f32 * ith;
-                q.s1 = (rendered.atlas_x + rendered.width) as f32 * itw;
-                q.t1 = (rendered.atlas_y + rendered.height) as f32 * ith;
-
-                cmd.quads.push(q);
-            }
-
-            Ok(())
-        };
-
-        // Glyph masks are drawn inside one offscreen_pass(). The pass restores the caller's state
-        // and render target when it ends, also when a glyph fails. It is opened on the caller's
-        // own render target, so no target switch is queued unless a mask is drawn.
+        // The entire atlas operation runs offscreen. This preserves the caller's layers, state
+        // and render target, including when a glyph fails. Opening the pass on the caller's
+        // target queues no target switch unless a new path mask needs to be drawn.
         let target = canvas.current_render_target;
         canvas.offscreen_pass(target, Transform2D::identity(), |canvas| {
-            glyphs.try_for_each(|glyph| add_glyph(canvas, glyph))
-        })?;
+            let mut alpha_cmd_map = FnvHashMap::default();
+            let mut color_cmd_map = FnvHashMap::default();
 
-        Ok(GlyphDrawCommands {
-            alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
-            color_glyphs: color_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+            let line_width_offset = if mode == RenderMode::Stroke {
+                (line_width / 2.0).ceil()
+            } else {
+                0.0
+            };
+
+            for glyph in glyphs {
+                // The fraction of x in tenths of a pixel, -10 to 10, with the sign of x. It is the
+                // offset of the glyph from `glyph.x.trunc()`, where the quad is placed below.
+                // `quantize` rounds to the nearest step only for a non-negative value, so it is given
+                // the absolute value.
+                let fract = glyph.x.fract();
+                let subpixel_location = (crate::geometry::quantize(fract.abs(), 0.1) * 10.0).copysign(fract) as i8;
+
+                let id = RenderedGlyphId::new(
+                    glyph.glyph_id,
+                    font_id,
+                    font_size,
+                    line_width,
+                    mode,
+                    subpixel_location,
+                    normalized_coords,
+                );
+
+                let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
+                let glyph_cache_entry = rendered_glyphs.entry(id);
+                let glyph_cache_entry = match glyph_cache_entry {
+                    std::collections::hash_map::Entry::Occupied(occupied_entry) => occupied_entry,
+                    std::collections::hash_map::Entry::Vacant(_) => {
+                        let placed = self.place_glyph(
+                            canvas,
+                            font_size,
+                            line_width,
+                            mode,
+                            font,
+                            font_face,
+                            glyph.glyph_id,
+                            f32::from(subpixel_location) / 10.0,
+                            normalized_coords,
+                        )?;
+                        if let Some((_, Some(mask))) = &placed {
+                            // The masks of one run can be in different atlas textures.
+                            canvas.set_render_target(RenderTarget::Image(mask.image_id));
+                            mask.draw(canvas, mode);
+                        }
+                        glyph_cache_entry.insert_entry(placed.map(|(rendered, _)| rendered))
+                    }
+                };
+
+                let Some(rendered) = glyph_cache_entry.get() else {
+                    continue;
+                };
+
+                if let Some(texture) = self.glyph_textures.borrow().get(rendered.texture_index) {
+                    let image_id = texture.image_id;
+                    let size = texture.atlas.size();
+                    let itw = 1.0 / size.0 as f32;
+                    let ith = 1.0 / size.1 as f32;
+
+                    let cmd_map = if rendered.color_glyph {
+                        &mut color_cmd_map
+                    } else {
+                        &mut alpha_cmd_map
+                    };
+
+                    let cmd = cmd_map.entry(rendered.texture_index).or_insert_with(|| DrawCommand {
+                        image_id,
+                        quads: Vec::new(),
+                    });
+
+                    let mut q = Quad::default();
+
+                    let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
+
+                    q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
+                    q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
+                    q.x1 = q.x0 + rendered.width as f32;
+                    q.y1 = q.y0 + rendered.height as f32;
+
+                    q.s0 = rendered.atlas_x as f32 * itw;
+                    q.t0 = rendered.atlas_y as f32 * ith;
+                    q.s1 = (rendered.atlas_x + rendered.width) as f32 * itw;
+                    q.t1 = (rendered.atlas_y + rendered.height) as f32 * ith;
+
+                    cmd.quads.push(q);
+                }
+            }
+
+            Ok(GlyphDrawCommands {
+                alpha_glyphs: alpha_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+                color_glyphs: color_cmd_map.drain().map(|(_, cmd)| cmd).collect(),
+            })
         })
     }
 
@@ -1013,4 +1014,104 @@ pub fn render_direct<T: Renderer>(
     }
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "swash"))]
+mod tests {
+    use super::*;
+    use crate::RecordingRenderer;
+
+    const ROBOTO_FLEX: &[u8] = include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf");
+    const FONT_SIZE: f32 = 24.0;
+
+    /// Renders a glyph of Roboto Flex with Swash at `FONT_SIZE` and subpixel offset `subpixel_x`,
+    /// with the hinting and format that `render_glyph_swash` uses.
+    fn swash_image(glyph_id: u16, subpixel_x: f32) -> swash::scale::image::Image {
+        use swash::scale::{Render, ScaleContext, Source};
+
+        let mut context = ScaleContext::new();
+        let mut scaler = context
+            .builder(swash::FontRef::from_index(ROBOTO_FLEX, 0).unwrap())
+            .size(FONT_SIZE)
+            .hint(true)
+            .build();
+        Render::new(&[Source::Outline])
+            .format(swash::zeno::Format::Alpha)
+            .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
+            .render(&mut scaler, glyph_id)
+            .unwrap()
+    }
+
+    #[test]
+    fn swash_fill_at_negative_x_uses_the_mask_for_its_subpixel_offset() {
+        let renderer = RecordingRenderer {
+            retain_image_updates: true,
+            ..RecordingRenderer::default()
+        };
+        let mut canvas = Canvas::new(renderer).unwrap();
+        let font_id = canvas.text_context.borrow_mut().add_font_mem(ROBOTO_FLEX).unwrap();
+        let glyph_id = swash::FontRef::from_index(ROBOTO_FLEX, 0).unwrap().charmap().map('g');
+
+        let atlas = canvas.glyph_atlas.clone();
+        let text_context = canvas.text_context.clone();
+        let text_context = RefCell::borrow(&text_context);
+        let font = text_context.font(font_id).unwrap();
+        let font_face = font.face_ref_with_normalized_coords(&[]);
+
+        // Each entry is (x, pixel, tenths). x rounded to a tenth of a pixel is
+        // `pixel + tenths / 10`, where `pixel` is a whole number. -0.96 rounds to -1.0.
+        for (x, pixel, tenths) in [
+            (-0.3, -1.0, 7_u8),
+            (-0.7, -1.0, 3),
+            (0.3, 0.0, 3),
+            (5.0, 5.0, 0),
+            (-0.96, -1.0, 0),
+            (-2.0, -2.0, 0),
+        ] {
+            let glyph = PositionedGlyph { x, y: 70.0, glyph_id };
+            let commands = atlas
+                .render_atlas(
+                    &mut canvas,
+                    font_id,
+                    font,
+                    &font_face,
+                    [glyph].into_iter(),
+                    FONT_SIZE,
+                    0.0,
+                    RenderMode::Fill,
+                    &[],
+                )
+                .unwrap();
+            let command = &commands.alpha_glyphs[0];
+            let quad = &command.quads[0];
+
+            // The mask that the quad samples is the upload to the quad's atlas cell, without the
+            // padding. Its coverage is in the red channel.
+            let cell = (
+                (quad.s0 * TEXTURE_SIZE as f32).round() as usize,
+                (quad.t0 * TEXTURE_SIZE as f32).round() as usize,
+            );
+            let uploads = &canvas.images.get(command.image_id).unwrap().updates;
+            let (_, _, upload) = uploads
+                .iter()
+                .find(|(x, y, _)| (*x, *y) == cell)
+                .expect("Swash should have uploaded a mask to the quad's atlas cell");
+            let padding = GLYPH_PADDING as usize;
+            let (width, height) = (upload.width() - 2 * padding, upload.height() - 2 * padding);
+            let mask = upload.as_ref().sub_image(padding, padding, width, height);
+            let coverage: Vec<u8> = mask.pixels().map(|pixel| pixel.r).collect();
+
+            let expected = swash_image(glyph_id, f32::from(tenths) / 10.0);
+            // `assert!`, not `assert_eq!`, so that a failure does not print both pixel arrays.
+            assert!(
+                (width, coverage) == (expected.placement.width as usize, expected.data),
+                "the glyph at x = {x} should sample Swash's image for the subpixel offset 0.{tenths}"
+            );
+            assert_eq!(
+                quad.x0,
+                pixel + expected.placement.left as f32 - GLYPH_PADDING as f32,
+                "left edge of the quad of the glyph at x = {x}"
+            );
+        }
+    }
 }
