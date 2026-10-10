@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed the WGPU backend rebuilding render pipelines every frame when a frame
+  takes several flushes: each flush dropped every pipeline it did not use.
+  Pipelines now stay cached across flushes, and past 512 the least recently
+  used are dropped first.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
