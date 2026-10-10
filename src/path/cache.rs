@@ -183,6 +183,11 @@ impl<'a> Iterator for PointPairsIter<'a> {
     }
 }
 
+/// How far a chord is moved toward the side its control points lie on, as a
+/// share of their mean distance from it: 3/8 of that is half the curve's
+/// distance from the chord at its middle, half the sagitta on a circular arc.
+const CHORD_SHIFT: f32 = 0.375;
+
 #[derive(Clone, Debug, Default)]
 pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
@@ -193,6 +198,8 @@ pub struct PathCache {
     // whether it bounds a hole under either fill rule. Computed once per
     // cache (per transform), not per fill.
     contour_sides: Option<Vec<(i32, u32, i32)>>,
+    // The square of the farthest a point between two chords was moved off the curve.
+    straddle: f32,
 }
 
 impl PathCache {
@@ -358,9 +365,24 @@ impl PathCache {
         })
     }
 
+    /// The farthest a point between two chords stands off its curve (see
+    /// [`Self::tesselate_bezier`]), in device pixels.
+    pub(crate) fn straddle(&self) -> f32 {
+        self.straddle.sqrt()
+    }
+
     /// The points of every contour: the flattened outline.
     pub(crate) fn positions(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
         self.points.iter().map(|point| [point.pos.x, point.pos.y])
+    }
+
+    /// The points of every contour, each with whether it lies between two
+    /// chords, off its curve, rather than where the path put it.
+    pub(crate) fn positions_between_chords(&self) -> impl Iterator<Item = ([f32; 2], bool)> + '_ {
+        let between_chords = |point: &Point| !point.flags.contains(PointFlags::CORNER);
+        self.points
+            .iter()
+            .map(move |point| ([point.pos.x, point.pos.y], between_chords(point)))
     }
 
     fn add_contour(&mut self) {
@@ -389,27 +411,45 @@ impl PathCache {
         }
     }
 
-    /// Flattens a cubic into the ends of its pieces: a piece whose control
-    /// points lie close enough to the line between its ends is taken as
-    /// that line, and any other is halved, to ten halvings, the left half
-    /// first. Only the cubic's own end takes `flags`.
+    /// Flattens a cubic into chords: a piece whose control points lie close
+    /// enough to the line between its ends is taken as that line, and any
+    /// other is halved, to ten halvings, the left half first. A chord lies
+    /// on the inner side of its piece's bend, off the curve by up to its
+    /// sagitta, so each point between two chords is moved outward, toward
+    /// their control points, by the mean of their [`CHORD_SHIFT`]s: the
+    /// chords then cross the curve and stray about half the sagitta either
+    /// side. The cubic's end stays on it and takes `flags`.
     fn tesselate_bezier(&mut self, curve: [f32; 8], flags: PointFlags, tess_tol: f32, dist_tol: f32) {
         // The right halves still to flatten, the nearest last, each with its
-        // depth and whether it ends the cubic: one at most per depth.
-        let mut pending = [([0.0; 8], 0u8, false); 10];
+        // depth: one at most per depth.
+        let mut pending = [([0.0; 8], 0u8); 10];
         let mut count = 0;
-        let (mut piece, mut depth, mut ends) = (curve, 0u8, true);
+        let (mut piece, mut depth) = (curve, 0u8);
+        // The end of the last chord, held until the next chord's shift is
+        // known, and its own shift.
+        let mut held: Option<([f32; 2], [f32; 2])> = None;
 
         loop {
             let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
             let dx = x4 - x1;
             let dy = y4 - y1;
-            let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
-            let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
+            // The control points' distances to the right of the chord, times its length.
+            let d2 = (x2 - x4) * dy - (y2 - y4) * dx;
+            let d3 = (x3 - x4) * dy - (y3 - y4) * dx;
+            let chord = dx * dx + dy * dy;
 
-            if (d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy) {
-                let flags = if ends { flags } else { PointFlags::empty() };
-                self.add_point(x4, y4, flags, dist_tol);
+            if (d2.abs() + d3.abs()) * (d2.abs() + d3.abs()) < tess_tol * chord {
+                let bend = if chord > 0.0 {
+                    -CHORD_SHIFT * 0.5 * (d2 + d3) / chord
+                } else {
+                    0.0
+                };
+                let shift = [-dy * bend, dx * bend];
+                if let Some((at, previous)) = held.replace(([x4, y4], shift)) {
+                    let mean = [(previous[0] + shift[0]) * 0.5, (previous[1] + shift[1]) * 0.5];
+                    self.straddle = self.straddle.max(mean[0] * mean[0] + mean[1] * mean[1]);
+                    self.add_point(at[0] + mean[0], at[1] + mean[1], PointFlags::empty(), dist_tol);
+                }
             } else if depth < 10 {
                 let x12 = (x1 + x2) * 0.5;
                 let y12 = (y1 + y2) * 0.5;
@@ -425,9 +465,9 @@ impl PathCache {
                 let y1234 = (y123 + y234) * 0.5;
 
                 depth += 1;
-                pending[count] = ([x1234, y1234, x234, y234, x34, y34, x4, y4], depth, ends);
+                pending[count] = ([x1234, y1234, x234, y234, x34, y34, x4, y4], depth);
                 count += 1;
-                (piece, ends) = ([x1, y1, x12, y12, x123, y123, x1234, y1234], false);
+                piece = [x1, y1, x12, y12, x123, y123, x1234, y1234];
                 continue;
             }
 
@@ -437,7 +477,11 @@ impl PathCache {
                 break;
             };
             count = next;
-            (piece, depth, ends) = pending[count];
+            (piece, depth) = pending[count];
+        }
+
+        if let Some((at, _)) = held {
+            self.add_point(at[0], at[1], flags, dist_tol);
         }
     }
 
@@ -1313,14 +1357,9 @@ mod tests {
         (*seed >> 8) as f32 / (1 << 24) as f32
     }
 
-    // The recursive flattener the loop replaced, as the reference it must match.
-    fn flatten_recursively(
-        points: &mut Vec<([f32; 2], PointFlags)>,
-        c: [f32; 8],
-        level: usize,
-        flags: PointFlags,
-        tol: f32,
-    ) {
+    // The recursive flattener the loop replaced, as the reference it must
+    // match: the pieces it takes as chords, in turn.
+    fn chords_recursively(chords: &mut Vec<[f32; 8]>, c: [f32; 8], level: usize, tol: f32) {
         if level > 10 {
             return;
         }
@@ -1338,17 +1377,29 @@ mod tests {
         let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
         let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
         if (d2 + d3) * (d2 + d3) < tol * (dx * dx + dy * dy) {
-            points.push(([x4, y4], flags));
+            chords.push(c);
             return;
         }
         let x234 = (x23 + x34) * 0.5;
         let y234 = (y23 + y34) * 0.5;
         let x1234 = (x123 + x234) * 0.5;
         let y1234 = (y123 + y234) * 0.5;
-        let left = [x1, y1, x12, y12, x123, y123, x1234, y1234];
-        flatten_recursively(points, left, level + 1, PointFlags::empty(), tol);
-        let right = [x1234, y1234, x234, y234, x34, y34, x4, y4];
-        flatten_recursively(points, right, level + 1, flags, tol);
+        chords_recursively(chords, [x1, y1, x12, y12, x123, y123, x1234, y1234], level + 1, tol);
+        chords_recursively(chords, [x1234, y1234, x234, y234, x34, y34, x4, y4], level + 1, tol);
+    }
+
+    // How far a chord is moved toward the side its control points lie on.
+    fn chord_shift([x1, y1, x2, y2, x3, y3, x4, y4]: [f32; 8]) -> [f32; 2] {
+        let (dx, dy) = (x4 - x1, y4 - y1);
+        let d2 = (x2 - x4) * dy - (y2 - y4) * dx;
+        let d3 = (x3 - x4) * dy - (y3 - y4) * dx;
+        let chord = dx * dx + dy * dy;
+        let bend = if chord > 0.0 {
+            -CHORD_SHIFT * 0.5 * (d2 + d3) / chord
+        } else {
+            0.0
+        };
+        [-dy * bend, dx * bend]
     }
 
     // Each point's direction and length to the next, the last's to the first.
@@ -1447,8 +1498,19 @@ mod tests {
             path.move_to(c[0], c[1]);
             path.bezier_to(c[2], c[3], c[4], c[5], c[6], c[7]);
             let cache = PathCache::new(path.verbs(), &Transform2D::identity(), tol, 0.01);
+            // Each point between two chords moved by the mean of their shifts,
+            // and the last chord's end where it is, with the curve's flags.
+            let mut chords = Vec::new();
+            chords_recursively(&mut chords, c, 0, tol);
             let mut expected = vec![([c[0], c[1]], PointFlags::CORNER)];
-            flatten_recursively(&mut expected, c, 0, PointFlags::CORNER, tol);
+            for pair in chords.windows(2) {
+                let ([a0, a1], [b0, b1]) = (chord_shift(pair[0]), chord_shift(pair[1]));
+                let mean = [(a0 + b0) * 0.5, (a1 + b1) * 0.5];
+                expected.push(([pair[0][6] + mean[0], pair[0][7] + mean[1]], PointFlags::empty()));
+            }
+            if let Some(last) = chords.last() {
+                expected.push(([last[6], last[7]], PointFlags::CORNER));
+            }
 
             let bits = |(p, flags): ([f32; 2], PointFlags)| (p.map(f32::to_bits), flags);
             let got: Vec<_> = cache

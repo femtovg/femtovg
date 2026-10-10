@@ -374,6 +374,12 @@ impl Default for State {
 // The most vertices a fill's fan is drawn with.
 const MAX_FAN: usize = 65_535;
 
+// At a dpi of 1: a cubic piece is flat once its control points' distances
+// from its chord sum to under the square root of TESS_TOL, in pixels, and
+// points nearer each other than DIST_TOL pixels may be taken as one.
+const TESS_TOL: f32 = 0.125;
+const DIST_TOL: f32 = 0.01;
+
 /// Main 2D drawing context.
 #[derive(Debug)]
 pub struct Canvas<T: Renderer> {
@@ -488,8 +494,8 @@ where
             pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
-            tess_tol: 0.25,
-            dist_tol: 0.01,
+            tess_tol: TESS_TOL,
+            dist_tol: DIST_TOL,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             filter_work: 0,
@@ -532,8 +538,8 @@ where
             pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
-            tess_tol: 0.25,
-            dist_tol: 0.01,
+            tess_tol: TESS_TOL,
+            dist_tol: DIST_TOL,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             filter_work: 0,
@@ -559,8 +565,8 @@ where
         self.width = width;
         self.height = height;
         self.fringe_width = 1.0 / dpi;
-        self.tess_tol = 0.25 / dpi;
-        self.dist_tol = 0.01 / dpi;
+        self.tess_tol = TESS_TOL / dpi;
+        self.dist_tol = DIST_TOL / dpi;
         self.device_px_ratio = dpi;
 
         self.renderer.set_size(width, height, dpi);
