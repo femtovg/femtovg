@@ -496,6 +496,7 @@ impl PendingMask<'_> {
             if mode == RenderMode::Stroke {
                 canvas.stroke_path_internal(
                     &self.path,
+                    None,
                     &PaintFlavor::Color(mask_color),
                     false,
                     &StrokeSettings {
@@ -504,7 +505,13 @@ impl PendingMask<'_> {
                     },
                 );
             } else {
-                canvas.fill_path_internal(&self.path, &PaintFlavor::Color(mask_color), false, FillRule::NonZero);
+                canvas.fill_path_internal(
+                    &self.path,
+                    None,
+                    &PaintFlavor::Color(mask_color),
+                    false,
+                    FillRule::NonZero,
+                );
             }
         }
     }
@@ -979,21 +986,23 @@ pub fn render_direct<T: Renderer>(
             (glyph_rendering, scale)
         };
 
-        canvas.save();
-
         let line_width = match mode {
             RenderMode::Fill => stroke.line_width,
             RenderMode::Stroke => stroke.line_width / scale,
         };
 
-        canvas.translate(glyph.x, glyph.y);
-        canvas.scale(scale, -scale);
+        // Maps the outline from font units (y up) to the glyph's position in the
+        // run. It is passed with the path and not set on the canvas because the
+        // canvas transform also maps the paint's coordinates, and a gradient or
+        // image paint has to be mapped the same way for every glyph of the run.
+        let outline_transform = Transform2D::new(scale, 0.0, 0.0, -scale, glyph.x, glyph.y);
 
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
                     canvas.stroke_path_internal(
                         path.borrow(),
+                        Some(&outline_transform),
                         paint_flavor,
                         anti_alias,
                         &StrokeSettings {
@@ -1002,14 +1011,18 @@ pub fn render_direct<T: Renderer>(
                         },
                     );
                 } else {
-                    canvas.fill_path_internal(path.borrow(), paint_flavor, anti_alias, FillRule::NonZero);
+                    canvas.fill_path_internal(
+                        path.borrow(),
+                        Some(&outline_transform),
+                        paint_flavor,
+                        anti_alias,
+                        FillRule::NonZero,
+                    );
                 }
             }
             #[cfg(feature = "image-loading")]
             GlyphRendering::RenderAsImage(_) => unreachable!(),
         }
-
-        canvas.restore();
     }
 
     Ok(())
