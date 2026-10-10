@@ -18,7 +18,7 @@ use crate::{
 
 use glow::HasContext;
 
-use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
+use super::{Command, CommandType, FanIndices, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
 
 mod program;
 use program::MainProgram;
@@ -55,6 +55,12 @@ pub struct OpenGl {
     current_program_clips: (bool, bool),
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
+    // The fill fans as triangles of 32-bit indices, on WebGL alone: its
+    // implementations (ANGLE) emulate a fan draw by draw, where a native
+    // driver draws one for less than an indexed draw costs (Apple's: by
+    // about 7,000 instructions).
+    fan_indices: FanIndices,
+    fan_index_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
     screen_target: Option<Framebuffer>,
@@ -76,7 +82,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a function loader that takes C-style strings.
@@ -92,7 +98,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function_cstr(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a Glutin display.
@@ -119,10 +125,10 @@ impl OpenGl {
         };
 
         let context = glow::Context::from_webgl2_context(webgl2_context);
-        Self::new_from_context(context, true)
+        Self::new_from_context(context, true, true)
     }
 
-    fn new_from_context(context: glow::Context, is_opengles_2_0: bool) -> Result<Self, ErrorKind> {
+    fn new_from_context(context: glow::Context, is_opengles_2_0: bool, indexed_fans: bool) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
@@ -303,6 +309,8 @@ impl OpenGl {
             current_program_clips: (false, false),
             vert_arr: None,
             vert_buff: None,
+            fan_indices: FanIndices::default(),
+            fan_index_buff: None,
             framebuffers: HashMap::default(),
             context,
             screen_target: None,
@@ -315,6 +323,9 @@ impl OpenGl {
 
             opengl.vert_arr = opengl.context.create_vertex_array().ok();
             opengl.vert_buff = opengl.context.create_buffer().ok();
+            if indexed_fans {
+                opengl.fan_index_buff = opengl.context.create_buffer().ok();
+            }
         }
 
         Ok(opengl)
@@ -476,15 +487,32 @@ impl OpenGl {
         self.check_error("clip_reset");
     }
 
-    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
+    /// Draws the fan of `count` vertices from `start`: as triangles of the
+    /// frame's fan indices from `first`, moved past them, or without fan
+    /// indices as a fan.
+    fn draw_fan(&self, first: &mut Option<u32>, start: usize, count: usize) {
+        unsafe {
+            match first {
+                Some(first) => {
+                    let indices = FanIndices::count(count);
+                    let offset = (*first as usize * mem::size_of::<u32>()) as i32;
+                    self.context
+                        .draw_elements(glow::TRIANGLES, indices as i32, glow::UNSIGNED_INT, offset);
+                    *first += indices;
+                }
+                None => self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32),
+            }
+        }
+    }
+
+    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, fans: Option<u32>, gpu_paint: &Params) {
         self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
+        let mut first = fans;
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
 
             if let Some((start, count)) = drawable.stroke_verts {
@@ -503,6 +531,7 @@ impl OpenGl {
         &mut self,
         images: &ImageStore<GlTexture>,
         cmd: &Command,
+        fans: Option<u32>,
         stencil_paint: &Params,
         fill_paint: &Params,
     ) {
@@ -531,11 +560,10 @@ impl OpenGl {
             self.context.disable(glow::CULL_FACE);
         }
 
+        let mut first = fans;
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
         }
 
@@ -1247,6 +1275,18 @@ impl Renderer for OpenGl {
             self.context
                 .buffer_data_u8_slice(glow::ARRAY_BUFFER, verts.align_to().1, glow::STREAM_DRAW);
 
+            if self.fan_index_buff.is_some() {
+                self.fan_indices.build(&commands);
+                // Bound with the vertex array, which keeps it for the frame.
+                self.context
+                    .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.fan_index_buff);
+                self.context.buffer_data_u8_slice(
+                    glow::ELEMENT_ARRAY_BUFFER,
+                    self.fan_indices.indices().align_to().1,
+                    glow::STREAM_DRAW,
+                );
+            }
+
             self.context.enable_vertex_attrib_array(0);
             self.context.enable_vertex_attrib_array(1);
 
@@ -1264,16 +1304,17 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        for cmd in commands {
+        for (index, cmd) in commands.into_iter().enumerate() {
             self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
             self.set_composite_operation(cmd.composite_operation);
+            let fans = self.fan_index_buff.map(|_| self.fan_indices.firsts[index]);
 
             match cmd.cmd_type {
-                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, params),
+                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, fans, params),
                 CommandType::ConcaveFill {
                     ref stencil_params,
                     ref fill_params,
-                } => self.concave_fill(images, &cmd, stencil_params, fill_params),
+                } => self.concave_fill(images, &cmd, fans, stencil_params, fill_params),
                 CommandType::Stroke { ref params } => self.stroke(images, &cmd, params),
                 CommandType::StencilStroke {
                     ref params1,
@@ -1435,9 +1476,9 @@ impl Drop for OpenGl {
             }
         }
 
-        if let Some(vert_buff) = self.vert_buff {
+        for buffer in [self.vert_buff, self.fan_index_buff].into_iter().flatten() {
             unsafe {
-                self.context.delete_buffer(vert_buff);
+                self.context.delete_buffer(buffer);
             }
         }
     }

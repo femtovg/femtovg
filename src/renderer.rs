@@ -26,8 +26,48 @@ pub(crate) use params::Params;
 /// Represents a drawable object.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Drawable {
+    /// A fill's fan, or in a `ClipFill` the triangles of all its contours' fans.
     pub(crate) fill_verts: Option<(usize, usize)>,
     pub(crate) stroke_verts: Option<(usize, usize)>,
+}
+
+/// A frame's fill fans as one triangle list over its vertices, for a
+/// renderer that draws them indexed: no fan topology, base vertex or rebind
+/// is needed, and a layered driver has no fan to emulate per draw.
+#[derive(Debug, Default)]
+pub(crate) struct FanIndices {
+    pub(crate) triangles: Vec<[u32; 3]>,
+    // Where each command's fans start, as an index, by the command's place.
+    pub(crate) firsts: Vec<u32>,
+}
+
+impl FanIndices {
+    pub(crate) fn build(&mut self, commands: &[Command]) {
+        self.triangles.clear();
+        self.firsts.clear();
+        for command in commands {
+            self.firsts.push(3 * self.triangles.len() as u32);
+            if matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ) {
+                for (start, count) in command.drawables.iter().filter_map(|drawable| drawable.fill_verts) {
+                    let (hub, end) = (start as u32, (start + count) as u32);
+                    self.triangles
+                        .extend((hub + 1..end.saturating_sub(1)).map(|rim| [hub, rim, rim + 1]));
+                }
+            }
+        }
+    }
+
+    pub(crate) fn indices(&self) -> &[u32] {
+        self.triangles.as_flattened()
+    }
+
+    /// How many indices the fan of `count` vertices takes.
+    pub(crate) fn count(count: usize) -> u32 {
+        (count.saturating_sub(2) * 3) as u32
+    }
 }
 
 /// Defines different types of commands that can be executed by the renderer.
@@ -454,4 +494,51 @@ pub(crate) fn gaussian_blur_coefficients(sigma: f32) -> ([f32; 3], f32) {
     let x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
     let y = f32::exp(-0.5 / (sigma * sigma));
     ([x, y, y * y], sigma)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fan_indices_take_each_fills_fans_in_turn() {
+        let with_fills = |cmd_type, fills: &[(usize, usize)]| {
+            let mut command = Command::new(cmd_type);
+            command.drawables = fills
+                .iter()
+                .map(|&fill| Drawable {
+                    fill_verts: Some(fill),
+                    ..Drawable::default()
+                })
+                .collect();
+            command
+        };
+        let commands = [
+            with_fills(
+                CommandType::ConvexFill {
+                    params: Params::default(),
+                },
+                &[(4, 4)],
+            ),
+            // A clip's fill vertices are triangles already.
+            with_fills(CommandType::ClipFill, &[(20, 6)]),
+            with_fills(
+                CommandType::ConcaveFill {
+                    stencil_params: Params::default(),
+                    fill_params: Params::default(),
+                },
+                &[(10, 3), (13, 5)],
+            ),
+        ];
+
+        let mut fans = FanIndices::default();
+        fans.build(&commands);
+
+        assert_eq!(
+            fans.indices(),
+            [4, 5, 6, 4, 6, 7, 10, 11, 12, 13, 14, 15, 13, 15, 16, 13, 16, 17]
+        );
+        assert_eq!(fans.firsts, [0, 6, 6]);
+        assert_eq!(FanIndices::count(5), 9);
+    }
 }

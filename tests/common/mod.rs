@@ -106,6 +106,25 @@ pub fn render_rgba(
     clear: Color,
     draw: impl FnOnce(&mut Canvas<WGPURenderer>),
 ) -> Vec<u8> {
+    let mut draw = Some(draw);
+    render_frames(device, queue, width, height, clear, 1, |canvas, _| {
+        (draw.take().unwrap())(canvas)
+    })
+    .remove(0)
+}
+
+/// Renders `frames` frames in turn on one fresh canvas of `width` x
+/// `height`, each cleared to `clear` and then drawn by `draw` with its
+/// number, and returns each one's RGBA8 pixels, rows tightly packed.
+pub fn render_frames(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    clear: Color,
+    frames: usize,
+    mut draw: impl FnMut(&mut Canvas<WGPURenderer>, usize),
+) -> Vec<Vec<u8>> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("femtovg test target"),
         size: wgpu::Extent3d {
@@ -123,65 +142,69 @@ pub fn render_rgba(
     let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(width, height, 1.0);
-    canvas.clear_rect(0, 0, width, height, clear);
-    draw(&mut canvas);
-    // The render and the copy that reads it back go to the queue together, so
-    // the pixels cannot depend on the ordering of two separate submissions.
-    let commands = canvas
-        .flush_to_output(&target)
-        .expect("flush_to_output produced no command buffer for a frame with draws");
+    (0..frames)
+        .map(|frame| {
+            canvas.clear_rect(0, 0, width, height, clear);
+            draw(&mut canvas, frame);
+            // The render and the copy that reads it back go to the queue together, so
+            // the pixels cannot depend on the ordering of two separate submissions.
+            let commands = canvas
+                .flush_to_output(&target)
+                .expect("flush_to_output produced no command buffer for a frame with draws");
 
-    let unpadded = width * 4;
-    let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (padded * height) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    enc.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &target,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit([commands, enc.finish()]);
-    let slice = readback.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        sender.send(result).expect("map result receiver dropped");
-    });
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .expect("device poll failed while waiting for the readback");
-    receiver
-        .recv()
-        .expect("map_async callback never ran")
-        .expect("readback buffer map failed");
-    let mapped = slice.get_mapped_range().expect("readback");
-    let mut pixels = vec![0u8; (unpadded * height) as usize];
-    for row in 0..height as usize {
-        let s = row * padded as usize;
-        let d = row * unpadded as usize;
-        pixels[d..d + unpadded as usize].copy_from_slice(&mapped[s..s + unpadded as usize]);
-    }
-    drop(mapped);
-    readback.unmap();
-    pixels
+            let unpadded = width * 4;
+            let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: (padded * height) as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &target,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded),
+                        rows_per_image: Some(height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit([commands, enc.finish()]);
+            let slice = readback.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                sender.send(result).expect("map result receiver dropped");
+            });
+            device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("device poll failed while waiting for the readback");
+            receiver
+                .recv()
+                .expect("map_async callback never ran")
+                .expect("readback buffer map failed");
+            let mapped = slice.get_mapped_range().expect("readback");
+            let mut pixels = vec![0u8; (unpadded * height) as usize];
+            for row in 0..height as usize {
+                let s = row * padded as usize;
+                let d = row * unpadded as usize;
+                pixels[d..d + unpadded as usize].copy_from_slice(&mapped[s..s + unpadded as usize]);
+            }
+            drop(mapped);
+            readback.unmap();
+            pixels
+        })
+        .collect()
 }

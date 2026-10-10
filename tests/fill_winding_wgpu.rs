@@ -265,17 +265,19 @@ fn a_stroke_after_a_fill_still_sees_the_path_as_written() {
         ("closed clockwise square", Box::new(closed) as Box<dyn Fn() -> Path>),
         ("open clockwise polyline", Box::new(open)),
     ] {
+        // One path for every draw, so the stroke after the fill reads the cache the fill left.
+        let path = make();
         let stroke = |canvas: &mut Canvas<WGPURenderer>| {
             let mut paint = Paint::color(Color::rgb(0, 0, 0))
                 .with_line_width(11.0)
                 .with_anti_alias(true);
             paint.set_line_cap_start(LineCap::Round);
             paint.set_line_cap_end(LineCap::Square);
-            canvas.stroke_path(&make(), &paint);
+            canvas.stroke_path(&path, &paint);
         };
         let alone = common::render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |canvas| stroke(canvas));
         let after_fill = common::render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |canvas| {
-            canvas.fill_path(&make(), &Paint::color(Color::rgba(0, 0, 0, 0)).with_anti_alias(true));
+            canvas.fill_path(&path, &Paint::color(Color::rgba(0, 0, 0, 0)).with_anti_alias(true));
             stroke(canvas);
         });
         assert_eq!(alone, after_fill, "filling first changed the stroke of a {what}");

@@ -58,6 +58,7 @@ impl std::fmt::Debug for WGPURenderOutput {
     }
 }
 
+use super::FanIndices;
 use super::Params;
 use super::Vertex;
 use crate::clip::{ClipCoverage, MaskCoverage};
@@ -73,6 +74,8 @@ const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
 const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST);
 const VERTEX_BUFFER_LABEL: &str = "Main Vertex Buffer";
 const VERTEX_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
+const FAN_INDEX_LABEL: &str = "femtovg fan indices";
+const FAN_INDEX_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::INDEX.union(wgpu::BufferUsages::COPY_DST);
 
 /// Replaces `buffer` with a larger one when `needed` bytes no longer fit.
 fn grow_buffer(device: &wgpu::Device, buffer: &mut wgpu::Buffer, needed: u64, label: &str, usage: wgpu::BufferUsages) {
@@ -294,6 +297,8 @@ pub struct WGPURenderer {
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
     vertex_buffer: wgpu::Buffer,
+    fan_indices: FanIndices,
+    fan_index_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
@@ -450,6 +455,13 @@ impl WGPURenderer {
 
         let draw_layouts = [false, true].map(|mask| DrawLayout::new(&device, &viewport_bind_group_layout, mask));
 
+        let fan_index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(FAN_INDEX_LABEL),
+            size: MIN_VERTEX_BYTES,
+            usage: FAN_INDEX_USAGE,
+            mapped_at_creation: false,
+        });
+
         Self {
             device,
             queue,
@@ -463,6 +475,8 @@ impl WGPURenderer {
             uniform_buffer,
             uniform_stride,
             vertex_buffer,
+            fan_indices: FanIndices::default(),
+            fan_index_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
             viewport_bind_group_layout,
@@ -693,6 +707,18 @@ impl Renderer for WGPURenderer {
             self.queue.write_buffer(&self.vertex_buffer, 0, vertex_bytes);
         }
         let vertex_buffer = self.vertex_buffer.clone();
+        self.fan_indices.build(&commands);
+        let fan_index_bytes: &[u8] = bytemuck::cast_slice(self.fan_indices.indices());
+        grow_buffer(
+            &self.device,
+            &mut self.fan_index_buffer,
+            fan_index_bytes.len() as u64,
+            FAN_INDEX_LABEL,
+            FAN_INDEX_USAGE,
+        );
+        if !fan_index_bytes.is_empty() {
+            self.queue.write_buffer(&self.fan_index_buffer, 0, fan_index_bytes);
+        }
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
             if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
@@ -734,6 +760,7 @@ impl Renderer for WGPURenderer {
             texture_view,
             stencil_buffer.clone(),
             vertex_buffer,
+            self.fan_index_buffer.clone(),
         );
         // Ensure that we have one initial render pass, in case the first command is not SetRenderTarget
         render_pass_builder.set_render_target_screen();
@@ -750,7 +777,7 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
-        for command in commands {
+        for (command, &fans) in commands.into_iter().zip(&self.fan_indices.firsts) {
             render_pass_builder.set_clip_bounds(&command);
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
@@ -777,6 +804,7 @@ impl Renderer for WGPURenderer {
                 super::CommandType::ConvexFill { ref params } => {
                     convex_fill(
                         &command,
+                        fans,
                         &mut pipeline_and_bindgroup_mapper,
                         &mut render_pass_builder,
                         params,
@@ -789,6 +817,7 @@ impl Renderer for WGPURenderer {
                 } => {
                     concave_fill(
                         &command,
+                        fans,
                         &mut pipeline_and_bindgroup_mapper,
                         &mut render_pass_builder,
                         stencil_params,
@@ -1516,6 +1545,7 @@ fn stroke(
 
 fn concave_fill(
     command: &super::Command,
+    fans: u32,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
     stencil_params: &Params,
@@ -1563,9 +1593,10 @@ fn concave_fill(
             GlyphTexture::None,
         );
 
+        let mut first = fans;
         for drawable in &command.drawables {
-            if let Some((start, count)) = drawable.fill_verts {
-                render_pass_builder.draw(start as u32..(start + count) as u32);
+            if let Some((_, count)) = drawable.fill_verts {
+                render_pass_builder.draw_fan(&mut first, count);
             }
         }
     }
@@ -1841,6 +1872,7 @@ fn clip_reset(
 
 fn convex_fill(
     command: &super::Command,
+    fans: u32,
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
     params: &Params,
@@ -1848,8 +1880,9 @@ fn convex_fill(
 ) {
     let blend_state = blend_state(command).into();
 
+    let mut first = fans;
     for drawable in &command.drawables {
-        if let Some((start, count)) = drawable.fill_verts {
+        if let Some((_, count)) = drawable.fill_verts {
             pipeline_and_bindgroup_mapper.update_renderpass(
                 render_pass_builder,
                 blend_state,
@@ -1861,7 +1894,7 @@ fn convex_fill(
                 command.image,
                 command.glyph_texture,
             );
-            render_pass_builder.draw(start as u32..(start + count) as u32);
+            render_pass_builder.draw_fan(&mut first, count);
         }
 
         if let Some((start, count)) = drawable.stroke_verts {
@@ -2288,6 +2321,7 @@ struct RenderPassBuilder<'a> {
     stencil_buffer: Option<wgpu::Texture>,
     viewport: [f32; 2],
     vertex_buffer: wgpu::Buffer,
+    fan_indices: wgpu::Buffer,
     rendering_to_texture: bool,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     rpass: Option<wgpu::RenderPass<'a>>,
@@ -2314,6 +2348,7 @@ impl<'a> RenderPassBuilder<'a> {
         texture_view: wgpu::TextureView,
         stencil_buffer: wgpu::Texture,
         vertex_buffer: wgpu::Buffer,
+        fan_indices: wgpu::Buffer,
     ) -> Self {
         let viewport_bind_group = Self::create_viewport_bind_group(&device, &screen_view, &viewport_bind_group_layout);
         Self {
@@ -2325,6 +2360,7 @@ impl<'a> RenderPassBuilder<'a> {
             stencil_buffer: Some(stencil_buffer.clone()),
             viewport: screen_view,
             vertex_buffer,
+            fan_indices,
             rendering_to_texture: false,
             viewport_bind_group_layout,
             rpass: None,
@@ -2560,6 +2596,7 @@ impl<'a> RenderPassBuilder<'a> {
             multiview_mask: None,
         });
         rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        rpass.set_index_buffer(self.fan_indices.slice(..), wgpu::IndexFormat::Uint32);
         rpass.set_viewport(0., 0., self.viewport[0], self.viewport[1], 0., 0.);
         rpass.set_bind_group(0, &self.viewport_bind_group, &[]);
         self.rpass = Some(rpass.forget_lifetime());
@@ -2567,6 +2604,14 @@ impl<'a> RenderPassBuilder<'a> {
 
     fn draw(&mut self, vertices: std::ops::Range<u32>) {
         self.rpass.as_mut().unwrap().draw(vertices, 0..1);
+    }
+
+    /// Draws the fan of `count` vertices whose triangles start at `first` in
+    /// the frame's fan indices, and moves `first` past them.
+    fn draw_fan(&mut self, first: &mut u32, count: usize) {
+        let end = *first + FanIndices::count(count);
+        self.rpass.as_mut().unwrap().draw_indexed(*first..end, 0, 0..1);
+        *first = end;
     }
 
     /// Limits the open pass to `crop` - x, y, width and height in the

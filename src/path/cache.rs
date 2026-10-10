@@ -138,15 +138,24 @@ impl Contour {
         self.point_range.end - self.point_range.start
     }
 
-    /// Recomputes each point's direction and length to its successor. Every
-    /// point stores the edge that leaves it, so reversing a contour leaves all
-    /// of them pointing at what is now the previous point.
-    fn recompute_directions(points: &mut [Point]) {
-        for i in 0..points.len() {
-            let next = points[(i + 1) % points.len()].pos;
-            let p = &mut points[i];
-            p.dpos = next - p.pos;
-            p.len = p.dpos.normalize();
+    /// Reverses a contour whose points know the edge that leaves each one:
+    /// reversed, a point leaves along the edge that arrived at it, negated.
+    /// That equals working the directions out again, but a zero component
+    /// can come back as -0.0; reversing twice restores every bit.
+    fn reverse(points: &mut [Point]) {
+        points.reverse();
+        let Some(first) = points.first().map(|p| (p.dpos, p.len)) else {
+            return;
+        };
+        for i in 1..points.len() {
+            let (dpos, len) = (points[i].dpos, points[i].len);
+            let p = &mut points[i - 1];
+            p.dpos = -dpos;
+            p.len = len;
+        }
+        if let Some(last) = points.last_mut() {
+            last.dpos = -first.0;
+            last.len = first.1;
         }
     }
 }
@@ -209,15 +218,7 @@ impl PathCache {
                         let (x, y) = transform.transform_point(x, y);
 
                         cache.tesselate_bezier(
-                            last.pos.x,
-                            last.pos.y,
-                            c1x,
-                            c1y,
-                            c2x,
-                            c2y,
-                            x,
-                            y,
-                            0,
+                            [last.pos.x, last.pos.y, c1x, c1y, c2x, c2y, x, y],
                             PointFlags::CORNER,
                             tess_tol,
                             dist_tol,
@@ -288,23 +289,22 @@ impl PathCache {
                 }
             }
 
-            for i in 0..contour.point_count() {
-                let p1 = points.get(i).copied().unwrap();
-
-                let p0 = if i == 0 {
-                    points.last_mut().unwrap()
-                } else {
-                    points.get_mut(i - 1).unwrap()
-                };
-
-                p0.dpos = p1.pos - p0.pos;
-                p0.len = p0.dpos.normalize();
-
-                bounds.minx = bounds.minx.min(p0.pos.x);
-                bounds.miny = bounds.miny.min(p0.pos.y);
-                bounds.maxx = bounds.maxx.max(p0.pos.x);
-                bounds.maxy = bounds.maxy.max(p0.pos.y);
+            // Each point's direction and length to the next, the last's to the
+            // first, and the bounds, kept in registers until the contour ends.
+            let first = points[0].pos;
+            let (mut minx, mut miny, mut maxx, mut maxy) = (bounds.minx, bounds.miny, bounds.maxx, bounds.maxy);
+            let count = points.len();
+            for i in 0..count {
+                let next = if i + 1 < count { points[i + 1].pos } else { first };
+                let p = &mut points[i];
+                p.dpos = next - p.pos;
+                p.len = p.dpos.normalize();
+                minx = minx.min(p.pos.x);
+                miny = miny.min(p.pos.y);
+                maxx = maxx.max(p.pos.x);
+                maxy = maxy.max(p.pos.y);
             }
+            *bounds = Bounds { minx, miny, maxx, maxy };
 
             true
         });
@@ -323,18 +323,24 @@ impl PathCache {
     /// contours share one vertex list without introducing triangles between
     /// them.
     pub(crate) fn winding_triangles(&self) -> Vec<Vertex> {
-        let mut vertices = Vec::new();
+        let triangles = self
+            .contours
+            .iter()
+            .map(|contour| contour.point_count().saturating_sub(2))
+            .sum::<usize>();
+        let mut vertices = Vec::with_capacity(triangles * 3);
 
         for contour in &self.contours {
             let points = &self.points[contour.point_range.clone()];
-            if let Some((&center, tail)) = points.split_first() {
-                vertices.extend(tail.windows(2).flat_map(|edge| {
-                    [
-                        Vertex::pos(center.pos, 0.5, 1.0),
+            if let Some((center, tail)) = points.split_first() {
+                let center = Vertex::pos(center.pos, 0.5, 1.0);
+                for edge in tail.windows(2) {
+                    vertices.extend_from_slice(&[
+                        center,
                         Vertex::pos(edge[0].pos, 0.5, 1.0),
                         Vertex::pos(edge[1].pos, 0.5, 1.0),
-                    ]
-                }));
+                    ]);
+                }
             }
         }
 
@@ -383,78 +389,56 @@ impl PathCache {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn tesselate_bezier(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-        x4: f32,
-        y4: f32,
-        level: usize,
-        flags: PointFlags,
-        tess_tol: f32,
-        dist_tol: f32,
-    ) {
-        if level > 10 {
-            return;
+    /// Flattens a cubic into the ends of its pieces: a piece whose control
+    /// points lie close enough to the line between its ends is taken as
+    /// that line, and any other is halved, to ten halvings, the left half
+    /// first. Only the cubic's own end takes `flags`.
+    fn tesselate_bezier(&mut self, curve: [f32; 8], flags: PointFlags, tess_tol: f32, dist_tol: f32) {
+        // The right halves still to flatten, the nearest last, each with its
+        // depth and whether it ends the cubic: one at most per depth.
+        let mut pending = [([0.0; 8], 0u8, false); 10];
+        let mut count = 0;
+        let (mut piece, mut depth, mut ends) = (curve, 0u8, true);
+
+        loop {
+            let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
+            let dx = x4 - x1;
+            let dy = y4 - y1;
+            let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
+            let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
+
+            if (d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy) {
+                let flags = if ends { flags } else { PointFlags::empty() };
+                self.add_point(x4, y4, flags, dist_tol);
+            } else if depth < 10 {
+                let x12 = (x1 + x2) * 0.5;
+                let y12 = (y1 + y2) * 0.5;
+                let x23 = (x2 + x3) * 0.5;
+                let y23 = (y2 + y3) * 0.5;
+                let x34 = (x3 + x4) * 0.5;
+                let y34 = (y3 + y4) * 0.5;
+                let x123 = (x12 + x23) * 0.5;
+                let y123 = (y12 + y23) * 0.5;
+                let x234 = (x23 + x34) * 0.5;
+                let y234 = (y23 + y34) * 0.5;
+                let x1234 = (x123 + x234) * 0.5;
+                let y1234 = (y123 + y234) * 0.5;
+
+                depth += 1;
+                pending[count] = ([x1234, y1234, x234, y234, x34, y34, x4, y4], depth, ends);
+                count += 1;
+                (piece, ends) = ([x1, y1, x12, y12, x123, y123, x1234, y1234], false);
+                continue;
+            }
+
+            // A piece is taken or, past ten halvings, dropped: on to the
+            // nearest right half left.
+            let Some(next) = count.checked_sub(1) else {
+                break;
+            };
+            count = next;
+            (piece, depth, ends) = pending[count];
         }
-
-        let x12 = (x1 + x2) * 0.5;
-        let y12 = (y1 + y2) * 0.5;
-        let x23 = (x2 + x3) * 0.5;
-        let y23 = (y2 + y3) * 0.5;
-        let x34 = (x3 + x4) * 0.5;
-        let y34 = (y3 + y4) * 0.5;
-        let x123 = (x12 + x23) * 0.5;
-        let y123 = (y12 + y23) * 0.5;
-
-        let dx = x4 - x1;
-        let dy = y4 - y1;
-        let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
-        let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
-
-        if (d2 + d3) * (d2 + d3) < tess_tol * (dx * dx + dy * dy) {
-            self.add_point(x4, y4, flags, dist_tol);
-            return;
-        }
-
-        let x234 = (x23 + x34) * 0.5;
-        let y234 = (y23 + y34) * 0.5;
-        let x1234 = (x123 + x234) * 0.5;
-        let y1234 = (y123 + y234) * 0.5;
-
-        self.tesselate_bezier(
-            x1,
-            y1,
-            x12,
-            y12,
-            x123,
-            y123,
-            x1234,
-            y1234,
-            level + 1,
-            PointFlags::empty(),
-            tess_tol,
-            dist_tol,
-        );
-        self.tesselate_bezier(
-            x1234,
-            y1234,
-            x234,
-            y234,
-            x34,
-            y34,
-            x4,
-            y4,
-            level + 1,
-            flags,
-            tess_tol,
-            dist_tol,
-        );
     }
 
     // fn tesselate_bezier_afd(
@@ -730,25 +714,11 @@ impl PathCache {
             let points = &mut self.points[contour.point_range.clone()];
             contour.reversed = !contour.degenerate && (Contour::polygon_area(points) < 0.0) != is_hole;
             if contour.reversed {
-                points.reverse();
-                Contour::recompute_directions(points);
+                Contour::reverse(points);
             }
         }
 
         self.calculate_joins(fringe_width, line_join, miter_limit);
-
-        // Calculate max vertex usage.
-        for contour in &mut self.contours {
-            let point_count = contour.point_count();
-            let mut vertex_count = point_count + contour.bevel + 1;
-
-            if has_fringe {
-                vertex_count += (point_count + contour.bevel * 5 + 1) * 2;
-                contour.stroke.reserve(vertex_count);
-            }
-
-            contour.fill.reserve(vertex_count);
-        }
 
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
 
@@ -759,8 +729,13 @@ impl PathCache {
                 continue;
             }
 
-            let triangle_count = (contour.fill.capacity() - 2) * 3;
-            let mut triangle_fan_fill = Vec::with_capacity(triangle_count);
+            // The fill is a fan about its first vertex: one vertex per point,
+            // two at a bevel.
+            let point_count = contour.point_count();
+            contour.fill.reserve(point_count + contour.bevel);
+            if has_fringe {
+                contour.stroke.reserve((point_count + contour.bevel * 5 + 1) * 2);
+            }
 
             // TODO: woff = 0.0 produces no artifaacts for small sizes
             let woff = 0.5 * fringe_width;
@@ -771,45 +746,35 @@ impl PathCache {
                     if p1.flags.contains(PointFlags::BEVEL) {
                         if p1.flags.contains(PointFlags::LEFT) {
                             let lpos = p1.pos + p1.dmpos * woff;
-                            triangle_fan_fill.push(Vertex::pos(lpos, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos, 0.5, 1.0));
                         } else {
                             let lpos0 = p1.pos + p0.dpos.orthogonal() * woff;
                             let lpos1 = p1.pos + p1.dpos.orthogonal() * woff;
-                            triangle_fan_fill.push(Vertex::pos(lpos0, 0.5, 1.0));
-                            triangle_fan_fill.push(Vertex::pos(lpos1, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos0, 0.5, 1.0));
+                            contour.fill.push(Vertex::pos(lpos1, 0.5, 1.0));
                         }
                     } else {
-                        triangle_fan_fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
+                        contour.fill.push(Vertex::pos(p1.pos + p1.dmpos * woff, 0.5, 1.0));
                     }
                 }
             } else {
                 let points = &self.points[contour.point_range.clone()];
 
                 for point in points {
-                    triangle_fan_fill.push(Vertex::pos(point.pos, 0.5, 1.0));
+                    contour.fill.push(Vertex::pos(point.pos, 0.5, 1.0));
                 }
             }
 
-            // convert fill triangle fan to triangles, to eliminate requirement for GL_TRIANGLE_FAN
-            // from the renderer.
-            if triangle_fan_fill.len() > 2 {
-                let center = triangle_fan_fill[0];
-                let tail = &triangle_fan_fill[1..];
+            if contour.fill.len() > 2 {
                 // Only the stencil pass reads this winding back, to tell a hole
-                // from a solid. A convex path skips the stencil and is drawn
-                // directly, where flipped triangles would just face away.
-                let flip = contour.reversed && !convex;
-                contour.fill = tail
-                    .windows(2)
-                    .flat_map(|vertices| {
-                        let (a, b) = if flip {
-                            (vertices[1], vertices[0])
-                        } else {
-                            (vertices[0], vertices[1])
-                        };
-                        IntoIterator::into_iter([center, a, b])
-                    })
-                    .collect();
+                // from a solid; reversing the rim flips every triangle. A convex
+                // path skips the stencil, where flipped triangles would just
+                // face away.
+                if contour.reversed && !convex {
+                    contour.fill[1..].reverse();
+                }
+            } else {
+                contour.fill.clear();
             }
 
             if has_fringe {
@@ -846,8 +811,7 @@ impl PathCache {
         for contour in &mut self.contours {
             if contour.reversed {
                 let points = &mut self.points[contour.point_range.clone()];
-                points.reverse();
-                Contour::recompute_directions(points);
+                Contour::reverse(points);
             }
         }
     }
@@ -1117,32 +1081,22 @@ impl PathCache {
             return None;
         }
 
-        let vertices = &self.contours[0].fill;
-        if vertices.len() != 6 {
+        // A fan of four: the corners in turn.
+        let &[top_left, bottom_left, bottom_right, top_right] = self.contours[0].fill.as_slice() else {
             return None;
-        }
+        };
 
-        let maybe_t1_top_left = vertices[0];
-        let maybe_t1_bottom_left = vertices[1];
-        let maybe_t1_bottom_right = vertices[2];
-        let maybe_t2_top_left = vertices[3];
-        let maybe_t2_bottom_right = vertices[4];
-        let maybe_t2_top_right = vertices[5];
-
-        if maybe_t1_top_left == maybe_t2_top_left
-            && maybe_t1_bottom_right == maybe_t2_bottom_right
-            && maybe_t1_top_left.x == maybe_t1_bottom_left.x
-            && maybe_t1_top_left.y == maybe_t2_top_right.y
-            && maybe_t1_bottom_right.x == maybe_t2_top_right.x
-            && maybe_t2_bottom_right.y == maybe_t1_bottom_left.y
+        if top_left.x == bottom_left.x
+            && top_left.y == top_right.y
+            && bottom_right.x == top_right.x
+            && bottom_right.y == bottom_left.y
         {
             // A mirrored transform hands the corners over in the opposite
-            // order, so take the extent by min/max rather than by position in
-            // the strip: the fill is the same rect either way, and the blit
-            // maps its texture coordinates through the paint transform, flip
-            // included.
-            let (x0, x1) = (maybe_t1_top_left.x, maybe_t2_top_right.x);
-            let (y0, y1) = (maybe_t1_top_left.y, maybe_t1_bottom_left.y);
+            // order, so the names hold only for an upright rect: take the
+            // extent by min/max, not by place in the fan. The blit maps its
+            // texture coordinates through the paint transform, flip included.
+            let (x0, x1) = (top_left.x, top_right.x);
+            let (y0, y1) = (top_left.y, bottom_left.y);
             Some(crate::Rect::new(
                 x0.min(x1),
                 y0.min(y1),
@@ -1352,6 +1306,160 @@ mod tests {
 
     use super::*;
     use crate::Path;
+
+    // A fixed sequence of numbers in [0, 1), so the tests below are repeatable.
+    fn unit(seed: &mut u32) -> f32 {
+        *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (*seed >> 8) as f32 / (1 << 24) as f32
+    }
+
+    // The recursive flattener the loop replaced, as the reference it must match.
+    fn flatten_recursively(
+        points: &mut Vec<([f32; 2], PointFlags)>,
+        c: [f32; 8],
+        level: usize,
+        flags: PointFlags,
+        tol: f32,
+    ) {
+        if level > 10 {
+            return;
+        }
+        let [x1, y1, x2, y2, x3, y3, x4, y4] = c;
+        let x12 = (x1 + x2) * 0.5;
+        let y12 = (y1 + y2) * 0.5;
+        let x23 = (x2 + x3) * 0.5;
+        let y23 = (y2 + y3) * 0.5;
+        let x34 = (x3 + x4) * 0.5;
+        let y34 = (y3 + y4) * 0.5;
+        let x123 = (x12 + x23) * 0.5;
+        let y123 = (y12 + y23) * 0.5;
+        let dx = x4 - x1;
+        let dy = y4 - y1;
+        let d2 = ((x2 - x4) * dy - (y2 - y4) * dx).abs();
+        let d3 = ((x3 - x4) * dy - (y3 - y4) * dx).abs();
+        if (d2 + d3) * (d2 + d3) < tol * (dx * dx + dy * dy) {
+            points.push(([x4, y4], flags));
+            return;
+        }
+        let x234 = (x23 + x34) * 0.5;
+        let y234 = (y23 + y34) * 0.5;
+        let x1234 = (x123 + x234) * 0.5;
+        let y1234 = (y123 + y234) * 0.5;
+        let left = [x1, y1, x12, y12, x123, y123, x1234, y1234];
+        flatten_recursively(points, left, level + 1, PointFlags::empty(), tol);
+        let right = [x1234, y1234, x234, y234, x34, y34, x4, y4];
+        flatten_recursively(points, right, level + 1, flags, tol);
+    }
+
+    // Each point's direction and length to the next, the last's to the first.
+    fn work_out_directions(points: &mut [Point]) {
+        for i in 0..points.len() {
+            let next = points[(i + 1) % points.len()].pos;
+            let p = &mut points[i];
+            p.dpos = next - p.pos;
+            p.len = p.dpos.normalize();
+        }
+    }
+
+    #[test]
+    fn reversing_gives_the_directions_worked_out_again() {
+        let mut seed = 7;
+        for case in 0..600 {
+            // Every third contour on a coarse grid, for axis-aligned edges and repeated points.
+            let grid = case % 3 == 0;
+            let mut points: Vec<Point> = (0..1 + case % 9)
+                .map(|_| {
+                    let (x, y) = (unit(&mut seed) * 50.0, unit(&mut seed) * 50.0);
+                    let (x, y) = if grid {
+                        ((x / 10.0).floor(), (y / 10.0).floor())
+                    } else {
+                        (x, y)
+                    };
+                    Point::new(x, y, PointFlags::empty())
+                })
+                .collect();
+            work_out_directions(&mut points);
+            let bits = |p: &Point| [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len].map(f32::to_bits);
+            let original: Vec<_> = points.iter().map(bits).collect();
+
+            let mut expected = points.clone();
+            expected.reverse();
+            work_out_directions(&mut expected);
+            Contour::reverse(&mut points);
+            for (p, q) in points.iter().zip(&expected) {
+                let same =
+                    [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len] == [q.pos.x, q.pos.y, q.dpos.x, q.dpos.y, q.len];
+                assert!(same, "case {case}: {p:?} reversed, {q:?} worked out again");
+            }
+
+            Contour::reverse(&mut points);
+            assert_eq!(
+                points.iter().map(bits).collect::<Vec<_>>(),
+                original,
+                "case {case}: reversed twice"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fill_hands_a_reversed_contour_back_as_it_found_it() {
+        // Wound against a solid's direction, with a curve and edges along both axes.
+        let mut path = Path::new();
+        path.move_to(10.0, 10.0);
+        path.line_to(90.0, 10.0);
+        path.bezier_to(110.0, 30.0, 110.0, 70.0, 90.0, 90.0);
+        path.line_to(10.0, 90.0);
+        path.close();
+        let mut cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let snapshot = |cache: &PathCache| {
+            let bits = |p: &Point| [p.pos.x, p.pos.y, p.dpos.x, p.dpos.y, p.len].map(f32::to_bits);
+            cache.points.iter().map(bits).collect::<Vec<_>>()
+        };
+        let before = snapshot(&cache);
+
+        cache.expand_fill(1.0, LineJoin::Miter, 2.4, FillRule::NonZero);
+
+        assert!(
+            cache.contours[0].reversed,
+            "the fill has to reverse this contour for the test to mean anything"
+        );
+        assert_eq!(snapshot(&cache), before);
+    }
+
+    #[test]
+    fn the_loop_flattens_a_cubic_as_the_recursion_did() {
+        let mut seed = 1;
+        for case in 0..3000 {
+            let mut c: [f32; 8] = std::array::from_fn(|_| unit(&mut seed) * 400.0 - 200.0);
+            match case % 6 {
+                // Control points at the chord's ends, a closed loop, a tiny curve, and
+                // curves so large they need about ten halvings and more than ten.
+                1 => [c[2], c[3], c[4], c[5]] = [c[0], c[1], c[6], c[7]],
+                2 => [c[6], c[7]] = [c[0], c[1]],
+                3 => c.iter_mut().for_each(|v| *v *= 1e-3),
+                4 => c.iter_mut().for_each(|v| *v *= 300.0),
+                5 => c.iter_mut().for_each(|v| *v *= 3000.0),
+                _ => {}
+            }
+            let tol = [0.25, 0.0625, 0.25 / 3.0][case / 6 % 3];
+
+            let mut path = Path::new();
+            path.move_to(c[0], c[1]);
+            path.bezier_to(c[2], c[3], c[4], c[5], c[6], c[7]);
+            let cache = PathCache::new(path.verbs(), &Transform2D::identity(), tol, 0.01);
+            let mut expected = vec![([c[0], c[1]], PointFlags::CORNER)];
+            flatten_recursively(&mut expected, c, 0, PointFlags::CORNER, tol);
+
+            let bits = |(p, flags): ([f32; 2], PointFlags)| (p.map(f32::to_bits), flags);
+            let got: Vec<_> = cache
+                .points
+                .iter()
+                .map(|p| bits(([p.pos.x, p.pos.y], p.flags)))
+                .collect();
+            let expected: Vec<_> = expected.into_iter().map(bits).collect();
+            assert_eq!(got, expected, "case {case}: {c:?} at {tol}");
+        }
+    }
 
     #[test]
     fn self_intersecting_polygon_is_concave() {
