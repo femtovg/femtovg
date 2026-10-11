@@ -67,11 +67,11 @@ impl ShapingId {
         let mut hasher = FnvHasher::default();
         word.hash(&mut hasher);
         if let Some(max_width) = max_width {
-            (max_width.trunc() as i32).hash(&mut hasher);
+            max_width.to_bits().hash(&mut hasher);
         }
 
         Self {
-            size: (font_size * 10.0).trunc() as u32,
+            size: font_size.to_bits(),
             word_hash: hasher.finish(),
             font_ids,
             variation_hash: variations.hash(),

@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed text getting the glyph advances it had at an earlier font size when
+  both sizes were in the same tenth of a device pixel (e.g., 12 and 12.09):
+  `measure_text` returned the earlier width, `break_text` broke the text by
+  it, and `fill_text` placed its glyphs by it.
+- Fixed `break_text` and `break_text_vec` breaking the text where an earlier
+  `max_width` broke it when both widths were in the same whole device pixel
+  (e.g., 100.2 and 100.9), even when the text fit at one width and not at the
+  other.
 - Fixed the WGPU backend rebuilding render pipelines every frame when a frame
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
