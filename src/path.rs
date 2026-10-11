@@ -886,6 +886,7 @@ impl Path {
 
         self.verbs.extend_from_slice(verbs);
         self.coords.extend_from_slice(coords);
+        *self.cache.get_mut() = None;
     }
 }
 
