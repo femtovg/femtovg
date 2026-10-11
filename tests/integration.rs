@@ -145,6 +145,22 @@ fn path_contains_point() {
 }
 
 #[test]
+fn path_edited_after_use_is_hit_tested_as_edited() {
+    let mut canvas = Canvas::new(Void).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    let mut path = Path::new();
+    path.rect(0.0, 0.0, 10.0, 10.0);
+    assert!(canvas.contains_point(&path, 5.0, 5.0, FillRule::NonZero));
+    assert!(!canvas.contains_point(&path, 25.0, 5.0, FillRule::NonZero));
+    assert_eq!(canvas.path_bbox(&path).maxx, 10.0);
+
+    path.rect(20.0, 0.0, 10.0, 10.0);
+    assert!(canvas.contains_point(&path, 25.0, 5.0, FillRule::NonZero));
+    assert_eq!(canvas.path_bbox(&path).maxx, 30.0);
+}
+
+#[test]
 fn text_location_respects_scale() {
     let mut canvas = Canvas::new(Void).unwrap();
 

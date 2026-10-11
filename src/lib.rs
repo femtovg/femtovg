@@ -3254,6 +3254,34 @@ fn shared_arc_path_across_canvases_keeps_tessellation_isolated() {
     assert_ne!(a1, b1, "the two transforms must produce different geometry");
 }
 
+/// A path filled, then extended, then filled again under the same transform
+/// is filled as the extended path: the same vertices as a path built with
+/// every verb before its first fill.
+#[test]
+fn a_path_extended_after_a_fill_is_filled_as_the_extended_path() {
+    let renderer = RecordingRenderer::default();
+    let verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    let mut path = Path::new();
+    path.rect(0.0, 0.0, 10.0, 10.0);
+    let before = record_fill_bytes(&mut canvas, &verts, &path);
+    path.rect(20.0, 0.0, 10.0, 10.0);
+    let after = record_fill_bytes(&mut canvas, &verts, &path);
+
+    let mut both = Path::new();
+    both.rect(0.0, 0.0, 10.0, 10.0);
+    both.rect(20.0, 0.0, 10.0, 10.0);
+    let fresh = record_fill_bytes(&mut canvas, &verts, &both);
+
+    assert_ne!(fresh, before, "one rect and two rects must not fill the same");
+    assert_eq!(
+        after, fresh,
+        "the extended path was not filled as a path built with both rects"
+    );
+}
+
 /// Switching the render target between an image and the screen must not
 /// perturb the tessellation of a path filled on both: the emitted fill
 /// vertices are a function of the path and canvas transform only.
