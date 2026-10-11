@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
   `BlendFactor` is a subset of what the backends expose - so adding to either
   should not be a breaking change. Downstream `match`es on them now need a
   wildcard arm.
+- Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
+  hit-tested still being drawn and hit-tested as the old path under the same
+  transform: the flattened copy a `Path` keeps was not dropped when verbs were
+  added.
 - Fixed the WGPU backend rebuilding render pipelines every frame when a frame
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
