@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Breaking:** `CompositeOperation` and `BlendFactor` are now
+  `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
 - Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
   hit-tested still being drawn and hit-tested as the old path under the same
   transform: the flattened copy a `Path` keeps was not dropped when verbs were
