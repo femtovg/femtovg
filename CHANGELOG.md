@@ -3,12 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- `CompositeOperation` and `BlendFactor` are now `#[non_exhaustive]`. Both
-  describe an open-ended capability space - the separable blend modes
-  (`multiply`, `screen`, `color-burn`, ...) belong in `CompositeOperation`, and
-  `BlendFactor` is a subset of what the backends expose - so adding to either
-  should not be a breaking change. Downstream `match`es on them now need a
-  wildcard arm.
+- **Breaking:** `CompositeOperation` and `BlendFactor` are now
+  `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
 - Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
   hit-tested still being drawn and hit-tested as the old path under the same
   transform: the flattened copy a `Path` keeps was not dropped when verbs were
