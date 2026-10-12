@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 pub mod blend;
+pub mod pipelines;
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color};
 
