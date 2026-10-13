@@ -685,7 +685,12 @@ where
         let holds = |coverage: &ClipCoverage| {
             coverage.holds(&bounds)
                 || outline.is_some_and(|(path, spread)| {
-                    coverage.holds_outline(&bounds, path.positions(), spread / fringe_width)
+                    coverage.holds_outline(
+                        &bounds,
+                        path.positions_between_chords(),
+                        spread / fringe_width,
+                        path.straddle() / fringe_width,
+                    )
                 })
         };
         let mut scissor = boxes.scissor;
@@ -1453,6 +1458,37 @@ fn a_box_clip_is_a_shape_on_the_draws_under_it() {
 /// their outline - and one that reaches past the shape carries it. After a
 /// draw that carried the shape, a held one carries a coverage of one, for
 /// the renderer to stay on the variant it has bound.
+/// A vertex where the path put it takes no slack from the path's curves:
+/// past a round corner's arc by more than the clip's slack, it is clipped,
+/// though the chords of a circle in the same path straddle by more.
+#[test]
+fn a_vertex_takes_no_slack_from_the_paths_curves() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut clip = Path::new();
+    clip.rounded_rect(10.0, 10.0, 80.0, 80.0, 20.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+
+    let mut path = Path::new();
+    path.circle(50.0, 50.0, 25.0);
+    // A twentieth of a pixel past the top left corner's arc.
+    let tip = 30.0 - 20.05 * std::f32::consts::FRAC_1_SQRT_2;
+    path.move_to(tip, tip);
+    path.line_to(40.0, 30.0);
+    path.line_to(30.0, 40.0);
+    path.close();
+    assert!(
+        path.cache(&Transform2D::identity(), canvas.tess_tol, canvas.dist_tol)
+            .straddle()
+            > 0.05
+    );
+    canvas.fill_path(&path, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    assert_eq!(carried(&recorded.borrow()), ["shape"]);
+}
+
 /// Held, a draw under an operation coverage cannot bound leaves the shape a
 /// shape.
 #[test]

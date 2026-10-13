@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Curves are flattened closer to their shape: each point between two chords
+  is moved outward, so the chords cross the curve instead of cutting inside
+  every bend, and the flattening tolerance is halved. Round joins and caps
+  take a few more segments with it, 1.25 times as many for a 20 px stroke.
 - Filling a path costs less CPU and vertex memory, with identical output:
   curves are flattened in a loop rather than by recursion, a contour turned
   round for a fill keeps the directions it had, and a fill's vertices are
