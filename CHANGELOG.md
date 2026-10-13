@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Filling a path costs less CPU and vertex memory, with identical output:
+  curves are flattened in a loop rather than by recursion, a contour turned
+  round for a fill keeps the directions it had, and a fill's vertices are
+  its fan - one a point, where they were three a triangle - drawn as fans on
+  OpenGL and as one index list a frame on WGPU and WebGL.
 - **Breaking:** `CompositeOperation` and `BlendFactor` are now
   `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
 - Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
