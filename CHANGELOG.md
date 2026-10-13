@@ -8,6 +8,21 @@ All notable changes to this project will be documented in this file.
   included) or in the same tenth above that (e.g., 2 and 2.05):
   `measure_text` returned the earlier width, `break_text` broke the text by
   it, and centered or right-aligned text started in the wrong place.
+- Curves are flattened closer to their shape: each point between two chords
+  is moved outward, so the chords cross the curve instead of cutting inside
+  every bend, and the flattening tolerance is halved. Round joins and caps
+  take a few more segments with it, 1.25 times as many for a 20 px stroke.
+- Filling a path costs less CPU and vertex memory, with identical output:
+  curves are flattened in a loop rather than by recursion, a contour turned
+  round for a fill keeps the directions it had, and a fill's vertices are
+  its fan - one a point, where they were three a triangle - drawn as fans on
+  OpenGL and as one index list a frame on WGPU and WebGL.
+- **Breaking:** `CompositeOperation` and `BlendFactor` are now
+  `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
+- Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
+  hit-tested still being drawn and hit-tested as the old path under the same
+  transform: the flattened copy a `Path` keeps was not dropped when verbs were
+  added.
 - Fixed the WGPU backend rebuilding render pipelines every frame when a frame
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
