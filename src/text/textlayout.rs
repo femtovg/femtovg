@@ -76,7 +76,7 @@ impl ShapingId {
             font_ids,
             variation_hash: variations.hash(),
             rtl,
-            letter_spacing_key: (letter_spacing * 10.0).trunc() as u32,
+            letter_spacing_key: letter_spacing.to_bits(),
         }
     }
 }
