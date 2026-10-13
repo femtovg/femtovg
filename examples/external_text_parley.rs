@@ -202,7 +202,7 @@ fn render_glyph_run<T: Renderer>(
         .builder(font_ref)
         .size(font_size)
         .hint(true)
-        .normalized_coords(normalized_coords)
+        .normalized_coords(normalized_coords.iter().map(|coord| coord.to_bits()))
         .build();
 
     // Iterates over the glyphs in the GlyphRun
