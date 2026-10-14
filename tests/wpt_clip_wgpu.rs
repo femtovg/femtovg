@@ -16,7 +16,42 @@ use common::headless_device;
 const W: u32 = 100;
 const H: u32 = 50;
 
-fn render(device: &wgpu::Device, queue: &wgpu::Queue, draw: impl FnOnce(&mut Canvas<WGPURenderer>)) -> Vec<u8> {
+/// Renders `draw` twice - its path clips on the stencil, and as coverage
+/// masks - and returns the stencil's frame, which the assertions here were
+/// written against, after checking that the masks' frame differs from it
+/// only where a clip's edge passes: there a mask covers a pixel by its
+/// share inside and the stencil by its center.
+fn render(device: &wgpu::Device, queue: &wgpu::Queue, draw: impl Fn(&mut Canvas<WGPURenderer>)) -> Vec<u8> {
+    let stencil = render_with(device, queue, false, &draw);
+    let masks = render_with(device, queue, true, &draw);
+    let at = |frame: &[u8], x: i64, y: i64| {
+        let (x, y) = (x.clamp(0, i64::from(W) - 1), y.clamp(0, i64::from(H) - 1));
+        let i = ((y * i64::from(W) + x) * 4) as usize;
+        [frame[i], frame[i + 1], frame[i + 2], frame[i + 3]]
+    };
+    for y in 0..i64::from(H) {
+        for x in 0..i64::from(W) {
+            if at(&stencil, x, y) == at(&masks, x, y) {
+                continue;
+            }
+            let here = at(&stencil, x, y);
+            let on_an_edge = (-1..=1).any(|dy| (-1..=1).any(|dx| at(&stencil, x + dx, y + dy) != here));
+            assert!(
+                on_an_edge,
+                "({x}, {y}) is {:?} under a mask and {here:?} on the stencil, away from any edge",
+                at(&masks, x, y)
+            );
+        }
+    }
+    stencil
+}
+
+fn render_with(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    masks: bool,
+    draw: &dyn Fn(&mut Canvas<WGPURenderer>),
+) -> Vec<u8> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("wpt clip test target"),
         size: wgpu::Extent3d {
@@ -34,6 +69,9 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, draw: impl FnOnce(&mut Can
     let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(W, H, 1.0);
+    if !masks {
+        canvas.set_clip_mask_budget(0);
+    }
     canvas.clear_rect(0, 0, W, H, Color::white());
     draw(&mut canvas);
     queue.submit(canvas.flush_to_output(&target));
@@ -104,7 +142,7 @@ fn rect_path(x: f32, y: f32, w: f32, h: f32) -> Path {
 }
 
 /// Runs one case and checks the suite's pixel at (50, 25).
-fn case(name: &str, expected: [u8; 3], draw: impl FnOnce(&mut Canvas<WGPURenderer>)) {
+fn case(name: &str, expected: [u8; 3], draw: impl Fn(&mut Canvas<WGPURenderer>)) {
     let Some((device, queue)) = headless_device() else {
         eprintln!("skipping: no wgpu adapter available");
         return;

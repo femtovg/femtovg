@@ -957,97 +957,10 @@ impl Font {
 #[cfg(all(test, any(feature = "textlayout", feature = "swash")))]
 mod tests {
     use super::Font;
+    use crate::text::test_fonts::minimal_font_without_optional_tables;
 
     fn parse_font(data: Vec<u8>) -> Font {
         Font::new_with_data(data, 0, &super::super::TextContextImpl::default()).expect("font should parse")
-    }
-
-    /// Builds a minimal TrueType font containing only the tables required for
-    /// parsing (`head`, `hhea` and `maxp`), so every optional metric has to
-    /// take its documented fallback. Units per em is 1024 and the
-    /// ascender/descender are 800/-200 font units.
-    fn minimal_font_without_optional_tables() -> Vec<u8> {
-        fn push_u16(data: &mut Vec<u8>, value: u16) {
-            data.extend_from_slice(&value.to_be_bytes());
-        }
-        fn push_i16(data: &mut Vec<u8>, value: i16) {
-            data.extend_from_slice(&value.to_be_bytes());
-        }
-        fn push_u32(data: &mut Vec<u8>, value: u32) {
-            data.extend_from_slice(&value.to_be_bytes());
-        }
-
-        let mut head = Vec::new();
-        push_u16(&mut head, 1); // majorVersion
-        push_u16(&mut head, 0); // minorVersion
-        push_u32(&mut head, 0); // fontRevision
-        push_u32(&mut head, 0); // checkSumAdjustment
-        push_u32(&mut head, 0x5F0F_3CF5); // magicNumber
-        push_u16(&mut head, 0); // flags
-        push_u16(&mut head, 1024); // unitsPerEm
-        push_u32(&mut head, 0); // created (upper half)
-        push_u32(&mut head, 0); // created (lower half)
-        push_u32(&mut head, 0); // modified (upper half)
-        push_u32(&mut head, 0); // modified (lower half)
-        push_i16(&mut head, 0); // xMin
-        push_i16(&mut head, -200); // yMin
-        push_i16(&mut head, 500); // xMax
-        push_i16(&mut head, 800); // yMax
-        push_u16(&mut head, 0); // macStyle
-        push_u16(&mut head, 8); // lowestRecPPEM
-        push_i16(&mut head, 2); // fontDirectionHint
-        push_i16(&mut head, 0); // indexToLocFormat
-        push_i16(&mut head, 0); // glyphDataFormat
-
-        let mut hhea = Vec::new();
-        push_u16(&mut hhea, 1); // majorVersion
-        push_u16(&mut hhea, 0); // minorVersion
-        push_i16(&mut hhea, 800); // ascender
-        push_i16(&mut hhea, -200); // descender
-        push_i16(&mut hhea, 0); // lineGap
-        push_u16(&mut hhea, 500); // advanceWidthMax
-        push_i16(&mut hhea, 0); // minLeftSideBearing
-        push_i16(&mut hhea, 0); // minRightSideBearing
-        push_i16(&mut hhea, 500); // xMaxExtent
-        push_i16(&mut hhea, 1); // caretSlopeRise
-        push_i16(&mut hhea, 0); // caretSlopeRun
-        push_i16(&mut hhea, 0); // caretOffset
-        for _ in 0..4 {
-            push_i16(&mut hhea, 0); // reserved
-        }
-        push_i16(&mut hhea, 0); // metricDataFormat
-        push_u16(&mut hhea, 0); // numberOfHMetrics
-
-        let mut maxp = Vec::new();
-        push_u32(&mut maxp, 0x0000_5000); // version 0.5
-        push_u16(&mut maxp, 1); // numGlyphs
-
-        // Table records must be sorted by tag.
-        let tables: [(&[u8; 4], &Vec<u8>); 3] = [(b"head", &head), (b"hhea", &hhea), (b"maxp", &maxp)];
-
-        let mut font = Vec::new();
-        push_u32(&mut font, 0x0001_0000); // sfntVersion
-        push_u16(&mut font, tables.len() as u16); // numTables
-        push_u16(&mut font, 32); // searchRange
-        push_u16(&mut font, 1); // entrySelector
-        push_u16(&mut font, 16); // rangeShift
-
-        let header_len = 12 + 16 * tables.len();
-        let mut records = Vec::new();
-        let mut body: Vec<u8> = Vec::new();
-        for (tag, table) in tables {
-            records.extend_from_slice(&tag[..]);
-            push_u32(&mut records, 0); // checksum, not verified by the parsers
-            push_u32(&mut records, (header_len + body.len()) as u32);
-            push_u32(&mut records, table.len() as u32);
-            body.extend_from_slice(table);
-            while !body.len().is_multiple_of(4) {
-                body.push(0); // tables start on 4-byte boundaries
-            }
-        }
-        font.extend_from_slice(&records);
-        font.extend_from_slice(&body);
-        font
     }
 
     #[test]

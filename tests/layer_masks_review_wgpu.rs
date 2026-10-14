@@ -379,7 +379,7 @@ fn default_layer_effects_composite_at_full_opacity() {
 /// The blur reach used in the scissored-layer tests: sigma 2 pads the store
 /// by 8 px per side, so a scissor left in root coordinates shows up shifted.
 fn blur() -> LayerEffects {
-    LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 2.0 }])
+    LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(2.0)])
 }
 
 /// A rounded scissor: device 8..56 on each axis.

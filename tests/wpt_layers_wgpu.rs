@@ -472,7 +472,7 @@ fn wpt_clip_and_filtered_layers() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 12.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(12.0)]);
     let clip = |c: &mut C| c.intersect_scissor(15.0, 15.0, 70.0, 70.0);
 
     // Outside: clip, then a blurred layer of an unclipped rect.
@@ -544,7 +544,7 @@ fn wpt_blur_from_outside_canvas() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 8.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(8.0)]);
     let content = |c: &mut C| {
         fill_rect(c, 201.0, 50.0, 100.0, 100.0, rgb(64, 224, 208));
         fill_rect(c, 50.0, 201.0, 100.0, 100.0, rgb(75, 0, 130));
@@ -607,10 +607,10 @@ fn wpt_css_filters() {
         return;
     };
     let teal = |c: &mut C| fill_rect(c, 50.0, 50.0, 100.0, 100.0, rgb(0, 128, 128));
-    let blur = LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 5.0 }]);
+    let blur = LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(5.0)]);
     // blur(10px)
     let code = render(&device, &queue, 200, 200, |c| {
-        assert!(c.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 10.0 }])));
+        assert!(c.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(10.0)])));
         teal(c);
         c.end_layer();
     });
@@ -624,7 +624,7 @@ fn wpt_css_filters() {
                 ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y,
             )
             .unwrap();
-        c.filter_image_chain(filtered, &[ImageFilter::GaussianBlur { sigma: 10.0 }], image)
+        c.filter_image_chain(filtered, &[ImageFilter::gaussian_blur(10.0)], image)
             .unwrap();
         draw_image(c, filtered, 0.0, 0.0, 200, 200);
     });
@@ -659,7 +659,7 @@ fn wpt_css_filters() {
                 ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y,
             )
             .unwrap();
-        c.filter_image_chain(filtered, &[ImageFilter::GaussianBlur { sigma: 5.0 }], image)
+        c.filter_image_chain(filtered, &[ImageFilter::gaussian_blur(5.0)], image)
             .unwrap();
         shadow(c, 10.0, 10.0, 10.0, rgb(255, 165, 0));
         draw_image(c, filtered, 0.0, 0.0, 200, 200);
@@ -718,7 +718,7 @@ fn wpt_reset_discards_pending_layers() {
             if filtered {
                 shadow(c, -3.0, 3.0, 0.0, rgb(0, 0, 0));
             }
-            assert!(c.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 5.0 }])));
+            assert!(c.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(5.0)])));
             c.set_global_alpha(0.6);
             shadow(c, -6.0, 6.0, 3.0, Color::rgba(0, 60, 0, 153));
             c.reset();
@@ -797,7 +797,7 @@ fn wpt_valid_calls() {
 //   pairing (femtovg/femtovg#335) - a restore() closes the layer on top of
 //   the stack and end_layer() restores to its layer's boundary - where the
 //   proposal throws; tests/layer_state_wgpu.rs pins those sequences.
-// - 2d.layer.anisotropic-blur: GaussianBlur is isotropic (one sigma).
+// - 2d.layer.anisotropic-blur.*: per-axis blurs, in tests/blur_axes_wgpu.rs.
 // - 2d.layer.globalCompositeOperation multiply/screen/overlay/darken/lighten:
 //   separable blend modes, femtovg/femtovg#332.
 // - 2d.layer.drawImage / draw-in-filter / beginLayer-options /

@@ -18,7 +18,7 @@ use crate::{
 
 use glow::HasContext;
 
-use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
+use super::{Command, CommandType, FanIndices, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
 
 mod program;
 use program::MainProgram;
@@ -42,13 +42,25 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 18],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 16],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 18],
+    // The programs of draws under a clip shape, by shader type and glyph texture use, each built when first drawn
+    // with (None if that failed): no other program evaluates a shape, and few of them are ever drawn under one.
+    clip_programs: FnvHashMap<(u8, bool, (bool, bool)), Option<MainProgram>>,
+    // The scissor rect of the draws under a clip; none is no scissor.
+    current_clip_bounds: Option<[u32; 4]>,
     current_program: u8,
     current_program_needs_glyph_texture: bool,
+    current_program_clips: (bool, bool),
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
+    // The fill fans as triangles of 32-bit indices, on WebGL alone: its
+    // implementations (ANGLE) emulate a fan draw by draw, where a native
+    // driver draws one for less than an indexed draw costs (Apple's: by
+    // about 7,000 instructions).
+    fan_indices: FanIndices,
+    fan_index_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
     screen_target: Option<Framebuffer>,
@@ -70,7 +82,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a function loader that takes C-style strings.
@@ -86,7 +98,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function_cstr(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a Glutin display.
@@ -113,10 +125,10 @@ impl OpenGl {
         };
 
         let context = glow::Context::from_webgl2_context(webgl2_context);
-        Self::new_from_context(context, true)
+        Self::new_from_context(context, true, true)
     }
 
-    fn new_from_context(context: glow::Context, is_opengles_2_0: bool) -> Result<Self, ErrorKind> {
+    fn new_from_context(context: glow::Context, is_opengles_2_0: bool, indexed_fans: bool) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
@@ -244,11 +256,43 @@ impl OpenGl {
                 } else {
                     None
                 },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageMorphology,
+                        false,
+                    )?)
+                },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(
+                        &context,
+                        antialias,
+                        ShaderType::FilterImageOffset,
+                        false,
+                    )?)
+                },
             ])
         };
 
         let main_programs_with_glyph_texture = generate_shader_program_variants(true)?;
         let main_programs_without_glyph_texture = generate_shader_program_variants(false)?;
+        // One of them now: a driver that cannot build the clip shape's code fails here, not at a draw.
+        let mut clip_programs = FnvHashMap::default();
+        clip_programs.insert(
+            (ShaderType::FillColor.to_u8(), false, (true, true)),
+            Some(MainProgram::with_clip(
+                &context,
+                antialias,
+                ShaderType::FillColor,
+                false,
+                (true, true),
+            )?),
+        );
 
         let mut opengl = Self {
             debug,
@@ -258,10 +302,15 @@ impl OpenGl {
             screen_view: [0.0, 0.0],
             main_programs_with_glyph_texture,
             main_programs_without_glyph_texture,
+            clip_programs,
+            current_clip_bounds: None,
             current_program: 0,
             current_program_needs_glyph_texture: true,
+            current_program_clips: (false, false),
             vert_arr: None,
             vert_buff: None,
+            fan_indices: FanIndices::default(),
+            fan_index_buff: None,
             framebuffers: HashMap::default(),
             context,
             screen_target: None,
@@ -274,6 +323,9 @@ impl OpenGl {
 
             opengl.vert_arr = opengl.context.create_vertex_array().ok();
             opengl.vert_buff = opengl.context.create_buffer().ok();
+            if indexed_fans {
+                opengl.fan_index_buff = opengl.context.create_buffer().ok();
+            }
         }
 
         Ok(opengl)
@@ -435,15 +487,32 @@ impl OpenGl {
         self.check_error("clip_reset");
     }
 
-    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
+    /// Draws the fan of `count` vertices from `start`: as triangles of the
+    /// frame's fan indices from `first`, moved past them, or without fan
+    /// indices as a fan.
+    fn draw_fan(&self, first: &mut Option<u32>, start: usize, count: usize) {
+        unsafe {
+            match first {
+                Some(first) => {
+                    let indices = FanIndices::count(count);
+                    let offset = (*first as usize * mem::size_of::<u32>()) as i32;
+                    self.context
+                        .draw_elements(glow::TRIANGLES, indices as i32, glow::UNSIGNED_INT, offset);
+                    *first += indices;
+                }
+                None => self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32),
+            }
+        }
+    }
+
+    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, fans: Option<u32>, gpu_paint: &Params) {
         self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
+        let mut first = fans;
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
 
             if let Some((start, count)) = drawable.stroke_verts {
@@ -462,6 +531,7 @@ impl OpenGl {
         &mut self,
         images: &ImageStore<GlTexture>,
         cmd: &Command,
+        fans: Option<u32>,
         stencil_paint: &Params,
         fill_paint: &Params,
     ) {
@@ -490,11 +560,10 @@ impl OpenGl {
             self.context.disable(glow::CULL_FACE);
         }
 
+        let mut first = fans;
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
         }
 
@@ -708,6 +777,14 @@ impl OpenGl {
             self.context.bind_texture(glow::TEXTURE_2D, glyphtex);
         }
 
+        if let Some(mask) = paint.clip_mask {
+            let cliptex = images.get(mask.image).map(GlTexture::id);
+            unsafe {
+                self.context.active_texture(glow::TEXTURE0 + 2);
+                self.context.bind_texture(glow::TEXTURE_2D, cliptex);
+            }
+        }
+
         self.check_error("set_uniforms texture");
     }
 
@@ -735,6 +812,31 @@ impl OpenGl {
             self.context.clear(glow::COLOR_BUFFER_BIT | glow::STENCIL_BUFFER_BIT);
             self.context.stencil_mask(0xff);
             self.context.disable(glow::SCISSOR_TEST);
+        }
+    }
+
+    /// Limits the draws that follow to `crop` - x, y, width and height in
+    /// the target's texel rows - until [`end_crop`](Self::end_crop), and says
+    /// whether that leaves anything to draw.
+    fn begin_crop(&self, crop: Option<[u32; 4]>) -> bool {
+        let Some([x, y, width, height]) = crop else {
+            return true;
+        };
+        if width == 0 || height == 0 {
+            return false;
+        }
+        unsafe {
+            self.context.enable(glow::SCISSOR_TEST);
+            self.context.scissor(x as i32, y as i32, width as i32, height as i32);
+        }
+        true
+    }
+
+    fn end_crop(&self, crop: Option<[u32; 4]>) {
+        if crop.is_some() {
+            unsafe {
+                self.context.disable(glow::SCISSOR_TEST);
+            }
         }
     }
 
@@ -798,12 +900,19 @@ impl OpenGl {
         filter: ImageFilter,
     ) {
         match filter {
-            ImageFilter::GaussianBlur { sigma } => self.render_gaussian_blur(images, cmd, target_image, sigma),
+            ImageFilter::GaussianBlur { sigma_x, sigma_y } => {
+                self.render_gaussian_blur(images, cmd, target_image, [sigma_x, sigma_y])
+            }
+            ImageFilter::Morphology {
+                radius_x,
+                radius_y,
+                operator,
+            } => self.render_morphology(images, cmd, target_image, [radius_x, radius_y], operator),
             single_pass => {
                 let target_image_info = images.get(target_image).unwrap().info();
                 let (shader_type, slots) = single_pass
                     .single_pass(target_image_info.width() as f32, target_image_info.height() as f32)
-                    .expect("every filter but the Gaussian blur runs as one pass");
+                    .expect("every filter but the Gaussian blur and the morphology runs as one pass");
                 self.render_filter_pass(images, cmd, target_image, shader_type, slots)
             }
         }
@@ -872,22 +981,27 @@ impl OpenGl {
             Color::rgbaf(0., 0., 0., 0.),
             false,
         );
-        self.triangles(images, &cmd, &params);
+        if self.begin_crop(cmd.crop) {
+            self.triangles(images, &cmd, &params);
+        }
+        self.end_crop(cmd.crop);
 
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
     }
 
-    fn render_gaussian_blur(
+    /// A filter of two draws along the axes: the horizontal one, with the
+    /// parameters `axis_params(params, 0)` sets, into the canvas-owned
+    /// scratch, then the vertical one, with `axis_params(params, 1)`, from
+    /// the scratch into `target_image`.
+    fn render_separable_filter(
         &mut self,
         images: &mut ImageStore<GlTexture>,
         mut cmd: Command,
         target_image: ImageId,
-        sigma: f32,
+        mut axis_params: impl FnMut(&mut Params, usize),
     ) {
         let original_render_target = self.current_render_target;
-
-        // The filtering happens in two passes through the canvas-owned scratch.
 
         let source_image_info = images.get(cmd.image.unwrap()).unwrap().info();
 
@@ -900,7 +1014,7 @@ impl OpenGl {
             0.,
             1.,
         );
-        let mut blur_params = Params::new(
+        let mut params = Params::new(
             images,
             &Transform2D::default(),
             &image_paint.flavor,
@@ -910,17 +1024,18 @@ impl OpenGl {
             0.,
             0.,
         );
-        blur_params.shader_type = ShaderType::FilterImage;
+        axis_params(&mut params, 0);
+        params.image_blur_filter_direction = [1.0, 0.0];
+        // The fused matrices ride parameters a filter draw leaves unused: an
+        // alpha-only matrix before the filter is the `radius` flag on the
+        // first draw, a matrix after it the `feather` flag and the matrix
+        // slots on the second.
+        params.radius = f32::from(u8::from(cmd.fused.source_alpha));
 
-        let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma);
-        blur_params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
-        blur_params.image_blur_filter_direction = [1.0, 0.0];
-        blur_params.image_blur_filter_sigma = sigma;
-
-        let horizontal_blur_buffer = cmd
+        let horizontal_buffer = cmd
             .filter_scratch
-            .expect("a Gaussian blur has a reserved scratch image");
-        self.set_target(images, RenderTarget::Image(horizontal_blur_buffer));
+            .expect("a two-pass filter has a reserved scratch image");
+        self.set_target(images, RenderTarget::Image(horizontal_buffer));
         self.main_program().set_view(self.view);
 
         self.clear_rect(
@@ -932,7 +1047,7 @@ impl OpenGl {
             false,
         );
 
-        self.triangles(images, &cmd, &blur_params);
+        self.triangles(images, &cmd, &params);
 
         self.set_target(images, RenderTarget::Image(target_image));
         self.main_program().set_view(self.view);
@@ -946,21 +1061,103 @@ impl OpenGl {
             false,
         );
 
-        blur_params.image_blur_filter_direction = [0.0, 1.0];
-        // The horizontal pass stored premultiplied RGBA regardless of the
+        axis_params(&mut params, 1);
+        params.image_blur_filter_direction = [0.0, 1.0];
+        // The horizontal draw stored premultiplied RGBA regardless of the
         // source image's format or premultiplication flag.
-        blur_params.tex_type = 0.0;
+        params.tex_type = 0.0;
+        params.radius = 0.0;
+        if let Some(matrix) = cmd.fused.post_matrix {
+            params.scissor_mat.copy_from_slice(&matrix[..12]);
+            params.paint_mat[..8].copy_from_slice(&matrix[12..20]);
+            params.feather = 1.0;
+        }
 
-        cmd.image = Some(horizontal_blur_buffer);
+        cmd.image = Some(horizontal_buffer);
 
-        self.triangles(images, &cmd, &blur_params);
+        if self.begin_crop(cmd.crop) {
+            self.triangles(images, &cmd, &params);
+        }
+        self.end_crop(cmd.crop);
 
         // restore previous render target and view
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
     }
 
+    /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
+    /// by `sigma[0]`, then vertical by `sigma[1]`. A degenerate sigma makes
+    /// that draw a copy.
+    fn render_gaussian_blur(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        sigma: [f32; 2],
+    ) {
+        self.render_separable_filter(images, cmd, target_image, |params, axis| {
+            params.shader_type = ShaderType::FilterImage;
+            let (coeff, sigma) = crate::renderer::gaussian_blur_coefficients(sigma[axis]);
+            params.image_blur_filter_coeff[..3].copy_from_slice(&coeff);
+            params.image_blur_filter_sigma = sigma;
+        });
+    }
+
+    /// Two-pass morphology of `cmd.image` into `target_image`: the
+    /// per-channel maximum (dilate) or minimum (erode) over `radius[0]`
+    /// whole pixels either side along x, then over `radius[1]` along y. The
+    /// radius rides the blur's sigma parameter and the operator its first
+    /// coefficient.
+    fn render_morphology(
+        &mut self,
+        images: &mut ImageStore<GlTexture>,
+        cmd: Command,
+        target_image: ImageId,
+        radius: [f32; 2],
+        operator: crate::MorphologyOperator,
+    ) {
+        self.render_separable_filter(images, cmd, target_image, |params, axis| {
+            params.shader_type = ShaderType::FilterImageMorphology;
+            params.image_blur_filter_sigma = radius[axis];
+            params.image_blur_filter_coeff[0] = f32::from(u8::from(operator == crate::MorphologyOperator::Dilate));
+        });
+    }
+
+    /// Scissors the draws that follow to `bounds` - x, y, width and height
+    /// from the target's top left - or lifts the scissor.
+    fn set_clip_bounds(&mut self, bounds: Option<[u32; 4]>) {
+        if self.current_clip_bounds == bounds {
+            return;
+        }
+        self.current_clip_bounds = bounds;
+        unsafe {
+            match bounds {
+                Some([x, y, width, height]) => {
+                    self.context.enable(glow::SCISSOR_TEST);
+                    self.context.scissor(
+                        x as i32,
+                        self.view[1] as i32 - (y + height) as i32,
+                        width as i32,
+                        height as i32,
+                    );
+                }
+                None => self.context.disable(glow::SCISSOR_TEST),
+            }
+        }
+    }
+
     fn main_program(&self) -> &MainProgram {
+        if self.current_program_clips != (false, false) {
+            return self
+                .clip_programs
+                .get(&(
+                    self.current_program,
+                    self.current_program_needs_glyph_texture,
+                    self.current_program_clips,
+                ))
+                .and_then(Option::as_ref)
+                .expect("internal error: clip program selected before it was built");
+        }
         let programs = if self.current_program_needs_glyph_texture {
             &self.main_programs_with_glyph_texture
         } else {
@@ -971,10 +1168,31 @@ impl OpenGl {
             .expect("internal error: invalid shader program selected for given paint")
     }
 
+    /// Whether the program for `params` under `clips` - a clip shape, a coverage mask - is there, building it when
+    /// first asked for. Start-up built one, so the driver can; what fails later is a lost context, which draws
+    /// nothing with any program.
+    fn has_clip_program(&mut self, params: &Params, clips: (bool, bool)) -> bool {
+        let (context, antialias) = (&self.context, self.antialias);
+        let (shader_type, with_glyph_texture) = (params.shader_type, params.uses_glyph_texture());
+        self.clip_programs
+            .entry((shader_type.to_u8(), with_glyph_texture, clips))
+            .or_insert_with(|| {
+                MainProgram::with_clip(context, antialias, shader_type, with_glyph_texture, clips)
+                    .map_err(|error| log::error!("clip program for {shader_type:?}: {error}"))
+                    .ok()
+            })
+            .is_some()
+    }
+
     fn select_main_program(&mut self, params: &Params) {
         let program_index = params.shader_type.to_u8();
+        let mut clips = (params.clip.is_some(), params.clip_mask.is_some());
+        if clips != (false, false) && !self.has_clip_program(params, clips) {
+            clips = (false, false);
+        }
         if program_index != self.current_program
             || params.uses_glyph_texture() != self.current_program_needs_glyph_texture
+            || clips != self.current_program_clips
         {
             unsafe {
                 self.context.active_texture(glow::TEXTURE0);
@@ -986,12 +1204,14 @@ impl OpenGl {
             self.main_program().unbind();
             self.current_program = program_index;
             self.current_program_needs_glyph_texture = params.uses_glyph_texture();
+            self.current_program_clips = clips;
 
             let program = self.main_program();
             program.bind();
             // Bind the two uniform samplers to texture units
             program.set_tex(0);
             program.set_glyphtex(1);
+            program.set_cliptex(2);
             program.set_view(self.view);
         }
     }
@@ -1027,6 +1247,7 @@ impl Renderer for OpenGl {
         commands: Vec<Command>,
     ) {
         self.current_program = 0;
+        self.current_program_clips = (false, false);
         self.main_program().bind();
 
         unsafe {
@@ -1054,6 +1275,18 @@ impl Renderer for OpenGl {
             self.context
                 .buffer_data_u8_slice(glow::ARRAY_BUFFER, verts.align_to().1, glow::STREAM_DRAW);
 
+            if self.fan_index_buff.is_some() {
+                self.fan_indices.build(&commands);
+                // Bound with the vertex array, which keeps it for the frame.
+                self.context
+                    .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.fan_index_buff);
+                self.context.buffer_data_u8_slice(
+                    glow::ELEMENT_ARRAY_BUFFER,
+                    self.fan_indices.indices().align_to().1,
+                    glow::STREAM_DRAW,
+                );
+            }
+
             self.context.enable_vertex_attrib_array(0);
             self.context.enable_vertex_attrib_array(1);
 
@@ -1071,15 +1304,17 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        for cmd in commands {
+        for (index, cmd) in commands.into_iter().enumerate() {
+            self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
             self.set_composite_operation(cmd.composite_operation);
+            let fans = self.fan_index_buff.map(|_| self.fan_indices.firsts[index]);
 
             match cmd.cmd_type {
-                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, params),
+                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, fans, params),
                 CommandType::ConcaveFill {
                     ref stencil_params,
                     ref fill_params,
-                } => self.concave_fill(images, &cmd, stencil_params, fill_params),
+                } => self.concave_fill(images, &cmd, fans, stencil_params, fill_params),
                 CommandType::Stroke { ref params } => self.stroke(images, &cmd, params),
                 CommandType::StencilStroke {
                     ref params1,
@@ -1112,6 +1347,9 @@ impl Renderer for OpenGl {
                 }
             }
         }
+
+        // No scissor of a clipped draw outlives the frame.
+        self.set_clip_bounds(None);
 
         unsafe {
             self.context.disable_vertex_attrib_array(0);
@@ -1238,9 +1476,9 @@ impl Drop for OpenGl {
             }
         }
 
-        if let Some(vert_buff) = self.vert_buff {
+        for buffer in [self.vert_buff, self.fan_index_buff].into_iter().flatten() {
             unsafe {
-                self.context.delete_buffer(vert_buff);
+                self.context.delete_buffer(buffer);
             }
         }
     }

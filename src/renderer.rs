@@ -4,8 +4,9 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
-    ImageInfo, ImageSource, ImageStore,
+    geometry::{Bounds, Position},
+    paint::GlyphTexture,
+    Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
@@ -25,8 +26,48 @@ pub(crate) use params::Params;
 /// Represents a drawable object.
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Drawable {
+    /// A fill's fan, or in a `ClipFill` the triangles of all its contours' fans.
     pub(crate) fill_verts: Option<(usize, usize)>,
     pub(crate) stroke_verts: Option<(usize, usize)>,
+}
+
+/// A frame's fill fans as one triangle list over its vertices, for a
+/// renderer that draws them indexed: no fan topology, base vertex or rebind
+/// is needed, and a layered driver has no fan to emulate per draw.
+#[derive(Debug, Default)]
+pub(crate) struct FanIndices {
+    pub(crate) triangles: Vec<[u32; 3]>,
+    // Where each command's fans start, as an index, by the command's place.
+    pub(crate) firsts: Vec<u32>,
+}
+
+impl FanIndices {
+    pub(crate) fn build(&mut self, commands: &[Command]) {
+        self.triangles.clear();
+        self.firsts.clear();
+        for command in commands {
+            self.firsts.push(3 * self.triangles.len() as u32);
+            if matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ) {
+                for (start, count) in command.drawables.iter().filter_map(|drawable| drawable.fill_verts) {
+                    let (hub, end) = (start as u32, (start + count) as u32);
+                    self.triangles
+                        .extend((hub + 1..end.saturating_sub(1)).map(|rim| [hub, rim, rim + 1]));
+                }
+            }
+        }
+    }
+
+    pub(crate) fn indices(&self) -> &[u32] {
+        self.triangles.as_flattened()
+    }
+
+    /// How many indices the fan of `count` vertices takes.
+    pub(crate) fn count(count: usize) -> u32 {
+        (count.saturating_sub(2) * 3) as u32
+    }
 }
 
 /// Defines different types of commands that can be executed by the renderer.
@@ -94,6 +135,16 @@ pub enum CommandType {
     },
 }
 
+/// The colour matrices a two-draw filter pass carries in its draws: an
+/// alpha-only matrix before it, so every tap of the first draw reads
+/// (0, 0, 0, a), and any matrix after it, applied by the second draw to its
+/// result before storing it - each one draw fewer than its own pass.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Fused {
+    pub(crate) source_alpha: bool,
+    pub(crate) post_matrix: Option<[f32; 20]>,
+}
+
 /// A blend pass's inputs beyond its mode: whether the backdrop (the glyph
 /// texture) is stored the other way up from the image, the alpha the image
 /// is scaled by first, and whether to write the image's contribution over
@@ -129,6 +180,11 @@ pub struct Command {
     pub(crate) glyph_texture: GlyphTexture,
     // A blend pass's inputs beyond its mode; the backdrop is the glyph texture.
     pub(crate) blend_pass: BlendPass,
+    // The matrices a two-draw filter pass folds into its draws.
+    pub(crate) fused: Fused,
+    // The rect a filter pass's result is drawn inside - x, y, width and
+    // height in the texel rows of its target - when it is cropped.
+    pub(crate) crop: Option<[u32; 4]>,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -145,9 +201,52 @@ impl Command {
             filter_scratch: None,
             glyph_texture: GlyphTexture::default(),
             blend_pass: BlendPass::default(),
+            fused: Fused::default(),
+            crop: None,
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
+    }
+
+    /// The pixels of a target of `size` that the clip leaves the command's
+    /// draws - x, y, width and height from the top left - when they carry a
+    /// shape that ends somewhere, a mask, or both. Outside them the clip's
+    /// coverage is zero, so the renderer scissors every draw of the command
+    /// to them, the ones that only write the stencil too: no fragment is
+    /// shaded out there and a tiler leaves its tiles alone, as under a clip
+    /// on the stencil. Never less than a pixel: Metal takes no empty
+    /// scissor.
+    pub(crate) fn clip_bounds(&self, [width, height]: [u32; 2]) -> Option<[u32; 4]> {
+        let params = match &self.cmd_type {
+            CommandType::ConvexFill { params }
+            | CommandType::Stroke { params }
+            | CommandType::Triangles { params }
+            | CommandType::ConcaveFill {
+                fill_params: params, ..
+            }
+            | CommandType::StencilStroke { params1: params, .. } => params,
+            _ => return None,
+        };
+        let shape = params.clip.and_then(|shape| shape.reach());
+        let mask = params.clip_mask.map(|mask| mask.reach());
+        let reach = match (shape, mask) {
+            (Some(shape), Some(mask)) => Bounds {
+                minx: shape.minx.max(mask.minx),
+                miny: shape.miny.max(mask.miny),
+                maxx: shape.maxx.min(mask.maxx),
+                maxy: shape.maxy.min(mask.maxy),
+            },
+            (shape, mask) => shape.or(mask)?,
+        };
+        if width == 0 || height == 0 {
+            return None;
+        }
+        // A float past either end saturates, and one that is no number is zero.
+        let left = (reach.minx.floor() as u32).min(width - 1);
+        let top = (reach.miny.floor() as u32).min(height - 1);
+        let right = (reach.maxx.ceil() as u32).clamp(left + 1, width);
+        let bottom = (reach.maxy.ceil() as u32).clamp(top + 1, height);
+        Some([left, top, right - left, bottom - top])
     }
 }
 
@@ -334,6 +433,11 @@ pub enum ShaderType {
     /// Blend shader (SVG `feBlend`): the image over the backdrop bound in the
     /// glyph-texture slot, with one of the sixteen blend modes.
     FilterImageBlend,
+    /// Morphology shader (SVG `feMorphology`), one axis per draw like the
+    /// blur: the per-channel maximum or minimum within a radius.
+    FilterImageMorphology,
+    /// Offset shader (SVG `feOffset`): the image shifted by a pixel offset.
+    FilterImageOffset,
 }
 
 impl ShaderType {
@@ -356,6 +460,8 @@ impl ShaderType {
             Self::FilterImageTurbulence => 13,
             Self::FilterImageTransfer => 14,
             Self::FilterImageBlend => 15,
+            Self::FilterImageMorphology => 16,
+            Self::FilterImageOffset => 17,
         }
     }
 
@@ -369,9 +475,9 @@ impl ShaderType {
 /// fragment shader's blur loop is bounded at 24 taps per side (GLES 2.0 needs
 /// a constant loop bound) and the kernel reaches 3 sigma, so a pass covers
 /// sigma 8 exactly and no more. A blur above it is not clamped away: the chain
-/// planner (`filter_passes` in lib.rs) runs it as several passes of at most
-/// this sigma, which compose in quadrature to the requested one. The
-/// coefficients below and the shader's tap count agree on this value.
+/// planner (`blur_passes` in filters.rs) halves the image until the sigma
+/// fits one pass and scales the result back up. The coefficients below and
+/// the shader's tap count agree on this value.
 pub(crate) const MAX_BLUR_SIGMA: f32 = 8.0;
 
 /// Gaussian blur coefficients for `sigma`, sanitized the same way for every
@@ -388,4 +494,51 @@ pub(crate) fn gaussian_blur_coefficients(sigma: f32) -> ([f32; 3], f32) {
     let x = 1. / ((2. * std::f32::consts::PI).sqrt() * sigma);
     let y = f32::exp(-0.5 / (sigma * sigma));
     ([x, y, y * y], sigma)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fan_indices_take_each_fills_fans_in_turn() {
+        let with_fills = |cmd_type, fills: &[(usize, usize)]| {
+            let mut command = Command::new(cmd_type);
+            command.drawables = fills
+                .iter()
+                .map(|&fill| Drawable {
+                    fill_verts: Some(fill),
+                    ..Drawable::default()
+                })
+                .collect();
+            command
+        };
+        let commands = [
+            with_fills(
+                CommandType::ConvexFill {
+                    params: Params::default(),
+                },
+                &[(4, 4)],
+            ),
+            // A clip's fill vertices are triangles already.
+            with_fills(CommandType::ClipFill, &[(20, 6)]),
+            with_fills(
+                CommandType::ConcaveFill {
+                    stencil_params: Params::default(),
+                    fill_params: Params::default(),
+                },
+                &[(10, 3), (13, 5)],
+            ),
+        ];
+
+        let mut fans = FanIndices::default();
+        fans.build(&commands);
+
+        assert_eq!(
+            fans.indices(),
+            [4, 5, 6, 4, 6, 7, 10, 11, 12, 13, 14, 15, 13, 15, 16, 13, 16, 17]
+        );
+        assert_eq!(fans.firsts, [0, 6, 6]);
+        assert_eq!(FanIndices::count(5), 9);
+    }
 }

@@ -26,6 +26,78 @@ All notable changes to this project will be documented in this file.
   `flush_to_surface`. `Canvas::renderer` and
   `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
   reports the passes per command buffer of the last frame.
+- Fixed text getting the width it had at an earlier letter spacing when both
+  letter spacings were below a tenth of a device pixel (every negative one
+  included) or in the same tenth above that (e.g., 2 and 2.05):
+  `measure_text` returned the earlier width, `break_text` broke the text by
+  it, and centered or right-aligned text started in the wrong place.
+- Curves are flattened closer to their shape: each point between two chords
+  is moved outward, so the chords cross the curve instead of cutting inside
+  every bend, and the flattening tolerance is halved. Round joins and caps
+  take a few more segments with it, 1.25 times as many for a 20 px stroke.
+- Filling a path costs less CPU and vertex memory, with identical output:
+  curves are flattened in a loop rather than by recursion, a contour turned
+  round for a fill keeps the directions it had, and a fill's vertices are
+  its fan - one a point, where they were three a triangle - drawn as fans on
+  OpenGL and as one index list a frame on WGPU and WebGL.
+- **Breaking:** `CompositeOperation` and `BlendFactor` are now
+  `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
+- Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
+  hit-tested still being drawn and hit-tested as the old path under the same
+  transform: the flattened copy a `Path` keeps was not dropped when verbs were
+  added.
+- Fixed the WGPU backend rebuilding render pipelines every frame when a frame
+  takes several flushes: each flush dropped every pipeline it did not use.
+  Pipelines now stay cached across flushes, and past 512 the least recently
+  used are dropped first.
+- Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
+  created with it now gets its mip levels, filled after every upload the way
+  the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
+  mipmap filtering, so a raster drawn smaller than its size is box-filtered
+  instead of point-sampled from the base level. Both backends now sample an
+  image half a level toward the larger mip, where the browsers' minification
+  sits (Chromium samples the larger level, Firefox downsamples directly).
+  The levels cost a third more texture memory for those images only; the
+  downsample pipeline is built on the first such upload.
+- Fixed a panic with the `swash` and `textlayout` features when text with PNG
+  bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
+  rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
+  pixels, or scaled with a gradient or image paint.
+- Added `ImageFilter::Morphology`, `ImageFilter::Offset` and
+  `ImageFilter::Crop`, the SVG `feMorphology` and `feOffset` primitives and
+  the subregion a primitive's result is clipped to: a dilation grows the opaque
+  regions of an image by a whole-pixel radius per axis and an erosion
+  shrinks them (the per-channel maximum or minimum within the radius, as
+  two draws like the blur, a radius above the 24 pixels one draw covers
+  running as passes whose radii sum to it), and an offset shifts the image
+  by a device-pixel vector, transparent beyond its edge. A layer pads its
+  store by a morphology's radius - a dilation reaches that far out, an
+  erosion reads that far beyond the store - and by an offset's shift, as it
+  does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
+  shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
+  `feColorMatrix`) as one layer filter. A crop leaves an image transparent
+  outside a rectangle; after another filter of a chain it is that filter's
+  pass drawn inside the rectangle, at no pass of its own.
+- A Gaussian blur whose standard deviation on an axis is above the 8 device
+  pixels one shader pass covers now runs at a downsampled size, the way
+  Skia's GPU blur does: a filter chain, a layer filter or a shadow halves
+  its image along that axis until the sigma fits one pass, blurs there and
+  scales the result back up bilinearly,
+  instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
+  1080p layer is four halvings, a blur over a sixteenth of the pixels
+  where it was 93 full-size blurs, so it no longer exceeds the
+  filter work budget, which had left the layer unblurred; the sigma ceiling
+  rises from 128 to 512; blurs within the bound render as before. The blur
+  shader also reads transparent beyond the image it samples instead of
+  extending its edge texels, so a blurred image fades at its border as it
+  does in a browser.
+- `ImageFilter::GaussianBlur` now takes a standard deviation per axis
+  (`sigma_x`, `sigma_y`), SVG's two-valued `feGaussianBlur stdDeviation`: a
+  blur along one axis renders as a streak or a glow instead of spreading the
+  larger value both ways. Each axis splits into its own passes above the
+  per-pass bound, an unblurred axis copies through, and a layer pads each axis
+  by its own reach. `ImageFilter::gaussian_blur(sigma)` builds the isotropic
+  blur the single `sigma` field used to.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which
@@ -117,15 +189,25 @@ All notable changes to this project will be documented in this file.
   stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
   render it. Showed as a wedge cut out of the Firefox logo's flame.
 - Added `Canvas::clip_path(path, fill_rule)`, which clips later drawing to any
-  path under the current transform - Canvas 2D `clip()` and SVG `clip-path`
-  with `clip-rule` - and is scoped by `save()`/`restore()`. Clips use a bit of
-  the stencil buffer both backends already have, so they add no textures or
-  render passes; a clip taken while drawing into a layer lives on the layer's
-  store and gates its content, while the clips underneath gate the composite.
-  `clear_rect()` stays a raw clear the clip does not affect; it clears the
-  stencil with the color so a winding count a cover pass missed cannot reach
-  the next frame - the whole stencil, or only the winding bits while a clip is
-  armed on the target. Clip edges are not antialiased yet.
+  path under the current transform - Canvas 2D `clip()` and SVG `clip-path` with
+  `clip-rule` - and is scoped by `save()`/`restore()`, and
+  `Canvas::clip_paths()`, which clips to the union of several paths, each under
+  its own rule, as an SVG `clipPath` with several children does. A clip's edge
+  is antialiased like a fill's and costs no render pass: a clip whose path
+  outlines a rectangle (under any transform), a rounded rectangle - rounded at
+  all four corners or at the two of one side - or an ellipse is evaluated by the
+  fragment shader of each draw under it, a rectangle that cuts such a shape
+  clips with it in the scissor's place, and any other clip is rasterized on the
+  CPU into a coverage mask of one byte a pixel that those shaders read - kept
+  while the clip does not change or moves by whole pixels, within a budget
+  (`Canvas::set_clip_mask_budget()`, 32 MiB by default). A clip the budget has
+  no room for uses a bit of the stencil buffer both backends already have, where
+  its edge is not antialiased. A clip taken while drawing into a layer lives on
+  the layer's store and gates its content, while the clips underneath gate the
+  composite. `clear_rect()` stays a raw clear the clip does not affect; it
+  clears the stencil with the color so a winding count a cover pass missed
+  cannot reach the next frame - the whole stencil, or only the winding bits
+  while a clip is armed on the target.
 - Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
   a mask image placed in device space, using either its luminance times alpha
   (SVG `mask`'s default `mask-type`, via the new

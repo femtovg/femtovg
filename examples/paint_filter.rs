@@ -69,7 +69,7 @@ fn run<W: WindowSurface + 'static>(
 
                         canvas.filter_image(
                             filtered_image.unwrap(),
-                            femtovg::ImageFilter::GaussianBlur { sigma },
+                            femtovg::ImageFilter::gaussian_blur(sigma),
                             image_id,
                         );
 

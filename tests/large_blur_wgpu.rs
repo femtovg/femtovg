@@ -1,11 +1,12 @@
 //! Headless GPU tests for blurs above the shader's per-pass bound (sigma 8:
 //! the 24-tap loop GLES 2.0's constant loop bound allows). A chain, a layer
-//! filter and a shadow split such a blur into passes that compose in
-//! quadrature to the requested sigma, so a blurred step edge must follow the
-//! analytic Gaussian profile of that sigma, 0.5 * (1 + erf(d / (sigma *
-//! sqrt(2)))), where the single clamped pass renders a sigma-8 edge. Blurs
-//! within the bound must stay the one pass they were. Skips without a GPU
-//! adapter.
+//! filter and a shadow run such a blur down a pyramid - the image halved
+//! until the sigma fits one pass, blurred there, scaled back up - so a
+//! blurred step edge must still follow the analytic Gaussian profile of the
+//! requested sigma, 0.5 * (1 + erf(d / (sigma * sqrt(2)))), where the single
+//! clamped pass renders a sigma-8 edge. Blurs within the bound must stay the
+//! one pass they were, and a blurred image must fade at its border rather
+//! than smear its edge texels. Skips without a GPU adapter.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
@@ -16,13 +17,16 @@ use femtovg::{
 mod common;
 use common::headless_device;
 
-const W: u32 = 128;
-const H: u32 = 64;
+const W: u32 = 256;
+/// Tall enough that the middle row is more than 3 sigma from the image's
+/// top and bottom edges too, for the chains over an image.
+const H: u32 = 192;
 /// The step edge: columns below it are black, from it on white.
-const EDGE: u32 = 64;
-/// Columns checked against the profile, 3 sigma inside both image edges for
-/// the sigmas below.
-const CHECK: std::ops::RangeInclusive<u32> = 16..=112;
+const EDGE: u32 = 128;
+/// Columns checked against the profile: within 3 sigma of the edge for the
+/// sigmas below, and more than that from the image's own edges, beyond which
+/// a blur over an image reads transparent.
+const CHECK: std::ops::RangeInclusive<u32> = 80..=176;
 /// The allowed deviation from the analytic profile, in 8-bit counts.
 const TOLERANCE: f64 = 3.0;
 
@@ -173,12 +177,12 @@ fn max_deviation(buf: &[u8], sigma: f64) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// `filter_image_chain` with sigma 16 renders the sigma-16 profile: four
-/// passes of 8 compose in quadrature to one of 16. The single-pass
+/// `filter_image_chain` with sigma 16 renders the sigma-16 profile: the
+/// image halved once, blurred by 8 and scaled back up. The single-pass
 /// `filter_image`, which keeps the bound, renders the sigma-8 profile
 /// instead and misses the sigma-16 one by tens of counts.
 #[test]
-fn a_split_blur_chain_matches_the_gaussian_profile() {
+fn a_pyramid_blur_chain_matches_the_gaussian_profile() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
@@ -186,7 +190,7 @@ fn a_split_blur_chain_matches_the_gaussian_profile() {
         let source = step_image(canvas);
         let target = filter_target(canvas);
         canvas
-            .filter_image_chain(target, &[ImageFilter::GaussianBlur { sigma: 16.0 }], source)
+            .filter_image_chain(target, &[ImageFilter::gaussian_blur(16.0)], source)
             .expect("chain");
         blit(canvas, target);
     });
@@ -199,7 +203,7 @@ fn a_split_blur_chain_matches_the_gaussian_profile() {
     let single = render(&device, &queue, |canvas| {
         let source = step_image(canvas);
         let target = filter_target(canvas);
-        canvas.filter_image(target, ImageFilter::GaussianBlur { sigma: 16.0 }, source);
+        canvas.filter_image(target, ImageFilter::gaussian_blur(16.0), source);
         blit(canvas, target);
     });
     let clamped = max_deviation(&single, 16.0);
@@ -216,14 +220,14 @@ fn a_split_blur_chain_matches_the_gaussian_profile() {
 }
 
 /// A layer filter with sigma 20 renders the sigma-20 profile: its store pads
-/// by the true reach and its seven passes compose to the declared blur.
+/// by the true reach and the blur runs at a quarter size, by 5.
 #[test]
-fn a_split_blur_layer_matches_the_gaussian_profile() {
+fn a_pyramid_blur_layer_matches_the_gaussian_profile() {
     let Some((device, queue)) = headless_device() else {
         return;
     };
     let layered = render(&device, &queue, |canvas| {
-        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::GaussianBlur { sigma: 20.0 }])));
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[ImageFilter::gaussian_blur(20.0)])));
         step_fill(canvas, -400.0, 800.0);
         canvas.end_layer();
     });
@@ -235,8 +239,8 @@ fn a_split_blur_layer_matches_the_gaussian_profile() {
     eprintln!("layer sigma 20: {deviation:.2} counts off the sigma-20 profile");
 }
 
-/// A shadow with `shadowBlur` 40 (sigma 20, beyond the 16 one pass covers)
-/// renders the sigma-20 profile. The shape sits above the canvas and its
+/// A shadow with `shadowBlur` 40 (sigma 20, beyond the 8 one pass covers)
+/// renders the sigma-20 profile through the pyramid. The shape sits above the canvas and its
 /// shadow is offset down onto it, so the middle row reads the shadow alone.
 #[test]
 fn a_large_shadow_blur_matches_the_gaussian_profile() {
@@ -257,7 +261,7 @@ fn a_large_shadow_blur_matches_the_gaussian_profile() {
     eprintln!("shadow sigma 20: {deviation:.2} counts off the sigma-20 profile");
 }
 
-/// A blur within the bound is untouched by the split: the chain [blur
+/// A blur within the bound is untouched by the pyramid: the chain [blur
 /// sigma] renders bit-identically to the single blur pass followed by the
 /// parity identity it always was.
 #[test]
@@ -270,7 +274,7 @@ fn a_blur_within_the_bound_is_bit_identical_to_its_single_pass() {
             let source = step_image(canvas);
             let target = filter_target(canvas);
             canvas
-                .filter_image_chain(target, &[ImageFilter::GaussianBlur { sigma }], source)
+                .filter_image_chain(target, &[ImageFilter::gaussian_blur(sigma)], source)
                 .expect("chain");
             blit(canvas, target);
         });
@@ -280,7 +284,7 @@ fn a_blur_within_the_bound_is_bit_identical_to_its_single_pass() {
                 .create_image_empty(W as usize, H as usize, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
                 .expect("scratch");
             let target = filter_target(canvas);
-            canvas.filter_image(scratch, ImageFilter::GaussianBlur { sigma }, source);
+            canvas.filter_image(scratch, ImageFilter::gaussian_blur(sigma), source);
             canvas.filter_image(target, ImageFilter::identity(), scratch);
             blit(canvas, target);
         });
@@ -294,4 +298,44 @@ fn a_blur_within_the_bound_is_bit_identical_to_its_single_pass() {
             "sigma {sigma}: {deviation} counts off its profile"
         );
     }
+}
+
+/// A blur reads transparent beyond the image it samples: an opaque white
+/// image blurred by sigma 6 fades over its border - column x keeps the
+/// kernel mass inside the image, 0.5 * (1 + erf((x + 0.5) / (sigma *
+/// sqrt(2)))) - where clamped sampling kept every column white.
+#[test]
+fn a_blurred_image_fades_at_its_edge() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let faded = render(&device, &queue, |canvas| {
+        canvas.clear_rect(0, 0, W, H, Color::black());
+        let pixels = vec![RGBA8::new(255, 255, 255, 255); (W * H) as usize];
+        let source = canvas
+            .create_image(Img::new(pixels.as_slice(), W as usize, H as usize), ImageFlags::empty())
+            .expect("source image");
+        let target = canvas
+            .create_image_empty(W as usize, H as usize, PixelFormat::Rgba8, ImageFlags::PREMULTIPLIED)
+            .expect("target image");
+        canvas.filter_image(target, ImageFilter::gaussian_blur(6.0), source);
+        blit(canvas, target);
+    });
+    let row = H / 2;
+    let deviation = (0..W / 2)
+        .map(|x| {
+            let value = faded[((row * W + x) * 4) as usize] as f64;
+            let inside = 0.5 * (1.0 + erf((x as f64 + 0.5) / (6.0 * 2f64.sqrt())));
+            (value - 255.0 * inside).abs()
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        deviation <= TOLERANCE,
+        "the blurred edge deviates from the fade of a transparent exterior by {deviation} counts"
+    );
+    let edge = faded[((row * W) * 4) as usize];
+    assert!(
+        (130..=142).contains(&edge),
+        "first column {edge}, not the 136 of a fade"
+    );
 }

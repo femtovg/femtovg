@@ -139,7 +139,7 @@ fn a_slice_holds_at_most_the_configured_passes_at_63_64_and_65() {
                     let blurred = c
                         .create_image_empty(8, 8, PixelFormat::Rgba8, ImageFlags::empty())
                         .unwrap();
-                    c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+                    c.filter_image(blurred, ImageFilter::gaussian_blur(2.0), source);
                     let mut p = Path::new();
                     p.rect(20.0, 2.0, 8.0, 8.0);
                     c.fill_path(&p, &Paint::image(blurred, 20.0, 2.0, 8.0, 8.0, 0.0, 1.0));
@@ -180,7 +180,7 @@ fn a_target_left_undrawn_gets_no_pass() {
             c.clear_rect(0, 0, 8, 8, Color::rgba(0, 0, 0, 0));
             fill(c, 2.0, 2.0, 4.0, 4.0, Color::rgb(0, 0, 255));
         });
-        c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 2.0 }, source);
+        c.filter_image(blurred, ImageFilter::gaussian_blur(2.0), source);
         let mut matrix = [0.0; 20];
         (matrix[0], matrix[6], matrix[12], matrix[18]) = (1.0, 1.0, 1.0, 1.0);
         c.filter_image(tinted, ImageFilter::ColorMatrix { matrix }, blurred);
@@ -227,7 +227,7 @@ fn mixed_scene(c: &mut C) {
     let blurred = c
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
-    c.filter_image(blurred, ImageFilter::GaussianBlur { sigma: 3.0 }, source);
+    c.filter_image(blurred, ImageFilter::gaussian_blur(3.0), source);
     let tinted = c
         .create_image_empty(32, 32, PixelFormat::Rgba8, ImageFlags::empty())
         .unwrap();
@@ -451,7 +451,7 @@ fn with_slicing_a_prepass_submitted_with_the_tail_erases_the_slices_before_it() 
 fn portrait(c: &mut C) {
     let blurred = LayerEffects::new()
         .with_opacity(0.8)
-        .with_filters(&[ImageFilter::GaussianBlur { sigma: 12.0 }]);
+        .with_filters(&[ImageFilter::gaussian_blur(12.0)]);
     let plain = LayerEffects::new().with_opacity(0.6);
     for i in 0..176 {
         let effects = if i % 30 == 15 { &blurred } else { &plain };

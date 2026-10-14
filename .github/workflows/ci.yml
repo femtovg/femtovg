@@ -40,9 +40,11 @@ jobs:
       - run: cargo build --verbose --examples
       - run: cargo build --verbose --examples --features wgpu
       - run: cargo build --target=wasm32-unknown-unknown --example demo
+      - run: cargo build --target=wasm32-unknown-unknown --example demo --features wgpu
       - run: cargo test
       - run: cargo test --lib --no-default-features --features swash
       - run: cargo test --lib --features swash
+      - run: cargo test --lib --no-default-features --features swash,debug_inspector
   # `cargo test` above never runs the GPU tests: every tests/*_wgpu.rs is gated
   # behind the `wgpu` feature, which that command does not enable, so each of
   # those executables is built and then reports "running 0 tests". This job

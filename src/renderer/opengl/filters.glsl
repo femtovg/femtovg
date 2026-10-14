@@ -2,13 +2,15 @@
 // curves and feBlend. Appended after main-fs.glsl; main() calls them
 // through the prototypes declared there.
 
-vec4 renderColorMatrix() {
-    // The 4x5 color matrix is packed row-major into frag[0..4] (the scissor/paint
-    // matrix slots, unused during a filter pass). Apply it in unpremultiplied
-    // sRGB space, clamp to [0,1], then re-premultiply: unpremultiplying avoids
-    // edge halos and the clamp keeps overflowing matrices from producing
-    // out-of-range or NaN pixels.
-    vec4 c = texture2D(tex, fpos.xy / extent);
+// The 4x5 color matrix packed row-major into frag[0..4] (the scissor/paint
+// matrix slots, unused during a filter pass) applied to a premultiplied
+// color: in unpremultiplied sRGB space, clamped to [0,1], re-premultiplied
+// - unpremultiplying avoids edge halos and the clamp keeps overflowing
+// matrices from producing out-of-range or NaN pixels. The color-matrix pass
+// and the second draw of a two-draw filter with a matrix fused into it
+// share it.
+vec4 colorMatrixOn(vec4 premultiplied) {
+    vec4 c = premultiplied;
     if (c.a > 0.0) {
         c.rgb /= c.a;
     }
@@ -19,6 +21,10 @@ vec4 renderColorMatrix() {
     vec4 outc = clamp(vec4(r, g, b, a), 0.0, 1.0);
     outc.rgb *= outc.a;
     return outc;
+}
+
+vec4 renderColorMatrix() {
+    return colorMatrixOn(texture2D(tex, fpos.xy / extent));
 }
 
 // SVG feTurbulence (SVG 1.1 section 15.19), all four channels at once. `tex`
@@ -252,4 +258,40 @@ vec4 renderBlend() {
         return vec4(contribution, src.a);
     }
     return vec4(contribution + bd.rgb * (1.0 - src.a), src.a + bd.a - src.a * bd.a);
+}
+
+// SVG feMorphology, one axis per draw like the blur: each pixel takes the
+// per-channel maximum (dilate) or minimum (erode) of the premultiplied
+// pixels within the radius along imageBlurFilterDirection, every tap
+// through blurTap, so beyond the image reads transparent and an erosion
+// eats into the border. The radius rides imageBlurFilterSigma (whole
+// pixels, at most 24, the loop's constant bound) and the operator
+// imageBlurFilterCoeff.x (1 dilates).
+vec4 renderMorphology() {
+    // `radius` is the box gradient's macro in main-fs.glsl.
+    float reach = imageBlurFilterSigma;
+    bool dilate = imageBlurFilterCoeff.x > 0.5;
+    vec4 acc = blurTap(fpos.xy);
+    for (float i = 1.0; i <= 24.0; i += 1.) {
+        if (i > reach) {
+            break;
+        }
+        vec4 before = blurTap(fpos.xy - i * imageBlurFilterDirection);
+        vec4 after = blurTap(fpos.xy + i * imageBlurFilterDirection);
+        if (dilate) {
+            acc = max(acc, max(before, after));
+        } else {
+            acc = min(acc, min(before, after));
+        }
+    }
+    // A color matrix fused into this second draw.
+    if (feather > 0.5) acc = colorMatrixOn(acc);
+    if (texType == 2) acc = vec4(acc.x);
+    return acc;
+}
+
+// SVG feOffset: the image shifted by the (dx, dy) in the first two
+// parameter slots; what shifts in from beyond the image is transparent.
+vec4 renderOffset() {
+    return blurTap(fpos.xy - frag[0].xy);
 }

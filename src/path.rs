@@ -134,6 +134,19 @@ impl Path {
         self.verbs.is_empty()
     }
 
+    /// How many verbs the path has.
+    pub(crate) fn verb_count(&self) -> usize {
+        self.verbs.len()
+    }
+
+    /// The path's verbs and coordinates, bit for bit, onto `words`: what
+    /// tells it from another path without flattening either.
+    pub(crate) fn words(&self, words: &mut Vec<u32>) {
+        words.extend([self.verbs.len() as u32, self.coords.len() as u32]);
+        words.extend(self.verbs.iter().map(|verb| *verb as u32));
+        words.extend(self.coords.iter().flat_map(|at| [at.x.to_bits(), at.y.to_bits()]));
+    }
+
     /// Sets the distance tolerance used for path operations.
     pub fn set_distance_tolerance(&mut self, value: f32) {
         self.dist_tol = value;
@@ -873,6 +886,7 @@ impl Path {
 
         self.verbs.extend_from_slice(verbs);
         self.coords.extend_from_slice(coords);
+        *self.cache.get_mut() = None;
     }
 }
 
