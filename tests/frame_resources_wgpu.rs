@@ -1,7 +1,9 @@
 //! What the WGPU backend sets up for a frame. The viewport uniform and bind
 //! group of a render target size outlive the flush that made them, for later
 //! flushes to the same size, and the renderer keeps those of only so many
-//! sizes.
+//! sizes. A frame's command buffer carries the vertices, fan indices and
+//! uniforms it draws with, so frames recorded before any of them is submitted
+//! each draw their own: a frame does not read data a later flush wrote.
 //!
 //! Live bind groups are read from wgpu's internal counters, enabled by the
 //! `counters` feature on the `wgpu` dev-dependency.
@@ -30,6 +32,57 @@ fn target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
+}
+
+fn readback(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture) -> Vec<u8> {
+    let unpadded = W * 4;
+    let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (padded * H) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: target,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(H),
+            },
+        },
+        wgpu::Extent3d {
+            width: W,
+            height: H,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit(Some(encoder.finish()));
+    let slice = buffer.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed while waiting for the readback");
+    let mapped = slice.get_mapped_range().expect("readback");
+    let mut pixels = vec![0u8; (unpadded * H) as usize];
+    for row in 0..H as usize {
+        let (s, d) = (row * padded as usize, row * unpadded as usize);
+        pixels[d..d + unpadded as usize].copy_from_slice(&mapped[s..s + unpadded as usize]);
+    }
+    pixels
+}
+
+fn pixel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let offset = ((y * W + x) * 4) as usize;
+    pixels[offset..offset + 4].try_into().unwrap()
 }
 
 /// Clears the canvas to black and fills a square of `color` at `x`.
@@ -129,5 +182,37 @@ fn viewport_bind_groups_past_a_bound_are_dropped_least_recently_used_first() {
         live[frames - 16..].iter().all(|&count| count == last),
         "bind groups alive after the last frames, each with an image target of a new size: {:?}",
         &live[frames - 16..]
+    );
+}
+
+/// Two frames flushed one after the other and submitted together: each
+/// target shows its own square, in its own color, where it was drawn.
+#[test]
+fn frames_flushed_before_a_submit_each_draw_their_own() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (left, right) = (target(&device, W, H), target(&device, W, H));
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+
+    let (red, blue) = (Color::rgb(255, 0, 0), Color::rgb(0, 0, 255));
+    frame_with_square(&mut canvas, 4.0, red);
+    let first = canvas.flush_to_output(&left).expect("a frame with draws");
+    frame_with_square(&mut canvas, 36.0, blue);
+    let second = canvas.flush_to_output(&right).expect("a frame with draws");
+    queue.submit([first, second]);
+
+    let (left, right) = (readback(&device, &queue, &left), readback(&device, &queue, &right));
+    let black = [0, 0, 0, 255];
+    assert_eq!(
+        [pixel(&left, 16, 32), pixel(&left, 48, 32)],
+        [[255, 0, 0, 255], black],
+        "the first frame's target should hold its red square on the left and nothing on the right"
+    );
+    assert_eq!(
+        [pixel(&right, 16, 32), pixel(&right, 48, 32)],
+        [black, [0, 0, 255, 255]],
+        "the second frame's target should hold its blue square on the right and nothing on the left"
     );
 }

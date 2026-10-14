@@ -69,6 +69,8 @@ const UNIFORM_BYTES: u64 = (UNIFORMARRAY_SIZE * 4 * 4) as u64;
 const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 const MIN_UNIFORM_SLOTS: u64 = 64;
 const MIN_VERTEX_BYTES: u64 = 4096;
+// What a frame uploads goes through staging chunks of this size, or larger for a larger upload.
+const STAGING_CHUNK_BYTES: u64 = 1 << 20;
 
 const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
 const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST);
@@ -403,6 +405,8 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     fan_indices: FanIndices,
     fan_index_buffer: wgpu::Buffer,
+    // Staging for a frame's vertices, fan indices and uniforms, copied by the frame's own command buffer.
+    staging_belt: wgpu::util::StagingBelt,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_groups: ViewportBindGroups,
@@ -568,6 +572,7 @@ impl WGPURenderer {
         });
 
         Self {
+            staging_belt: wgpu::util::StagingBelt::new(device.clone(), STAGING_CHUNK_BYTES),
             device,
             queue,
 
@@ -810,8 +815,15 @@ impl Renderer for WGPURenderer {
             VERTEX_BUFFER_LABEL,
             VERTEX_BUFFER_USAGE,
         );
-        if !vertex_bytes.is_empty() {
-            self.queue.write_buffer(&self.vertex_buffer, 0, vertex_bytes);
+        // The copies come first in the frame's own command buffer, so a frame flushed before the one before it
+        // is submitted cannot overwrite what that one draws with.
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        if let Some(size) = wgpu::BufferSize::new(vertex_bytes.len() as u64) {
+            self.staging_belt
+                .write_buffer(&mut encoder, &self.vertex_buffer, 0, size)
+                .copy_from_slice(vertex_bytes);
         }
         let vertex_buffer = self.vertex_buffer.clone();
         self.fan_indices.build(&commands);
@@ -823,9 +835,18 @@ impl Renderer for WGPURenderer {
             FAN_INDEX_LABEL,
             FAN_INDEX_USAGE,
         );
-        if !fan_index_bytes.is_empty() {
-            self.queue.write_buffer(&self.fan_index_buffer, 0, fan_index_bytes);
+        if let Some(size) = wgpu::BufferSize::new(fan_index_bytes.len() as u64) {
+            self.staging_belt
+                .write_buffer(&mut encoder, &self.fan_index_buffer, 0, size)
+                .copy_from_slice(fan_index_bytes);
         }
+        // Written as the commands are recorded; the slots past the last one used are copied too, and never read.
+        let uniform_slots = self.staging_belt.write_buffer(
+            &mut encoder,
+            &self.uniform_buffer,
+            0,
+            wgpu::BufferSize::new(needed_slots * self.uniform_stride).expect("a frame has commands"),
+        );
 
         if let Some(stencil_buffer) = &self.stencil_buffer {
             if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
@@ -853,10 +874,6 @@ impl Renderer for WGPURenderer {
             })
             .clone();
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-
         let mut render_pass_builder = RenderPassBuilder::new(
             self.device.clone(),
             &mut encoder,
@@ -879,6 +896,7 @@ impl Renderer for WGPURenderer {
             self.sampler_cache.clone(),
             self.uniform_buffer.clone(),
             self.uniform_stride,
+            uniform_slots,
             self.shader_module.clone(),
             self.draw_layouts.clone(),
             self.pipeline_cache.clone(),
@@ -1021,16 +1039,9 @@ impl Renderer for WGPURenderer {
 
         drop(render_pass_builder);
 
-        // write_buffer is ordered ahead of the caller's submit.
-        let uniform_staging = &pipeline_and_bindgroup_mapper.uniform_staging;
-        debug_assert!(
-            uniform_staging.len() as u64 <= self.uniform_buffer.size(),
-            "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
-        );
-        if !uniform_staging.is_empty() {
-            self.queue.write_buffer(&self.uniform_buffer, 0, uniform_staging);
-        }
-
+        // The chunks are mapped again for reuse once the command buffer has been submitted and run.
+        drop(pipeline_and_bindgroup_mapper);
+        self.staging_belt.finish_and_recall_on_submit(&encoder);
         let command_buffer = encoder.finish();
 
         self.viewport_bind_groups.evict(self.flush_count);
@@ -2788,7 +2799,9 @@ struct CommandToPipelineAndBindGroupMapper {
     sampler_cache: SamplerCache,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    uniform_staging: Vec<u8>,
+    /// The frame's uniform slots, `UNIFORM_SLOTS_PER_COMMAND` a command, and how many bytes of them are used.
+    uniform_slots: wgpu::BufferViewMut,
+    uniform_bytes: usize,
     current_uniforms: Option<UniformArray>,
     shader_module: Rc<wgpu::ShaderModule>,
 
@@ -2807,6 +2820,7 @@ impl CommandToPipelineAndBindGroupMapper {
         sampler_cache: SamplerCache,
         uniform_buffer: wgpu::Buffer,
         uniform_stride: u64,
+        uniform_slots: wgpu::BufferViewMut,
         shader_module: Rc<wgpu::ShaderModule>,
         draw_layouts: [DrawLayout; 2],
         pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
@@ -2818,7 +2832,8 @@ impl CommandToPipelineAndBindGroupMapper {
             sampler_cache,
             uniform_buffer,
             uniform_stride,
-            uniform_staging: Vec::new(),
+            uniform_slots,
+            uniform_bytes: 0,
             current_uniforms: None,
             shader_module,
             current_bind_group_state: None,
@@ -2875,14 +2890,20 @@ impl CommandToPipelineAndBindGroupMapper {
 
         let uniforms = UniformArray::from(params);
         if self.current_uniforms.as_ref() != Some(&uniforms) {
-            let end = self.uniform_staging.len() + self.uniform_stride as usize;
-            self.uniform_staging
-                .extend_from_slice(bytemuck::cast_slice(uniforms.as_slice()));
-            self.uniform_staging.resize(end, 0);
+            let start = self.uniform_bytes;
+            self.uniform_bytes += self.uniform_stride as usize;
+            debug_assert!(
+                self.uniform_bytes <= self.uniform_slots.len(),
+                "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
+            );
+            let bytes: &[u8] = bytemuck::cast_slice(uniforms.as_slice());
+            self.uniform_slots
+                .slice(start..start + bytes.len())
+                .copy_from_slice(bytes);
             self.current_uniforms = Some(uniforms);
         }
         // The current command's slot is the last one staged.
-        let offset = (self.uniform_staging.len() - self.uniform_stride as usize) as u32;
+        let offset = (self.uniform_bytes - self.uniform_stride as usize) as u32;
         if bind_group_changed || render_pass_builder.current_bound_offset != Some(offset) {
             render_pass.set_bind_group(1, self.current_bind_group.as_ref().unwrap(), &[offset]);
             render_pass_builder.current_bound_offset = Some(offset);
