@@ -291,20 +291,22 @@ struct CachedPipeline {
     last_used: u64,
 }
 
-/// Evicts the entries whose `last_used` flush is oldest until at most `PIPELINE_CACHE_CAPACITY` remain, but none
-/// used within the last `PIPELINE_RECENT_FLUSHES` flushes: a frame that binds more states than that keeps them all.
+/// Evicts the entries whose `last_used` flush is oldest until at most `capacity` remain, but none used within the
+/// last `recent_flushes` flushes: a frame that binds more states than that keeps them all.
 fn evict_least_recently_used<K: Clone + Eq + std::hash::Hash, V>(
     cache: &mut HashMap<K, V>,
     flush: u64,
+    capacity: usize,
+    recent_flushes: u64,
     last_used: impl Fn(&V) -> u64,
 ) {
-    if cache.len() <= PIPELINE_CACHE_CAPACITY {
+    if cache.len() <= capacity {
         return;
     }
-    let excess = cache.len() - PIPELINE_CACHE_CAPACITY;
+    let excess = cache.len() - capacity;
     let mut unused: Vec<(u64, K)> = cache
         .iter()
-        .filter(|(_, value)| flush.saturating_sub(last_used(value)) > PIPELINE_RECENT_FLUSHES)
+        .filter(|(_, value)| flush.saturating_sub(last_used(value)) > recent_flushes)
         .map(|(key, value)| (last_used(value), key.clone()))
         .collect();
     unused.sort_unstable_by_key(|&(stamp, _)| stamp);
@@ -327,7 +329,13 @@ mod pipeline_eviction_tests {
             let flush = len as u64;
             let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, i as u64)).collect();
             cache.insert(0, flush);
-            evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+            evict_least_recently_used(
+                &mut cache,
+                flush,
+                PIPELINE_CACHE_CAPACITY,
+                PIPELINE_RECENT_FLUSHES,
+                |&last_used| last_used,
+            );
             assert_eq!(cache.len(), len.min(PIPELINE_CACHE_CAPACITY), "pipelines kept of {len}");
             if len > PIPELINE_CACHE_CAPACITY {
                 assert!(!cache.contains_key(&1), "pipeline 1, used longest ago, was kept");
@@ -336,7 +344,13 @@ mod pipeline_eviction_tests {
 
         let len = PIPELINE_CACHE_CAPACITY + 1;
         let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, 1)).collect();
-        evict_least_recently_used(&mut cache, 1, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            1,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert_eq!(cache.len(), len, "a flush binding {len} states evicted some of them");
 
         // Past capacity, the oldest pipeline is kept while its last use is within PIPELINE_RECENT_FLUSHES flushes,
@@ -344,14 +358,26 @@ mod pipeline_eviction_tests {
         let flush = PIPELINE_RECENT_FLUSHES + 2;
         let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, flush - 1)).collect();
         cache.insert(1, flush - PIPELINE_RECENT_FLUSHES);
-        evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            flush,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert_eq!(
             cache.len(),
             len,
             "pipeline 1, used {PIPELINE_RECENT_FLUSHES} flushes ago, was evicted"
         );
         cache.insert(1, flush - PIPELINE_RECENT_FLUSHES - 1);
-        evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            flush,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert!(
             !cache.contains_key(&1),
             "pipeline 1, used {} flushes ago, was kept",
@@ -379,7 +405,7 @@ pub struct WGPURenderer {
     fan_index_buffer: wgpu::Buffer,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
-    viewport_bind_group_layout: wgpu::BindGroupLayout,
+    viewport_bind_groups: ViewportBindGroups,
     /// Without and with a coverage mask.
     draw_layouts: [DrawLayout; 2],
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
@@ -558,7 +584,7 @@ impl WGPURenderer {
             fan_index_buffer,
             stencil_buffer: None,
             stencil_buffer_for_textures: HashMap::new(),
-            viewport_bind_group_layout,
+            viewport_bind_groups: ViewportBindGroups::new(viewport_bind_group_layout),
             draw_layouts,
             pipeline_cache: Default::default(),
             mipmaps: None,
@@ -836,7 +862,8 @@ impl Renderer for WGPURenderer {
             &mut encoder,
             output.format,
             self.screen_view,
-            self.viewport_bind_group_layout.clone(),
+            &mut self.viewport_bind_groups,
+            self.flush_count,
             &mut self.stencil_buffer_for_textures,
             texture_view,
             stencil_buffer.clone(),
@@ -1006,9 +1033,12 @@ impl Renderer for WGPURenderer {
 
         let command_buffer = encoder.finish();
 
+        self.viewport_bind_groups.evict(self.flush_count);
         evict_least_recently_used(
             &mut self.pipeline_cache.borrow_mut(),
             self.flush_count,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
             |cached_pipeline| cached_pipeline.last_used,
         );
 
@@ -2396,6 +2426,70 @@ impl BindGroupState {
     }
 }
 
+/// Viewport bind groups kept between flushes beyond those the last one bound. One costs about 5 KB to keep and
+/// 10 microseconds to make again.
+const VIEWPORT_BIND_GROUP_CAPACITY: usize = 128;
+
+/// The viewport uniform of each render target size, bound as group 0 by every
+/// pass on a target of that size. A frame's targets repeat their sizes, within
+/// the frame and from one frame or flush to the next, so the uniform and bind
+/// group made for a size are kept: up to `VIEWPORT_BIND_GROUP_CAPACITY` sizes
+/// beyond those the last flush bound, the least recently bound dropped first.
+#[derive(Debug)]
+struct ViewportBindGroups {
+    layout: wgpu::BindGroupLayout,
+    /// The bind group of each size and the last flush that bound it.
+    groups: HashMap<[u32; 2], (wgpu::BindGroup, u64)>,
+}
+
+impl ViewportBindGroups {
+    fn new(layout: wgpu::BindGroupLayout) -> Self {
+        Self {
+            layout,
+            groups: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, device: &wgpu::Device, viewport: [f32; 2], flush: u64) -> wgpu::BindGroup {
+        let (group, last_used) = self
+            .groups
+            .entry(viewport.map(|extent| extent as u32))
+            .or_insert_with(|| (Self::create(device, &self.layout, viewport), flush));
+        *last_used = flush;
+        group.clone()
+    }
+
+    fn evict(&mut self, flush: u64) {
+        evict_least_recently_used(
+            &mut self.groups,
+            flush,
+            VIEWPORT_BIND_GROUP_CAPACITY,
+            0,
+            |(_, last_used)| *last_used,
+        );
+    }
+
+    fn create(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, viewport: [f32; 2]) -> wgpu::BindGroup {
+        // WebGL requires 16 byte alignment for uniforms, so pad accordingly.
+        let viewport_padded: [f32; 4] = [viewport[0], viewport[1], 0.0, 0.0];
+
+        let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Uniform Buffer for Viewport"),
+            contents: bytemuck::cast_slice(&viewport_padded),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: view_buf.as_entire_binding(),
+            }],
+            label: None,
+        })
+    }
+}
+
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
     encoder: &'a mut wgpu::CommandEncoder,
@@ -2407,7 +2501,8 @@ struct RenderPassBuilder<'a> {
     vertex_buffer: wgpu::Buffer,
     fan_indices: wgpu::Buffer,
     rendering_to_texture: bool,
-    viewport_bind_group_layout: wgpu::BindGroupLayout,
+    viewport_bind_groups: &'a mut ViewportBindGroups,
+    flush_count: u64,
     rpass: Option<wgpu::RenderPass<'a>>,
     screen_stencil_buffer: wgpu::Texture,
     screen_view: [f32; 2],
@@ -2427,14 +2522,15 @@ impl<'a> RenderPassBuilder<'a> {
         encoder: &'a mut wgpu::CommandEncoder,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
-        viewport_bind_group_layout: wgpu::BindGroupLayout,
+        viewport_bind_groups: &'a mut ViewportBindGroups,
+        flush_count: u64,
         stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
         texture_view: wgpu::TextureView,
         stencil_buffer: wgpu::Texture,
         vertex_buffer: wgpu::Buffer,
         fan_indices: wgpu::Buffer,
     ) -> Self {
-        let viewport_bind_group = Self::create_viewport_bind_group(&device, &screen_view, &viewport_bind_group_layout);
+        let viewport_bind_group = viewport_bind_groups.get(&device, screen_view, flush_count);
         Self {
             device: device.clone(),
             encoder,
@@ -2446,7 +2542,8 @@ impl<'a> RenderPassBuilder<'a> {
             vertex_buffer,
             fan_indices,
             rendering_to_texture: false,
-            viewport_bind_group_layout,
+            viewport_bind_groups,
+            flush_count,
             rpass: None,
             screen_stencil_buffer: stencil_buffer,
             screen_view,
@@ -2480,34 +2577,7 @@ impl<'a> RenderPassBuilder<'a> {
             return;
         }
         self.viewport = viewport;
-        self.viewport_bind_group =
-            Self::create_viewport_bind_group(&self.device, &self.viewport, &self.viewport_bind_group_layout);
-    }
-
-    fn create_viewport_bind_group(
-        device: &wgpu::Device,
-        viewport: &[f32; 2],
-        viewport_bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> wgpu::BindGroup {
-        // WebGL requires 16 byte alignment for uniforms, so pad accordingly.
-        let viewport_padded: [f32; 4] = [viewport[0], viewport[1], 0.0, 0.0];
-
-        let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Uniform Buffer for Viewport"),
-            contents: bytemuck::cast_slice(&viewport_padded),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let viewport_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: viewport_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: view_buf.as_entire_binding(),
-            }],
-            label: None,
-        });
-
-        viewport_bind_group
+        self.viewport_bind_group = self.viewport_bind_groups.get(&self.device, viewport, self.flush_count);
     }
 
     fn create_binding_resource_and_sampler(
