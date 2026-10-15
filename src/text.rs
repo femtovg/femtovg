@@ -379,6 +379,8 @@ impl TextContextImpl {
 
     fn clear_caches(&mut self) {
         #[cfg(feature = "textlayout")]
+        self.shaping_run_cache.clear();
+        #[cfg(feature = "textlayout")]
         self.shaped_words_cache.clear();
     }
 
