@@ -422,8 +422,8 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     fan_indices: FanIndices,
     fan_index_buffer: wgpu::Buffer,
-    stencil_buffer: Option<wgpu::Texture>,
-    stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
+    screen_stencil: TargetStencil,
+    stencil_buffer_for_textures: HashMap<wgpu::Texture, TargetStencil>,
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     /// Without and with a coverage mask.
     draw_layouts: [DrawLayout; 2],
@@ -603,7 +603,7 @@ impl WGPURenderer {
             vertex_buffer,
             fan_indices: FanIndices::default(),
             fan_index_buffer,
-            stencil_buffer: None,
+            screen_stencil: TargetStencil::default(),
             stencil_buffer_for_textures: HashMap::new(),
             viewport_bind_group_layout,
             draw_layouts,
@@ -872,31 +872,16 @@ impl Renderer for WGPURenderer {
             self.queue.write_buffer(&self.fan_index_buffer, 0, fan_index_bytes);
         }
 
-        if let Some(stencil_buffer) = &self.stencil_buffer {
-            if stencil_buffer.width() != output.width || stencil_buffer.height() != output.height {
-                self.stencil_buffer = None;
-            }
+        // A screen of another size starts over: its clip plane went with the old stencil.
+        if self
+            .screen_stencil
+            .texture
+            .as_ref()
+            .is_some_and(|stencil| stencil.width() != output.width || stencil.height() != output.height)
+        {
+            self.screen_stencil = TargetStencil::default();
         }
-
-        let stencil_buffer = self
-            .stencil_buffer
-            .get_or_insert_with(|| {
-                self.device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Stencil buffer"),
-                    size: wgpu::Extent3d {
-                        width: output.width,
-                        height: output.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Stencil8,
-                    view_formats: &[],
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                })
-            })
-            .clone();
+        let stencil_uses = commands.iter().map(StencilUse::of).collect();
 
         let frame = FrameEncoder {
             device: self.device.clone(),
@@ -918,9 +903,10 @@ impl Renderer for WGPURenderer {
             output.format,
             self.screen_view,
             self.viewport_bind_group_layout.clone(),
+            &mut self.screen_stencil,
             &mut self.stencil_buffer_for_textures,
+            stencil_uses,
             texture_view,
-            stencil_buffer,
             vertex_buffer,
             self.fan_index_buffer.clone(),
         );
@@ -939,7 +925,8 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
-        for (command, &fans) in commands.into_iter().zip(&self.fan_indices.firsts) {
+        for (index, (command, &fans)) in commands.into_iter().zip(&self.fan_indices.firsts).enumerate() {
+            render_pass_builder.command_index = index;
             render_pass_builder.set_clip_bounds(&command);
             match command.cmd_type {
                 super::CommandType::SetRenderTarget(render_target) => {
@@ -2166,25 +2153,13 @@ fn clear_rect(
     );
     params.shader_type = ShaderType::FillColorUnclipped;
     if let Some((start, count)) = command.triangles_verts {
-        pipeline_and_bindgroup_mapper.update_renderpass(
-            render_pass_builder,
-            Some(wgpu::BlendState {
-                color: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::Zero,
-                    operation: wgpu::BlendOperation::Add,
-                },
-                alpha: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::One,
-                    dst_factor: wgpu::BlendFactor::Zero,
-                    operation: wgpu::BlendOperation::Add,
-                },
-            }),
-            wgpu::PrimitiveTopology::TriangleList,
-            // Zero the stencil under the cleared rect, as the GL backend's
-            // stencil clear does: a winding count a cover pass missed must
-            // not leak into the next frame's fills. With a clip armed on the
-            // target the clip plane (bit 7) is left alone.
+        // Zero the stencil under the cleared rect, as the GL backend's
+        // stencil clear does: a winding count a cover pass missed must not
+        // leak into the next fills. With a clip armed on the target the clip
+        // plane (bit 7) is left alone. A pass with no stencil has none to
+        // clear: the next one to attach it clears it as it loads.
+        render_pass_builder.ensure_pass();
+        let stencil_test = if render_pass_builder.stencil_buffer.is_some() {
             StencilTest::Enabled {
                 stencil_state: wgpu::StencilState {
                     front: wgpu::StencilFaceState {
@@ -2203,7 +2178,26 @@ fn clear_rect(
                     write_mask: if keep_clip { 0x7f } else { 0xff },
                 },
                 stencil_reference: 0,
-            },
+            }
+        } else {
+            StencilTest::Disabled
+        };
+        pipeline_and_bindgroup_mapper.update_renderpass(
+            render_pass_builder,
+            Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            }),
+            wgpu::PrimitiveTopology::TriangleList,
+            stencil_test,
             None,
             &params,
             images,
@@ -2544,13 +2538,112 @@ impl BindGroupState {
     }
 }
 
+/// A render target's stencil: the texture its passes attach, made by the first
+/// pass that needs one, and whether a clip plane armed in it outlives the pass
+/// that wrote it. A fill zeroes the winding it counted before the next command
+/// draws, so the plane is the only stencil content one pass hands another.
+#[derive(Debug, Default)]
+struct TargetStencil {
+    texture: Option<wgpu::Texture>,
+    clip_armed: bool,
+}
+
+fn create_stencil(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Stencil buffer"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Stencil8,
+        view_formats: &[],
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+    })
+}
+
+/// Whose stencil the current target's passes attach.
+enum StencilTarget {
+    Screen,
+    Image(wgpu::Texture),
+    /// A filter's target: its passes draw no fills and take no clip.
+    None,
+}
+
+/// What a command does with its target's stencil.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum StencilUse {
+    /// Ends the pass: a change of target, or a filter, which draws into targets of its own.
+    PassEnd,
+    /// Draws without it.
+    Unused,
+    /// Counts winding in it, or tests the clip plane.
+    Used,
+    /// Arms the clip plane: `ClipReset { visible: true }`.
+    Arms,
+    /// Disarms the clip plane: `ClipReset { visible: false }`.
+    Disarms,
+}
+
+impl StencilUse {
+    fn of(command: &super::Command) -> Self {
+        use super::CommandType;
+        match command.cmd_type {
+            CommandType::SetRenderTarget(_) | CommandType::RenderFilteredImage { .. } => Self::PassEnd,
+            CommandType::ClipReset { visible: true } => Self::Arms,
+            CommandType::ClipReset { visible: false } => Self::Disarms,
+            CommandType::ClipFill | CommandType::ConcaveFill { .. } | CommandType::StencilStroke { .. } => Self::Used,
+            // Without a clip plane the stencil is zero wherever no fill is
+            // counting winding, and a pass begins by clearing it: the clear's
+            // own stencil clear has nothing left to do.
+            CommandType::ClearRect { keep_clip, .. } => {
+                if keep_clip {
+                    Self::Used
+                } else {
+                    Self::Unused
+                }
+            }
+            CommandType::ConvexFill { .. } | CommandType::Stroke { .. } | CommandType::Triangles { .. } => {
+                if command.clip_active {
+                    Self::Used
+                } else {
+                    Self::Unused
+                }
+            }
+        }
+    }
+
+    /// Whether the commands of `uses` up to the end of their pass test or
+    /// write the stencil, and whether a clip plane is armed when they are
+    /// done, `armed` saying whether one is before them.
+    fn ahead(uses: &[Self], mut armed: bool) -> (bool, bool) {
+        let mut used = false;
+        for &stencil_use in uses {
+            match stencil_use {
+                Self::PassEnd => break,
+                Self::Unused => {}
+                Self::Used => used = true,
+                Self::Arms => (used, armed) = (true, true),
+                Self::Disarms => (used, armed) = (true, false),
+            }
+        }
+        (used, armed)
+    }
+}
+
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
     frame: FrameEncoder,
     surface_view: wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
     texture_view: wgpu::TextureView,
+    /// The stencil the open pass attaches, if any.
     stencil_buffer: Option<wgpu::Texture>,
+    /// Whose stencil the current target's next pass attaches if it needs one.
+    stencil_target: StencilTarget,
     viewport: [f32; 2],
     vertex_buffer: wgpu::Buffer,
     fan_indices: wgpu::Buffer,
@@ -2563,10 +2656,14 @@ struct RenderPassBuilder<'a> {
     /// its own, see `SubmissionSlicing` - so a target that is left again
     /// before anything is drawn into it gets no pass.
     pending_load: Option<wgpu::LoadOp<wgpu::Color>>,
-    screen_stencil_buffer: wgpu::Texture,
+    screen_stencil: &'a mut TargetStencil,
     screen_view: [f32; 2],
     screen_surface_format: wgpu::TextureFormat,
-    stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
+    stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, TargetStencil>,
+    /// Each command's use of the stencil, and the one being drawn: a pass
+    /// that begins looks ahead to its end.
+    stencil_uses: Vec<StencilUse>,
+    command_index: usize,
     viewport_bind_group: wgpu::BindGroup,
     current_pipeline_state: Option<PipelineState>,
     current_stencil_reference: Option<u32>,
@@ -2584,9 +2681,10 @@ impl<'a> RenderPassBuilder<'a> {
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
         viewport_bind_group_layout: wgpu::BindGroupLayout,
-        stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, wgpu::Texture>,
+        screen_stencil: &'a mut TargetStencil,
+        stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, TargetStencil>,
+        stencil_uses: Vec<StencilUse>,
         texture_view: wgpu::TextureView,
-        stencil_buffer: wgpu::Texture,
         vertex_buffer: wgpu::Buffer,
         fan_indices: wgpu::Buffer,
     ) -> Self {
@@ -2597,7 +2695,8 @@ impl<'a> RenderPassBuilder<'a> {
             surface_view: texture_view.clone(),
             surface_format: screen_surface_format,
             texture_view,
-            stencil_buffer: Some(stencil_buffer.clone()),
+            stencil_buffer: None,
+            stencil_target: StencilTarget::Screen,
             viewport: screen_view,
             vertex_buffer,
             fan_indices,
@@ -2605,10 +2704,12 @@ impl<'a> RenderPassBuilder<'a> {
             viewport_bind_group_layout,
             rpass: None,
             pending_load: None,
-            screen_stencil_buffer: stencil_buffer,
+            screen_stencil,
             screen_view,
             screen_surface_format,
             stencil_buffer_for_textures,
+            stencil_uses,
+            command_index: 0,
             viewport_bind_group,
             current_pipeline_state: None,
             current_stencil_reference: None,
@@ -2756,13 +2857,13 @@ impl<'a> RenderPassBuilder<'a> {
     fn set_render_target_texture(
         &mut self,
         texture: &wgpu::Texture,
-        stencil_buffer: Option<wgpu::Texture>,
+        stencil_target: StencilTarget,
         load: wgpu::LoadOp<wgpu::Color>,
     ) {
         self.end_pass();
         self.texture_view = texture.create_view(&base_level());
         self.set_viewport([texture.width() as f32, texture.height() as f32]);
-        self.stencil_buffer = stencil_buffer;
+        self.stencil_target = stencil_target;
         self.surface_format = texture.format();
         self.rendering_to_texture = true;
 
@@ -2778,28 +2879,8 @@ impl<'a> RenderPassBuilder<'a> {
         let image = images.get(image_id).unwrap();
 
         if let Texture::Internal(texture) = &image.texture {
-            let stencil_buffer = self
-                .stencil_buffer_for_textures
-                .entry(texture.clone())
-                .or_insert_with(|| {
-                    self.device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("Stencil buffer"),
-                        size: wgpu::Extent3d {
-                            width: texture.width(),
-                            height: texture.height(),
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Stencil8,
-                        view_formats: &[],
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    })
-                })
-                .clone();
-
-            self.set_render_target_texture(&texture.clone(), Some(stencil_buffer), load);
+            let texture = texture.clone();
+            self.set_render_target_texture(&texture, StencilTarget::Image(texture.clone()), load);
         }
     }
 
@@ -2811,14 +2892,14 @@ impl<'a> RenderPassBuilder<'a> {
     ) {
         let image = images.get(image_id).unwrap();
         if let Texture::Internal(texture) = &image.texture {
-            self.set_render_target_texture(texture, None, load);
+            self.set_render_target_texture(texture, StencilTarget::None, load);
         }
     }
 
     fn set_render_target_screen(&mut self) {
         self.end_pass();
         self.texture_view = self.surface_view.clone();
-        self.stencil_buffer = Some(self.screen_stencil_buffer.clone());
+        self.stencil_target = StencilTarget::Screen;
         self.set_viewport(self.screen_view);
         self.surface_format = self.screen_surface_format;
         self.rendering_to_texture = false;
@@ -2844,10 +2925,11 @@ impl<'a> RenderPassBuilder<'a> {
         }
         let load = self.pending_load.take().unwrap_or(wgpu::LoadOp::Load);
         self.frame.begin_pass();
-        let stencil_view = self
-            .stencil_buffer
+        let stencil = self.stencil_for_pass();
+        self.stencil_buffer = stencil.as_ref().map(|(texture, _)| texture.clone());
+        let stencil_view = stencil
             .as_ref()
-            .map(|buffer| buffer.create_view(&Default::default()));
+            .map(|(texture, ops)| (texture.create_view(&Default::default()), *ops));
 
         let mut rpass = self.frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -2862,13 +2944,10 @@ impl<'a> RenderPassBuilder<'a> {
             })],
             depth_stencil_attachment: stencil_view
                 .as_ref()
-                .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                .map(|(view, ops)| wgpu::RenderPassDepthStencilAttachment {
                     view,
                     depth_ops: None,
-                    stencil_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    }),
+                    stencil_ops: Some(*ops),
                 }),
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -2880,6 +2959,53 @@ impl<'a> RenderPassBuilder<'a> {
         rpass.set_bind_group(0, &self.viewport_bind_group, &[]);
         self.rpass = Some(rpass.forget_lifetime());
         self.apply_clip_bounds();
+    }
+
+    /// The stencil the pass about to begin attaches, and how. A pass that
+    /// draws nothing testing or writing it attaches none: on a tiler a
+    /// stencil attachment costs tile memory, and the target keeps any clip
+    /// plane in its texture for a later pass. A pass that does attach one
+    /// clears it on load unless a clip plane is armed when it begins, and
+    /// discards it on store unless one is armed when it ends, so that on a
+    /// tiler the stencil is neither read from memory nor written back.
+    fn stencil_for_pass(&mut self) -> Option<(wgpu::Texture, wgpu::Operations<u32>)> {
+        let (state, width, height) = match &self.stencil_target {
+            StencilTarget::None => return None,
+            StencilTarget::Screen => (
+                &mut *self.screen_stencil,
+                self.screen_view[0] as u32,
+                self.screen_view[1] as u32,
+            ),
+            StencilTarget::Image(texture) => (
+                self.stencil_buffer_for_textures.entry(texture.clone()).or_default(),
+                texture.width(),
+                texture.height(),
+            ),
+        };
+        let armed = state.clip_armed;
+        let ahead = self.stencil_uses.get(self.command_index..).unwrap_or_default();
+        let (used, armed_at_end) = StencilUse::ahead(ahead, armed);
+        if !used {
+            return None;
+        }
+        state.clip_armed = armed_at_end;
+        let texture = state
+            .texture
+            .get_or_insert_with(|| create_stencil(&self.device, width, height))
+            .clone();
+        let ops = wgpu::Operations {
+            load: if armed {
+                wgpu::LoadOp::Load
+            } else {
+                wgpu::LoadOp::Clear(0)
+            },
+            store: if armed_at_end {
+                wgpu::StoreOp::Store
+            } else {
+                wgpu::StoreOp::Discard
+            },
+        };
+        Some((texture, ops))
     }
 
     fn draw(&mut self, vertices: std::ops::Range<u32>) {
@@ -2965,6 +3091,10 @@ impl CommandToPipelineAndBindGroupMapper {
         glyph_texture: GlyphTexture,
     ) {
         render_pass_builder.ensure_pass();
+        debug_assert!(
+            render_pass_builder.stencil_buffer.is_some() || stencil_test == StencilTest::Disabled,
+            "a draw tests or writes the stencil in a pass that attaches none: StencilUse::of misses its command"
+        );
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();
 
         let stencil_reference = match &stencil_test {

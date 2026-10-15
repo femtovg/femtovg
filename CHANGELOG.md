@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- WGPU: a render pass attaches the stencil only when something it draws
+  tests or writes it, and clears it on load and discards it on store unless
+  a clip plane armed on the target outlives the pass. On a tiled GPU the
+  stencil stays in tile memory instead of being read and written back at
+  every pass, and an image whose passes draw no fill that needs it gets no
+  stencil texture.
 - The WGPU backend begins a render pass only when a draw needs it. A
   target that was set and left again undrawn - the one every image filter
   hands back, the screen ahead of a frame's first target switch - used to
