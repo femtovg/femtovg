@@ -3,6 +3,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- WGPU: a render pass attaches the stencil only when something it draws
+  tests or writes it, and clears it on load and discards it on store unless
+  a clip plane armed on the target outlives the pass. On a tiled GPU the
+  stencil stays in tile memory instead of being read and written back at
+  every pass, and an image whose passes draw no fill that needs it gets no
+  stencil texture.
+- The WGPU backend begins a render pass only when a draw needs it. A
+  target that was set and left again undrawn - the one every image filter
+  hands back, the screen ahead of a frame's first target switch - used to
+  get a pass that loaded and stored it for nothing, and on Metal a command
+  buffer of its own: a quarter of the passes of a filter-heavy frame (849
+  to 632 for a 178-layer BuseyBench portrait). No pixel changes.
+- Added `WGPURenderer::set_submission_slicing`: with a `SubmissionSlicing`,
+  a frame is submitted in slices of at most that many render passes (64 by
+  default) instead of one submission holding every pass. wgpu opens a Metal
+  command buffer for every render pass and the driver keeps about 2.3 MiB
+  for each until it completes (gfx-rs/wgpu#5738), so one submission per
+  frame held gigabytes for a frame of hundreds of layers or a long blur
+  chain: 1,600 opacity layers failed buffer creation on an M4 Max, and a
+  176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
+  Sliced, the driver recycles the command buffers that complete while the
+  rest of the frame is encoded, which lowers the peak without bounding it:
+  the renderer never polls the device. The
+  slices before the returned command buffer are submitted during the
+  flush, so work that must run before the frame is submitted before it;
+  off by default, which keeps the one-command-buffer contract of
+  `flush_to_surface`. `Canvas::renderer` and
+  `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
+  reports the passes per command buffer of the last frame.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
