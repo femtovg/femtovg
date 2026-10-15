@@ -1368,7 +1368,7 @@ where
 
             CommandType::ConvexFill { params }
         } else {
-            let stencil_params = Params::stencil();
+            let stencil_params = Params::stencil().with_hard_clip_mask(&clip);
 
             let fill_params = Params::new(
                 &self.images,
