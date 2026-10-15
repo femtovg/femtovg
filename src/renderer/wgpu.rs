@@ -59,8 +59,8 @@ impl std::fmt::Debug for WGPURenderOutput {
 }
 
 use super::FanIndices;
+use super::Params;
 use super::Vertex;
-use super::{FilterSample, Params};
 use crate::clip::{ClipCoverage, MaskCoverage};
 
 const UNIFORMARRAY_SIZE: usize = 16;
@@ -191,15 +191,12 @@ impl UniformArray {
         }
     }
 
-    /// Where a blur draw samples and whether it clamps its taps to the
-    /// source's edge, in the clip shape's slots: a filter draw is never
-    /// under a clip.
-    pub fn set_filter_sample(&mut self, sample: &FilterSample, clamp: bool) {
+    /// Whether a blur draw clamps its taps to the source's edge and mirrors
+    /// its sample positions, in the clip shape's slots: a filter draw is
+    /// never under a clip.
+    pub fn set_filter_sampling(&mut self, clamp: bool, flip_y: bool) {
         self.0[54] = f32::from(u8::from(clamp));
-        self.0[56..58].copy_from_slice(&sample.scale);
-        self.0[60..62].copy_from_slice(&sample.offset);
-        self.0[62] = f32::from(u8::from(sample.mirror_height.is_some()));
-        self.0[63] = sample.mirror_height.unwrap_or(0.0);
+        self.0[55] = f32::from(u8::from(flip_y));
     }
 
     /// The coverage mask, read by the shader variant of a draw under one:
@@ -243,7 +240,7 @@ impl From<&Params> for UniformArray {
         arr.set_clip(params.clip.as_ref());
         if params.shader_type == ShaderType::FilterImage {
             debug_assert!(params.clip.is_none(), "a filter draw is never under a clip");
-            arr.set_filter_sample(&params.filter_sample, params.filter_clamp);
+            arr.set_filter_sampling(params.filter_clamp, params.filter_flip_y);
         }
         arr.set_clip_mask(params.clip_mask.as_ref());
 
@@ -1132,7 +1129,6 @@ impl Renderer for WGPURenderer {
                     sigma,
                     footprint,
                     region,
-                    flip_y,
                 } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
@@ -1146,7 +1142,7 @@ impl Renderer for WGPURenderer {
                         render_pass_builder: &mut render_pass_builder,
                         pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                     };
-                    blur_rect(&mut pass, &command, sigma, footprint, region, flip_y);
+                    blur_rect(&mut pass, &command, sigma, footprint, region);
                 }
             }
         }
@@ -1490,12 +1486,12 @@ fn sample_render_target(
     src: [u32; 4],
     sigma: f32,
 ) -> bool {
-    let Some(target_info) = pass.images.get(target_image).map(|image| image.info) else {
+    if pass.images.get(target_image).is_none() {
         return false;
-    };
+    }
     let previous_render_target = *pass.current_render_target;
     // An image target is read where it is; the screen through a copy.
-    let (source, size, mirror_height) = match previous_render_target {
+    let (source, size, flip_y) = match previous_render_target {
         RenderTarget::Image(id) => {
             let Some(Texture::Internal(texture)) = pass.images.get(id).map(|image| &image.texture) else {
                 return false;
@@ -1513,26 +1509,17 @@ fn sample_render_target(
                 ..Default::default()
             });
             // An image target holds its rows bottom-up.
-            (MainTexture::View(view), size, Some(size[1]))
+            (MainTexture::View(view), size, true)
         }
         RenderTarget::Screen => {
             let Some(view) = reader.copy_screen(pass.render_pass_builder, src) else {
                 return false;
             };
             let size = view.texture().size();
-            (MainTexture::View(view), [size.width as f32, size.height as f32], None)
+            (MainTexture::View(view), [size.width as f32, size.height as f32], false)
         }
     };
-    let [x, y, width, height] = src;
-    let sample = FilterSample {
-        scale: [
-            width as f32 / target_info.width() as f32,
-            height as f32 / target_info.height() as f32,
-        ],
-        offset: [x as f32, y as f32],
-        mirror_height,
-    };
-    let params = Params::rect_blur(size, sigma, 0, sample);
+    let params = Params::rect_blur(size, sigma, 0, flip_y);
 
     pass.render_pass_builder.set_filter_target_image(
         pass.images,
@@ -1565,20 +1552,14 @@ fn blur_rect(
     sigma: f32,
     footprint: [u32; 4],
     region: [u32; 4],
-    flip_y: bool,
 ) {
     let Some(source) = command.image else {
         return;
     };
-    let [x, y, width, height] = footprint;
+    let [_, _, width, height] = footprint;
     // The extent is the footprint's, so a source of another size (a pyramid
     // level) stretches over it.
-    let sample = FilterSample {
-        offset: [-(x as f32), -(y as f32)],
-        mirror_height: flip_y.then_some(height as f32),
-        ..FilterSample::default()
-    };
-    let params = Params::rect_blur([width as f32, height as f32], sigma, 1, sample);
+    let params = Params::rect_blur([width as f32, height as f32], sigma, 1, false);
     // The canvas can be larger than the output, and a scissor beyond the
     // target fails validation.
     let [viewport_width, viewport_height] = pass.render_pass_builder.viewport.map(|extent| extent as u32);

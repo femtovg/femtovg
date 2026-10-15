@@ -18,9 +18,7 @@ use crate::{
 
 use glow::HasContext;
 
-use super::{
-    Command, CommandType, FanIndices, FilterSample, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer,
-};
+use super::{Command, CommandType, FanIndices, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
 
 mod program;
 use program::MainProgram;
@@ -1170,15 +1168,9 @@ impl OpenGl {
                 (copy, self.view, false)
             }
         };
-        let [x, y, width, height] = src;
         let (target_width, target_height) = (target_info.width(), target_info.height());
-        let sample = FilterSample {
-            scale: [width as f32 / target_width as f32, height as f32 / target_height as f32],
-            offset: [x as f32, y as f32],
-            // Every OpenGL target holds its rows bottom-up.
-            mirror_height: Some(size[1]),
-        };
-        let params = Params::rect_blur(size, sigma, 0, sample);
+        // Every OpenGL target holds its rows bottom-up.
+        let params = Params::rect_blur(size, sigma, 0, true);
 
         let original_render_target = self.current_render_target;
         self.set_target(images, RenderTarget::Image(target_image));
@@ -1229,17 +1221,11 @@ impl OpenGl {
         sigma: f32,
         footprint: [u32; 4],
         region: [u32; 4],
-        flip_y: bool,
     ) {
-        let [x, y, width, height] = footprint;
+        let [_, _, width, height] = footprint;
         // The extent is the footprint's, so a source of another size (a
         // pyramid level) stretches over it.
-        let sample = FilterSample {
-            offset: [-(x as f32), -(y as f32)],
-            mirror_height: flip_y.then_some(height as f32),
-            ..FilterSample::default()
-        };
-        let params = Params::rect_blur([width as f32, height as f32], sigma, 1, sample);
+        let params = Params::rect_blur([width as f32, height as f32], sigma, 1, false);
         self.set_clip_bounds(Some(region));
         self.triangles(images, cmd, &params);
     }
@@ -1507,13 +1493,12 @@ impl Renderer for OpenGl {
                     sigma,
                     footprint,
                     region,
-                    flip_y,
                 } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
                     if sampled {
-                        self.blur_rect(images, &cmd, sigma, footprint, region, flip_y);
+                        self.blur_rect(images, &cmd, sigma, footprint, region);
                     }
                 }
                 CommandType::ClipFill => {

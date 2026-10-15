@@ -21,7 +21,7 @@ mod void;
 pub use void::Void;
 
 mod params;
-pub(crate) use params::{FilterSample, Params};
+pub(crate) use params::Params;
 
 /// Represents a drawable object.
 #[derive(Copy, Clone, Default, Debug)]
@@ -135,7 +135,10 @@ pub enum CommandType {
     },
     /// First draw of a rect blur: `src` of the render target, stretched over
     /// `target_image` and blurred along x by `sigma` (zero resamples). The
-    /// quad is `triangles_verts`. Taps clamp at the render target's edges.
+    /// quad is `triangles_verts`, its texture coordinates the render target
+    /// pixels it samples, counted from the top: a renderer storing the
+    /// target's rows bottom-up mirrors them. Taps clamp at the render
+    /// target's edges.
     SampleRenderTarget {
         /// The image drawn into.
         target_image: ImageId,
@@ -146,7 +149,8 @@ pub enum CommandType {
     },
     /// Last draw of a rect blur: `image` blurred along y by `sigma` (zero
     /// resamples) onto `region` of the render target. The quad is
-    /// `triangles_verts`. Taps clamp at `image`'s edges. A renderer whose
+    /// `triangles_verts`, its texture coordinates the pixels of `image`,
+    /// stretched over `footprint`, it samples. Taps clamp at `image`'s edges. A renderer whose
     /// last `SampleRenderTarget` didn't draw skips it: `image` then holds
     /// whatever was there before.
     BlurRect {
@@ -156,8 +160,6 @@ pub enum CommandType {
         footprint: [u32; 4],
         /// The rect written, in device pixels, within `footprint`.
         region: [u32; 4],
-        /// `image` is stored the way a draw stores rows, so read it flipped.
-        flip_y: bool,
     },
 }
 

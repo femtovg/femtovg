@@ -623,17 +623,13 @@ where
         let quad_x1 = image_width;
         let quad_y1 = image_height;
 
-        let texture_x0 = -(image_width / 2.);
-        let texture_y0 = -(image_height / 2.);
-        let texture_x1 = (image_width) / 2.;
-        let texture_y1 = (image_height) / 2.;
-
-        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
-        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
-        self.verts.push(Vertex::new(quad_x1, quad_y0, texture_x1, texture_y0));
-        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
-        self.verts.push(Vertex::new(quad_x0, quad_y1, texture_x0, texture_y1));
-        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+        // The blur samples where it draws.
+        self.verts.push(Vertex::new(quad_x0, quad_y0, quad_x0, quad_y0));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, quad_x1, quad_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y0, quad_x1, quad_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y0, quad_x0, quad_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y1, quad_x0, quad_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, quad_x1, quad_y1));
 
         cmd.triangles_verts = Some((vertex_offset, 6));
 
@@ -895,7 +891,11 @@ where
             src: footprint,
             sigma: first_sigma,
         });
-        cmd.triangles_verts = Some(self.push_device_quad([0, 0, width as u32, height as u32]));
+        let [x, y, src_width, src_height] = footprint.map(|v| v as f32);
+        cmd.triangles_verts = Some(self.push_device_quad(
+            [0, 0, width as u32, height as u32],
+            [x, y, x + src_width, y + src_height],
+        ));
         self.append_cmd(cmd);
 
         let (source, sigma, flip_y) = match x_scratch {
@@ -911,10 +911,20 @@ where
             sigma,
             footprint,
             region,
-            flip_y,
         });
         cmd.image = Some(source);
-        cmd.triangles_verts = Some(self.push_device_quad(region));
+        // `source` stretches over the footprint, read the other way up when
+        // it is stored flipped.
+        let [footprint_x, footprint_y, _, footprint_height] = footprint.map(|v| v as f32);
+        let [x, y, width, height] = region.map(|v| v as f32);
+        let (u0, u1) = (x - footprint_x, x + width - footprint_x);
+        let (v0, v1) = (y - footprint_y, y + height - footprint_y);
+        let (v0, v1) = if flip_y {
+            (footprint_height - v0, footprint_height - v1)
+        } else {
+            (v0, v1)
+        };
+        cmd.triangles_verts = Some(self.push_device_quad(region, [u0, v0, u1, v1]));
         cmd.composite_operation = CompositeOperationState::new(CompositeOperation::Copy);
         self.append_cmd(cmd);
 
@@ -925,18 +935,19 @@ where
     }
 
     /// Pushes two triangles covering `rect`, `[x, y, width, height]` in
-    /// device pixels, and returns their vertex range.
-    fn push_device_quad(&mut self, [x, y, width, height]: [u32; 4]) -> (usize, usize) {
+    /// device pixels, whose texture coordinates run over `[u0, v0, u1, v1]`
+    /// from its top left to its bottom right, and returns their vertex range.
+    fn push_device_quad(&mut self, [x, y, width, height]: [u32; 4], [u0, v0, u1, v1]: [f32; 4]) -> (usize, usize) {
         let (x0, y0) = (x as f32, y as f32);
         let (x1, y1) = (x0 + width as f32, y0 + height as f32);
         let start = self.verts.len();
         self.verts.extend([
-            Vertex::new(x0, y0, 0.0, 0.0),
-            Vertex::new(x1, y1, 0.0, 0.0),
-            Vertex::new(x1, y0, 0.0, 0.0),
-            Vertex::new(x0, y0, 0.0, 0.0),
-            Vertex::new(x0, y1, 0.0, 0.0),
-            Vertex::new(x1, y1, 0.0, 0.0),
+            Vertex::new(x0, y0, u0, v0),
+            Vertex::new(x1, y1, u1, v1),
+            Vertex::new(x1, y0, u1, v0),
+            Vertex::new(x0, y0, u0, v0),
+            Vertex::new(x0, y1, u0, v1),
+            Vertex::new(x1, y1, u1, v1),
         ]);
         (start, 6)
     }
@@ -1982,13 +1993,22 @@ fn a_cropped_pass_carries_the_rect_in_the_rows_it_stores() {
 }
 
 /// What a rect blur records: the kinds of its commands, in order, and its
-/// first draw's read rect and sigma and its write-back's rects, sigma and
-/// orientation.
+/// first draw's read rect, sigma and texture coordinates and its
+/// write-back's rects, sigma and texture coordinates, each `[u0, v0, u1, v1]`
+/// from the quad's top left to its bottom right.
 #[cfg(test)]
 struct RectBlurCommands {
     kinds: Vec<&'static str>,
-    sampled: Option<([u32; 4], f32)>,
-    written: Option<([u32; 4], [u32; 4], f32, bool)>,
+    sampled: Option<([u32; 4], f32, [f32; 4])>,
+    written: Option<WriteBack>,
+}
+
+#[cfg(test)]
+struct WriteBack {
+    footprint: [u32; 4],
+    region: [u32; 4],
+    sigma: f32,
+    texture_rect: [f32; 4],
 }
 
 #[cfg(test)]
@@ -2000,11 +2020,16 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
     canvas.blur_rect(x, y, width, height, sigma).unwrap();
     let mut sampled = None;
     let mut written = None;
+    let texture_rect = |command: &Command| {
+        let (start, _) = command.triangles_verts.expect("a rect blur draw has a quad");
+        let (top_left, bottom_right) = (&canvas.verts[start], &canvas.verts[start + 1]);
+        [top_left.u, top_left.v, bottom_right.u, bottom_right.v]
+    };
     let kinds = canvas.commands[before..]
         .iter()
         .map(|command| match command.cmd_type {
             CommandType::SampleRenderTarget { src, sigma, .. } => {
-                sampled = Some((src, sigma));
+                sampled = Some((src, sigma, texture_rect(command)));
                 "sample"
             }
             CommandType::RenderFilteredImage { filter, .. } => {
@@ -2017,10 +2042,14 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
                 sigma,
                 footprint,
                 region,
-                flip_y,
             } => {
                 assert!(!command.clip_active, "a rect blur is a raw write");
-                written = Some((footprint, region, sigma, flip_y));
+                written = Some(WriteBack {
+                    footprint,
+                    region,
+                    sigma,
+                    texture_rect: texture_rect(command),
+                });
                 "blur"
             }
             _ => "other",
@@ -2042,13 +2071,19 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
 fn a_rect_blur_within_one_pass_reads_its_reach_and_draws_back() {
     let commands = rect_blur_commands([4, 100, 64, 300], 3.0);
     assert_eq!(commands.kinds, ["sample", "blur"]);
-    let (src, first_sigma) = commands.sampled.unwrap();
-    let (footprint, region, sigma, flip_y) = commands.written.unwrap();
+    let (src, first_sigma, read) = commands.sampled.unwrap();
+    let WriteBack {
+        footprint,
+        region,
+        sigma,
+        texture_rect: written,
+    } = commands.written.unwrap();
     assert_eq!(src, [0, 91, 77, 101]);
+    assert_eq!(read, [0.0, 91.0, 77.0, 192.0]);
     assert_eq!(footprint, src);
     assert_eq!(region, [4, 100, 64, 92]);
+    assert_eq!(written, [4.0, 92.0, 68.0, 0.0], "the scratch is read the other way up");
     assert_eq!((first_sigma, sigma), (3.0, 3.0));
-    assert!(flip_y);
 }
 
 /// A blur above one pass reads the rect halved, as the pyramid's first
@@ -2068,9 +2103,13 @@ fn a_rect_blur_above_one_pass_draws_back_from_the_pyramid() {
             0.0,
             "sigma {sigma}: the first halving is a resample"
         );
-        let (_, _, drawn_sigma, flipped) = commands.written.unwrap();
+        let WriteBack {
+            sigma: drawn_sigma,
+            texture_rect: [_, v0, _, v1],
+            ..
+        } = commands.written.unwrap();
         assert_eq!(drawn_sigma, 0.0, "sigma {sigma}: the scale back up is a resample");
-        assert_eq!(flipped, flip_y, "sigma {sigma}");
+        assert_eq!(v0 > v1, flip_y, "sigma {sigma}");
     }
 }
 

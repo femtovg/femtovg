@@ -1,5 +1,5 @@
 use crate::clip::{ClipCoverage, MaskCoverage};
-use crate::renderer::{FilterSample, Params, ShaderType};
+use crate::renderer::{Params, ShaderType};
 
 const UNIFORMARRAY_SIZE: usize = 16;
 
@@ -101,15 +101,12 @@ impl UniformArray {
         }
     }
 
-    /// Where a blur draw samples and whether it clamps its taps to the
-    /// source's edge, in the clip shape's slots: a filter draw is never
-    /// under a clip.
-    pub fn set_filter_sample(&mut self, sample: &FilterSample, clamp: bool) {
+    /// Whether a blur draw clamps its taps to the source's edge and mirrors
+    /// its sample positions, in the clip shape's slots: a filter draw is
+    /// never under a clip.
+    pub fn set_filter_sampling(&mut self, clamp: bool, flip_y: bool) {
         self.0[54] = f32::from(u8::from(clamp));
-        self.0[56..58].copy_from_slice(&sample.scale);
-        self.0[60..62].copy_from_slice(&sample.offset);
-        self.0[62] = f32::from(u8::from(sample.mirror_height.is_some()));
-        self.0[63] = sample.mirror_height.unwrap_or(0.0);
+        self.0[55] = f32::from(u8::from(flip_y));
     }
 
     /// The coverage mask, read by the shader variant of a draw under one:
@@ -153,7 +150,7 @@ impl From<&Params> for UniformArray {
         arr.set_clip(params.clip.as_ref());
         if params.shader_type == ShaderType::FilterImage {
             debug_assert!(params.clip.is_none(), "a filter draw is never under a clip");
-            arr.set_filter_sample(&params.filter_sample, params.filter_clamp);
+            arr.set_filter_sampling(params.filter_clamp, params.filter_flip_y);
         }
         arr.set_clip_mask(params.clip_mask.as_ref());
 

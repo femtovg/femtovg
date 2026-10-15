@@ -28,8 +28,10 @@ pub struct Params {
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
     pub(crate) conic_start_angle: f32,
-    /// Where a blur draw samples its source.
-    pub(crate) filter_sample: FilterSample,
+    /// Whether a blur draw mirrors its sample positions to `extent[1] - y`:
+    /// a rect blur's first draw reads a source stored the other way up on
+    /// some backends.
+    pub(crate) filter_flip_y: bool,
     /// Whether a blur tap beyond the source reads its edge texel rather than
     /// transparent.
     pub(crate) filter_clamp: bool,
@@ -39,35 +41,12 @@ pub struct Params {
     pub(crate) clip_mask: Option<MaskCoverage>,
 }
 
-/// Where a blur draw samples its source for a fragment at `p`, in source
-/// pixels: `p * scale + offset`, its y then mirrored to `height - y` when
-/// `mirror_height` is set. The default samples at the fragment itself, as a
-/// draw into an image of its source's size does. A rect blur's draws need
-/// more: the first reads a rect of the render target, maybe resampled, and
-/// the last writes back at the rect's place, reading a source stored the
-/// other way up.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub(crate) struct FilterSample {
-    pub(crate) scale: [f32; 2],
-    pub(crate) offset: [f32; 2],
-    pub(crate) mirror_height: Option<f32>,
-}
-
-impl Default for FilterSample {
-    fn default() -> Self {
-        Self {
-            scale: [1.0, 1.0],
-            offset: [0.0, 0.0],
-            mirror_height: None,
-        }
-    }
-}
-
 impl Params {
     /// One axis, 0 for x and 1 for y, of a rect blur's Gaussian of `sigma`
-    /// over a premultiplied source of `extent` pixels, sampled through
-    /// `sample` and clamped at the source's edges.
-    pub(crate) fn rect_blur(extent: [f32; 2], sigma: f32, axis: usize, sample: FilterSample) -> Self {
+    /// over a premultiplied source of `extent` pixels.
+    /// It samples at its vertices' texture coordinates, mirrored with
+    /// `flip_y`, and clamps its taps at the source's edges.
+    pub(crate) fn rect_blur(extent: [f32; 2], sigma: f32, axis: usize, flip_y: bool) -> Self {
         let (coeff, sigma) = super::gaussian_blur_coefficients(sigma);
         Self {
             scissor_ext: [1.0, 1.0],
@@ -77,7 +56,7 @@ impl Params {
             image_blur_filter_direction: if axis == 0 { [1.0, 0.0] } else { [0.0, 1.0] },
             image_blur_filter_sigma: sigma,
             image_blur_filter_coeff: coeff,
-            filter_sample: sample,
+            filter_flip_y: flip_y,
             filter_clamp: true,
             ..Self::default()
         }

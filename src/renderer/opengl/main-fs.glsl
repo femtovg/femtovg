@@ -30,13 +30,11 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define clipLinear frag[14]
 #define clipOffset frag[15].xy
 #define clipOuter frag[15].zw
-// Where a blur draw samples (see `FilterSample`) and whether a tap beyond
-// the source reads its edge texel: they ride the clip shape's slots, which
-// no filter draw reads.
+// Whether a blur tap beyond the source reads its edge texel, and whether the
+// sample positions mirror to `extent.y - y`: they ride the clip shape's
+// slots, which no filter draw reads.
 #define filterClamp frag[13].z
-#define filterScale frag[14].xy
-#define filterOffset frag[15].xy
-#define filterMirror frag[15].zw
+#define filterFlipY frag[13].w
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -332,8 +330,9 @@ vec4 blurTap(vec2 pos) {
 vec4 colorMatrixOn(vec4 premultiplied);
 
 vec4 renderFilteredImage() {
-    vec2 center = fpos.xy * filterScale + filterOffset;
-    if (filterMirror.x > 0.5) center.y = filterMirror.y - center.y;
+    // The quad's texture coordinates say where in the source it samples.
+    vec2 center = ftcoord;
+    if (filterFlipY > 0.5) center.y = extent.y - center.y;
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
 
     vec3 gaussian_coeff = imageBlurFilterCoeff;

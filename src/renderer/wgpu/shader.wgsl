@@ -511,18 +511,10 @@ fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
     return color * select(0.0, 1.0, inside);
 }
 
-// Where a blur draw samples its source for a fragment at `pos`: scaled and
-// shifted, then mirrored when the source is stored the other way up (see
-// `FilterSample`). It rides `clip_linear.xy` and `clip_offset_outer`, which
-// no filter draw reads.
-fn filterSamplePos(pos: vec2<f32>, params: Params) -> vec2<f32> {
-    let mirror = params.clip_offset_outer.zw;
-    let shifted = pos * params.clip_linear.xy + params.clip_offset_outer.xy;
-    return select(shifted, vec2<f32>(shifted.x, mirror.y - shifted.y), mirror.x > 0.5);
-}
-
 fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    let center = filterSamplePos(vertex.fpos.xy, params);
+    // The quad's texture coordinates say where in the source it samples;
+    // `clip_inner.y`, which no filter draw reads otherwise, mirrors them.
+    let center = select(vertex.ftcoord, vec2<f32>(vertex.ftcoord.x, params.extent.y - vertex.ftcoord.y), params.clip_inner.y > 0.5);
     let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
