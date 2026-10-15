@@ -1125,11 +1125,7 @@ impl Renderer for WGPURenderer {
                         sigma,
                     );
                 }
-                super::CommandType::BlurRect {
-                    sigma,
-                    footprint,
-                    region,
-                } => {
+                super::CommandType::BlurRect { sigma, extent, region } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
@@ -1142,7 +1138,7 @@ impl Renderer for WGPURenderer {
                         render_pass_builder: &mut render_pass_builder,
                         pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                     };
-                    blur_rect(&mut pass, &command, sigma, footprint, region);
+                    blur_rect(&mut pass, &command, sigma, extent, region);
                 }
             }
         }
@@ -1419,7 +1415,6 @@ fn separable_filter(
     // draw, a matrix after it the `feather` flag and the matrix slots on
     // the second.
     params.radius = f32::from(u8::from(command.fused.source_alpha));
-    params.filter_clamp = command.clamp_edges;
 
     let horizontal_buffer = command
         .filter_scratch
@@ -1546,20 +1541,11 @@ fn sample_render_target(
 
 /// Blurs `command.image` along y back onto the render target the pass draws
 /// on: see `CommandType::BlurRect`.
-fn blur_rect(
-    pass: &mut FilterPass<'_, '_>,
-    command: &super::Command,
-    sigma: f32,
-    footprint: [u32; 4],
-    region: [u32; 4],
-) {
+fn blur_rect(pass: &mut FilterPass<'_, '_>, command: &super::Command, sigma: f32, extent: [u32; 2], region: [u32; 4]) {
     let Some(source) = command.image else {
         return;
     };
-    let [_, _, width, height] = footprint;
-    // The extent is the footprint's, so a source of another size (a pyramid
-    // level) stretches over it.
-    let params = Params::rect_blur([width as f32, height as f32], sigma, 1, false);
+    let params = Params::rect_blur(extent.map(|v| v as f32), sigma, 1, false);
     // The canvas can be larger than the output, and a scissor beyond the
     // target fails validation.
     let [viewport_width, viewport_height] = pass.render_pass_builder.viewport.map(|extent| extent as u32);

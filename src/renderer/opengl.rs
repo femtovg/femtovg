@@ -1084,7 +1084,6 @@ impl OpenGl {
         // first draw, a matrix after it the `feather` flag and the matrix
         // slots on the second.
         params.radius = f32::from(u8::from(cmd.fused.source_alpha));
-        params.filter_clamp = cmd.clamp_edges;
 
         let horizontal_buffer = cmd
             .filter_scratch
@@ -1219,13 +1218,10 @@ impl OpenGl {
         images: &ImageStore<GlTexture>,
         cmd: &Command,
         sigma: f32,
-        footprint: [u32; 4],
+        extent: [u32; 2],
         region: [u32; 4],
     ) {
-        let [_, _, width, height] = footprint;
-        // The extent is the footprint's, so a source of another size (a
-        // pyramid level) stretches over it.
-        let params = Params::rect_blur([width as f32, height as f32], sigma, 1, false);
+        let params = Params::rect_blur(extent.map(|v| v as f32), sigma, 1, false);
         self.set_clip_bounds(Some(region));
         self.triangles(images, cmd, &params);
     }
@@ -1489,16 +1485,12 @@ impl Renderer for OpenGl {
                     src,
                     sigma,
                 } => sampled = self.sample_render_target(images, &cmd, target_image, src, sigma),
-                CommandType::BlurRect {
-                    sigma,
-                    footprint,
-                    region,
-                } => {
+                CommandType::BlurRect { sigma, extent, region } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
                     if sampled {
-                        self.blur_rect(images, &cmd, sigma, footprint, region);
+                        self.blur_rect(images, &cmd, sigma, extent, region);
                     }
                 }
                 CommandType::ClipFill => {

@@ -68,8 +68,6 @@ pub(crate) struct PassDraw {
     pub(crate) fused: Fused,
     /// The rect the result is drawn inside, in the target's texel rows.
     pub(crate) crop: Option<[u32; 4]>,
-    /// Whether a blur's taps beyond the source read its edge texel.
-    pub(crate) clamp_edges: bool,
 }
 
 /// One pass of a filter plan: `filter`, rendered into an image at pyramid
@@ -607,7 +605,6 @@ where
         cmd.filter_scratch = blur_scratch;
         cmd.fused = draw.fused;
         cmd.crop = draw.crop;
-        cmd.clamp_edges = draw.clamp_edges;
         if let Some((placed, pass)) = draw.backdrop {
             cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
             cmd.blend_pass = pass;
@@ -841,15 +838,21 @@ where
         let region = [x, y, right - x, bottom - y];
         let reach = (3.0 * sigma).ceil() as u32;
         let (left, top) = (x.saturating_sub(reach), y.saturating_sub(reach));
-        let footprint = [
+        let src = [
             left,
             top,
             right.saturating_add(reach).min(target_width) - left,
             bottom.saturating_add(reach).min(target_height) - top,
         ];
-        let (footprint_width, footprint_height) = (footprint[2] as usize, footprint[3] as usize);
-
         let mut passes = blur_passes(sigma, sigma);
+        // The footprint, the rect plus its reach, can pass the target's edges.
+        // The first draw fills that part with the edge pixels, so the draws
+        // after it never reach an edge and need no clamp. Within one pass,
+        // the y draw reads only the rect's columns, so the x scratch leaves
+        // out the reach beside them.
+        let reach_x = if passes.len() == 1 { 0 } else { reach };
+        let footprint_width = (region[2] + 2 * reach_x) as usize;
+        let footprint_height = (region[3] + 2 * reach) as usize;
         let work = filter_work(&passes, footprint_width, footprint_height);
         if !self.reserve_filter_work(work) {
             return Err(ErrorKind::FilterWorkBudgetExceeded);
@@ -888,13 +891,18 @@ where
         let (width, height) = self.image_size(first).expect("a transient image has a size");
         let mut cmd = Command::new(CommandType::SampleRenderTarget {
             target_image: first,
-            src: footprint,
+            src,
             sigma: first_sigma,
         });
-        let [x, y, src_width, src_height] = footprint.map(|v| v as f32);
+        let (footprint_x, footprint_y) = (x as f32 - reach_x as f32, y as f32 - reach as f32);
         cmd.triangles_verts = Some(self.push_device_quad(
             [0, 0, width as u32, height as u32],
-            [x, y, x + src_width, y + src_height],
+            [
+                footprint_x,
+                footprint_y,
+                footprint_x + footprint_width as f32,
+                footprint_y + footprint_height as f32,
+            ],
         ));
         self.append_cmd(cmd);
 
@@ -902,27 +910,27 @@ where
             Some(x_scratch) => (x_scratch, sigma, true),
             None => {
                 let (level, flipped) =
-                    self.record_filter_passes(first, &passes[1..], (first, true), &pyramid, false, (0.0, 0.0), true);
+                    self.record_filter_passes(first, &passes[1..], (first, true), &pyramid, false, (0.0, 0.0));
                 // A degenerate sigma makes the y draw the pyramid's scale back up.
                 (level, 0.0, flipped)
             }
         };
         let mut cmd = Command::new(CommandType::BlurRect {
             sigma,
-            footprint,
+            extent: [footprint_width as u32, footprint_height as u32],
             region,
         });
         cmd.image = Some(source);
         // `source` stretches over the footprint, read the other way up when
         // it is stored flipped.
-        let [footprint_x, footprint_y, _, footprint_height] = footprint.map(|v| v as f32);
-        let [x, y, width, height] = region.map(|v| v as f32);
-        let (u0, u1) = (x - footprint_x, x + width - footprint_x);
-        let (v0, v1) = (y - footprint_y, y + height - footprint_y);
+        let [reach_x, reach] = [reach_x, reach].map(|v| v as f32);
+        let [width, height] = [region[2], region[3]].map(|v| v as f32);
+        let (u0, u1) = (reach_x, reach_x + width);
         let (v0, v1) = if flip_y {
-            (footprint_height - v0, footprint_height - v1)
+            let footprint_height = footprint_height as f32;
+            (footprint_height - reach, footprint_height - reach - height)
         } else {
-            (v0, v1)
+            (reach, reach + height)
         };
         cmd.triangles_verts = Some(self.push_device_quad(region, [u0, v0, u1, v1]));
         cmd.composite_operation = CompositeOperationState::new(CompositeOperation::Copy);
@@ -1057,7 +1065,6 @@ where
             &scratch,
             target_as_scratch,
             origin,
-            false,
         );
         debug_assert_eq!(last, target_image, "the plan's last pass lands in the target");
         for id in scratch.images() {
@@ -1069,9 +1076,7 @@ where
     /// does, from a source stored flipped or not, holding on to the
     /// scratches, and returns the image the last pass wrote - `target_image`
     /// when a pass runs at the chain's size, else a pyramid level's - and
-    /// whether it is stored flipped. With `clamp_edges`, its blurs clamp
-    /// their taps to their source's edge.
-    #[allow(clippy::too_many_arguments)]
+    /// whether it is stored flipped.
     pub(crate) fn record_filter_passes(
         &mut self,
         target_image: ImageId,
@@ -1080,7 +1085,6 @@ where
         scratch: &FilterScratchImages,
         target_as_scratch: bool,
         origin: (f32, f32),
-        clamp_edges: bool,
     ) -> (ImageId, bool) {
         debug_assert!(!target_as_scratch || target_image != source_image);
         let mut src = source_image;
@@ -1170,7 +1174,6 @@ where
                 backdrop,
                 fused: pass.fused,
                 crop,
-                clamp_edges,
             };
             let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, draw);
             src_flipped = filter.stores_flipped(src_flipped);
@@ -1994,7 +1997,7 @@ fn a_cropped_pass_carries_the_rect_in_the_rows_it_stores() {
 
 /// What a rect blur records: the kinds of its commands, in order, and its
 /// first draw's read rect, sigma and texture coordinates and its
-/// write-back's rects, sigma and texture coordinates, each `[u0, v0, u1, v1]`
+/// write-back's extent, rect, sigma and texture coordinates, each `[u0, v0, u1, v1]`
 /// from the quad's top left to its bottom right.
 #[cfg(test)]
 struct RectBlurCommands {
@@ -2005,7 +2008,7 @@ struct RectBlurCommands {
 
 #[cfg(test)]
 struct WriteBack {
-    footprint: [u32; 4],
+    extent: [u32; 2],
     region: [u32; 4],
     sigma: f32,
     texture_rect: [f32; 4],
@@ -2032,20 +2035,11 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
                 sampled = Some((src, sigma, texture_rect(command)));
                 "sample"
             }
-            CommandType::RenderFilteredImage { filter, .. } => {
-                if matches!(filter, ImageFilter::GaussianBlur { .. }) {
-                    assert!(command.clamp_edges, "the pyramid's blur clamps to the footprint's edge");
-                }
-                "filter"
-            }
-            CommandType::BlurRect {
-                sigma,
-                footprint,
-                region,
-            } => {
+            CommandType::RenderFilteredImage { .. } => "filter",
+            CommandType::BlurRect { sigma, extent, region } => {
                 assert!(!command.clip_active, "a rect blur is a raw write");
                 written = Some(WriteBack {
-                    footprint,
+                    extent,
                     region,
                     sigma,
                     texture_rect: texture_rect(command),
@@ -2064,25 +2058,26 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
     }
 }
 
-/// A blur within one shader pass reads the rect with three sigma around it,
-/// cut to the target, blurring it along x into a scratch, and draws y back
-/// onto the target, reading the scratch the other way up.
+/// A blur within one shader pass blurs the rect's columns along x into a
+/// scratch, with three sigma above and below.
+/// It reads the target only where that reach is within it.
+/// The y draw writes back onto the target, reading the scratch the other way up.
 #[test]
 fn a_rect_blur_within_one_pass_reads_its_reach_and_draws_back() {
     let commands = rect_blur_commands([4, 100, 64, 300], 3.0);
     assert_eq!(commands.kinds, ["sample", "blur"]);
     let (src, first_sigma, read) = commands.sampled.unwrap();
     let WriteBack {
-        footprint,
+        extent,
         region,
         sigma,
         texture_rect: written,
     } = commands.written.unwrap();
     assert_eq!(src, [0, 91, 77, 101]);
-    assert_eq!(read, [0.0, 91.0, 77.0, 192.0]);
-    assert_eq!(footprint, src);
+    assert_eq!(read, [4.0, 91.0, 68.0, 201.0], "the reach passes the bottom");
+    assert_eq!(extent, [64, 110]);
     assert_eq!(region, [4, 100, 64, 92]);
-    assert_eq!(written, [4.0, 92.0, 68.0, 0.0], "the scratch is read the other way up");
+    assert_eq!(written, [0.0, 101.0, 64.0, 9.0], "the scratch is read the other way up");
     assert_eq!((first_sigma, sigma), (3.0, 3.0));
 }
 
@@ -2146,40 +2141,4 @@ fn a_rect_blur_is_unsupported_inside_a_layer() {
     ));
     canvas.end_layer();
     assert!(canvas.blur_rect(0, 0, 16, 16, 4.0).is_ok());
-}
-
-/// Only a rect blur clamps its taps: a chain's blur fades at its
-/// source's edge, as SVG's does.
-#[test]
-fn a_chain_blur_does_not_clamp_to_its_edge() {
-    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
-    canvas.set_size(64, 64, 1.0);
-    let flags = ImageFlags::PREMULTIPLIED;
-    let source = canvas.create_image_empty(64, 64, PixelFormat::Rgba8, flags).unwrap();
-    let target = canvas.create_image_empty(64, 64, PixelFormat::Rgba8, flags).unwrap();
-    let before = canvas.commands.len();
-    canvas
-        .filter_image_chain(
-            target,
-            &[ImageFilter::GaussianBlur {
-                sigma_x: 20.0,
-                sigma_y: 20.0,
-            }],
-            source,
-        )
-        .unwrap();
-    let blurs: Vec<_> = canvas.commands[before..]
-        .iter()
-        .filter(|command| {
-            matches!(
-                command.cmd_type,
-                CommandType::RenderFilteredImage {
-                    filter: ImageFilter::GaussianBlur { .. },
-                    ..
-                }
-            )
-        })
-        .collect();
-    assert!(!blurs.is_empty());
-    assert!(blurs.iter().all(|command| !command.clamp_edges));
 }
