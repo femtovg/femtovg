@@ -946,6 +946,7 @@ impl Renderer for WGPURenderer {
                         color,
                         &command,
                         keep_clip,
+                        verts,
                         &mut pipeline_and_bindgroup_mapper,
                         &mut render_pass_builder,
                     );
@@ -2138,6 +2139,7 @@ fn clear_rect(
     color: crate::Color,
     command: &super::Command,
     keep_clip: bool,
+    verts: &[super::Vertex],
     pipeline_and_bindgroup_mapper: &mut CommandToPipelineAndBindGroupMapper,
     render_pass_builder: &mut RenderPassBuilder<'_>,
 ) {
@@ -2153,6 +2155,14 @@ fn clear_rect(
     );
     params.shader_type = ShaderType::FillColorUnclipped;
     if let Some((start, count)) = command.triangles_verts {
+        // A clear of the whole target before anything is drawn into it is the
+        // load op of the target's pass: on a tiler each tile then starts out
+        // as the color instead of being read from memory and painted over.
+        // Keeping a clip plane takes the quad, which zeroes the winding bits
+        // only; a stencil load op clears all of them or none.
+        if !keep_clip && render_pass_builder.clear_on_load(&verts[start..start + count], params.inner_col) {
+            return;
+        }
         // Zero the stencil under the cleared rect, as the GL backend's
         // stencil clear does: a winding count a cover pass missed must not
         // leak into the next fills. With a clip armed on the target the clip
@@ -2713,7 +2723,8 @@ struct RenderPassBuilder<'a> {
     viewport_bind_group_layout: wgpu::BindGroupLayout,
     rpass: Option<wgpu::RenderPass<'a>>,
     /// The load op the current target's pass begins with, while no draw has
-    /// begun it. A pass that loads and stores its target without drawing
+    /// begun it: a clear of the whole target before any draw is one, see
+    /// `clear_on_load`. A pass that loads and stores its target without drawing
     /// changes nothing and is not free - on Metal it is a command buffer of
     /// its own, see `SubmissionSlicing` - so a target that is left again
     /// before anything is drawn into it gets no pass.
@@ -2978,6 +2989,30 @@ impl<'a> RenderPassBuilder<'a> {
         self.current_clip_bounds = None;
         self.clip_bounds = None;
         self.pending_load = Some(load);
+    }
+
+    /// Makes a clear of the rect `verts` outline to `color` (what its quad
+    /// writes) the load op of the current target's pass, if no draw has
+    /// begun the pass and the rect covers the target; returns whether it did.
+    fn clear_on_load(&mut self, verts: &[super::Vertex], [r, g, b, a]: [f32; 4]) -> bool {
+        if self.rpass.is_some() {
+            return false;
+        }
+        let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+        for vertex in verts {
+            min = [min[0].min(vertex.x), min[1].min(vertex.y)];
+            max = [max[0].max(vertex.x), max[1].max(vertex.y)];
+        }
+        if min[0] > 0.0 || min[1] > 0.0 || max[0] < self.viewport[0] || max[1] < self.viewport[1] {
+            return false;
+        }
+        self.pending_load = Some(wgpu::LoadOp::Clear(wgpu::Color {
+            r: r.into(),
+            g: g.into(),
+            b: b.into(),
+            a: a.into(),
+        }));
+        true
     }
 
     /// Begins the current target's pass unless a draw already has.
