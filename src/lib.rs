@@ -1473,6 +1473,18 @@ where
             ));
 
             cmd.triangles_verts = Some((offset, 4));
+
+            // The cover zeroes the winding it covers, but a fringe moves fill vertices
+            // outward from a hole, past the path where a hole comes within half a fringe of
+            // the edge around it - and the quad's corner at (minx - f, miny) never had the
+            // fringe added. A count the cover misses stays in the stencil until the next
+            // fill whose cover reaches it paints it. Such a fill has its fans drawn again
+            // after the cover, coloring nothing and zeroing them. Taking those pixels into
+            // the cover instead would paint them: where a shape is thinner than the
+            // fringe its fill vertices cross, and count winding outside the shape.
+            let (reach, b, f) = (path_cache.fill_bounds, path_cache.bounds, fringe_width);
+            cmd.zero_fans =
+                reach.minx < b.minx - f || reach.maxx > b.maxx + f || reach.miny < b.miny || reach.maxy > b.maxy + f;
         }
 
         self.append_cmd(cmd);
@@ -2708,6 +2720,115 @@ fn a_contour_longer_than_a_fan_goes_as_several() {
         joined.extend_from_slice(&fan[2..]);
     }
     assert_eq!(joined, contour_fan);
+}
+
+/// A concave fill's cover zeroes the winding its stencil pass counted where
+/// the cover reaches; a fill whose stencil pass reaches past the cover has
+/// its fans drawn again to zero the rest. Paths whose fill vertices stay
+/// inside the cover - the fringe moves a filled region's vertices inward -
+/// pay for no second draw.
+#[test]
+fn a_concave_fill_whose_stencil_pass_reaches_past_its_cover_zeroes_its_fans() {
+    use renderer::CommandType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(256, 256, 1.0);
+
+    let polygon = |path: &mut Path, points: &[(f32, f32)]| {
+        path.move_to(points[0].0, points[0].1);
+        for &(x, y) in &points[1..] {
+            path.line_to(x, y);
+        }
+        path.close();
+    };
+    // Paths that reach past their cover: a right triangle a fraction of a
+    // pixel thick, whose hole's vertices move past it, and a kite taken for
+    // a hole's boundary (a hole crosses its first edge), moved outward at
+    // its sharp corner.
+    let mut reaching = Vec::new();
+    for (i, offset) in [0.0, 0.3, 0.6].into_iter().enumerate() {
+        let (x, y) = (20.0 + 20.0 * i as f32 + offset, 20.0 + offset);
+        let mut triangle = Path::new();
+        polygon(&mut triangle, &[(x, y), (x, y + 12.0), (x + 12.0, y)]);
+        polygon(
+            &mut triangle,
+            &[(x + 0.15, y + 0.15), (x + 11.6, y + 0.15), (x + 0.15, y + 11.6)],
+        );
+        reaching.push(triangle);
+        let (x, y) = (x, y + 40.0);
+        let mut kite = Path::new();
+        polygon(&mut kite, &[(x, y), (x + 10.0, y + 3.0), (x + 3.0, y + 10.0)]);
+        polygon(&mut kite, &[(x + 4.5, y + 1.2), (x + 5.0, y + 2.5), (x + 5.5, y + 1.3)]);
+        reaching.push(kite);
+    }
+    // Paths that do not: a frame, a star, a ring two pixels thick.
+    let mut within = Vec::new();
+    let mut frame = Path::new();
+    frame.rect(120.0, 20.0, 60.0, 60.0);
+    polygon(
+        &mut frame,
+        &[(130.0, 30.0), (170.0, 30.0), (170.0, 70.0), (130.0, 70.0)],
+    );
+    within.push(frame);
+    let mut star = Path::new();
+    let points: Vec<(f32, f32)> = (0..10)
+        .map(|i| {
+            let a = i as f32 / 10.0 * std::f32::consts::TAU;
+            let r = if i % 2 == 0 { 40.0 } else { 16.0 };
+            (200.0 + r * a.cos(), 150.0 - r * a.sin())
+        })
+        .collect();
+    polygon(&mut star, &points);
+    within.push(star);
+    let mut ring = Path::new();
+    ring.circle(80.0, 180.0, 30.0);
+    ring.circle(80.0, 180.0, 28.0);
+    ring.solidity(Solidity::Hole);
+    within.push(ring);
+
+    for path in reaching.iter().chain(&within) {
+        canvas.fill_path(path, &Paint::color(Color::white()));
+    }
+    canvas.flush_to_output(());
+
+    // Within the two triangles of the cover's strip, edges included.
+    let covered = |cover: &[Vertex], v: &Vertex| {
+        let inside = |a: &Vertex, b: &Vertex, c: &Vertex| {
+            let side = |p: &Vertex, q: &Vertex| (q.x - p.x) * (v.y - p.y) - (q.y - p.y) * (v.x - p.x);
+            let (ab, bc, ca) = (side(a, b), side(b, c), side(c, a));
+            (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+        };
+        inside(&cover[0], &cover[1], &cover[2]) || inside(&cover[1], &cover[2], &cover[3])
+    };
+    let commands = recorded_commands.borrow();
+    let verts = recorded_verts.borrow();
+    let fills: Vec<_> = commands
+        .iter()
+        .filter(|command| matches!(command.cmd_type, CommandType::ConcaveFill { .. }))
+        .collect();
+    assert_eq!(fills.len(), reaching.len() + within.len());
+    for (index, command) in fills.iter().enumerate() {
+        let (start, count) = command.triangles_verts.expect("a concave fill has a cover");
+        let cover = &verts[start..start + count];
+        let past = command
+            .drawables
+            .iter()
+            .filter_map(|drawable| drawable.fill_verts)
+            .flat_map(|(start, count)| &verts[start..start + count])
+            .any(|v| !covered(cover, v));
+        if index < reaching.len() {
+            assert!(past, "path {index} reaches past its cover");
+            assert!(command.zero_fans, "path {index}: its fans are zeroed again");
+        } else {
+            assert!(
+                !past && !command.zero_fans,
+                "path {index} stays inside its cover and draws once"
+            );
+        }
+    }
 }
 
 #[test]

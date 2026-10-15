@@ -187,6 +187,10 @@ pub struct Command {
     pub(crate) crop: Option<[u32; 4]>,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
+    // A concave fill whose fill vertices reach past its cover: after the
+    // cover the renderer draws the fans again, coloring nothing and zeroing
+    // the winding the cover missed.
+    pub(crate) zero_fans: bool,
 }
 
 impl Command {
@@ -205,6 +209,7 @@ impl Command {
             crop: None,
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
+            zero_fans: false,
         }
     }
 
