@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Measured and drawn text no longer keeps missing glyphs after a font that
+  covers them is added. Its cached shaping was used until the text dropped out
+  of the shaping cache.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
