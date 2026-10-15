@@ -192,6 +192,12 @@ const CHORD_SHIFT: f32 = 0.375;
 pub struct PathCache {
     pub(crate) contours: Vec<Contour>,
     pub(crate) bounds: Bounds,
+    /// What the fill vertices [`Self::expand_fill`] made last take in, when
+    /// they are a stencil pass's and a fringe moved them: half its width
+    /// along each point's miter vector, outward from a hole, so where a hole
+    /// comes within half a fringe of the edge around it they reach past
+    /// `bounds`. Empty otherwise.
+    pub(crate) fill_bounds: Bounds,
     points: Vec<Point>,
     // Per contour, the other contours' winding number and crossing count at
     // a point just inside it, and its own orientation sign - what decides
@@ -765,6 +771,7 @@ impl PathCache {
         self.calculate_joins(fringe_width, line_join, miter_limit);
 
         let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
+        self.fill_bounds = Bounds::default();
 
         for contour in &mut self.contours {
             contour.stroke.clear();
@@ -814,8 +821,20 @@ impl PathCache {
                 // from a solid; reversing the rim flips every triangle. A convex
                 // path skips the stencil, where flipped triangles would just
                 // face away.
-                if contour.reversed && !convex {
-                    contour.fill[1..].reverse();
+                if !convex {
+                    if contour.reversed {
+                        contour.fill[1..].reverse();
+                    }
+                    if has_fringe {
+                        let mut b = self.fill_bounds;
+                        for vertex in &contour.fill {
+                            b.minx = b.minx.min(vertex.x);
+                            b.miny = b.miny.min(vertex.y);
+                            b.maxx = b.maxx.max(vertex.x);
+                            b.maxy = b.maxy.max(vertex.y);
+                        }
+                        self.fill_bounds = b;
+                    }
                 }
             } else {
                 contour.fill.clear();

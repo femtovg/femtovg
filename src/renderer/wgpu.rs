@@ -1789,6 +1789,44 @@ fn concave_fill(
         );
         render_pass_builder.draw(start as u32..(start + count) as u32);
     }
+
+    if command.zero_fans {
+        // The fill's vertices reach past the cover: draw the fans again,
+        // coloring nothing, to zero the winding the cover missed. With the
+        // cover's params, which are bound already: a command has room for
+        // two uniform slots, and the winding pass and the cover take both.
+        let zero = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Always,
+            fail_op: wgpu::StencilOperation::Zero,
+            depth_fail_op: wgpu::StencilOperation::Zero,
+            pass_op: wgpu::StencilOperation::Zero,
+        };
+        pipeline_and_bindgroup_mapper.update_renderpass(
+            render_pass_builder,
+            None,
+            wgpu::PrimitiveTopology::TriangleList,
+            StencilTest::Enabled {
+                stencil_state: wgpu::StencilState {
+                    front: zero,
+                    back: zero,
+                    read_mask: 0xff,
+                    write_mask: if command.clip_active { 0x7f } else { 0xff },
+                },
+                stencil_reference: 0,
+            },
+            None,
+            fill_params,
+            images,
+            command.image,
+            command.glyph_texture,
+        );
+        let mut first = fans;
+        for drawable in &command.drawables {
+            if let Some((_, count)) = drawable.fill_verts {
+                render_pass_builder.draw_fan(&mut first, count);
+            }
+        }
+    }
 }
 
 /// Intersects the persistent stencil clip with the command's path (winding

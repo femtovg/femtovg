@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a concave fill leaving winding counts in the stencil where its fill
+  reached past the quad that covers it - a feature thinner than the
+  antialiasing fringe, whose fill vertices move outward - so the next
+  concave fill whose cover reached them painted them, outside its own shape.
+  Such a fill now draws its fans again after the cover to zero them.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
