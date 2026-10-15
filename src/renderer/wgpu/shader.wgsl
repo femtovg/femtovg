@@ -497,24 +497,37 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades.
+// weight stays in the sum, so an edge fades. With `clip_inner.x` set, which
+// no filter draw reads otherwise, the sampler's clamp to edge applies
+// instead.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
     let uv = pos / params.extent;
-    let inside = all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0));
+    let inside = (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) || params.clip_inner.x > 0.5;
     var color: vec4<f32> = textureSample(image_texture, image_sampler, uv);
     if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
     if (params.radius > 0.5) { color = vec4<f32>(0.0, 0.0, 0.0, color.w); }
     return color * select(0.0, 1.0, inside);
 }
 
+// Where a blur draw samples its source for a fragment at `pos`: scaled and
+// shifted, then mirrored when the source is stored the other way up (see
+// `FilterSample`). It rides `clip_linear.xy` and `clip_offset_outer`, which
+// no filter draw reads.
+fn filterSamplePos(pos: vec2<f32>, params: Params) -> vec2<f32> {
+    let mirror = params.clip_offset_outer.zw;
+    let shifted = pos * params.clip_linear.xy + params.clip_offset_outer.xy;
+    return select(shifted, vec2<f32>(shifted.x, mirror.y - shifted.y), mirror.x > 0.5);
+}
+
 fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    let center = filterSamplePos(vertex.fpos.xy, params);
     let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
 
-    var color_sum: vec4<f32> = blurTap(vertex.fpos.xy, params) * gaussian_coeff.x;
+    var color_sum: vec4<f32> = blurTap(center, params) * gaussian_coeff.x;
     var coefficient_sum: f32 = gaussian_coeff.x;
     gaussian_coeff.x *= gaussian_coeff.y;
     gaussian_coeff.y *= gaussian_coeff.z;
@@ -527,8 +540,8 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += blurTap(vertex.fpos.xy - i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
-        color_sum += blurTap(vertex.fpos.xy + i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
+        color_sum += blurTap(center - i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
+        color_sum += blurTap(center + i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:

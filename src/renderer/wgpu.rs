@@ -59,8 +59,8 @@ impl std::fmt::Debug for WGPURenderOutput {
 }
 
 use super::FanIndices;
-use super::Params;
 use super::Vertex;
+use super::{FilterSample, Params};
 use crate::clip::{ClipCoverage, MaskCoverage};
 
 const UNIFORMARRAY_SIZE: usize = 16;
@@ -191,6 +191,17 @@ impl UniformArray {
         }
     }
 
+    /// Where a blur draw samples and whether it clamps its taps to the
+    /// source's edge, in the clip shape's slots: a filter draw is never
+    /// under a clip.
+    pub fn set_filter_sample(&mut self, sample: &FilterSample, clamp: bool) {
+        self.0[54] = f32::from(u8::from(clamp));
+        self.0[56..58].copy_from_slice(&sample.scale);
+        self.0[60..62].copy_from_slice(&sample.offset);
+        self.0[62] = f32::from(u8::from(sample.mirror_height.is_some()));
+        self.0[63] = sample.mirror_height.unwrap_or(0.0);
+    }
+
     /// The coverage mask, read by the shader variant of a draw under one:
     /// where its corner lies, the pixels it spans and what one of them is
     /// of its image, in the halves of the scissor matrix's columns that no
@@ -230,6 +241,10 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
         arr.set_conic_start_angle(params.conic_start_angle);
         arr.set_clip(params.clip.as_ref());
+        if params.shader_type == ShaderType::FilterImage {
+            debug_assert!(params.clip.is_none(), "a filter draw is never under a clip");
+            arr.set_filter_sample(&params.filter_sample, params.filter_clamp);
+        }
         arr.set_clip_mask(params.clip_mask.as_ref());
 
         arr
@@ -386,6 +401,7 @@ pub struct WGPURenderer {
     /// Built on the first upload of an image with `GENERATE_MIPMAPS`.
     mipmaps: Option<MipmapGenerator>,
     flush_count: u64,
+    render_target_reader: RenderTargetReader,
 }
 
 /// Rasterizes an image element into an offscreen canvas at the given size.
@@ -563,6 +579,7 @@ impl WGPURenderer {
             pipeline_cache: Default::default(),
             mipmaps: None,
             flush_count: 0,
+            render_target_reader: RenderTargetReader::default(),
         }
     }
 
@@ -736,6 +753,106 @@ impl MipmapGenerator {
     }
 }
 
+/// What a rect blur's first draw reads the render target through, and
+/// whether a blur was skipped yet.
+#[derive(Debug, Default)]
+struct RenderTargetReader {
+    /// The screen's pixels a rect blur reads, at their place on the screen:
+    /// a surface texture can be copied, not sampled. Kept at the output's
+    /// size, as the stencil buffer is, since a blur drawn every frame copies
+    /// every frame.
+    screen_copy: Option<wgpu::Texture>,
+    // Blurs run every frame, so a skipped one logs once, not per frame.
+    warned: bool,
+}
+
+impl RenderTargetReader {
+    fn warn_skipped(&mut self, reason: &str) {
+        if !std::mem::replace(&mut self.warned, true) {
+            log::warn!("rect blur skipped: {reason}");
+        }
+    }
+
+    /// Copies `src` of the screen `render_pass_builder` draws on into the
+    /// screen copy at the same place, ending the open render pass, and
+    /// returns a view of the copy.
+    fn copy_screen(
+        &mut self,
+        render_pass_builder: &mut RenderPassBuilder<'_>,
+        [x, y, width, height]: [u32; 4],
+    ) -> Option<wgpu::TextureView> {
+        let surface = render_pass_builder.surface_view.texture().clone();
+        if !surface.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+            self.warn_skipped("the output texture lacks COPY_SRC usage");
+            return None;
+        }
+        // A view's mip level and array layer can't be queried. The copy
+        // reads mip 0, layer 0, so it only trusts an output that spans the
+        // whole of a single-layer texture.
+        let size = surface.size();
+        if surface.depth_or_array_layers() != 1
+            || [size.width as f32, size.height as f32] != render_pass_builder.screen_view
+        {
+            self.warn_skipped("the output isn't mip 0 of a single-layer texture");
+            return None;
+        }
+        // The canvas size can differ from the output's.
+        let width = width.min(size.width.saturating_sub(x));
+        let height = height.min(size.height.saturating_sub(y));
+        if width == 0 || height == 0 {
+            return None;
+        }
+        // Draws through an sRGB view are encoded on write, so the copy
+        // decodes on read: drawing it back then encodes once.
+        let format = if render_pass_builder.screen_surface_format.is_srgb() {
+            surface.format().add_srgb_suffix()
+        } else {
+            surface.format().remove_srgb_suffix()
+        };
+        if self
+            .screen_copy
+            .as_ref()
+            .is_some_and(|copy| copy.format() != format || copy.size() != size)
+        {
+            self.screen_copy = None;
+        }
+        let device = &render_pass_builder.device;
+        let copy = self.screen_copy.get_or_insert_with(|| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("femtovg screen copy"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        });
+        let origin = wgpu::Origin3d { x, y, z: 0 };
+        render_pass_builder.end_render_pass().copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &surface,
+                mip_level: 0,
+                origin,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: copy,
+                mip_level: 0,
+                origin,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        Some(copy.create_view(&Default::default()))
+    }
+}
+
 impl Renderer for WGPURenderer {
     type Image = Image;
     type NativeTexture = wgpu::Texture;
@@ -859,6 +976,8 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
+        // Whether the last `SampleRenderTarget` drew.
+        let mut sampled = false;
         for (command, &fans) in commands.into_iter().zip(&self.fan_indices.firsts) {
             render_pass_builder.set_clip_bounds(&command);
             match command.cmd_type {
@@ -989,6 +1108,46 @@ impl Renderer for WGPURenderer {
                         single_pass_filter(&mut pass, command, shader_type, slots, target_image);
                     }
                 },
+                super::CommandType::SampleRenderTarget {
+                    target_image,
+                    src,
+                    sigma,
+                } => {
+                    let mut pass = FilterPass {
+                        images,
+                        current_render_target: &mut current_render_target,
+                        render_pass_builder: &mut render_pass_builder,
+                        pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                    };
+                    sampled = sample_render_target(
+                        &mut pass,
+                        &command,
+                        &mut self.render_target_reader,
+                        target_image,
+                        src,
+                        sigma,
+                    );
+                }
+                super::CommandType::BlurRect {
+                    sigma,
+                    footprint,
+                    region,
+                    flip_y,
+                } => {
+                    // Its source is the first draw's image, or that image run
+                    // down a pyramid: without that draw it would write back
+                    // whatever the image held before.
+                    if !sampled {
+                        continue;
+                    }
+                    let mut pass = FilterPass {
+                        images,
+                        current_render_target: &mut current_render_target,
+                        render_pass_builder: &mut render_pass_builder,
+                        pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
+                    };
+                    blur_rect(&mut pass, &command, sigma, footprint, region, flip_y);
+                }
             }
         }
 
@@ -1264,6 +1423,7 @@ fn separable_filter(
     // draw, a matrix after it the `feather` flag and the matrix slots on
     // the second.
     params.radius = f32::from(u8::from(command.fused.source_alpha));
+    params.filter_clamp = command.clamp_edges;
 
     let horizontal_buffer = command
         .filter_scratch
@@ -1318,6 +1478,132 @@ fn separable_filter(
     }
 
     pass.restore_target(previous_render_target);
+}
+
+/// Draws `src` of the render target the pass draws on over `target_image`:
+/// see `CommandType::SampleRenderTarget`. Returns whether it drew.
+fn sample_render_target(
+    pass: &mut FilterPass<'_, '_>,
+    command: &super::Command,
+    reader: &mut RenderTargetReader,
+    target_image: ImageId,
+    src: [u32; 4],
+    sigma: f32,
+) -> bool {
+    let Some(target_info) = pass.images.get(target_image).map(|image| image.info) else {
+        return false;
+    };
+    let previous_render_target = *pass.current_render_target;
+    // An image target is read where it is; the screen through a copy.
+    let (source, size, mirror_height) = match previous_render_target {
+        RenderTarget::Image(id) => {
+            let Some(Texture::Internal(texture)) = pass.images.get(id).map(|image| &image.texture) else {
+                return false;
+            };
+            if !texture.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING) {
+                reader.warn_skipped("the render target image can't be sampled");
+                return false;
+            }
+            let size = [texture.width() as f32, texture.height() as f32];
+            // A view, unlike the image, takes the default sampler, whatever
+            // the image's flags: the taps clamp and the first halving
+            // averages only through a linear, clamped lookup of the base level.
+            let view = texture.create_view(&wgpu::TextureViewDescriptor {
+                mip_level_count: Some(1),
+                ..Default::default()
+            });
+            // An image target holds its rows bottom-up.
+            (MainTexture::View(view), size, Some(size[1]))
+        }
+        RenderTarget::Screen => {
+            let Some(view) = reader.copy_screen(pass.render_pass_builder, src) else {
+                return false;
+            };
+            let size = view.texture().size();
+            (MainTexture::View(view), [size.width as f32, size.height as f32], None)
+        }
+    };
+    let [x, y, width, height] = src;
+    let sample = FilterSample {
+        scale: [
+            width as f32 / target_info.width() as f32,
+            height as f32 / target_info.height() as f32,
+        ],
+        offset: [x as f32, y as f32],
+        mirror_height,
+    };
+    let params = Params::rect_blur(size, sigma, 0, sample);
+
+    pass.render_pass_builder.set_filter_target_image(
+        pass.images,
+        target_image,
+        wgpu::LoadOp::Clear(wgpu::Color::default()),
+    );
+    if let Some((start, count)) = command.triangles_verts {
+        pass.pipeline_and_bindgroup_mapper.update_renderpass_sampling(
+            pass.render_pass_builder,
+            blend_state(command).into(),
+            wgpu::PrimitiveTopology::TriangleList,
+            StencilTest::Disabled,
+            None,
+            &params,
+            pass.images,
+            source,
+            GlyphTexture::None,
+        );
+        pass.render_pass_builder.draw(start as u32..(start + count) as u32);
+    }
+    pass.restore_target(previous_render_target);
+    true
+}
+
+/// Blurs `command.image` along y back onto the render target the pass draws
+/// on: see `CommandType::BlurRect`.
+fn blur_rect(
+    pass: &mut FilterPass<'_, '_>,
+    command: &super::Command,
+    sigma: f32,
+    footprint: [u32; 4],
+    region: [u32; 4],
+    flip_y: bool,
+) {
+    let Some(source) = command.image else {
+        return;
+    };
+    let [x, y, width, height] = footprint;
+    // The extent is the footprint's, so a source of another size (a pyramid
+    // level) stretches over it.
+    let sample = FilterSample {
+        offset: [-(x as f32), -(y as f32)],
+        mirror_height: flip_y.then_some(height as f32),
+        ..FilterSample::default()
+    };
+    let params = Params::rect_blur([width as f32, height as f32], sigma, 1, sample);
+    // The canvas can be larger than the output, and a scissor beyond the
+    // target fails validation.
+    let [viewport_width, viewport_height] = pass.render_pass_builder.viewport.map(|extent| extent as u32);
+    let [left, top, region_width, region_height] = region;
+    let right = (left + region_width).min(viewport_width);
+    let bottom = (top + region_height).min(viewport_height);
+    if right <= left || bottom <= top {
+        return;
+    }
+    if let Some((start, count)) = command.triangles_verts {
+        pass.render_pass_builder
+            .scissor_to(Some([left, top, right - left, bottom - top]));
+        pass.pipeline_and_bindgroup_mapper.update_renderpass(
+            pass.render_pass_builder,
+            blend_state(command).into(),
+            wgpu::PrimitiveTopology::TriangleList,
+            StencilTest::Disabled,
+            None,
+            &params,
+            pass.images,
+            Some(source),
+            GlyphTexture::None,
+        );
+        pass.render_pass_builder.draw(start as u32..(start + count) as u32);
+    }
 }
 
 /// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
@@ -2312,9 +2598,17 @@ impl DrawLayout {
     }
 }
 
+/// The texture a draw samples as its image: one of the canvas's, or a view
+/// the renderer holds itself.
+#[derive(Clone, PartialEq)]
+enum MainTexture {
+    Image(Option<ImageId>),
+    View(wgpu::TextureView),
+}
+
 #[derive(Clone, PartialEq)]
 struct BindGroupState {
-    image: Option<ImageId>,
+    image: MainTexture,
     glyph_texture: GlyphTexture,
     clip_mask: Option<ImageId>,
 }
@@ -2329,13 +2623,26 @@ impl BindGroupState {
         sampler_cache: &RefCell<HashMap<crate::ImageFlags, wgpu::Sampler>>,
         uniform_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
-        let (main_texture_view, main_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
-            device,
-            images,
-            self.image.as_ref(),
-            empty_texture_view,
-            sampler_cache,
-        );
+        let (main_texture_view, main_sampler) = match &self.image {
+            MainTexture::Image(image) => RenderPassBuilder::create_binding_resource_and_sampler(
+                device,
+                images,
+                image.as_ref(),
+                empty_texture_view,
+                sampler_cache,
+            ),
+            MainTexture::View(view) => {
+                // No image is the default sampler: bilinear, clamped to the edge.
+                let (_, sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
+                    device,
+                    images,
+                    None,
+                    empty_texture_view,
+                    sampler_cache,
+                );
+                (OwnedBindingResource::TextureView(view.clone()), sampler)
+            }
+        };
         let (glyph_texture_view, glyph_sampler) = RenderPassBuilder::create_binding_resource_and_sampler(
             device,
             images,
@@ -2463,8 +2770,14 @@ impl<'a> RenderPassBuilder<'a> {
     /// Scissors the open pass's draws to the pixels `command`'s clip
     /// leaves them, or to the whole target again.
     fn set_clip_bounds(&mut self, command: &super::Command) {
+        let bounds = command.clip_bounds([self.viewport[0] as u32, self.viewport[1] as u32]);
+        self.scissor_to(bounds);
+    }
+
+    /// Scissors the draws that follow to `bounds` - x, y, width and height
+    /// from the target's top left - or lifts the scissor.
+    fn scissor_to(&mut self, bounds: Option<[u32; 4]>) {
         let (width, height) = (self.viewport[0] as u32, self.viewport[1] as u32);
-        let bounds = command.clip_bounds([width, height]);
         if self.current_clip_bounds == bounds {
             return;
         }
@@ -2642,6 +2955,13 @@ impl<'a> RenderPassBuilder<'a> {
         self.recreate_render_pass(wgpu::LoadOp::Load);
     }
 
+    /// Ends the current render pass, for work the encoder records outside it;
+    /// `recreate_render_pass` resumes drawing on the same target.
+    fn end_render_pass(&mut self) -> &mut wgpu::CommandEncoder {
+        drop(self.rpass.take());
+        self.encoder
+    }
+
     fn recreate_render_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) {
         // A new render pass resets state, so nothing set on the previous one still counts.
         self.current_pipeline_state = None;
@@ -2769,6 +3089,33 @@ impl CommandToPipelineAndBindGroupMapper {
         params: &Params,
         images: &'a ImageStore<Image>,
         image: Option<ImageId>,
+        glyph_texture: GlyphTexture,
+    ) {
+        self.update_renderpass_sampling(
+            render_pass_builder,
+            color_blend,
+            primitive_topology,
+            stencil_test,
+            cull_mode,
+            params,
+            images,
+            MainTexture::Image(image),
+            glyph_texture,
+        );
+    }
+
+    /// [`update_renderpass`](Self::update_renderpass) for a draw that may
+    /// sample a view the renderer holds rather than an image.
+    fn update_renderpass_sampling<'a>(
+        &mut self,
+        render_pass_builder: &'a mut RenderPassBuilder<'_>,
+        color_blend: Option<wgpu::BlendState>,
+        primitive_topology: wgpu::PrimitiveTopology,
+        stencil_test: StencilTest,
+        cull_mode: Option<wgpu::Face>,
+        params: &Params,
+        images: &'a ImageStore<Image>,
+        image: MainTexture,
         glyph_texture: GlyphTexture,
     ) {
         let render_pass = render_pass_builder.rpass.as_mut().unwrap();

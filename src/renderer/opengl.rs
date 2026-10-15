@@ -12,13 +12,15 @@ use rgb::RGBA8;
 
 use crate::{
     renderer::{GlyphTexture, ImageId, Vertex},
-    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageInfo, ImageSource, ImageStore,
-    Scissor, Transform2D,
+    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageFlags, ImageInfo, ImageSource,
+    ImageStore, PixelFormat, Scissor, Transform2D,
 };
 
 use glow::HasContext;
 
-use super::{Command, CommandType, FanIndices, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
+use super::{
+    Command, CommandType, FanIndices, FilterSample, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer,
+};
 
 mod program;
 use program::MainProgram;
@@ -66,7 +68,20 @@ pub struct OpenGl {
     screen_target: Option<Framebuffer>,
     current_render_target: RenderTarget,
     max_texture_size: usize,
+    // The screen's pixels a rect blur reads, at their place on the screen:
+    // the screen can't be sampled. Kept at the screen's size, since a blur
+    // drawn every frame copies every frame.
+    screen_copy: Option<GlTexture>,
 }
+
+/// The texture parameters a rect blur's first draw reads an image target
+/// with.
+const RECT_BLUR_SAMPLING: [(u32, u32); 4] = [
+    (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
+    (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
+    (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+    (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+];
 
 impl OpenGl {
     /// Creates a new OpenGL renderer from a function loader.
@@ -316,6 +331,7 @@ impl OpenGl {
             screen_target: None,
             current_render_target: RenderTarget::Screen,
             max_texture_size,
+            screen_copy: None,
         };
 
         unsafe {
@@ -788,6 +804,45 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
+    /// Copies `src` of the screen into `screen_copy` at the same place and
+    /// returns the copy's texture.
+    fn copy_screen(&mut self, [x, y, width, height]: [u32; 4]) -> Option<<glow::Context as glow::HasContext>::Texture> {
+        let size = self.view.map(|extent| extent as usize);
+        if self
+            .screen_copy
+            .as_ref()
+            .is_none_or(|copy| [copy.info().width(), copy.info().height()] != size)
+        {
+            if let Some(copy) = self.screen_copy.take() {
+                copy.delete(&self.context);
+            }
+            let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, size[0], size[1], PixelFormat::Rgba8);
+            self.screen_copy = GlTexture::new(&self.context, info, self.is_opengles_2_0)
+                .inspect_err(|err| log::warn!("rect blur skipped: can't create the screen copy: {err:?}"))
+                .ok();
+        }
+        let texture = self.screen_copy.as_ref()?.id();
+        // The screen holds its rows bottom-up, as the copy does.
+        let row = self.view[1] as i32 - (y + height) as i32;
+        unsafe {
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.context.copy_tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                x as i32,
+                row,
+                x as i32,
+                row,
+                width as i32,
+                height as i32,
+            );
+            self.context.bind_texture(glow::TEXTURE_2D, None);
+        }
+        self.check_error("copy_screen");
+        Some(texture)
+    }
+
     fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color, keep_clip: bool) {
         unsafe {
             self.context.enable(glow::SCISSOR_TEST);
@@ -1031,6 +1086,7 @@ impl OpenGl {
         // first draw, a matrix after it the `feather` flag and the matrix
         // slots on the second.
         params.radius = f32::from(u8::from(cmd.fused.source_alpha));
+        params.filter_clamp = cmd.clamp_edges;
 
         let horizontal_buffer = cmd
             .filter_scratch
@@ -1083,6 +1139,109 @@ impl OpenGl {
         // restore previous render target and view
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
+    }
+
+    /// Draws `src` of the current render target over `target_image`: see
+    /// `CommandType::SampleRenderTarget`. Returns whether it drew.
+    fn sample_render_target(
+        &mut self,
+        images: &ImageStore<GlTexture>,
+        cmd: &Command,
+        target_image: ImageId,
+        src: [u32; 4],
+        sigma: f32,
+    ) -> bool {
+        let Some(target_info) = images.get(target_image).map(GlTexture::info) else {
+            return false;
+        };
+        // An image target is read where it is; the screen through a copy.
+        let (source, size, is_image) = match self.current_render_target {
+            RenderTarget::Image(id) => {
+                let Some(texture) = images.get(id) else {
+                    return false;
+                };
+                let info = texture.info();
+                (texture.id(), [info.width() as f32, info.height() as f32], true)
+            }
+            RenderTarget::Screen => {
+                let Some(copy) = self.copy_screen(src) else {
+                    return false;
+                };
+                (copy, self.view, false)
+            }
+        };
+        let [x, y, width, height] = src;
+        let (target_width, target_height) = (target_info.width(), target_info.height());
+        let sample = FilterSample {
+            scale: [width as f32 / target_width as f32, height as f32 / target_height as f32],
+            offset: [x as f32, y as f32],
+            // Every OpenGL target holds its rows bottom-up.
+            mirror_height: Some(size[1]),
+        };
+        let params = Params::rect_blur(size, sigma, 0, sample);
+
+        let original_render_target = self.current_render_target;
+        self.set_target(images, RenderTarget::Image(target_image));
+        self.main_program().set_view(self.view);
+        self.clear_rect(
+            0,
+            0,
+            target_width as u32,
+            target_height as u32,
+            Color::rgbaf(0., 0., 0., 0.),
+            false,
+        );
+        self.set_uniforms(images, &params, None, GlyphTexture::None);
+        unsafe {
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, Some(source));
+            // The taps clamp and the first halving averages only through a
+            // linear, clamped lookup of the base level, whatever the image's
+            // own flags (or, for a native texture, its owner) set.
+            let saved = is_image.then(|| {
+                RECT_BLUR_SAMPLING.map(|(parameter, value)| {
+                    let previous = self.context.get_tex_parameter_i32(glow::TEXTURE_2D, parameter);
+                    self.context
+                        .tex_parameter_i32(glow::TEXTURE_2D, parameter, value as i32);
+                    (parameter, previous)
+                })
+            });
+            if let Some((start, count)) = cmd.triangles_verts {
+                self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
+            }
+            for (parameter, previous) in saved.into_iter().flatten() {
+                self.context.tex_parameter_i32(glow::TEXTURE_2D, parameter, previous);
+            }
+        }
+        self.check_error("sample_render_target");
+
+        self.set_target(images, original_render_target);
+        self.main_program().set_view(self.view);
+        true
+    }
+
+    /// Blurs `cmd.image` along y back onto the current render target: see
+    /// `CommandType::BlurRect`.
+    fn blur_rect(
+        &mut self,
+        images: &ImageStore<GlTexture>,
+        cmd: &Command,
+        sigma: f32,
+        footprint: [u32; 4],
+        region: [u32; 4],
+        flip_y: bool,
+    ) {
+        let [x, y, width, height] = footprint;
+        // The extent is the footprint's, so a source of another size (a
+        // pyramid level) stretches over it.
+        let sample = FilterSample {
+            offset: [-(x as f32), -(y as f32)],
+            mirror_height: flip_y.then_some(height as f32),
+            ..FilterSample::default()
+        };
+        let params = Params::rect_blur([width as f32, height as f32], sigma, 1, sample);
+        self.set_clip_bounds(Some(region));
+        self.triangles(images, cmd, &params);
     }
 
     /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
@@ -1304,6 +1463,8 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
+        // Whether the last `SampleRenderTarget` drew.
+        let mut sampled = false;
         for (index, cmd) in commands.into_iter().enumerate() {
             self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
             self.set_composite_operation(cmd.composite_operation);
@@ -1336,6 +1497,24 @@ impl Renderer for OpenGl {
                 }
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
+                }
+                CommandType::SampleRenderTarget {
+                    target_image,
+                    src,
+                    sigma,
+                } => sampled = self.sample_render_target(images, &cmd, target_image, src, sigma),
+                CommandType::BlurRect {
+                    sigma,
+                    footprint,
+                    region,
+                    flip_y,
+                } => {
+                    // Its source is the first draw's image, or that image run
+                    // down a pyramid: without that draw it would write back
+                    // whatever the image held before.
+                    if sampled {
+                        self.blur_rect(images, &cmd, sigma, footprint, region, flip_y);
+                    }
                 }
                 CommandType::ClipFill => {
                     let stencil_params = Params::stencil();
@@ -1480,6 +1659,9 @@ impl Drop for OpenGl {
             unsafe {
                 self.context.delete_buffer(buffer);
             }
+        }
+        if let Some(copy) = self.screen_copy.take() {
+            copy.delete(&self.context);
         }
     }
 }

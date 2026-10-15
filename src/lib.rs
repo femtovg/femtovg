@@ -860,8 +860,9 @@ where
         }
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
-        // to gate; clear_rect is a raw clear that neither backend clips; a
-        // filter pass draws into its own target image, not the clipped one.
+        // to gate; clear_rect and a rect blur are raw writes that neither
+        // backend clips; a filter pass or a rect blur's first draw writes its
+        // own target image, not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
@@ -869,6 +870,8 @@ where
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
+                | CommandType::SampleRenderTarget { .. }
+                | CommandType::BlurRect { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }

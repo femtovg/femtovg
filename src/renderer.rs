@@ -21,7 +21,7 @@ mod void;
 pub use void::Void;
 
 mod params;
-pub(crate) use params::Params;
+pub(crate) use params::{FilterSample, Params};
 
 /// Represents a drawable object.
 #[derive(Copy, Clone, Default, Debug)]
@@ -133,6 +133,32 @@ pub enum CommandType {
         /// Image filter to apply.
         filter: ImageFilter,
     },
+    /// First draw of a rect blur: `src` of the render target, stretched over
+    /// `target_image` and blurred along x by `sigma` (zero resamples). The
+    /// quad is `triangles_verts`. Taps clamp at the render target's edges.
+    SampleRenderTarget {
+        /// The image drawn into.
+        target_image: ImageId,
+        /// `[x, y, width, height]` in device pixels, within the target.
+        src: [u32; 4],
+        /// The standard deviation along x.
+        sigma: f32,
+    },
+    /// Last draw of a rect blur: `image` blurred along y by `sigma` (zero
+    /// resamples) onto `region` of the render target. The quad is
+    /// `triangles_verts`. Taps clamp at `image`'s edges. A renderer whose
+    /// last `SampleRenderTarget` didn't draw skips it: `image` then holds
+    /// whatever was there before.
+    BlurRect {
+        /// The standard deviation along y.
+        sigma: f32,
+        /// The rect `image` is stretched over, in device pixels.
+        footprint: [u32; 4],
+        /// The rect written, in device pixels, within `footprint`.
+        region: [u32; 4],
+        /// `image` is stored the way a draw stores rows, so read it flipped.
+        flip_y: bool,
+    },
 }
 
 /// The colour matrices a two-draw filter pass carries in its draws: an
@@ -185,6 +211,9 @@ pub struct Command {
     // The rect a filter pass's result is drawn inside - x, y, width and
     // height in the texel rows of its target - when it is cropped.
     pub(crate) crop: Option<[u32; 4]>,
+    // Whether a blur pass's taps beyond its source read the edge texel
+    // instead of transparent: a rect blur's source ends where the target does.
+    pub(crate) clamp_edges: bool,
     pub(crate) fill_rule: FillRule,
     pub(crate) composite_operation: CompositeOperationState,
 }
@@ -203,6 +232,7 @@ impl Command {
             blend_pass: BlendPass::default(),
             fused: Fused::default(),
             crop: None,
+            clamp_edges: false,
             fill_rule: FillRule::default(),
             composite_operation: CompositeOperationState::default(),
         }
