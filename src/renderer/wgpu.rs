@@ -2634,6 +2634,68 @@ impl StencilUse {
     }
 }
 
+#[cfg(test)]
+#[test]
+fn a_pass_takes_the_stencil_only_for_commands_that_use_it_and_keeps_only_an_armed_plane() {
+    use super::{Command, CommandType};
+    use StencilUse::{Arms, Disarms, PassEnd, Unused, Used};
+
+    let of = |cmd_type, clip_active| {
+        let mut command = Command::new(cmd_type);
+        command.clip_active = clip_active;
+        StencilUse::of(&command)
+    };
+    let params = Params::default();
+    assert_eq!(of(CommandType::SetRenderTarget(RenderTarget::Screen), false), PassEnd);
+    assert_eq!(of(CommandType::ConvexFill { params }, false), Unused);
+    assert_eq!(
+        of(CommandType::ConvexFill { params }, true),
+        Used,
+        "tests the clip plane"
+    );
+    assert_eq!(
+        of(
+            CommandType::ConcaveFill {
+                stencil_params: params,
+                fill_params: params
+            },
+            false
+        ),
+        Used
+    );
+    assert_eq!(of(CommandType::ClipReset { visible: true }, false), Arms);
+    assert_eq!(of(CommandType::ClipReset { visible: false }, true), Disarms);
+    let clear = |keep_clip| CommandType::ClearRect {
+        color: crate::Color::white(),
+        keep_clip,
+    };
+    assert_eq!(
+        of(clear(false), false),
+        Unused,
+        "the next pass clears the stencil anyway"
+    );
+    assert_eq!(of(clear(true), true), Used, "keeps the plane, zeroes the winding bits");
+
+    // Whether the pass uses the stencil, and whether a plane is armed as it ends.
+    assert_eq!(
+        StencilUse::ahead(&[Unused, Unused, PassEnd, Used], false),
+        (false, false)
+    );
+    assert_eq!(StencilUse::ahead(&[Unused, Used, PassEnd, Arms], false), (true, false));
+    assert_eq!(StencilUse::ahead(&[Arms, Used], false), (true, true));
+    assert_eq!(StencilUse::ahead(&[Used, Disarms, Used], true), (true, false));
+    assert_eq!(
+        StencilUse::ahead(&[Unused], true),
+        (false, true),
+        "an armed plane outlives a pass that does not attach it"
+    );
+    assert_eq!(
+        StencilUse::ahead(&[], false),
+        (false, false),
+        "a clear begun at the end of the commands"
+    );
+}
+
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
     frame: FrameEncoder,
