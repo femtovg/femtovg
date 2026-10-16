@@ -183,7 +183,8 @@ impl FillMasks {
     /// Doubles the atlas's side, or more for a mask of `size` that needs
     /// it, each mask kept where it lies: the image is let go, freed once the
     /// frame is drawn, and the next one made of the pixels kept here. Masks
-    /// made this frame must be in it before.
+    /// made this frame must be in it before. An atlas that holds no masks -
+    /// not made yet, or started over - grows empty.
     pub(crate) fn grow(&mut self, size: [usize; 2]) {
         let old = self.side;
         let mut side = (2 * old).min(self.most);
@@ -191,15 +192,17 @@ impl FillMasks {
             side = (2 * side).min(self.most);
         }
         let mut pixels = vec![0; side * side];
-        for (row, line) in self.pixels.chunks_exact(old).enumerate() {
-            pixels[row * side..][..old].copy_from_slice(line);
+        self.packer = Atlas::new(side, side);
+        if !self.masks.is_empty() {
+            for (row, line) in self.pixels.chunks_exact(old).enumerate() {
+                pixels[row * side..][..old].copy_from_slice(line);
+            }
+            // The old atlas held where it lies, the new room beside and above it.
+            self.packer.add_rect(old, old);
         }
         self.pixels = pixels;
         self.dirty = None;
         self.side = side;
-        // The old atlas held where it lies, the new room beside and above it.
-        self.packer = Atlas::new(side, side);
-        self.packer.add_rect(old, old);
         self.retired.extend(self.image.take());
     }
 

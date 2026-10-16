@@ -484,9 +484,6 @@ where
         paint_flavor: &PaintFlavor,
         fill_rule: FillRule,
     ) -> bool {
-        if self.fill_mask_atlas().is_none() {
-            return false;
-        }
         let (width, height) = self.render_target_size();
         let within = [0, 0, width as i32, height as i32];
         let mut request = vec![u32::from(fill_rule == FillRule::EvenOdd)];
@@ -494,43 +491,14 @@ where
         request.extend(transform.0.map(f32::to_bits));
         request.extend([self.tess_tol.to_bits(), self.dist_tol.to_bits()]);
         request.extend(within.map(|side| side as u32));
-        let mask = match self.fill_masks.asked(&request) {
-            Some(mask) => mask,
-            None => {
-                // The fill's own outline: flattened again 64 times finer, as a
-                // clip's is, the corpus's thin fills came only 0.7 % nearer.
-                let mut outline = MaskOutline::default();
-                outline.child(fill_rule, path_cache.outlines(fill_rule));
-                let rect = outline.rect(within);
-                let key = outline.key(rect, None);
-                let atlas = match self.fill_masks.get(&key) {
-                    Some(at) => at,
-                    None => {
-                        let at = loop {
-                            match self.fill_masks.place(key.size()) {
-                                Placement::At(at) => break at,
-                                Placement::Grow => {
-                                    // The masks made this frame go to the image
-                                    // their quads read before it is let go.
-                                    self.upload_fill_masks();
-                                    self.fill_masks.grow(key.size());
-                                    if self.fill_mask_atlas().is_none() {
-                                        return false;
-                                    }
-                                }
-                                Placement::Refused => return false,
-                            }
-                        };
-                        self.fill_masks.make(key, at);
-                        at
-                    }
-                };
-                let mask = PlacedMask { atlas, rect };
+        let mut mask = self.fill_masks.asked(&request);
+        if mask.is_none() {
+            mask = self.fill_mask(path_cache, fill_rule, within);
+            if let Some(mask) = mask {
                 self.fill_masks.remember(request, mask);
-                mask
             }
-        };
-        let Some(image) = self.fill_masks.image else {
+        }
+        let (Some(mask), Some(image)) = (mask, self.fill_masks.image) else {
             return false;
         };
         // The quad covers the mask's pixels exactly, each fragment reading
@@ -551,14 +519,47 @@ where
         true
     }
 
-    /// The atlas of fill masks, made when the first thin fill asks for it
-    /// and uploaded whole, as a clip mask's image is, so that no backend
+    /// The mask of a fill not asked for before: found by its outline, or
+    /// made where the atlas has room for it. The atlas is made once a mask
+    /// has its place, as large as the mask needs: a first thin fill that is
+    /// refused, or larger than the first atlas, makes none to no purpose.
+    fn fill_mask(&mut self, path_cache: &mut PathCache, fill_rule: FillRule, within: [i32; 4]) -> Option<PlacedMask> {
+        // The fill's own outline: flattened again 64 times finer, as a
+        // clip's is, the corpus's thin fills came only 0.7 % nearer.
+        let mut outline = MaskOutline::default();
+        outline.child(fill_rule, path_cache.outlines(fill_rule));
+        let rect = outline.rect(within);
+        let key = outline.key(rect, None);
+        if let Some(atlas) = self.fill_masks.get(&key) {
+            return Some(PlacedMask { atlas, rect });
+        }
+        if self.fill_masks.image.is_none() {
+            self.fill_masks.limit(self.renderer.max_texture_size());
+        }
+        let atlas = loop {
+            match self.fill_masks.place(key.size()) {
+                Placement::At(at) => break at,
+                Placement::Grow => {
+                    // The masks made this frame go to the image their quads
+                    // read before it is let go.
+                    self.upload_fill_masks();
+                    self.fill_masks.grow(key.size());
+                }
+                Placement::Refused => return None,
+            }
+        };
+        self.fill_mask_atlas()?;
+        self.fill_masks.make(key, atlas);
+        Some(PlacedMask { atlas, rect })
+    }
+
+    /// The atlas of fill masks, made when the first mask has its place in
+    /// it and uploaded whole, as a clip mask's image is, so that no backend
     /// clears it before each use.
     fn fill_mask_atlas(&mut self) -> Option<ImageId> {
         if let Some(image) = self.fill_masks.image {
             return Some(image);
         }
-        self.fill_masks.limit(self.renderer.max_texture_size());
         let side = self.fill_masks.side();
         let info = ImageInfo::new(ImageFlags::NEAREST, side, side, PixelFormat::Gray8);
         let image = self.images.alloc(&mut self.renderer, info).ok()?;
@@ -3098,4 +3099,31 @@ fn a_mask_that_finds_no_room_leaves_it_to_smaller_ones() {
     assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 2);
     assert_eq!(fills(&recorded.borrow()), 1, "the large one keeps its fringe");
     assert_eq!(canvas.fill_masks.held(), 0, "started over");
+}
+
+/// The atlas is made once a mask has its place in it, as large as that
+/// mask needs: a first thin fill that is refused makes none, and one wider
+/// than the first atlas makes only the one it needs.
+#[test]
+fn the_atlas_is_made_for_the_first_mask_placed() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 600,
+        ..Default::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut too_wide = Path::new();
+    too_wide.rect(10.0, 10.0, 700.0, 0.4);
+    canvas.fill_path(&too_wide, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.renderer.image_allocation_attempts, 0, "refused, no atlas");
+
+    let mut wide = Path::new();
+    wide.rect(10.0, 50.0, 560.0, 0.4);
+    canvas.fill_path(&wide, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.renderer.image_allocation_attempts, 1);
+    assert_eq!(canvas.renderer.image_deletion_count, 0, "none made to be let go");
+    assert_eq!(canvas.fill_masks.side(), 600);
 }
