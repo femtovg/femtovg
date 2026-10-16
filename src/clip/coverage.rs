@@ -1,11 +1,14 @@
 //! The share of each pixel that outlines cover, worked out on the CPU: what
-//! a clip that is no box takes its edge from.
+//! a clip that is no box, or a fill thinner than a pixel, takes its edge
+//! from.
 //!
 //! Each edge adds, row by row, the signed area it sweeps to its right into
 //! the cells it crosses, so that a cell's winding is the sum of what the
 //! cells up to it in its row hold - the accumulation of font-rs and of
-//! FreeType's smooth rasterizer, kept as a sparse list so that the cells
-//! between two edges cost a fill and no arithmetic. An edge pixel gets the
+//! FreeType's smooth rasterizer. The rows are resolved top to bottom from
+//! the edges that cross each, into one row of cells and a bit for each cell
+//! an edge touched: the touched cells are summed in order, and the cells
+//! between two of them cost a fill and no arithmetic. An edge pixel gets the
 //! exact area of the polygon inside it; where two contours cross in one
 //! pixel their areas add before the fill rule folds them.
 
@@ -16,16 +19,115 @@ use crate::FillRule;
 /// from another by its points.
 pub(crate) const SUBPIXELS: f32 = 256.0;
 
-/// Area swept into cells: `(row, cell, area)`, in no order until resolved.
-/// The buffers are kept from one mask to the next.
+/// An edge from its top to its bottom: `x` and `y` at the top, the change
+/// in x a unit of y, and 1 if it was drawn downwards, -1 if upwards.
+#[derive(Clone, Copy, Debug, Default)]
+struct Edge {
+    x: f32,
+    y: f32,
+    bottom: f32,
+    slope: f32,
+    down: f32,
+}
+
+impl Edge {
+    fn at(&self, y: f32) -> f32 {
+        self.x + (y - self.y) * self.slope
+    }
+}
+
+/// One row being resolved: its area by cell, which cells hold any, and the
+/// first and last word of `touched` set.
+struct Row<'a> {
+    width: usize,
+    area: &'a mut [f32],
+    touched: &'a mut [u64],
+    words: [usize; 2],
+}
+
+impl Row<'_> {
+    /// Adds the piece of an edge inside the row: from `xa` at its top to
+    /// `xb` at its bottom, `area` the height it spans there, signed. What
+    /// lies left of the mask counts for every cell of the row, what lies
+    /// right of it for none.
+    fn span(&mut self, xa: f32, xb: f32, area: f32) {
+        let width = self.width as f32;
+        let (lo, hi) = if xa <= xb { (xa, xb) } else { (xb, xa) };
+        if lo >= width {
+            return;
+        }
+        if hi <= 0.0 {
+            return self.add(0, area);
+        }
+        if lo < 0.0 {
+            let outside = lo / (lo - hi);
+            self.add(0, area * outside);
+            let (xa, xb) = if xa < xb { (0.0, xb) } else { (xa, 0.0) };
+            return self.span(xa, xb, area * (1.0 - outside));
+        }
+        if hi > width {
+            let inside = (width - lo) / (hi - lo);
+            let (xa, xb) = if xa < xb { (xa, width) } else { (width, xb) };
+            return self.span(xa, xb, area * inside);
+        }
+        let first = lo.floor();
+        let end = hi.ceil();
+        let (cell, last) = (first as usize, end as usize);
+        if last <= cell + 1 {
+            // Inside one cell: what is right of the edge's middle is the cell's.
+            let middle = 0.5 * (lo + hi) - first;
+            self.add(cell, area * (1.0 - middle));
+            self.add(cell + 1, area * middle);
+            return;
+        }
+        // Across cells the edge's height is spread evenly along x: a
+        // triangle in the first and the last cell, a trapezoid in between.
+        let per_cell = (hi - lo).recip();
+        let enters = 1.0 - (lo - first);
+        let leaves = hi - (end - 1.0);
+        let head = 0.5 * per_cell * enters * enters;
+        let tail = 0.5 * per_cell * leaves * leaves;
+        self.add(cell, area * head);
+        if last == cell + 2 {
+            self.add(cell + 1, area * (1.0 - head - tail));
+        } else {
+            let second = per_cell * (enters + 0.5);
+            self.add(cell + 1, area * (second - head));
+            for between in cell + 2..last - 1 {
+                self.add(between, area * per_cell);
+            }
+            let before_last = second + (last - cell - 3) as f32 * per_cell;
+            self.add(last - 1, area * (1.0 - before_last - tail));
+        }
+        self.add(last, area * tail);
+    }
+
+    fn add(&mut self, cell: usize, area: f32) {
+        if cell < self.width && area != 0.0 {
+            self.area[cell] += area;
+            let word = cell / 64;
+            self.touched[word] |= 1 << (cell % 64);
+            self.words = [self.words[0].min(word), self.words[1].max(word)];
+        }
+    }
+}
+
+/// The edges added, and what resolving them reuses: the edges crossing the
+/// row, the row's area by cell and which cells hold any. The buffers are
+/// kept from one mask to the next.
 #[derive(Debug, Default)]
 pub(crate) struct Coverage {
     width: usize,
     height: usize,
-    cells: Vec<(u32, u32, f32)>,
-    // Resolving: where each row's cells end once they are gathered by row.
-    row_ends: Vec<u32>,
-    by_row: Vec<(u32, f32)>,
+    edges: Vec<Edge>,
+    // Resolving: the edges by the row they start in, and those crossing it.
+    starts: Vec<u32>,
+    order: Vec<Edge>,
+    active: Vec<Edge>,
+    area: Vec<f32>,
+    touched: Vec<u64>,
+    /// A contour's points on their way in, kept for the next.
+    pub(crate) points: Vec<[f32; 2]>,
 }
 
 impl Coverage {
@@ -40,7 +142,12 @@ impl Coverage {
     pub(crate) fn reset(&mut self, width: usize, height: usize) {
         self.width = width;
         self.height = height;
-        self.cells.clear();
+        self.edges.clear();
+        // Resolving leaves every cell and bit as it found them: clear.
+        if self.area.len() < width {
+            self.area.resize(width, 0.0);
+            self.touched.resize(width.div_ceil(64), 0);
+        }
     }
 
     /// Adds a closed contour, its points in pixels from the mask's corner.
@@ -66,83 +173,16 @@ impl Coverage {
         } else {
             (-1.0, (x1, y1), (x0, y0))
         };
-        let height = self.height as f32;
-        if yb <= 0.0 || ya >= height {
+        if yb <= 0.0 || ya >= self.height as f32 {
             return;
         }
-        let slope = (xb - xa) / (yb - ya);
-        let at = |y: f32| xa + (y - ya) * slope;
-        let (top, bottom) = (ya.max(0.0), yb.min(height));
-        let mut row = top as usize;
-        let mut y = top;
-        while y < bottom {
-            let next = ((row + 1) as f32).min(bottom);
-            self.span(row, at(y), at(next), (next - y) * down);
-            y = next;
-            row += 1;
-        }
-    }
-
-    /// Adds the piece of an edge inside one row: from `xa` at its top to
-    /// `xb` at its bottom, `area` the height it spans there, signed. What
-    /// lies left of the mask counts for every cell of the row, what lies
-    /// right of it for none.
-    fn span(&mut self, row: usize, xa: f32, xb: f32, area: f32) {
-        let width = self.width as f32;
-        let (lo, hi) = if xa <= xb { (xa, xb) } else { (xb, xa) };
-        if lo >= width {
-            return;
-        }
-        if hi <= 0.0 {
-            return self.add(row, 0, area);
-        }
-        if lo < 0.0 {
-            let outside = lo / (lo - hi);
-            self.add(row, 0, area * outside);
-            let (xa, xb) = if xa < xb { (0.0, xb) } else { (xa, 0.0) };
-            return self.span(row, xa, xb, area * (1.0 - outside));
-        }
-        if hi > width {
-            let inside = (width - lo) / (hi - lo);
-            let (xa, xb) = if xa < xb { (xa, width) } else { (width, xb) };
-            return self.span(row, xa, xb, area * inside);
-        }
-        let first = lo.floor();
-        let end = hi.ceil();
-        let (cell, last) = (first as usize, end as usize);
-        if last <= cell + 1 {
-            // Inside one cell: what is right of the edge's middle is the cell's.
-            let middle = 0.5 * (lo + hi) - first;
-            self.add(row, cell, area * (1.0 - middle));
-            self.add(row, cell + 1, area * middle);
-            return;
-        }
-        // Across cells the edge's height is spread evenly along x: a
-        // triangle in the first and the last cell, a trapezoid in between.
-        let per_cell = (hi - lo).recip();
-        let enters = 1.0 - (lo - first);
-        let leaves = hi - (end - 1.0);
-        let head = 0.5 * per_cell * enters * enters;
-        let tail = 0.5 * per_cell * leaves * leaves;
-        self.add(row, cell, area * head);
-        if last == cell + 2 {
-            self.add(row, cell + 1, area * (1.0 - head - tail));
-        } else {
-            let second = per_cell * (enters + 0.5);
-            self.add(row, cell + 1, area * (second - head));
-            for between in cell + 2..last - 1 {
-                self.add(row, between, area * per_cell);
-            }
-            let before_last = second + (last - cell - 3) as f32 * per_cell;
-            self.add(row, last - 1, area * (1.0 - before_last - tail));
-        }
-        self.add(row, last, area * tail);
-    }
-
-    fn add(&mut self, row: usize, cell: usize, area: f32) {
-        if cell < self.width && area != 0.0 {
-            self.cells.push((row as u32, cell as u32, area));
-        }
+        self.edges.push(Edge {
+            x: xa,
+            y: ya,
+            bottom: yb,
+            slope: (xb - xa) / (yb - ya),
+            down,
+        });
     }
 
     /// Folds what was added by `rule` into coverage and adds it to `mask`,
@@ -151,25 +191,6 @@ impl Coverage {
     /// edge leave no seam along it. Leaves nothing added.
     pub(crate) fn resolve(&mut self, rule: FillRule, mask: &mut [u8]) {
         debug_assert_eq!(mask.len(), self.width * self.height);
-        // Gathered by row with a counting sort - a row has few cells, the
-        // mask many - and ordered within each row as it is swept.
-        self.row_ends.clear();
-        self.row_ends.resize(self.height + 1, 0);
-        for &(row, _, _) in &self.cells {
-            self.row_ends[row as usize + 1] += 1;
-        }
-        for row in 0..self.height {
-            self.row_ends[row + 1] += self.row_ends[row];
-        }
-        self.by_row.clear();
-        self.by_row.resize(self.cells.len(), (0, 0.0));
-        for &(row, cell, area) in &self.cells {
-            let at = &mut self.row_ends[row as usize];
-            self.by_row[*at as usize] = (cell, area);
-            *at += 1;
-        }
-        self.cells.clear();
-
         let covered = |winding: f32| -> u8 {
             let winding = winding.abs();
             let share = match rule {
@@ -190,29 +211,74 @@ impl Coverage {
             255 => cells.fill(255),
             _ => cells.iter_mut().for_each(|cell| *cell = cell.saturating_add(coverage)),
         };
-        let mut begin = 0;
+        // Top to bottom, an edge joining the rows it crosses as they come:
+        // gathered by the row it starts in with a counting sort.
+        let row_of = |edge: &Edge| edge.y.max(0.0) as usize;
+        self.starts.clear();
+        self.starts.resize(self.height + 1, 0);
+        for edge in &self.edges {
+            self.starts[row_of(edge) + 1] += 1;
+        }
+        for row in 0..self.height {
+            self.starts[row + 1] += self.starts[row];
+        }
+        self.order.clear();
+        self.order.resize(self.edges.len(), Edge::default());
+        for edge in &self.edges {
+            let at = &mut self.starts[row_of(edge)];
+            self.order[*at as usize] = *edge;
+            *at += 1;
+        }
+        // Filling moved each row's start to its end: its edges are those before.
+        let height = self.height as f32;
+        let mut next = 0;
         for (row, line) in mask.chunks_exact_mut(self.width.max(1)).enumerate() {
-            let end = self.row_ends[row] as usize;
-            if end == begin {
+            let end = self.starts[row] as usize;
+            self.active.extend_from_slice(&self.order[next..end]);
+            next = end;
+            if self.active.is_empty() {
                 continue;
             }
-            let cells = &mut self.by_row[begin..end];
-            begin = end;
-            cells.sort_unstable_by_key(|&(cell, _)| cell);
-            let (mut winding, mut from, mut next) = (0.0, 0, 0);
-            while next < cells.len() {
-                let cell = cells[next].0 as usize;
-                fill(&mut line[from..cell], covered(winding));
-                while next < cells.len() && cells[next].0 as usize == cell {
-                    winding += cells[next].1;
-                    next += 1;
+            let width = self.width;
+            let mut cells = Row {
+                width,
+                area: &mut self.area[..width],
+                touched: &mut self.touched[..width.div_ceil(64)],
+                words: [usize::MAX, 0],
+            };
+            let (top, bottom) = (row as f32, (row + 1) as f32);
+            let mut kept = 0;
+            for index in 0..self.active.len() {
+                let edge = self.active[index];
+                let (y, next) = (edge.y.max(top), bottom.min(edge.bottom).min(height));
+                cells.span(edge.at(y), edge.at(next), (next - y) * edge.down);
+                if edge.bottom > bottom {
+                    self.active[kept] = edge;
+                    kept += 1;
                 }
-                line[cell] = line[cell].saturating_add(covered(winding));
-                from = cell + 1;
+            }
+            self.active.truncate(kept);
+
+            let (mut winding, mut from) = (0.0, 0);
+            let words = cells.words;
+            for word in words[0]..=words[1] {
+                let mut bits = std::mem::take(&mut cells.touched[word]);
+                while bits != 0 {
+                    let cell = word * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    if cell > from {
+                        fill(&mut line[from..cell], covered(winding));
+                    }
+                    winding += std::mem::take(&mut cells.area[cell]);
+                    line[cell] = line[cell].saturating_add(covered(winding));
+                    from = cell + 1;
+                }
             }
             // Past the last edge the winding is what the mask's right side cut off.
             fill(&mut line[from..], covered(winding));
         }
+        self.edges.clear();
+        self.active.clear();
     }
 }
 

@@ -54,7 +54,9 @@ pub(crate) struct FillMasks {
     /// Masks the frame before made that the atlas still holds.
     made_before: usize,
     full: bool,
-    pub(crate) coverage: super::coverage::Coverage,
+    coverage: super::coverage::Coverage,
+    // A mask's pixels on their way into the atlas, kept for the next.
+    scratch: Vec<u8>,
     /// The atlas's pixels, which the masks a frame makes are written into
     /// and uploaded from once, as the rectangle they span, when it is drawn.
     pub(crate) pixels: Vec<u8>,
@@ -79,6 +81,7 @@ impl Default for FillMasks {
             made_before: 0,
             full: false,
             coverage: Default::default(),
+            scratch: Vec::new(),
             pixels: Vec::new(),
             dirty: None,
             upload: Vec::new(),
@@ -137,8 +140,16 @@ impl FillMasks {
         Some([x as u32, y as u32])
     }
 
+    /// Rasterizes the mask of `key` and keeps it at `at`.
+    pub(crate) fn make(&mut self, key: MaskKey, at: [u32; 2]) {
+        let mut pixels = std::mem::take(&mut self.scratch);
+        key.rasterize_into(&mut self.coverage, &mut pixels);
+        self.keep(key, at, &pixels);
+        self.scratch = pixels;
+    }
+
     /// Keeps the mask of `key`, its rows `pixels`, at `at`.
-    pub(crate) fn keep(&mut self, key: MaskKey, at: [u32; 2], pixels: &[u8]) {
+    fn keep(&mut self, key: MaskKey, at: [u32; 2], pixels: &[u8]) {
         let [width, height] = key.size();
         let [x, y] = at.map(|side| side as usize);
         for (row, line) in pixels.chunks_exact(width).enumerate() {

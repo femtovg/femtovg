@@ -509,8 +509,7 @@ where
                         let Some(at) = self.fill_masks.place(key.size()) else {
                             return false;
                         };
-                        let pixels = key.rasterize(&mut self.fill_masks.coverage);
-                        self.fill_masks.keep(key, at, &pixels);
+                        self.fill_masks.make(key, at);
                         at
                     }
                 };

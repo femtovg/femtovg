@@ -128,8 +128,24 @@ impl MaskKey {
     pub(crate) fn rasterize(&self, coverage: &mut Coverage) -> Vec<u8> {
         let [width, height] = self.size();
         let mut mask = vec![0; width * height];
+        self.rasterize_onto(coverage, &mut mask);
+        mask
+    }
+
+    /// Rasterizes the outline into `mask`, which it resizes to the key's.
+    pub(crate) fn rasterize_into(&self, coverage: &mut Coverage, mask: &mut Vec<u8>) {
+        let [width, height] = self.size();
+        // Zeroed as a slice, which is a memset, and grown only past its length.
+        mask.truncate(width * height);
+        mask.fill(0);
+        mask.resize(width * height, 0);
+        self.rasterize_onto(coverage, mask);
+    }
+
+    fn rasterize_onto(&self, coverage: &mut Coverage, mask: &mut [u8]) {
+        let [width, height] = self.size();
         coverage.reset(width, height);
-        let mut contour = Vec::new();
+        let mut contour = std::mem::take(&mut coverage.points);
         let mut words = self.outline.iter().copied();
         while let (Some(rule), Some(contours)) = (words.next(), words.next()) {
             for _ in 0..contours {
@@ -147,9 +163,9 @@ impl MaskKey {
             } else {
                 FillRule::EvenOdd
             };
-            coverage.resolve(rule, &mut mask);
+            coverage.resolve(rule, mask);
         }
-        mask
+        coverage.points = contour;
     }
 }
 
