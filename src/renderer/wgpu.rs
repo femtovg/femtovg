@@ -72,6 +72,17 @@ const MIN_VERTEX_BYTES: u64 = 4096;
 // What a frame uploads goes through staging chunks of this size, or larger for a larger upload.
 const STAGING_CHUNK_BYTES: u64 = 1 << 20;
 
+/// An image upload staged in the belt: where its rows lie and where they go.
+#[derive(Debug)]
+struct PendingCopy {
+    buffer: wgpu::Buffer,
+    offset: u64,
+    bytes_per_row: u32,
+    texture: wgpu::Texture,
+    origin: [u32; 2],
+    size: [u32; 2],
+}
+
 const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
 const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST);
 const VERTEX_BUFFER_LABEL: &str = "Main Vertex Buffer";
@@ -405,8 +416,11 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     fan_indices: FanIndices,
     fan_index_buffer: wgpu::Buffer,
-    // Staging for a frame's vertices, fan indices and uniforms, copied by the frame's own command buffer.
+    // Staging for a frame's vertices, fan indices, uniforms and image uploads, copied by the frame's own command
+    // buffer.
     staging_belt: wgpu::util::StagingBelt,
+    // Image uploads staged in the belt, copied at the start of the next frame's command buffer.
+    pending_copies: Vec<PendingCopy>,
     stencil_buffer: Option<wgpu::Texture>,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, wgpu::Texture>,
     viewport_bind_groups: ViewportBindGroups,
@@ -573,6 +587,7 @@ impl WGPURenderer {
 
         Self {
             staging_belt: wgpu::util::StagingBelt::new(device.clone(), STAGING_CHUNK_BYTES),
+            pending_copies: Vec::new(),
             device,
             queue,
 
@@ -820,6 +835,33 @@ impl Renderer for WGPURenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        for copy in self.pending_copies.drain(..) {
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &copy.buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: copy.offset,
+                        bytes_per_row: Some(copy.bytes_per_row),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &copy.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: copy.origin[0],
+                        y: copy.origin[1],
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: copy.size[0],
+                    height: copy.size[1],
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         if let Some(size) = wgpu::BufferSize::new(vertex_bytes.len() as u64) {
             self.staging_belt
                 .write_buffer(&mut encoder, &self.vertex_buffer, 0, size)
@@ -1152,6 +1194,38 @@ impl Renderer for WGPURenderer {
         };
 
         if let Texture::Internal(texture) = &image.texture {
+            // An upload that fits a staging chunk is copied at the start of the next frame's own command
+            // buffer, so that a frame draws the image as it was when the frame was flushed, from staging
+            // the belt reuses where write_texture makes a buffer for each call. An image with mip levels
+            // keeps write_texture: the levels are generated from it at once.
+            let size = data.dimensions();
+            let row = bpp as u64 * size.width as u64;
+            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
+            let padded = row.div_ceil(align) * align;
+            let total = padded * size.height as u64;
+            if texture.mip_level_count() == 1 && total > 0 && total <= STAGING_CHUNK_BYTES {
+                let slice = self.staging_belt.allocate(
+                    wgpu::BufferSize::new(total).expect("not empty"),
+                    wgpu::BufferSize::new(align).expect("not zero"),
+                );
+                let staged = slice.get_mapped_range_mut().map(|mut view| {
+                    let (row, padded) = (row as usize, padded as usize);
+                    for (line, source) in bytes.chunks_exact(row).take(size.height).enumerate() {
+                        view.slice(line * padded..line * padded + row).copy_from_slice(source);
+                    }
+                });
+                if staged.is_ok() {
+                    self.pending_copies.push(PendingCopy {
+                        buffer: slice.buffer().clone(),
+                        offset: slice.offset(),
+                        bytes_per_row: padded as u32,
+                        texture: texture.clone(),
+                        origin: [x as u32, y as u32],
+                        size: [size.width as u32, size.height as u32],
+                    });
+                    return Ok(());
+                }
+            }
             let mut target = texture.as_image_copy();
             target.origin.x = x as _;
             target.origin.y = y as _;

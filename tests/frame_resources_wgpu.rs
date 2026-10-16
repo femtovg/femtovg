@@ -10,6 +10,8 @@
 #![cfg(feature = "wgpu")]
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use imgref::Img;
+use rgb::RGBA8;
 
 mod common;
 use common::headless_device;
@@ -214,5 +216,49 @@ fn frames_flushed_before_a_submit_each_draw_their_own() {
         [pixel(&right, 16, 32), pixel(&right, 48, 32)],
         [black, [0, 0, 255, 255]],
         "the second frame's target should hold its blue square on the right and nothing on the left"
+    );
+}
+
+/// An image updated between two frames flushed one after the other and
+/// submitted together: each frame draws the image as it was when that frame
+/// was flushed, its upload carried in the frame's own command buffer.
+#[test]
+fn frames_flushed_before_a_submit_each_draw_the_image_they_were_given() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (first, second) = (target(&device, W, H), target(&device, W, H));
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let red = vec![RGBA8::new(255, 0, 0, 255); 16];
+    let blue = vec![RGBA8::new(0, 0, 255, 255); 16];
+    let image = canvas
+        .create_image(Img::new(red.as_slice(), 4, 4), ImageFlags::NEAREST)
+        .expect("image");
+    let mut whole = Path::new();
+    whole.rect(0.0, 0.0, W as f32, H as f32);
+    let paint = Paint::image(image, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0);
+
+    canvas.fill_path(&whole, &paint);
+    let a = canvas.flush_to_output(&first);
+    canvas
+        .update_image(image, Img::new(blue.as_slice(), 4, 4), 0, 0)
+        .expect("update");
+    canvas.fill_path(&whole, &paint);
+    let b = canvas.flush_to_output(&second);
+    queue.submit(a.into_iter().chain(b));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+
+    assert_eq!(
+        pixel(&readback(&device, &queue, &first), 32, 32),
+        [255, 0, 0, 255],
+        "the first frame's image"
+    );
+    assert_eq!(
+        pixel(&readback(&device, &queue, &second), 32, 32),
+        [0, 0, 255, 255],
+        "the second frame's image"
     );
 }

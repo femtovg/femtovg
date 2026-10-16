@@ -23,10 +23,11 @@ All notable changes to this project will be documented in this file.
   hit-tested still being drawn and hit-tested as the old path under the same
   transform: the flattened copy a `Path` keeps was not dropped when verbs were
   added.
-- Fixed the WGPU backend drawing a frame with the vertices and uniforms of a
-  later one when the later frame was flushed before the earlier one was
-  submitted. A frame's command buffer now carries its own uploads, through
-  staging reused from frame to frame instead of made for every upload.
+- Fixed the WGPU backend drawing a frame with the vertices, uniforms and
+  images of a later one when the later frame was flushed before the earlier
+  one was submitted. A frame's command buffer now carries its own uploads,
+  images up to a megabyte included, through staging reused from frame to
+  frame instead of made for every upload.
 - The WGPU backend keeps the viewport uniform of each render target size
   from one flush to the next instead of creating it again for every pass
   on a target of another size, up to a thousand times a frame on pages
