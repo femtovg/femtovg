@@ -253,6 +253,8 @@ impl MaskImage {
 pub(crate) struct ClipMasks {
     masks: WordMap<MaskKey, Rc<MaskImage>>,
     asked: WordMap<Vec<u32>, Asked>,
+    /// The request being asked, built where the last one was.
+    pub(crate) request: Vec<u32>,
     bytes: usize,
     budget: usize,
     frame: u64,
@@ -302,6 +304,7 @@ impl Default for ClipMasks {
         Self {
             masks: WordMap::default(),
             asked: WordMap::default(),
+            request: Vec::new(),
             bytes: 0,
             budget: DEFAULT_MASK_BUDGET,
             frame: 0,

@@ -381,8 +381,12 @@ where
                 within[3].min(at[1] + parent_height as i32),
             ];
         }
-        // The clip bit for bit: asked for as before, it has its mask.
-        let mut request = vec![paths.len() as u32];
+        // The clip bit for bit: asked for as before, it has its mask. It is
+        // built where the last one was, so that one found again allocates
+        // nothing.
+        let mut request = std::mem::take(&mut self.clip_masks.request);
+        request.clear();
+        request.push(paths.len() as u32);
         for &(path, fill_rule) in paths {
             request.push(u32::from(fill_rule == FillRule::EvenOdd));
             path.words(&mut request);
@@ -394,6 +398,7 @@ where
             request.extend([parent.id as u32, (parent.id >> 32) as u32, at[0] as u32, at[1] as u32]);
         }
         if let Some((mask, origin)) = self.clip_masks.asked(&request) {
+            self.clip_masks.request = request;
             self.clip_stack.push(ClipEntry {
                 target,
                 kind: ClipKind::Mask { mask, origin },
@@ -401,6 +406,9 @@ where
             self.state_mut().clip_depth = self.clip_stack.len();
             return true;
         }
+        // A new request is remembered by a copy, the buffer kept for the next.
+        let remembered = request.clone();
+        self.clip_masks.request = request;
         let mut outline = MaskOutline::default();
         for &(path, fill_rule) in paths {
             let mut path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
@@ -463,7 +471,7 @@ where
                 self.clip_masks.keep(key, image, pixels)
             }
         };
-        self.clip_masks.remember(request, &mask, origin);
+        self.clip_masks.remember(remembered, &mask, origin);
         self.clip_stack.push(ClipEntry {
             target,
             kind: ClipKind::Mask { mask, origin },
@@ -486,7 +494,9 @@ where
     ) -> bool {
         let (width, height) = self.render_target_size();
         let within = [0, 0, width as i32, height as i32];
-        let mut request = vec![u32::from(fill_rule == FillRule::EvenOdd)];
+        let mut request = std::mem::take(&mut self.fill_masks.request);
+        request.clear();
+        request.push(u32::from(fill_rule == FillRule::EvenOdd));
         path.words(&mut request);
         request.extend(transform.0.map(f32::to_bits));
         request.extend([self.tess_tol.to_bits(), self.dist_tol.to_bits()]);
@@ -495,9 +505,10 @@ where
         if mask.is_none() {
             mask = self.fill_mask(path_cache, fill_rule, within);
             if let Some(mask) = mask {
-                self.fill_masks.remember(request, mask);
+                self.fill_masks.remember(request.clone(), mask);
             }
         }
+        self.fill_masks.request = request;
         let (Some(mask), Some(image)) = (mask, self.fill_masks.image) else {
             return false;
         };

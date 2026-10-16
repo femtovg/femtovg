@@ -58,6 +58,9 @@ pub(crate) struct FillMasks {
     /// The masks of requests asked for bit for bit as before: the fill rule,
     /// the path's words, the transform, the tolerances and the target's size.
     asked: WordMap<Vec<u32>, PlacedMask>,
+    /// The request being asked, built where the last one was: a still frame
+    /// finds every one again, and allocates none.
+    pub(crate) request: Vec<u32>,
     made: usize,
     /// Masks the frame found again, by request or by outline.
     found: usize,
@@ -92,6 +95,7 @@ impl Default for FillMasks {
             packer: Atlas::new(ATLAS_FIRST, ATLAS_FIRST),
             masks: WordMap::default(),
             asked: WordMap::default(),
+            request: Vec::new(),
             made: 0,
             found: 0,
             made_before: 0,
