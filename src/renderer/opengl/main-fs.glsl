@@ -289,7 +289,9 @@ vec4 transferColor(vec4 c, bool toSrgb) {
     vec3 x = clamp(c.rgb, 0.0, 1.0);
     vec3 y;
     if (toSrgb) {
-        y = mix(x * 12.92, 1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
+        // mix evaluates both sides: keep pow off 0, where an exp2(log2) under fast math can give a NaN that
+        // mix carries even at weight 0. The clamp only touches the side step leaves out.
+        y = mix(x * 12.92, 1.055 * pow(max(x, vec3(0.0031308)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
     } else {
         y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3(2.4)), step(0.04045, x));
     }
