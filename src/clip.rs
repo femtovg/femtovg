@@ -2908,16 +2908,7 @@ fn a_frame_makes_its_share_of_masks() {
     canvas.flush_to_output(());
     let commands = recorded.borrow();
     assert_eq!(mask_quads(&commands, canvas.fill_masks.image), 256);
-    let fills = commands
-        .iter()
-        .filter(|command| {
-            matches!(
-                command.cmd_type,
-                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
-            )
-        })
-        .count();
-    assert_eq!(fills, 44);
+    assert_eq!(fills(&commands), 44);
 }
 
 /// The atlas starts small and doubles when a mask finds no room in it, in
@@ -3009,4 +3000,66 @@ fn a_moving_thin_fill_does_not_fill_the_atlas() {
         canvas.flush_to_output(());
     }
     assert_eq!(canvas.fill_masks.held(), 1);
+}
+
+#[cfg(test)]
+fn fills(commands: &[Command]) -> usize {
+    commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            )
+        })
+        .count()
+}
+
+/// A degenerate contour, of which a fill draws nothing, plays no part in a
+/// mask: a path of one alone makes no atlas, one beside a square does not
+/// make the square thin, and one beside a thin fill leaves its outline, and
+/// its mask, as they were.
+#[test]
+fn degenerate_contours_play_no_part_in_masks() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+
+    // #341's bare collinear contour.
+    let mut line = Path::new();
+    line.move_to(0.2, 0.2);
+    line.line_to(0.2, 1.8);
+    line.close();
+    canvas.fill_path(&line, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.image, None);
+    assert_eq!(canvas.renderer.image_allocation_attempts, 0);
+
+    // A square 20 px wide beside a line traced 900 px back and forth, whose
+    // perimeter would have made the square's mean width 0.8.
+    let mut square = Path::new();
+    square.rect(10.0, 10.0, 20.0, 20.0);
+    square.move_to(0.0, 50.0);
+    for _ in 0..5 {
+        square.line_to(90.0, 50.0);
+        square.line_to(0.0, 50.0);
+    }
+    square.close();
+    canvas.fill_path(&square, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.image, None, "the square keeps its fringe");
+    assert_eq!(fills(&recorded.borrow()), 1);
+
+    canvas.fill_path(&thin_strip(0.0, 0.3), &paint);
+    canvas.flush_to_output(());
+    let mut beside = thin_strip(0.0, 0.3);
+    beside.move_to(70.0, 80.0);
+    beside.line_to(90.0, 80.0);
+    beside.close();
+    canvas.fill_path(&beside, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 1);
+    assert_eq!(canvas.fill_masks.rasterized, 1, "found by its outline");
 }

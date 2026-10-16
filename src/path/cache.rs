@@ -363,7 +363,9 @@ impl PathCache {
     /// a ring thinner than a pixel, both circles wound alike, sees 0, 1 and
     /// 2, and its hole counted as ink. Even-odd does not ask which way a
     /// contour is wound, so a hole's contour is wound against those around
-    /// it, and nested contours wind 0 or 1.
+    /// it, and nested contours wind 0 or 1. A degenerate contour is left
+    /// out, as [`Self::expand_fill`] leaves it: the mask is of what the fill
+    /// would draw.
     pub(crate) fn outlines(&mut self, fill_rule: FillRule) -> impl Iterator<Item = Vec<[f32; 2]>> + '_ {
         let reverse: Vec<bool> = if fill_rule == FillRule::EvenOdd && self.contours.len() > 1 {
             let hole = self.hole_contours(fill_rule);
@@ -378,7 +380,12 @@ impl PathCache {
             Vec::new()
         };
         let cache = &*self;
-        cache.contours.iter().enumerate().map(move |(i, contour)| {
+        let drawn = cache
+            .contours
+            .iter()
+            .enumerate()
+            .filter(|(_, contour)| !contour.degenerate);
+        drawn.map(move |(i, contour)| {
             let points = cache.points[contour.point_range.clone()].iter();
             let outline = points.map(|point| [point.pos.x, point.pos.y]);
             if reverse.get(i) == Some(&true) {
@@ -392,8 +399,10 @@ impl PathCache {
     /// Twice the area a fill of the outline under `fill_rule` covers, over
     /// the outline's perimeter, in device pixels: a sliver's width, a disc's
     /// radius. Each contour adds the area inside it, or takes it off if it
-    /// bounds a hole, however it is wound. Worked out once a cache, which a
-    /// path keeps while its transform does.
+    /// bounds a hole, however it is wound. A degenerate contour, of which the
+    /// fill draws nothing, adds no perimeter either, and a path of them alone
+    /// has no width to measure: it fills nothing, and needs no mask. Worked
+    /// out once a cache, which a path keeps while its transform does.
     pub(crate) fn mean_width(&mut self, fill_rule: FillRule) -> f32 {
         if let Some((rule, width)) = self.mean_width {
             if rule == fill_rule {
@@ -412,6 +421,9 @@ impl PathCache {
             let (Some(first), Some(last)) = (points.first(), points.last()) else {
                 continue;
             };
+            if contour.degenerate {
+                continue;
+            }
             // From the contour's first point, so that the products stay small.
             let origin = first.pos;
             let mut from = last.pos - origin;
@@ -429,7 +441,11 @@ impl PathCache {
                 twice.abs()
             };
         }
-        let width = if perimeter > 0.0 { area.abs() / perimeter } else { 0.0 };
+        let width = if perimeter > 0.0 {
+            area.abs() / perimeter
+        } else {
+            f32::INFINITY
+        };
         self.mean_width = Some((fill_rule, width));
         width
     }
