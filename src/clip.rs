@@ -12,7 +12,7 @@ mod fill;
 mod mask;
 mod shape;
 pub(crate) use fill::{FillMasks, THIN_FILL_SPAN, THIN_FILL_WIDTH};
-use fill::{PlacedMask, ATLAS_SIZE};
+use fill::{PlacedMask, Placement};
 use mask::MaskOutline;
 pub(crate) use mask::{ClipMasks, MaskImage};
 pub(crate) use shape::{ClipCoverage, RectFill, RoundedBox};
@@ -310,9 +310,9 @@ where
     /// Whether an antialiased fill thinner than a pixel - twice its area
     /// over its perimeter under one, its bounds spanning at most 65,536
     /// pixels - is drawn through a coverage mask, as it is by default: the
-    /// fringes of its edges would over-ink it. The masks share an atlas of
-    /// four megabytes and at most 256 are made a frame; past either a thin
-    /// fill is filled as any other.
+    /// fringes of its edges would over-ink it. The masks share an atlas that
+    /// grows from a quarter of a megabyte to four as frames need, and at most
+    /// 256 are made a frame; past either a thin fill is filled as any other.
     pub fn set_thin_fill_masks(&mut self, enabled: bool) {
         self.fill_masks.set_enabled(enabled);
     }
@@ -484,9 +484,9 @@ where
         paint_flavor: &PaintFlavor,
         fill_rule: FillRule,
     ) -> bool {
-        let Some(image) = self.fill_mask_atlas() else {
+        if self.fill_mask_atlas().is_none() {
             return false;
-        };
+        }
         let (width, height) = self.render_target_size();
         let within = [0, 0, width as i32, height as i32];
         let mut request = vec![u32::from(fill_rule == FillRule::EvenOdd)];
@@ -506,8 +506,20 @@ where
                 let atlas = match self.fill_masks.get(&key) {
                     Some(at) => at,
                     None => {
-                        let Some(at) = self.fill_masks.place(key.size()) else {
-                            return false;
+                        let at = loop {
+                            match self.fill_masks.place(key.size()) {
+                                Placement::At(at) => break at,
+                                Placement::Grow => {
+                                    // The masks made this frame go to the image
+                                    // their quads read before it is let go.
+                                    self.upload_fill_masks();
+                                    self.fill_masks.grow(key.size());
+                                    if self.fill_mask_atlas().is_none() {
+                                        return false;
+                                    }
+                                }
+                                Placement::Refused => return false,
+                            }
                         };
                         self.fill_masks.make(key, at);
                         at
@@ -518,10 +530,13 @@ where
                 mask
             }
         };
+        let Some(image) = self.fill_masks.image else {
+            return false;
+        };
         // The quad covers the mask's pixels exactly, each fragment reading
         // the texel of its own pixel.
         let [x0, y0, x1, y1] = mask.rect.map(|side| side as f32);
-        let side = ATLAS_SIZE as f32;
+        let side = self.fill_masks.side() as f32;
         let [s0, t0] = mask.atlas.map(|at| at as f32 / side);
         let (s1, t1) = (s0 + (x1 - x0) / side, t0 + (y1 - y0) / side);
         let verts = [
@@ -543,14 +558,14 @@ where
         if let Some(image) = self.fill_masks.image {
             return Some(image);
         }
-        let info = ImageInfo::new(ImageFlags::NEAREST, ATLAS_SIZE, ATLAS_SIZE, PixelFormat::Gray8);
+        let side = self.fill_masks.side();
+        let info = ImageInfo::new(ImageFlags::NEAREST, side, side, PixelFormat::Gray8);
         let image = self.images.alloc(&mut self.renderer, info).ok()?;
-        self.fill_masks.pixels = vec![0; ATLAS_SIZE * ATLAS_SIZE];
-        let source = ImageSource::Gray(imgref::Img::new(
-            self.fill_masks.pixels.as_gray(),
-            ATLAS_SIZE,
-            ATLAS_SIZE,
-        ));
+        // An atlas that grew keeps the pixels of the one before.
+        if self.fill_masks.pixels.len() != side * side {
+            self.fill_masks.pixels = vec![0; side * side];
+        }
+        let source = ImageSource::Gray(imgref::Img::new(self.fill_masks.pixels.as_gray(), side, side));
         if self.images.update(&mut self.renderer, image, source, 0, 0).is_err() {
             self.images.remove(&mut self.renderer, image);
             return None;
@@ -2902,6 +2917,53 @@ fn a_frame_makes_its_share_of_masks() {
         })
         .count();
     assert_eq!(fills, 44);
+}
+
+/// The atlas starts small and doubles when a mask finds no room in it, in
+/// the frame: the masks it held keep their places, the quads drawn before
+/// read the image it outgrew, freed once the frame is drawn, and the next
+/// frame finds every mask in the new one.
+#[test]
+fn the_atlas_grows_when_a_mask_finds_no_room() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut small = Path::new();
+    small.rect(10.0, 50.0, 40.0, 0.4);
+    let mut bar = Path::new();
+    bar.rect(10.0, 10.0, 700.0, 0.4);
+    let images = |commands: &[Command]| -> Vec<ImageId> {
+        commands
+            .iter()
+            .filter_map(|command| match command.glyph_texture {
+                GlyphTexture::AlphaMask(id) => Some(id),
+                _ => None,
+            })
+            .collect()
+    };
+    let deleted = canvas.renderer.image_deletion_count;
+    canvas.fill_path(&small, &paint);
+    canvas.fill_path(&bar, &paint);
+    canvas.flush_to_output(());
+    let atlas = canvas.fill_masks.image;
+    let drawn = images(&recorded.borrow());
+    assert_eq!(drawn.len(), 2, "both through masks");
+    assert_ne!(Some(drawn[0]), atlas, "the first quad reads the atlas outgrown");
+    assert_eq!(Some(drawn[1]), atlas);
+    assert_eq!(canvas.fill_masks.side(), 1024);
+    assert_eq!(
+        canvas.renderer.image_deletion_count,
+        deleted + 1,
+        "the outgrown atlas freed"
+    );
+
+    canvas.fill_path(&small, &paint);
+    canvas.fill_path(&bar, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(images(&recorded.borrow()), [atlas.unwrap(); 2]);
+    assert_eq!(canvas.fill_masks.rasterized, 2, "nothing made again");
 }
 
 /// A scene in motion makes masks that no later frame asks for: the atlas

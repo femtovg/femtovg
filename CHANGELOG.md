@@ -8,9 +8,10 @@ All notable changes to this project will be documented in this file.
   it was, so a sliver a tenth of a pixel wide came out nearly eight times as
   dark as its area and a 0.3 px hairline nearly three times. Such a fill
   (twice its area over its perimeter under a pixel, its bounds at most
-  65,536 pixels) is rasterized on the CPU into a mask in a shared
-  four-megabyte atlas and drawn as a quad that reads the mask as text reads
-  its glyphs, with the fill's paint, scissor and clips, on OpenGL and WGPU.
+  65,536 pixels) is rasterized on the CPU into a mask in a shared atlas,
+  which grows from a quarter of a megabyte to four as frames need, and drawn
+  as a quad that reads the mask as text reads its glyphs, with the fill's
+  paint, scissor and clips, on OpenGL and WGPU.
   A mask is kept while its fill does not change or moves by whole pixels, at
   most 256 are made a frame, and `Canvas::set_thin_fill_masks(false)` turns
   them off.

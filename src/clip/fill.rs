@@ -19,9 +19,13 @@ pub(crate) const THIN_FILL_WIDTH: f32 = 1.0;
 /// The most pixels a thin fill's bounds may span to be drawn through a mask.
 pub(crate) const THIN_FILL_SPAN: f32 = 65_536.0;
 
-/// The atlas's side in pixels: a byte each, four megabytes, more than the
-/// thin fills of any corpus frame at 1080p took (1.9 MB).
-pub(crate) const ATLAS_SIZE: usize = 2048;
+/// The atlas's side in pixels at first, a byte each: a quarter of a megabyte.
+const ATLAS_FIRST: usize = 512;
+
+/// The side the atlas grows to at most, doubling when a frame's masks find
+/// no room: four megabytes, more than the thin fills of any corpus frame at
+/// 1080p took (1.9 MB).
+const ATLAS_MOST: usize = 2048;
 
 /// The most masks rasterized in a frame, as Skia's 256 a flush: past it a
 /// thin fill is filled as any other, so that a scene whose thin fills move
@@ -30,6 +34,14 @@ const MASKS_A_FRAME: usize = 256;
 
 /// The most requests remembered bit for bit.
 const ASKED_KEPT: usize = 4096;
+
+/// What the atlas has for a new mask.
+pub(crate) enum Placement {
+    At([u32; 2]),
+    /// No room, but the atlas can grow.
+    Grow,
+    Refused,
+}
 
 /// Where a mask lies in the atlas and the rect of the target it covers.
 #[derive(Clone, Copy, Debug)]
@@ -54,6 +66,9 @@ pub(crate) struct FillMasks {
     /// Masks the frame before made that the atlas still holds.
     made_before: usize,
     full: bool,
+    side: usize,
+    // The images of atlases outgrown this frame, freed once it is drawn.
+    retired: Vec<ImageId>,
     coverage: super::coverage::Coverage,
     // A mask's pixels on their way into the atlas, kept for the next.
     scratch: Vec<u8>,
@@ -73,13 +88,15 @@ impl Default for FillMasks {
         Self {
             enabled: true,
             image: None,
-            packer: Atlas::new(ATLAS_SIZE, ATLAS_SIZE),
+            packer: Atlas::new(ATLAS_FIRST, ATLAS_FIRST),
             masks: HashMap::new(),
             asked: HashMap::new(),
             made: 0,
             found: 0,
             made_before: 0,
             full: false,
+            side: ATLAS_FIRST,
+            retired: Vec::new(),
             coverage: Default::default(),
             scratch: Vec::new(),
             pixels: Vec::new(),
@@ -98,6 +115,10 @@ impl FillMasks {
 
     pub(crate) fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+    }
+
+    pub(crate) fn side(&self) -> usize {
+        self.side
     }
 
     pub(crate) fn asked(&mut self, request: &[u32]) -> Option<PlacedMask> {
@@ -122,22 +143,50 @@ impl FillMasks {
     }
 
     /// A place in the atlas for a new mask of `size`, if the frame has not
-    /// made its share of masks and the atlas has room; a mask that does not
-    /// fit marks the atlas full, to start over once the frame is drawn.
-    pub(crate) fn place(&mut self, size: [usize; 2]) -> Option<[u32; 2]> {
-        if self.made >= MASKS_A_FRAME || self.full || size[0] > ATLAS_SIZE || size[1] > ATLAS_SIZE {
-            return None;
+    /// made its share of masks and the atlas has room or can grow; a mask
+    /// that does not fit an atlas at its largest marks it full, to start
+    /// over once the frame is drawn.
+    pub(crate) fn place(&mut self, size: [usize; 2]) -> Placement {
+        if self.made >= MASKS_A_FRAME || self.full || size[0] > ATLAS_MOST || size[1] > ATLAS_MOST {
+            return Placement::Refused;
         }
-        let Some((x, y)) = self.packer.add_rect(size[0], size[1]) else {
+        let fits = size[0] <= self.side && size[1] <= self.side;
+        let Some((x, y)) = fits.then(|| self.packer.add_rect(size[0], size[1])).flatten() else {
+            if self.side < ATLAS_MOST {
+                return Placement::Grow;
+            }
             self.full = true;
-            return None;
+            return Placement::Refused;
         };
         self.made += 1;
         #[cfg(test)]
         {
             self.rasterized += 1;
         }
-        Some([x as u32, y as u32])
+        Placement::At([x as u32, y as u32])
+    }
+
+    /// Doubles the atlas's side, or more for a mask of `size` that needs
+    /// it, each mask kept where it lies: the image is let go, freed once the
+    /// frame is drawn, and the next one made of the pixels kept here. Masks
+    /// made this frame must be in it before.
+    pub(crate) fn grow(&mut self, size: [usize; 2]) {
+        let old = self.side;
+        let mut side = 2 * old;
+        while side < ATLAS_MOST && side < size[0].max(size[1]) {
+            side *= 2;
+        }
+        let mut pixels = vec![0; side * side];
+        for (row, line) in self.pixels.chunks_exact(old).enumerate() {
+            pixels[row * side..][..old].copy_from_slice(line);
+        }
+        self.pixels = pixels;
+        self.dirty = None;
+        self.side = side;
+        // The old atlas held where it lies, the new room beside and above it.
+        self.packer = Atlas::new(side, side);
+        self.packer.add_rect(old, old);
+        self.retired.extend(self.image.take());
     }
 
     /// Rasterizes the mask of `key` and keeps it at `at`.
@@ -153,7 +202,7 @@ impl FillMasks {
         let [width, height] = key.size();
         let [x, y] = at.map(|side| side as usize);
         for (row, line) in pixels.chunks_exact(width).enumerate() {
-            let start = (y + row) * ATLAS_SIZE + x;
+            let start = (y + row) * self.side + x;
             self.pixels[start..start + width].copy_from_slice(line);
         }
         let [x0, y0, x1, y1] = self.dirty.unwrap_or([x, y, x + width, y + height]);
@@ -174,8 +223,8 @@ impl FillMasks {
         let [x0, y0, x1, y1] = self.dirty.take()?;
         self.upload.clear();
         for row in y0..y1 {
-            self.upload
-                .extend_from_slice(&self.pixels[row * ATLAS_SIZE + x0..row * ATLAS_SIZE + x1]);
+            let start = row * self.side;
+            self.upload.extend_from_slice(&self.pixels[start + x0..start + x1]);
         }
         Some(([x0, y0], [x1 - x0, y1 - y0], &self.upload))
     }
@@ -190,8 +239,9 @@ impl FillMasks {
     /// again as the frames that follow ask for them. So does one whose frame
     /// found none of the masks the frame before made, making its own - a
     /// scene in motion, whose masks no frame asks for again - so that the
-    /// atlas does not grow slower to pack into frame after frame.
-    pub(crate) fn end_frame(&mut self) {
+    /// atlas does not grow slower to pack into frame after frame. Returns the
+    /// images of the atlases the frame outgrew, to be freed.
+    pub(crate) fn end_frame(&mut self) -> Vec<ImageId> {
         if self.made > 0 && self.made_before > 0 && self.found == 0 {
             self.full = true;
         }
@@ -201,9 +251,10 @@ impl FillMasks {
         if self.full {
             self.full = false;
             self.made_before = 0;
-            self.packer.reset(ATLAS_SIZE, ATLAS_SIZE);
+            self.packer.reset(self.side, self.side);
             self.masks.clear();
             self.asked.clear();
         }
+        std::mem::take(&mut self.retired)
     }
 }

@@ -698,7 +698,9 @@ where
         for image in self.clip_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
-        self.fill_masks.end_frame();
+        for image in self.fill_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -2528,7 +2530,9 @@ where
         for image in self.clip_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
-        self.fill_masks.end_frame();
+        for image in self.fill_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);

@@ -34,6 +34,19 @@ fn render(
     })
 }
 
+fn render_frames_sized(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    frames: usize,
+    mut draw: impl FnMut(&mut Canvas<WGPURenderer>),
+) -> Vec<Vec<u8>> {
+    render_frames(device, queue, width, height, Color::white(), frames, |canvas, _| {
+        draw(canvas)
+    })
+}
+
 fn polygon(points: &[[f32; 2]]) -> Path {
     let mut path = Path::new();
     path.move_to(points[0][0], points[0][1]);
@@ -150,6 +163,37 @@ fn masks_made_later_leave_the_kept_ones_whole() {
         "the masks kept and made later draw as made at once"
     );
     assert!(ink(&at_once) > ink(&frames[0]) + 0.4 * (80.0 + 80.0 + 50.0) - 2.0);
+}
+
+/// An atlas that grows in a frame keeps its masks: a sliver whose mask was
+/// made before a bar too wide for the first atlas holds its area, as does the
+/// bar, and the next frame, every mask found again, draws the same.
+#[test]
+fn an_atlas_that_grows_keeps_its_masks() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (strip, area) = sliver(0.3);
+    let mut bar = Path::new();
+    // Past the first atlas's 512 pixels, through a target wide enough.
+    bar.rect(4.0, 90.3, 600.0, 0.4);
+    let frames = render_frames_sized(&device, &queue, 640, H, 2, |canvas| {
+        canvas.fill_path(&strip, &red());
+        canvas.fill_path(&bar, &red());
+    });
+    let bar_ink = |frame: &[u8]| ink(&frame[(88 * 640 * 4) as usize..]);
+    let strip_ink = |frame: &[u8]| ink(&frame[..(88 * 640 * 4) as usize]);
+    assert!(
+        (strip_ink(&frames[0]) - area).abs() < 0.02 * area + 0.5,
+        "the sliver: {:.1} for {area:.1}",
+        strip_ink(&frames[0])
+    );
+    assert!(
+        (bar_ink(&frames[0]) - 240.0).abs() < 0.02 * 240.0,
+        "the bar: {:.1} for 240",
+        bar_ink(&frames[0])
+    );
+    assert!(frames[0] == frames[1], "the next frame draws the same");
 }
 
 /// The scissor and a clip to a path bound the mask's quad: the sliver's
