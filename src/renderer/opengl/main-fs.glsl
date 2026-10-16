@@ -30,6 +30,9 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define clipLinear frag[14]
 #define clipOffset frag[15].xy
 #define clipOuter frag[15].zw
+// An image paint's transfer (0 none, 1 to sRGB, 2 to linearRGB) in the paint
+// matrix's first column's w, which no image paint reads.
+#define imageTransfer int(frag[3].w)
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -276,6 +279,36 @@ vec4 renderImageGradientTwoPointRadial() {
     return ditherGradient(texture2D(tex, vec2(d, 0.0)));
 }
 
+// The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
+// the unpremultiplied color, alpha untouched: to sRGB when toSrgb, else to
+// linearRGB.
+vec4 transferColor(vec4 c, bool toSrgb) {
+    if (c.a > 0.0) {
+        c.rgb /= c.a;
+    }
+    vec3 x = clamp(c.rgb, 0.0, 1.0);
+    vec3 y;
+    if (toSrgb) {
+        // mix evaluates both sides: keep pow off 0, where an exp2(log2) under fast math can give a NaN that
+        // mix carries even at weight 0. The clamp only touches the side step leaves out.
+        y = mix(x * 12.92, 1.055 * pow(max(x, vec3(0.0031308)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3(2.4)), step(0.04045, x));
+    }
+    return vec4(y * c.a, c.a);
+}
+
+// A sampled image texel as the paint uses it: premultiplied, converted by
+// the paint's transfer if it has one - rounded to 8 bits, as the transfer's
+// pass stores its result - then tinted.
+vec4 paintTexel(vec4 color) {
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (texType == 2) color = vec4(color.x);
+    if (imageTransfer != 0) color = floor(transferColor(color, imageTransfer == 1) * 255.0 + 0.5) / 255.0;
+    // Apply color tint and alpha.
+    return color * innerCol;
+}
+
 vec4 renderImage() {
     // Calculate color from texture
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
@@ -283,23 +316,11 @@ vec4 renderImage() {
     // Half a level toward the larger mip: browsers minify sharper than plain
     // trilinear (Chromium samples the larger level, Firefox downsamples
     // directly); no effect without mipmaps or under magnification.
-    vec4 color = texture2D(tex, pt, -0.5);
-
-    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-    if (texType == 2) color = vec4(color.x);
-
-    // Apply color tint and alpha.
-    color *= innerCol;
-    return color;
+    return paintTexel(texture2D(tex, pt, -0.5));
 }
 
 vec4 renderPlainTextureCopy() {
-    vec4 color = texture2D(tex, ftcoord, -0.5);
-    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-    if (texType == 2) color = vec4(color.x);
-    // Apply color tint and alpha.
-    color *= innerCol;
-    return color;
+    return paintTexel(texture2D(tex, ftcoord, -0.5));
 }
 
 // A blur tap, premultiplied: a straight-alpha source is converted per tap,
