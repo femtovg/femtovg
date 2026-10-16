@@ -558,6 +558,7 @@ where
         if let Some(image) = self.fill_masks.image {
             return Some(image);
         }
+        self.fill_masks.limit(self.renderer.max_texture_size());
         let side = self.fill_masks.side();
         let info = ImageInfo::new(ImageFlags::NEAREST, side, side, PixelFormat::Gray8);
         let image = self.images.alloc(&mut self.renderer, info).ok()?;
@@ -2964,6 +2965,30 @@ fn the_atlas_grows_when_a_mask_finds_no_room() {
     canvas.flush_to_output(());
     assert_eq!(images(&recorded.borrow()), [atlas.unwrap(); 2]);
     assert_eq!(canvas.fill_masks.rasterized, 2, "nothing made again");
+}
+
+/// The atlas stays within the backend's largest image: past it a mask keeps
+/// its fringe, and the atlas grows only as far as the backend allows.
+#[test]
+fn the_atlas_stays_within_the_backends_largest_image() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 600,
+        ..Default::default()
+    };
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut too_wide = Path::new();
+    too_wide.rect(10.0, 10.0, 700.0, 0.4);
+    let mut wide = Path::new();
+    wide.rect(10.0, 50.0, 560.0, 0.4);
+    canvas.fill_path(&too_wide, &paint);
+    canvas.fill_path(&wide, &paint);
+    canvas.flush_to_output(());
+    let image = canvas.fill_masks.image;
+    assert_eq!(mask_quads(&recorded.borrow(), image), 1, "the wide one only");
+    assert_eq!(canvas.fill_masks.side(), 600);
 }
 
 /// A scene in motion makes masks that no later frame asks for: the atlas

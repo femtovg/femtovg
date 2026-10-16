@@ -65,6 +65,9 @@ pub(crate) struct FillMasks {
     made_before: usize,
     full: bool,
     side: usize,
+    // The largest side the atlas grows to: ATLAS_MOST, or less if the backend
+    // cannot allocate that.
+    most: usize,
     // The images of atlases outgrown this frame, freed once it is drawn.
     retired: Vec<ImageId>,
     coverage: super::coverage::Coverage,
@@ -94,6 +97,7 @@ impl Default for FillMasks {
             made_before: 0,
             full: false,
             side: ATLAS_FIRST,
+            most: ATLAS_MOST,
             retired: Vec::new(),
             coverage: Default::default(),
             scratch: Vec::new(),
@@ -117,6 +121,17 @@ impl FillMasks {
 
     pub(crate) fn side(&self) -> usize {
         self.side
+    }
+
+    /// Holds the atlas within the backend's largest image, before the first
+    /// atlas is made: 2048 a side on a VideoCore IV (Raspberry Pi Zero to 3)
+    /// is ATLAS_MOST already, but a backend may allow less.
+    pub(crate) fn limit(&mut self, max_texture_size: usize) {
+        self.most = ATLAS_MOST.min(max_texture_size).max(1);
+        if self.side > self.most {
+            self.side = self.most;
+            self.packer.reset(self.side, self.side);
+        }
     }
 
     pub(crate) fn asked(&mut self, request: &[u32]) -> Option<PlacedMask> {
@@ -145,12 +160,12 @@ impl FillMasks {
     /// that does not fit an atlas at its largest marks it full, to start
     /// over once the frame is drawn.
     pub(crate) fn place(&mut self, size: [usize; 2]) -> Placement {
-        if self.made >= MASKS_A_FRAME || self.full || size[0] > ATLAS_MOST || size[1] > ATLAS_MOST {
+        if self.made >= MASKS_A_FRAME || self.full || size[0] > self.most || size[1] > self.most {
             return Placement::Refused;
         }
         let fits = size[0] <= self.side && size[1] <= self.side;
         let Some((x, y)) = fits.then(|| self.packer.add_rect(size[0], size[1])).flatten() else {
-            if self.side < ATLAS_MOST {
+            if self.side < self.most {
                 return Placement::Grow;
             }
             self.full = true;
@@ -170,9 +185,9 @@ impl FillMasks {
     /// made this frame must be in it before.
     pub(crate) fn grow(&mut self, size: [usize; 2]) {
         let old = self.side;
-        let mut side = 2 * old;
-        while side < ATLAS_MOST && side < size[0].max(size[1]) {
-            side *= 2;
+        let mut side = (2 * old).min(self.most);
+        while side < self.most && side < size[0].max(size[1]) {
+            side = (2 * side).min(self.most);
         }
         let mut pixels = vec![0; side * side];
         for (row, line) in self.pixels.chunks_exact(old).enumerate() {
