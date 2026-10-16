@@ -200,6 +200,8 @@ pub struct PathCache {
     contour_sides: Option<Vec<(i32, u32, i32)>>,
     // The square of the farthest a point between two chords was moved off the curve.
     straddle: f32,
+    // The outline's mean width under a fill rule, once a fill has asked for it.
+    mean_width: Option<(FillRule, f32)>,
 }
 
 impl PathCache {
@@ -385,6 +387,51 @@ impl PathCache {
                 outline.collect()
             }
         })
+    }
+
+    /// Twice the area a fill of the outline under `fill_rule` covers, over
+    /// the outline's perimeter, in device pixels: a sliver's width, a disc's
+    /// radius. Each contour adds the area inside it, or takes it off if it
+    /// bounds a hole, however it is wound. Worked out once a cache, which a
+    /// path keeps while its transform does.
+    pub(crate) fn mean_width(&mut self, fill_rule: FillRule) -> f32 {
+        if let Some((rule, width)) = self.mean_width {
+            if rule == fill_rule {
+                return width;
+            }
+        }
+        // One contour bounds no hole: no need to ask which do.
+        let hole = if self.contours.len() > 1 {
+            self.hole_contours(fill_rule)
+        } else {
+            Vec::new()
+        };
+        let (mut area, mut perimeter) = (0.0, 0.0);
+        for (i, contour) in self.contours.iter().enumerate() {
+            let points = &self.points[contour.point_range.clone()];
+            let (Some(first), Some(last)) = (points.first(), points.last()) else {
+                continue;
+            };
+            // From the contour's first point, so that the products stay small.
+            let origin = first.pos;
+            let mut from = last.pos - origin;
+            let mut twice = 0.0f32;
+            for point in points {
+                let to = point.pos - origin;
+                twice += from.x * to.y - to.x * from.y;
+                // Each point knows the length of the edge that leaves it.
+                perimeter += point.len;
+                from = to;
+            }
+            area += if hole.get(i) == Some(&true) {
+                -twice.abs()
+            } else {
+                twice.abs()
+            };
+        }
+        let width = if perimeter > 0.0 { area.abs() / perimeter } else { 0.0 };
+        self.mean_width = Some((fill_rule, width));
+        width
     }
 
     /// The farthest a point between two chords stands off its curve (see
