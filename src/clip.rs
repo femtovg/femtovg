@@ -515,9 +515,9 @@ where
         // The quad covers the mask's pixels exactly, each fragment reading
         // the texel of its own pixel.
         let [x0, y0, x1, y1] = mask.rect.map(|side| side as f32);
-        let side = self.fill_masks.side() as f32;
-        let [s0, t0] = mask.atlas.map(|at| at as f32 / side);
-        let (s1, t1) = (s0 + (x1 - x0) / side, t0 + (y1 - y0) / side);
+        let [width, height] = self.fill_masks.size().map(|side| side as f32);
+        let [s0, t0] = [mask.atlas[0] as f32 / width, mask.atlas[1] as f32 / height];
+        let (s1, t1) = (s0 + (x1 - x0) / width, t0 + (y1 - y0) / height);
         let verts = [
             Vertex::new(x0, y0, s0, t0),
             Vertex::new(x1, y1, s1, t1),
@@ -571,14 +571,14 @@ where
         if let Some(image) = self.fill_masks.image {
             return Some(image);
         }
-        let side = self.fill_masks.side();
-        let info = ImageInfo::new(ImageFlags::NEAREST, side, side, PixelFormat::Gray8);
+        let [width, height] = self.fill_masks.size();
+        let info = ImageInfo::new(ImageFlags::NEAREST, width, height, PixelFormat::Gray8);
         let image = self.images.alloc(&mut self.renderer, info).ok()?;
         // An atlas that grew keeps the pixels of the one before.
-        if self.fill_masks.pixels.len() != side * side {
-            self.fill_masks.pixels = vec![0; side * side];
+        if self.fill_masks.pixels.len() != width * height {
+            self.fill_masks.pixels = vec![0; width * height];
         }
-        let source = ImageSource::Gray(imgref::Img::new(self.fill_masks.pixels.as_gray(), side, side));
+        let source = ImageSource::Gray(imgref::Img::new(self.fill_masks.pixels.as_gray(), width, height));
         if self.images.update(&mut self.renderer, image, source, 0, 0).is_err() {
             self.images.remove(&mut self.renderer, image);
             return None;
@@ -2956,7 +2956,7 @@ fn the_atlas_grows_when_a_mask_finds_no_room() {
     assert_eq!(drawn.len(), 2, "both through masks");
     assert_ne!(Some(drawn[0]), atlas, "the first quad reads the atlas outgrown");
     assert_eq!(Some(drawn[1]), atlas);
-    assert_eq!(canvas.fill_masks.side(), 1024);
+    assert_eq!(canvas.fill_masks.size(), [1024, 512], "wider, not taller");
     assert_eq!(
         canvas.renderer.image_deletion_count,
         deleted + 1,
@@ -2991,7 +2991,7 @@ fn the_atlas_stays_within_the_backends_largest_image() {
     canvas.flush_to_output(());
     let image = canvas.fill_masks.image;
     assert_eq!(mask_quads(&recorded.borrow(), image), 1, "the wide one only");
-    assert_eq!(canvas.fill_masks.side(), 600);
+    assert_eq!(canvas.fill_masks.size(), [600, 512]);
 }
 
 /// A scene in motion makes masks that no later frame asks for: the atlas
@@ -3136,5 +3136,43 @@ fn the_atlas_is_made_for_the_first_mask_placed() {
     canvas.flush_to_output(());
     assert_eq!(canvas.renderer.image_allocation_attempts, 1);
     assert_eq!(canvas.renderer.image_deletion_count, 0, "none made to be let go");
-    assert_eq!(canvas.fill_masks.side(), 600);
+    assert_eq!(canvas.fill_masks.size(), [600, 512]);
+}
+
+/// The atlas grows only the way its masks need: a long sliver makes it wide,
+/// a tall one tall, and masks that fit it but find no room lengthen its
+/// shorter side.
+#[test]
+fn the_atlas_grows_only_the_way_its_masks_need() {
+    let paint = Paint::color(Color::black());
+    let grown = |width: u32, height: u32, paths: &[Path]| {
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(width, height, 1.0);
+        for path in paths {
+            canvas.fill_path(path, &paint);
+        }
+        canvas.flush_to_output(());
+        canvas.fill_masks.size()
+    };
+    let mut wide = Path::new();
+    wide.rect(10.0, 10.0, 1500.0, 0.4);
+    assert_eq!(grown(2000, 100, &[wide]), [2048, 512]);
+    let mut tall = Path::new();
+    tall.rect(10.0, 10.0, 0.4, 1500.0);
+    assert_eq!(grown(100, 2000, &[tall]), [512, 2048]);
+    // Strips 500 x 100 across, each a pixel shorter than the last, so that
+    // each is a mask of its own: four fit 512 x 512, the fifth finds no room.
+    let strips: Vec<Path> = (0..6)
+        .map(|i| {
+            let (y, end) = (10.0 + 90.0 * i as f32, 510.0 - i as f32);
+            let mut path = Path::new();
+            path.move_to(10.0, y);
+            path.line_to(end, y + 100.0);
+            path.line_to(end, y + 100.3);
+            path.line_to(10.0, y + 0.3);
+            path.close();
+            path
+        })
+        .collect();
+    assert_eq!(grown(600, 700, &strips), [512, 1024]);
 }

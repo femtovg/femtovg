@@ -17,12 +17,12 @@ pub(crate) const THIN_FILL_WIDTH: f32 = 1.0;
 /// The most pixels a thin fill's bounds may span to be drawn through a mask.
 pub(crate) const THIN_FILL_SPAN: f32 = 65_536.0;
 
-/// The atlas's side in pixels at first, a byte each: a quarter of a megabyte.
+/// The atlas's sides in pixels at first, a byte each: a quarter of a megabyte.
 const ATLAS_FIRST: usize = 512;
 
-/// The side the atlas grows to at most, doubling when a frame's masks find
-/// no room: four megabytes, more than the thin fills of any corpus frame at
-/// 1080p took (1.9 MB).
+/// The most either side of the atlas grows to, doubling when a frame's masks
+/// find no room: four megabytes at most, more than the thin fills of any
+/// corpus frame at 1080p took (1.9 MB).
 const ATLAS_MOST: usize = 2048;
 
 /// The most masks rasterized in a frame, as Skia's 256 a flush: past it a
@@ -67,7 +67,8 @@ pub(crate) struct FillMasks {
     /// Masks the frame before made that the atlas still holds.
     made_before: usize,
     full: bool,
-    side: usize,
+    // The atlas's width and height.
+    size: [usize; 2],
     // The largest side the atlas grows to: ATLAS_MOST, or less if the backend
     // cannot allocate that.
     most: usize,
@@ -100,7 +101,7 @@ impl Default for FillMasks {
             found: 0,
             made_before: 0,
             full: false,
-            side: ATLAS_FIRST,
+            size: [ATLAS_FIRST; 2],
             most: ATLAS_MOST,
             retired: Vec::new(),
             coverage: Default::default(),
@@ -123,8 +124,8 @@ impl FillMasks {
         self.enabled = enabled;
     }
 
-    pub(crate) fn side(&self) -> usize {
-        self.side
+    pub(crate) fn size(&self) -> [usize; 2] {
+        self.size
     }
 
     /// Holds the atlas within the backend's largest image, before the first
@@ -132,9 +133,9 @@ impl FillMasks {
     /// is ATLAS_MOST already, but a backend may allow less.
     pub(crate) fn limit(&mut self, max_texture_size: usize) {
         self.most = ATLAS_MOST.min(max_texture_size).max(1);
-        if self.side > self.most {
-            self.side = self.most;
-            self.packer.reset(self.side, self.side);
+        if self.size.iter().any(|&side| side > self.most) {
+            self.size = self.size.map(|side| side.min(self.most));
+            self.packer.reset(self.size[0], self.size[1]);
         }
     }
 
@@ -168,9 +169,9 @@ impl FillMasks {
         if self.made >= MASKS_A_FRAME || size[0] > self.most || size[1] > self.most {
             return Placement::Refused;
         }
-        let fits = size[0] <= self.side && size[1] <= self.side;
+        let fits = size[0] <= self.size[0] && size[1] <= self.size[1];
         let Some((x, y)) = fits.then(|| self.packer.add_rect(size[0], size[1])).flatten() else {
-            if self.side < self.most {
+            if self.size.iter().any(|&side| side < self.most) {
                 return Placement::Grow;
             }
             self.full = true;
@@ -184,29 +185,40 @@ impl FillMasks {
         Placement::At([x as u32, y as u32])
     }
 
-    /// Doubles the atlas's side, or more for a mask of `size` that needs
-    /// it, each mask kept where it lies: the image is let go, freed once the
-    /// frame is drawn, and the next one made of the pixels kept here. Masks
-    /// made this frame must be in it before. An atlas that holds no masks -
-    /// not made yet, or started over - grows empty.
+    /// Grows the atlas for a mask of `size`: a side the mask is longer than
+    /// doubles until it is not, so that a long sliver makes the atlas wide,
+    /// not wide and tall; a mask that fits but finds no room doubles the
+    /// shorter side. Each mask is kept where it lies: the image is let go,
+    /// freed once the frame is drawn, and the next one made of the pixels kept
+    /// here. Masks made this frame must be in it before. An atlas that holds
+    /// no masks - not made yet, or started over - grows empty.
     pub(crate) fn grow(&mut self, size: [usize; 2]) {
-        let old = self.side;
-        let mut side = (2 * old).min(self.most);
-        while side < self.most && side < size[0].max(size[1]) {
-            side = (2 * side).min(self.most);
-        }
-        let mut pixels = vec![0; side * side];
-        self.packer = Atlas::new(side, side);
-        if !self.masks.is_empty() {
-            for (row, line) in self.pixels.chunks_exact(old).enumerate() {
-                pixels[row * side..][..old].copy_from_slice(line);
+        let old = self.size;
+        let mut new = old;
+        if size[0] > old[0] || size[1] > old[1] {
+            for (side, needed) in new.iter_mut().zip(size) {
+                while *side < needed {
+                    *side = (2 * *side).min(self.most);
+                }
             }
-            // The old atlas held where it lies, the new room beside and above it.
-            self.packer.add_rect(old, old);
+        } else {
+            let taller = old[1] < self.most && (old[1] <= old[0] || old[0] == self.most);
+            let side = &mut new[usize::from(taller)];
+            *side = (2 * *side).min(self.most);
+        }
+        let mut pixels = vec![0; new[0] * new[1]];
+        if self.masks.is_empty() {
+            self.packer = Atlas::new(new[0], new[1]);
+        } else {
+            for (row, line) in self.pixels.chunks_exact(old[0]).enumerate() {
+                pixels[row * new[0]..][..old[0]].copy_from_slice(line);
+            }
+            // The masks held where they lie, the new room beside and below them.
+            self.packer.expand(new[0], new[1]);
         }
         self.pixels = pixels;
         self.dirty = None;
-        self.side = side;
+        self.size = new;
         self.retired.extend(self.image.take());
     }
 
@@ -223,7 +235,7 @@ impl FillMasks {
         let [width, height] = key.size();
         let [x, y] = at.map(|side| side as usize);
         for (row, line) in pixels.chunks_exact(width).enumerate() {
-            let start = (y + row) * self.side + x;
+            let start = (y + row) * self.size[0] + x;
             self.pixels[start..start + width].copy_from_slice(line);
         }
         let [x0, y0, x1, y1] = self.dirty.unwrap_or([x, y, x + width, y + height]);
@@ -244,7 +256,7 @@ impl FillMasks {
         let [x0, y0, x1, y1] = self.dirty.take()?;
         self.upload.clear();
         for row in y0..y1 {
-            let start = row * self.side;
+            let start = row * self.size[0];
             self.upload.extend_from_slice(&self.pixels[start + x0..start + x1]);
         }
         Some(([x0, y0], [x1 - x0, y1 - y0], &self.upload))
@@ -272,7 +284,7 @@ impl FillMasks {
         if self.full {
             self.full = false;
             self.made_before = 0;
-            self.packer.reset(self.side, self.side);
+            self.packer.reset(self.size[0], self.size[1]);
             self.masks.clear();
             self.asked.clear();
         }
