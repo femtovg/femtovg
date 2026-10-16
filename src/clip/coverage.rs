@@ -76,9 +76,7 @@ impl Row<'_> {
         if last <= cell + 1 {
             // Inside one cell: what is right of the edge's middle is the cell's.
             let middle = 0.5 * (lo + hi) - first;
-            self.add(cell, area * (1.0 - middle));
-            self.add(cell + 1, area * middle);
-            return;
+            return self.add_two(cell, area * (1.0 - middle), area * middle);
         }
         // Across cells the edge's height is spread evenly along x: a
         // triangle in the first and the last cell, a trapezoid in between.
@@ -100,6 +98,19 @@ impl Row<'_> {
             self.add(last - 1, area * (1.0 - before_last - tail));
         }
         self.add(last, area * tail);
+    }
+
+    /// Adds `area` to `cell`, below the width, and `next` to the cell after.
+    fn add_two(&mut self, cell: usize, area: f32, next: f32) {
+        self.area[cell] += area;
+        self.touched[cell / 64] |= 1 << (cell % 64);
+        let mut last = cell;
+        if cell + 1 < self.width && next != 0.0 {
+            self.area[cell + 1] += next;
+            self.touched[(cell + 1) / 64] |= 1 << ((cell + 1) % 64);
+            last = cell + 1;
+        }
+        self.words = [self.words[0].min(cell / 64), self.words[1].max(last / 64)];
     }
 
     fn add(&mut self, cell: usize, area: f32) {
