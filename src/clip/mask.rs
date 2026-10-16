@@ -102,6 +102,19 @@ impl MaskOutline {
         self.children.push((rule, contours));
     }
 
+    /// Swaps the outlines' x and y.
+    pub(crate) fn transpose(&mut self) {
+        for point in self
+            .children
+            .iter_mut()
+            .flat_map(|(_, contours)| contours.iter_mut().flatten())
+        {
+            point.swap(0, 1);
+        }
+        let [minx, miny, maxx, maxy] = self.bounds;
+        self.bounds = [miny, minx, maxy, maxx];
+    }
+
     /// The pixels the mask spans: the outlines' bounds and a pixel around
     /// them - the empty border that a draw past the mask reads - cut to
     /// `within`, a rect `[x0, y0, x1, y1]`. An outline that misses it is

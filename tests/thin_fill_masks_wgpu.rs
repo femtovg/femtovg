@@ -254,3 +254,24 @@ fn a_thin_fill_takes_its_paint() {
     assert!(left[0] > 240 && left[2] < 160, "red at the left end: {left:?}");
     assert!(right[2] > 240 && right[0] < 160, "blue at the right end: {right:?}");
 }
+
+/// A mask taller than it is wide, kept transposed, draws as the same fill
+/// turned on its side: the tall sliver's pixels are the wide one's mirrored
+/// across the diagonal, every one.
+#[test]
+fn a_tall_sliver_draws_as_a_wide_one_turned_on_its_side() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let tall = polygon(&[[20.0, 4.0], [30.0, 90.0], [30.3, 90.0], [20.3, 4.0]]);
+    let wide = polygon(&[[4.0, 20.0], [90.0, 30.0], [90.0, 30.3], [4.0, 20.3]]);
+    let tall = render(&device, &queue, true, |canvas| canvas.fill_path(&tall, &red()));
+    let wide = render(&device, &queue, true, |canvas| canvas.fill_path(&wide, &red()));
+    let pixel = |buf: &[u8], x: u32, y: u32| buf[((y * W + x) * 4) as usize..][..4].to_vec();
+    for y in 0..H {
+        for x in 0..W {
+            assert_eq!(pixel(&tall, x, y), pixel(&wide, y, x), "({x}, {y})");
+        }
+    }
+    assert!(ink(&tall) > 20.0, "the sliver is drawn");
+}

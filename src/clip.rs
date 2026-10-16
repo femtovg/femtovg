@@ -517,13 +517,24 @@ where
         let [x0, y0, x1, y1] = mask.rect.map(|side| side as f32);
         let [width, height] = self.fill_masks.size().map(|side| side as f32);
         let [s0, t0] = [mask.atlas[0] as f32 / width, mask.atlas[1] as f32 / height];
-        let (s1, t1) = (s0 + (x1 - x0) / width, t0 + (y1 - y0) / height);
+        // A transposed mask runs down the atlas where the quad runs across.
+        let [across, down] = if mask.transposed {
+            [y1 - y0, x1 - x0]
+        } else {
+            [x1 - x0, y1 - y0]
+        };
+        let (s1, t1) = (s0 + across / width, t0 + down / height);
+        let ((s_right, t_right), (s_below, t_below)) = if mask.transposed {
+            ((s0, t1), (s1, t0))
+        } else {
+            ((s1, t0), (s0, t1))
+        };
         let verts = [
             Vertex::new(x0, y0, s0, t0),
             Vertex::new(x1, y1, s1, t1),
-            Vertex::new(x1, y0, s1, t0),
+            Vertex::new(x1, y0, s_right, t_right),
             Vertex::new(x0, y0, s0, t0),
-            Vertex::new(x0, y1, s0, t1),
+            Vertex::new(x0, y1, s_below, t_below),
             Vertex::new(x1, y1, s1, t1),
         ];
         self.render_triangles(&verts, transform, paint_flavor, GlyphTexture::AlphaMask(image));
@@ -540,9 +551,21 @@ where
         let mut outline = MaskOutline::default();
         outline.child(fill_rule, path_cache.outlines(fill_rule));
         let rect = outline.rect(within);
-        let key = outline.key(rect, None);
+        // A mask taller than it is wide is rasterized and kept transposed, so
+        // that the rows written, copied and uploaded one at a time are long.
+        let transposed = rect[3] - rect[1] > rect[2] - rect[0];
+        let key = if transposed {
+            outline.transpose();
+            outline.key([rect[1], rect[0], rect[3], rect[2]], None)
+        } else {
+            outline.key(rect, None)
+        };
         if let Some(atlas) = self.fill_masks.get(&key) {
-            return Some(PlacedMask { atlas, rect });
+            return Some(PlacedMask {
+                atlas,
+                rect,
+                transposed,
+            });
         }
         if self.fill_masks.image.is_none() {
             self.fill_masks.limit(self.renderer.max_texture_size());
@@ -561,7 +584,11 @@ where
         };
         self.fill_mask_atlas()?;
         self.fill_masks.make(key, atlas);
-        Some(PlacedMask { atlas, rect })
+        Some(PlacedMask {
+            atlas,
+            rect,
+            transposed,
+        })
     }
 
     /// The atlas of fill masks, made when the first mask has its place in
@@ -3140,8 +3167,8 @@ fn the_atlas_is_made_for_the_first_mask_placed() {
 }
 
 /// The atlas grows only the way its masks need: a long sliver makes it wide,
-/// a tall one tall, and masks that fit it but find no room lengthen its
-/// shorter side.
+/// and so does a tall one, kept transposed; masks that fit it but find no
+/// room lengthen its shorter side.
 #[test]
 fn the_atlas_grows_only_the_way_its_masks_need() {
     let paint = Paint::color(Color::black());
@@ -3159,7 +3186,7 @@ fn the_atlas_grows_only_the_way_its_masks_need() {
     assert_eq!(grown(2000, 100, &[wide]), [2048, 512]);
     let mut tall = Path::new();
     tall.rect(10.0, 10.0, 0.4, 1500.0);
-    assert_eq!(grown(100, 2000, &[tall]), [512, 2048]);
+    assert_eq!(grown(100, 2000, &[tall]), [2048, 512]);
     // Strips 500 x 100 across, each a pixel shorter than the last, so that
     // each is a mask of its own: four fit 512 x 512, the fifth finds no room.
     let strips: Vec<Path> = (0..6)
@@ -3175,4 +3202,38 @@ fn the_atlas_grows_only_the_way_its_masks_need() {
         })
         .collect();
     assert_eq!(grown(600, 700, &strips), [512, 1024]);
+}
+
+/// A mask taller than it is wide is kept transposed, and its quad reads it
+/// so: across the target is down the atlas, and down the target across it.
+#[test]
+fn a_tall_mask_is_kept_transposed() {
+    let renderer = RecordingRenderer::default();
+    let (recorded, verts) = (renderer.last_commands.clone(), renderer.last_verts.clone());
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut tall = Path::new();
+    tall.rect(20.0, 10.0, 0.4, 70.0);
+    canvas.fill_path(&tall, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    let quad = commands
+        .iter()
+        .find(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(_)))
+        .expect("drawn through a mask");
+    let (offset, count) = quad.triangles_verts.unwrap();
+    let verts = &verts.borrow()[offset..offset + count];
+    let at = |x: f32, y: f32| *verts.iter().find(|v| v.x == x && v.y == y).unwrap();
+    let ([x0, y0], [x1, y1]) = ([19.0, 9.0], [22.0, 81.0]);
+    let (corner, right, below) = (at(x0, y0), at(x1, y0), at(x0, y1));
+    assert_eq!(
+        (right.u, right.v - corner.v),
+        (corner.u, 3.0 / 512.0),
+        "across the target, down the atlas"
+    );
+    assert_eq!(
+        (below.u - corner.u, below.v),
+        (72.0 / 512.0, corner.v),
+        "down the target, across the atlas"
+    );
 }

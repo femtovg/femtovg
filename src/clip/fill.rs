@@ -41,11 +41,13 @@ pub(crate) enum Placement {
     Refused,
 }
 
-/// Where a mask lies in the atlas and the rect of the target it covers.
+/// Where a mask lies in the atlas, the rect of the target it covers, and
+/// whether it is kept there transposed.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PlacedMask {
     pub(crate) atlas: [u32; 2],
     pub(crate) rect: [i32; 4],
+    pub(crate) transposed: bool,
 }
 
 /// The atlas and what it holds.
