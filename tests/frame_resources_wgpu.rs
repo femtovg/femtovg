@@ -262,3 +262,44 @@ fn frames_flushed_before_a_submit_each_draw_the_image_they_were_given() {
         "the second frame's image"
     );
 }
+
+/// An image updated in a corner and then whole, the second upload larger
+/// than a staging chunk, before the frame that draws it: the frame draws the
+/// later upload. Every upload is copied in the frame's own command buffer in
+/// the order it was made; the larger one, written on the queue, would have
+/// been copied before the corner.
+#[test]
+fn an_upload_larger_than_a_staging_chunk_keeps_its_place_in_order() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let output = target(&device, W, H);
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let side = 1024;
+    let red = vec![RGBA8::new(255, 0, 0, 255); side * side];
+    let image = canvas
+        .create_image(Img::new(red.as_slice(), side, side), ImageFlags::NEAREST)
+        .expect("image");
+    let green = vec![RGBA8::new(0, 255, 0, 255); 16 * 16];
+    canvas
+        .update_image(image, Img::new(green.as_slice(), 16, 16), 0, 0)
+        .expect("corner");
+    let blue = vec![RGBA8::new(0, 0, 255, 255); side * side];
+    canvas
+        .update_image(image, Img::new(blue.as_slice(), side, side), 0, 0)
+        .expect("whole");
+    let mut whole = Path::new();
+    whole.rect(0.0, 0.0, W as f32, H as f32);
+    canvas.fill_path(&whole, &Paint::image(image, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0));
+    queue.submit(canvas.flush_to_output(&output));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+
+    assert_eq!(
+        pixel(&readback(&device, &queue, &output), 0, 0),
+        [0, 0, 255, 255],
+        "the later, whole upload"
+    );
+}

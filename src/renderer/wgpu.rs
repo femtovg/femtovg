@@ -475,6 +475,17 @@ impl WGPURenderer {
         let Texture::Internal(texture) = &image.texture else {
             return Err(crate::ErrorKind::UnsupportedOperation);
         };
+        // The queue copies before the next frame's command buffer runs: the
+        // uploads staged for this image before go first, so that they do not
+        // land on what this one copies.
+        if self.pending_copies.iter().any(|copy| copy.texture == *texture) {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            self.encode_pending_copies(&mut encoder);
+            self.staging_belt.finish_and_recall_on_submit(&encoder);
+            self.queue.submit(Some(encoder.finish()));
+        }
         self.queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source,
@@ -609,6 +620,38 @@ impl WGPURenderer {
             pipeline_cache: Default::default(),
             mipmaps: None,
             flush_count: 0,
+        }
+    }
+
+    /// Copies the uploads staged since the last frame into their images, in
+    /// the order they were made.
+    fn encode_pending_copies(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        for copy in self.pending_copies.drain(..) {
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &copy.buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: copy.offset,
+                        bytes_per_row: Some(copy.bytes_per_row),
+                        rows_per_image: None,
+                    },
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &copy.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: copy.origin[0],
+                        y: copy.origin[1],
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: copy.size[0],
+                    height: copy.size[1],
+                    depth_or_array_layers: 1,
+                },
+            );
         }
     }
 
@@ -835,33 +878,7 @@ impl Renderer for WGPURenderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        for copy in self.pending_copies.drain(..) {
-            encoder.copy_buffer_to_texture(
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &copy.buffer,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: copy.offset,
-                        bytes_per_row: Some(copy.bytes_per_row),
-                        rows_per_image: None,
-                    },
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &copy.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: copy.origin[0],
-                        y: copy.origin[1],
-                        z: 0,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: copy.size[0],
-                    height: copy.size[1],
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
+        self.encode_pending_copies(&mut encoder);
         if let Some(size) = wgpu::BufferSize::new(vertex_bytes.len() as u64) {
             self.staging_belt
                 .write_buffer(&mut encoder, &self.vertex_buffer, 0, size)
@@ -1194,37 +1211,63 @@ impl Renderer for WGPURenderer {
         };
 
         if let Texture::Internal(texture) = &image.texture {
-            // An upload that fits a staging chunk is copied at the start of the next frame's own command
-            // buffer, so that a frame draws the image as it was when the frame was flushed, from staging
-            // the belt reuses where write_texture makes a buffer for each call. An image with mip levels
-            // keeps write_texture: the levels are generated from it at once.
+            // An image without mip levels is copied at the start of the next frame's own command buffer,
+            // every upload in the order it was made, so that a frame draws the image as it was when the frame
+            // was flushed: from staging the belt reuses, or, for an upload larger than a chunk, from a buffer of
+            // its own, which the belt would keep once recalled. write_texture would copy an upload before every
+            // one staged before it. An image with mip levels keeps write_texture: the levels are generated
+            // from it at once.
             let size = data.dimensions();
-            let row = bpp as u64 * size.width as u64;
-            let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
-            let padded = row.div_ceil(align) * align;
-            let total = padded * size.height as u64;
-            if texture.mip_level_count() == 1 && total > 0 && total <= STAGING_CHUNK_BYTES {
-                let slice = self.staging_belt.allocate(
-                    wgpu::BufferSize::new(total).expect("not empty"),
-                    wgpu::BufferSize::new(align).expect("not zero"),
-                );
-                let staged = slice.get_mapped_range_mut().map(|mut view| {
+            if texture.mip_level_count() == 1 {
+                let row = bpp as u64 * size.width as u64;
+                let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
+                let padded = row.div_ceil(align) * align;
+                let total = padded * size.height as u64;
+                let Some(bytes_needed) = wgpu::BufferSize::new(total) else {
+                    return Ok(());
+                };
+                let write = |mut view: wgpu::BufferViewMut| {
                     let (row, padded) = (row as usize, padded as usize);
                     for (line, source) in bytes.chunks_exact(row).take(size.height).enumerate() {
                         view.slice(line * padded..line * padded + row).copy_from_slice(source);
                     }
+                };
+                let staged = (total <= STAGING_CHUNK_BYTES)
+                    .then(|| {
+                        let slice = self
+                            .staging_belt
+                            .allocate(bytes_needed, wgpu::BufferSize::new(align).expect("not zero"));
+                        let view = slice.get_mapped_range_mut().ok()?;
+                        write(view);
+                        Some((slice.buffer().clone(), slice.offset()))
+                    })
+                    .flatten();
+                let (buffer, offset) = match staged {
+                    Some(staged) => staged,
+                    None => {
+                        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("femtovg image upload"),
+                            size: total,
+                            usage: wgpu::BufferUsages::COPY_SRC,
+                            mapped_at_creation: true,
+                        });
+                        let view = buffer.get_mapped_range_mut(..).map_err(|error| {
+                            crate::ErrorKind::GeneralError(format!("mapping an image upload: {error}"))
+                        })?;
+                        write(view);
+                        buffer.unmap();
+                        (buffer, 0)
+                    }
+                };
+                self.pending_copies.push(PendingCopy {
+                    buffer,
+                    offset,
+                    bytes_per_row: padded as u32,
+                    texture: texture.clone(),
+                    origin: [x as u32, y as u32],
+                    size: [size.width as u32, size.height as u32],
                 });
-                if staged.is_ok() {
-                    self.pending_copies.push(PendingCopy {
-                        buffer: slice.buffer().clone(),
-                        offset: slice.offset(),
-                        bytes_per_row: padded as u32,
-                        texture: texture.clone(),
-                        origin: [x as u32, y as u32],
-                        size: [size.width as u32, size.height as u32],
-                    });
-                    return Ok(());
-                }
+                return Ok(());
             }
             let mut target = texture.as_image_copy();
             target.origin.x = x as _;

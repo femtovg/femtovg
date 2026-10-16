@@ -26,8 +26,9 @@ All notable changes to this project will be documented in this file.
 - Fixed the WGPU backend drawing a frame with the vertices, uniforms and
   images of a later one when the later frame was flushed before the earlier
   one was submitted. A frame's command buffer now carries its own uploads,
-  images up to a megabyte included, through staging reused from frame to
-  frame instead of made for every upload.
+  in the order they were made, through staging reused from frame to frame
+  (an image upload larger than a megabyte has a buffer of its own); an
+  image with mipmaps is still uploaded at once.
 - The WGPU backend keeps the viewport uniform of each render target size
   from one flush to the next instead of creating it again for every pass
   on a target of another size, up to a thousand times a frame on pages
