@@ -7,9 +7,7 @@
 //! and every clip apply to it as they do to text. Skia's Graphite does the
 //! same for small paths (`RasterPathAtlas`, at most 256 of them a flush).
 
-use std::collections::HashMap;
-
-use super::mask::MaskKey;
+use super::mask::{MaskKey, WordMap};
 use crate::{text::Atlas, ImageId};
 
 /// A fill is thin when twice its area over its perimeter - its mean width -
@@ -56,10 +54,10 @@ pub(crate) struct FillMasks {
     enabled: bool,
     pub(crate) image: Option<ImageId>,
     packer: Atlas,
-    masks: HashMap<MaskKey, [u32; 2]>,
+    masks: WordMap<MaskKey, [u32; 2]>,
     /// The masks of requests asked for bit for bit as before: the fill rule,
     /// the path's words, the transform, the tolerances and the target's size.
-    asked: HashMap<Vec<u32>, PlacedMask>,
+    asked: WordMap<Vec<u32>, PlacedMask>,
     made: usize,
     /// Masks the frame found again, by request or by outline.
     found: usize,
@@ -89,8 +87,8 @@ impl Default for FillMasks {
             enabled: true,
             image: None,
             packer: Atlas::new(ATLAS_FIRST, ATLAS_FIRST),
-            masks: HashMap::new(),
-            asked: HashMap::new(),
+            masks: WordMap::default(),
+            asked: WordMap::default(),
             made: 0,
             found: 0,
             made_before: 0,

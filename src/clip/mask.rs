@@ -9,11 +9,59 @@
 use std::{
     cell::Cell,
     collections::HashMap,
+    hash::{BuildHasherDefault, Hasher},
     rc::{Rc, Weak},
 };
 
 use super::coverage::{self, Coverage, SUBPIXELS};
 use crate::{FillRule, ImageId};
+
+/// A map keyed by a mask's outline or a request for one: words, a few
+/// kilobytes of them, hashed eight bytes at a time as rustc's FxHasher does.
+/// std's SipHash took a twentieth of the cycles of a frame whose thin fills
+/// move; these keys come from the scene's paths, which nothing picks to
+/// collide.
+pub(crate) type WordMap<K, V> = HashMap<K, V, BuildHasherDefault<WordHasher>>;
+
+#[derive(Default)]
+pub(crate) struct WordHasher(u64);
+
+impl WordHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = self.0.wrapping_add(word).wrapping_mul(0xf135_7aea_2e62_a9c5);
+    }
+}
+
+impl Hasher for WordHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for word in &mut words {
+            self.add(u64::from_le_bytes(word.try_into().unwrap_or_default()));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut word = [0; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.add(u64::from(value));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0.rotate_left(26)
+    }
+}
 
 /// What identifies a mask: its size, the mask around it that it was cut by
 /// and where in it, and each child's fill rule and contours.
@@ -203,8 +251,8 @@ impl MaskImage {
 /// let go wait, a few of them, for a mask of their size to come.
 #[derive(Debug)]
 pub(crate) struct ClipMasks {
-    masks: HashMap<MaskKey, Rc<MaskImage>>,
-    asked: HashMap<Vec<u32>, Asked>,
+    masks: WordMap<MaskKey, Rc<MaskImage>>,
+    asked: WordMap<Vec<u32>, Asked>,
     bytes: usize,
     budget: usize,
     frame: u64,
@@ -252,8 +300,8 @@ fn bytes_of(size: [usize; 2]) -> usize {
 impl Default for ClipMasks {
     fn default() -> Self {
         Self {
-            masks: HashMap::new(),
-            asked: HashMap::new(),
+            masks: WordMap::default(),
+            asked: WordMap::default(),
             bytes: 0,
             budget: DEFAULT_MASK_BUDGET,
             frame: 0,
