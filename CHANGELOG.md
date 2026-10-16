@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- A cubic whose four points coincide is no longer halved ten times over
+  before it adds no point. Its chord is zero, so it never passed the
+  flatness test: each square corner of a `rounded_rect_varying` and every
+  curve under a transform that scales to nothing took 2,047 pieces, and
+  4,095 more when `Path::dashed` flattened it. A page of 300 tabs rounded
+  on top encoded in 3.4 ms a frame on an M4 Max, and now in 0.7 ms.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
