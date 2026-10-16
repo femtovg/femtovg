@@ -3063,3 +3063,39 @@ fn degenerate_contours_play_no_part_in_masks() {
     assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 1);
     assert_eq!(canvas.fill_masks.rasterized, 1, "found by its outline");
 }
+
+/// A mask that finds no room in the atlas at its largest leaves the room
+/// there is to the smaller masks after it in the frame; the atlas starts
+/// over once the frame is drawn.
+#[test]
+fn a_mask_that_finds_no_room_leaves_it_to_smaller_ones() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 64,
+        ..Default::default()
+    };
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let diagonal = |side: f32| {
+        let mut path = Path::new();
+        path.move_to(2.0, 2.2);
+        path.line_to(2.0 + side, 2.2 + side);
+        path.line_to(2.2 + side, 2.0 + side);
+        path.line_to(2.2, 2.0);
+        path.close();
+        path
+    };
+    let mut small = Path::new();
+    small.rect(40.0, 5.0, 20.0, 0.3);
+    // 31 x 31 in the corner, then 59 x 59, which no place in a 64 x 64
+    // atlas has room for beside it, then 22 x 3, which the corner's right
+    // has.
+    canvas.fill_path(&diagonal(28.0), &paint);
+    canvas.fill_path(&diagonal(56.0), &paint);
+    canvas.fill_path(&small, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 2);
+    assert_eq!(fills(&recorded.borrow()), 1, "the large one keeps its fringe");
+    assert_eq!(canvas.fill_masks.held(), 0, "started over");
+}

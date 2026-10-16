@@ -158,9 +158,10 @@ impl FillMasks {
     /// A place in the atlas for a new mask of `size`, if the frame has not
     /// made its share of masks and the atlas has room or can grow; a mask
     /// that does not fit an atlas at its largest marks it full, to start
-    /// over once the frame is drawn.
+    /// over once the frame is drawn, and the smaller masks after it still
+    /// take the room there is.
     pub(crate) fn place(&mut self, size: [usize; 2]) -> Placement {
-        if self.made >= MASKS_A_FRAME || self.full || size[0] > self.most || size[1] > self.most {
+        if self.made >= MASKS_A_FRAME || size[0] > self.most || size[1] > self.most {
             return Placement::Refused;
         }
         let fits = size[0] <= self.side && size[1] <= self.side;
