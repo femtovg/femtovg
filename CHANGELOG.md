@@ -3,21 +3,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Thin fills are drawn by their area: the fringe that antialiases each edge
-  gave a fill about a pixel of ink across however thin it was, so a sliver a
-  tenth of a pixel wide came out nearly eight times as dark as its area, a
-  0.3 px hairline nearly three times, and a mark at thumbnail size, whose
-  hairlines are thinner than its stems, up to a quarter too dark. A fill
-  whose mean width (twice its area over its perimeter) is under two pixels
-  and whose bounds span at most 65,536 pixels is rasterized on the CPU into
-  a mask in a shared atlas,
-  which grows from a quarter of a megabyte to four as frames need and shrinks
-  when a moving scene's masks need less, and drawn as a quad that reads the
-  mask as text reads its glyphs, with the fill's paint, scissor and clips, on
-  OpenGL and WGPU.
-  A mask is kept while its fill does not change or moves by whole pixels, at
-  most 256 are made a frame, and `Canvas::set_thin_fill_masks(false)` turns
-  them off.
+- Thin shapes are drawn with the coverage browsers give them: hairlines,
+  slivers and the fine details of icons, logos and illustrations came out too
+  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
+  logo 20 pixels tall twice as dark. On a test corpus of real-world SVGs, the
+  images such shapes reach have 22 to 99 % fewer pixels off the exact-area
+  reference: Mozilla's Firefox illustrations 65 % and its firefox.com art
+  22 %, the Google Pay mark 60 %, the SolidJS banner 99 % and the New York
+  Times marks 93 % (the logo at 50 px went from 23 % too dark to within 2 % of
+  Chromium). The WPT reftests `fill-path-subpixel-sliver-control` and
+  `hard-mask-figure-eight` now match Chromium to within 2 pixels. Render time
+  on those images stays within 2 % on a desktop, and thin shapes that move
+  every frame cost about 3 % more frame time on an iPhone.
+  `Canvas::set_thin_fill_masks(false)` turns this off.
 - Fixed even-odd clips letting paint through a hole that comes within a pixel
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. The
