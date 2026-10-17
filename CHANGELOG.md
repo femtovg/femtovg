@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed even-odd clips letting paint through a hole that comes within a pixel
+  of the shape around it and is wound the same way: a clip to a ring thinner
+  than a pixel painted nearly a third more than the ring's area. At half size,
+  the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
+  and the exact-area reference pixel for pixel, where 124 and 116 of its
+  pixels were off, and comes nearer Firefox and Chromium (181 to 118 and 214
+  to 185 pixels off).
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
