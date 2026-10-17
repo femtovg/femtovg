@@ -311,8 +311,9 @@ where
     /// over its perimeter under one, its bounds spanning at most 65,536
     /// pixels - is drawn through a coverage mask, as it is by default: the
     /// fringes of its edges would over-ink it. The masks share an atlas that
-    /// grows from a quarter of a megabyte to four as frames need, and at most
-    /// 256 are made a frame; past either a thin fill is filled as any other.
+    /// grows from a quarter of a megabyte to four as frames need and shrinks
+    /// when a moving scene's masks need less, and at most 256 are made a
+    /// frame; past either a thin fill is filled as any other.
     pub fn set_thin_fill_masks(&mut self, enabled: bool) {
         self.fill_masks.set_enabled(enabled);
     }
@@ -601,11 +602,11 @@ where
         let [width, height] = self.fill_masks.size();
         let info = ImageInfo::new(ImageFlags::NEAREST, width, height, PixelFormat::Gray8);
         let image = self.images.alloc(&mut self.renderer, info).ok()?;
-        // An atlas that grew keeps the pixels of the one before.
-        if self.fill_masks.pixels.len() != width * height {
-            self.fill_masks.pixels = vec![0; width * height];
-        }
-        let source = ImageSource::Gray(imgref::Img::new(self.fill_masks.pixels.as_gray(), width, height));
+        // Whole, the rows kept and blank ones below them: an atlas that grew
+        // keeps the masks of the one before.
+        let mut whole = vec![0; width * height];
+        whole[..self.fill_masks.pixels.len()].copy_from_slice(&self.fill_masks.pixels);
+        let source = ImageSource::Gray(imgref::Img::new(whole.as_gray(), width, height));
         if self.images.update(&mut self.renderer, image, source, 0, 0).is_err() {
             self.images.remove(&mut self.renderer, image);
             return None;
@@ -3202,6 +3203,50 @@ fn the_atlas_grows_only_the_way_its_masks_need() {
         })
         .collect();
     assert_eq!(grown(600, 700, &strips), [512, 1024]);
+}
+
+/// The atlas keeps its rows on the CPU only down to its lowest mask: a
+/// sliver three rows tall in an atlas 1024 wide keeps three rows of it.
+#[test]
+fn the_atlas_keeps_only_the_rows_its_masks_reach() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let mut sliver = Path::new();
+    sliver.rect(10.0, 10.0, 700.0, 0.4);
+    canvas.fill_path(&sliver, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    let [width, _] = canvas.fill_masks.size();
+    assert_eq!(width, 1024);
+    assert_eq!(canvas.fill_masks.pixels.len(), 3 * width);
+}
+
+/// An atlas a long sliver made wide is made small again once the masks after
+/// it have fitted a smaller one at eight start-overs in a row, not before:
+/// here a short sliver in motion, whose atlas starts over every other frame.
+#[test]
+fn the_atlas_is_made_smaller_once_its_masks_stay_small() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(2000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut long = Path::new();
+    long.rect(10.0, 10.0, 1500.0, 0.4);
+    canvas.fill_path(&long, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.size(), [2048, 512]);
+    let deleted = canvas.renderer.image_deletion_count;
+    for frame in 0..30 {
+        canvas.fill_path(&thin_strip(frame as f32 * 0.37, 0.3), &paint);
+        canvas.flush_to_output(());
+        if frame == 10 {
+            assert_eq!(canvas.fill_masks.size(), [2048, 512], "five start-overs are not enough");
+        }
+    }
+    assert_eq!(canvas.fill_masks.size(), [512, 512]);
+    assert_eq!(
+        canvas.renderer.image_deletion_count,
+        deleted + 1,
+        "the wide atlas freed"
+    );
 }
 
 /// A mask taller than it is wide is kept transposed, and its quad reads it

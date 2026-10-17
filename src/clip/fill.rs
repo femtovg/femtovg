@@ -33,6 +33,15 @@ const MASKS_A_FRAME: usize = 256;
 /// The most requests remembered bit for bit.
 const ASKED_KEPT: usize = 4096;
 
+/// Start-overs in a row whose masks would have fitted a smaller atlas before
+/// it is made smaller: one sliver on its way through the scene does not keep
+/// it long, nor does a scene whose masks alternate make and remake it.
+const SMALLER_AFTER: usize = 8;
+
+/// The most room kept between frames for the rows of an upload: more than a
+/// frame's masks in motion at 1080p take, less than an atlas's first upload.
+const UPLOAD_KEPT: usize = 1 << 18;
+
 /// What the atlas has for a new mask.
 pub(crate) enum Placement {
     At([u32; 2]),
@@ -76,11 +85,16 @@ pub(crate) struct FillMasks {
     most: usize,
     // The images of atlases outgrown this frame, freed once it is drawn.
     retired: Vec<ImageId>,
+    // How far right and down the masks placed since the atlas started reach.
+    reach: [usize; 2],
+    // Start-overs in a row that needed a smaller atlas, and the most of it.
+    smaller: (usize, [usize; 2]),
     coverage: super::coverage::Coverage,
     // A mask's pixels on their way into the atlas, kept for the next.
     scratch: Vec<u8>,
-    /// The atlas's pixels, which the masks a frame makes are written into
-    /// and uploaded from once, as the rectangle they span, when it is drawn.
+    /// The atlas's rows down to the lowest mask, which the masks a frame
+    /// makes are written into and uploaded from once, as the rectangle they
+    /// span, when it is drawn: the rows below hold none, and are not kept.
     pub(crate) pixels: Vec<u8>,
     /// That rectangle, `[x0, y0, x1, y1]`, and its rows side by side.
     dirty: Option<[usize; 4]>,
@@ -106,6 +120,8 @@ impl Default for FillMasks {
             size: [ATLAS_FIRST; 2],
             most: ATLAS_MOST,
             retired: Vec::new(),
+            reach: [0; 2],
+            smaller: (0, [0; 2]),
             coverage: Default::default(),
             scratch: Vec::new(),
             pixels: Vec::new(),
@@ -180,6 +196,7 @@ impl FillMasks {
             return Placement::Refused;
         };
         self.made += 1;
+        self.reach = [self.reach[0].max(x + size[0]), self.reach[1].max(y + size[1])];
         #[cfg(test)]
         {
             self.rasterized += 1;
@@ -208,17 +225,20 @@ impl FillMasks {
             let side = &mut new[usize::from(taller)];
             *side = (2 * *side).min(self.most);
         }
-        let mut pixels = vec![0; new[0] * new[1]];
         if self.masks.is_empty() {
             self.packer = Atlas::new(new[0], new[1]);
+            self.pixels.clear();
         } else {
-            for (row, line) in self.pixels.chunks_exact(old[0]).enumerate() {
-                pixels[row * new[0]..][..old[0]].copy_from_slice(line);
+            if new[0] != old[0] {
+                let mut pixels = vec![0; new[0] * self.pixels.len() / old[0]];
+                for (row, line) in self.pixels.chunks_exact(old[0]).enumerate() {
+                    pixels[row * new[0]..][..old[0]].copy_from_slice(line);
+                }
+                self.pixels = pixels;
             }
             // The masks held where they lie, the new room beside and below them.
             self.packer.expand(new[0], new[1]);
         }
-        self.pixels = pixels;
         self.dirty = None;
         self.size = new;
         self.retired.extend(self.image.take());
@@ -236,6 +256,9 @@ impl FillMasks {
     fn keep(&mut self, key: MaskKey, at: [u32; 2], pixels: &[u8]) {
         let [width, height] = key.size();
         let [x, y] = at.map(|side| side as usize);
+        if self.pixels.len() < (y + height) * self.size[0] {
+            self.pixels.resize((y + height) * self.size[0], 0);
+        }
         for (row, line) in pixels.chunks_exact(width).enumerate() {
             let start = (y + row) * self.size[0] + x;
             self.pixels[start..start + width].copy_from_slice(line);
@@ -283,12 +306,34 @@ impl FillMasks {
         self.made_before = self.made;
         self.made = 0;
         self.found = 0;
+        if self.upload.capacity() > UPLOAD_KEPT {
+            self.upload = Vec::new();
+        }
         if self.full {
             self.full = false;
             self.made_before = 0;
+            let needed = self
+                .reach
+                .map(|side| side.next_power_of_two().max(ATLAS_FIRST).min(self.most));
+            let (count, most) = self.smaller;
+            self.smaller = if needed[0] < self.size[0] || needed[1] < self.size[1] {
+                (count + 1, [most[0].max(needed[0]), most[1].max(needed[1])])
+            } else {
+                (0, [0; 2])
+            };
+            if self.smaller.0 >= SMALLER_AFTER {
+                let size = [self.smaller.1[0].min(self.size[0]), self.smaller.1[1].min(self.size[1])];
+                self.smaller = (0, [0; 2]);
+                self.size = size;
+                self.retired.extend(self.image.take());
+                self.pixels = Vec::new();
+            }
             self.packer.reset(self.size[0], self.size[1]);
             self.masks.clear();
             self.asked.clear();
+            self.reach = [0; 2];
+            self.pixels.clear();
+            self.dirty = None;
         }
         std::mem::take(&mut self.retired)
     }
