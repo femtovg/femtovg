@@ -102,8 +102,15 @@ fn a_square_on_a_retraced_tail_still_fills() {
             p.line_to(1.5, 0.5);
             p.close();
         });
-        let centre = alpha(&px, scale as u32, scale as u32);
-        assert!(centre >= 0.5, "the square's centre at {scale}x: alpha {centre:.2}");
+        // The square's pixels hold its area: at 1x a quarter of each of four.
+        let side = (1.5 * scale).ceil() as u32 + 1;
+        let px = &px;
+        let square: f64 = (0..side).flat_map(|y| (0..side).map(move |x| alpha(px, x, y))).sum();
+        let area = f64::from(scale * scale);
+        assert!(
+            square >= 0.9 * area,
+            "the square at {scale}x: {square:.2} px of ink, its area {area:.2}"
+        );
     }
 }
 

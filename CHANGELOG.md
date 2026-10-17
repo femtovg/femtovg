@@ -3,6 +3,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Thin shapes are drawn with the coverage browsers give them: hairlines,
+  slivers and the fine details of icons, logos and illustrations came out too
+  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
+  logo 20 pixels tall twice as dark.
+- On a test corpus of real-world SVGs, images have 37-99% fewer pixels that don't
+  match Firefox, Chromium, and WebKit's reference; by collection: Mozilla's Firefox
+  illustrations improved 65%, the GooglePay mark 60%, the SolidJS banner 99,
+  the New York Times marks now matches all browsers' ink within 2 %. The WPT
+  reftests `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight`
+  now match WebKit and Chromium to within 2 pixels and Firefox to within 0 and
+  52, from 225 and 142. Render time on those images stays within 2 % on a
+  desktop, and thin shapes that move every frame cost about 3 % more frame
+  time on an iPhone XS. `Canvas::set_thin_fill_masks(false)` turns this off.
+- Fixed even-odd clips letting paint through a hole that comes within a pixel
+  of the shape around it and is wound the same way: a clip to a ring thinner
+  than a pixel painted nearly a third more than the ring's area. At half size,
+  the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
+  and the exact-area reference pixel for pixel, where 124 and 116 of its
+  pixels were off, and comes nearer Firefox and Chromium (181 to 118 and 214
+  to 185 pixels off).
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):

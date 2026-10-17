@@ -442,6 +442,8 @@ pub struct Canvas<T: Renderer> {
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
     // The coverage masks of the clips that are no box.
     clip_masks: ClipMasks,
+    // The coverage masks of thin fills.
+    fill_masks: FillMasks,
     // The scissor and clip shape the last draw met, as the boxes they make.
     last_clip_boxes: Option<ClipBoxes>,
     // Whether the last draw carried a clip shape: the shader variant the
@@ -517,6 +519,7 @@ where
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
             clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -561,6 +564,7 @@ where
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
             clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -683,6 +687,7 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush_to_output(&mut self, output: impl Into<T::RenderOutput>) -> T::CommandBuffer {
+        self.upload_fill_masks();
         let command_buffer = self.renderer.render(
             output,
             &mut self.images,
@@ -691,6 +696,9 @@ where
         );
         self.verts.clear();
         for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
         self.release_pending_images();
@@ -1306,6 +1314,19 @@ where
 
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
+
+        // A thin fill, which the fringe would over-ink, is drawn through a
+        // coverage mask instead, unless its operation changes
+        // what coverage does not reach: it would change the whole quad.
+        if anti_alias && self.fill_masks.enabled() && self.state().composite_operation.takes_coverage() {
+            let bounds = path_cache.bounds;
+            if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
+                && clip::is_thin(path_cache.mean_width(fill_rule))
+                && self.fill_through_mask(path, &mut path_cache, &transform, &paint_flavor, fill_rule)
+            {
+                return;
+            }
+        }
 
         let (clip, rect) = self.fill_clip(
             || path_cache.bounds,
@@ -2502,10 +2523,14 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush(&mut self) {
+        self.upload_fill_masks();
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
         for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
         self.release_pending_images();
@@ -3158,14 +3183,21 @@ fn fill_text_selects_atlas_or_path_rendering() {
         // Atlas rendering blits glyphs from a glyph texture; outline rendering only
         // ever emits plain path fills (note: atlas cache misses also emit path fills
         // while rasterizing into the atlas, so the glyph texture is the reliable
-        // discriminator, not the absence of fills).
-        let used_atlas = commands.iter().any(|c| !matches!(c.glyph_texture, GlyphTexture::None));
-        let filled_outlines = commands.iter().any(|c| {
-            matches!(c.glyph_texture, GlyphTexture::None)
-                && matches!(
-                    c.cmd_type,
-                    CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
-                )
+        // discriminator, not the absence of fills). A thin outline is filled through
+        // the atlas of fill masks, which is no glyph atlas.
+        let fill_masks = canvas.fill_masks.image;
+        let used_atlas = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => false,
+            GlyphTexture::AlphaMask(id) => Some(id) != fill_masks,
+            GlyphTexture::ColorTexture(_) => true,
+        });
+        let filled_outlines = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => matches!(
+                c.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ),
+            GlyphTexture::AlphaMask(id) => Some(id) == fill_masks,
+            GlyphTexture::ColorTexture(_) => false,
         });
 
         match expect {

@@ -8,8 +8,11 @@ use crate::path::PathCache;
 use rgb::FromSlice;
 
 mod coverage;
+mod fill;
 mod mask;
 mod shape;
+pub(crate) use fill::{is_thin, FillMasks, THIN_FILL_SPAN};
+use fill::{PlacedMask, Placement};
 use mask::MaskOutline;
 pub(crate) use mask::{ClipMasks, MaskImage};
 pub(crate) use shape::{ClipCoverage, RectFill, RoundedBox};
@@ -304,6 +307,17 @@ where
         self.clip_masks.set_budget(bytes);
     }
 
+    /// Whether an antialiased thin fill - twice its area over its perimeter
+    /// under two pixels, its bounds spanning at most 65,536 - is drawn
+    /// through a coverage mask, as it is by default: the fringes of its
+    /// edges would over-ink it. The masks share an atlas that
+    /// grows from a quarter of a megabyte to four as frames need and shrinks
+    /// when a moving scene's masks need less, and at most 256 are made a
+    /// frame; past either a thin fill is filled as any other.
+    pub fn set_thin_fill_masks(&mut self, enabled: bool) {
+        self.fill_masks.set_enabled(enabled);
+    }
+
     /// Intersects the stencil clip plane of the current render target with
     /// `geometry`, the winding fans of a clip, under `fill_rule`.
     fn clip_to_stencil(&mut self, geometry: Rc<ClipGeometry>, bounds: Bounds, fill_rule: FillRule) {
@@ -368,8 +382,12 @@ where
                 within[3].min(at[1] + parent_height as i32),
             ];
         }
-        // The clip bit for bit: asked for as before, it has its mask.
-        let mut request = vec![paths.len() as u32];
+        // The clip bit for bit: asked for as before, it has its mask. It is
+        // built where the last one was, so that one found again allocates
+        // nothing.
+        let mut request = std::mem::take(&mut self.clip_masks.request);
+        request.clear();
+        request.push(paths.len() as u32);
         for &(path, fill_rule) in paths {
             request.push(u32::from(fill_rule == FillRule::EvenOdd));
             path.words(&mut request);
@@ -381,6 +399,7 @@ where
             request.extend([parent.id as u32, (parent.id >> 32) as u32, at[0] as u32, at[1] as u32]);
         }
         if let Some((mask, origin)) = self.clip_masks.asked(&request) {
+            self.clip_masks.request = request;
             self.clip_stack.push(ClipEntry {
                 target,
                 kind: ClipKind::Mask { mask, origin },
@@ -388,10 +407,13 @@ where
             self.state_mut().clip_depth = self.clip_stack.len();
             return true;
         }
+        // A new request is remembered by a copy, the buffer kept for the next.
+        let remembered = request.clone();
+        self.clip_masks.request = request;
         let mut outline = MaskOutline::default();
         for &(path, fill_rule) in paths {
-            let path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
-            outline.child(fill_rule, path_cache.outlines());
+            let mut path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
+            outline.child(fill_rule, path_cache.outlines(fill_rule));
         }
         let rect = outline.rect(within);
         let origin = [rect[0], rect[1]];
@@ -450,13 +472,163 @@ where
                 self.clip_masks.keep(key, image, pixels)
             }
         };
-        self.clip_masks.remember(request, &mask, origin);
+        self.clip_masks.remember(remembered, &mask, origin);
         self.clip_stack.push(ClipEntry {
             target,
             kind: ClipKind::Mask { mask, origin },
         });
         self.state_mut().clip_depth = self.clip_stack.len();
         true
+    }
+
+    /// Draws a thin fill (see [`fill`]) as a quad over its
+    /// coverage mask in the atlas of fill masks. `false` - the frame has made
+    /// its share of masks, or the atlas has no room - leaves the fill to its
+    /// fringe.
+    pub(crate) fn fill_through_mask(
+        &mut self,
+        path: &Path,
+        path_cache: &mut PathCache,
+        transform: &Transform2D,
+        paint_flavor: &PaintFlavor,
+        fill_rule: FillRule,
+    ) -> bool {
+        let (width, height) = self.render_target_size();
+        let within = [0, 0, width as i32, height as i32];
+        let mut request = std::mem::take(&mut self.fill_masks.request);
+        request.clear();
+        request.push(u32::from(fill_rule == FillRule::EvenOdd));
+        path.words(&mut request);
+        request.extend(transform.0.map(f32::to_bits));
+        request.extend([self.tess_tol.to_bits(), self.dist_tol.to_bits()]);
+        request.extend(within.map(|side| side as u32));
+        let mut mask = self.fill_masks.asked(&request);
+        if mask.is_none() {
+            mask = self.fill_mask(path_cache, fill_rule, within);
+            if let Some(mask) = mask {
+                self.fill_masks.remember(request.clone(), mask);
+            }
+        }
+        self.fill_masks.request = request;
+        let (Some(mask), Some(image)) = (mask, self.fill_masks.image) else {
+            return false;
+        };
+        // The quad covers the mask's pixels exactly, each fragment reading
+        // the texel of its own pixel.
+        let [x0, y0, x1, y1] = mask.rect.map(|side| side as f32);
+        let [width, height] = self.fill_masks.size().map(|side| side as f32);
+        let [s0, t0] = [mask.atlas[0] as f32 / width, mask.atlas[1] as f32 / height];
+        // A transposed mask runs down the atlas where the quad runs across.
+        let [across, down] = if mask.transposed {
+            [y1 - y0, x1 - x0]
+        } else {
+            [x1 - x0, y1 - y0]
+        };
+        let (s1, t1) = (s0 + across / width, t0 + down / height);
+        let ((s_right, t_right), (s_below, t_below)) = if mask.transposed {
+            ((s0, t1), (s1, t0))
+        } else {
+            ((s1, t0), (s0, t1))
+        };
+        let verts = [
+            Vertex::new(x0, y0, s0, t0),
+            Vertex::new(x1, y1, s1, t1),
+            Vertex::new(x1, y0, s_right, t_right),
+            Vertex::new(x0, y0, s0, t0),
+            Vertex::new(x0, y1, s_below, t_below),
+            Vertex::new(x1, y1, s1, t1),
+        ];
+        self.render_triangles(&verts, transform, paint_flavor, GlyphTexture::AlphaMask(image));
+        true
+    }
+
+    /// The mask of a fill not asked for before: found by its outline, or
+    /// made where the atlas has room for it. The atlas is made once a mask
+    /// has its place, as large as the mask needs: a first thin fill that is
+    /// refused, or larger than the first atlas, makes none to no purpose.
+    fn fill_mask(&mut self, path_cache: &mut PathCache, fill_rule: FillRule, within: [i32; 4]) -> Option<PlacedMask> {
+        // The fill's own outline: flattened again 64 times finer, as a
+        // clip's is, the corpus's thin fills came only 0.7 % nearer.
+        let mut outline = MaskOutline::default();
+        outline.child(fill_rule, path_cache.outlines(fill_rule));
+        let rect = outline.rect(within);
+        // A mask taller than it is wide is rasterized and kept transposed, so
+        // that the rows written, copied and uploaded one at a time are long.
+        let transposed = rect[3] - rect[1] > rect[2] - rect[0];
+        let key = if transposed {
+            outline.transpose();
+            outline.key([rect[1], rect[0], rect[3], rect[2]], None)
+        } else {
+            outline.key(rect, None)
+        };
+        if let Some(atlas) = self.fill_masks.get(&key) {
+            return Some(PlacedMask {
+                atlas,
+                rect,
+                transposed,
+            });
+        }
+        if self.fill_masks.image.is_none() {
+            self.fill_masks.limit(self.renderer.max_texture_size());
+        }
+        let atlas = loop {
+            match self.fill_masks.place(key.size()) {
+                Placement::At(at) => break at,
+                Placement::Grow => {
+                    // The masks made this frame go to the image their quads
+                    // read before it is let go.
+                    self.upload_fill_masks();
+                    self.fill_masks.grow(key.size());
+                }
+                Placement::Refused => return None,
+            }
+        };
+        self.fill_mask_atlas()?;
+        self.fill_masks.make(key, atlas);
+        Some(PlacedMask {
+            atlas,
+            rect,
+            transposed,
+        })
+    }
+
+    /// The atlas of fill masks, made when the first mask has its place in
+    /// it and uploaded whole, as a clip mask's image is, so that no backend
+    /// clears it before each use.
+    fn fill_mask_atlas(&mut self) -> Option<ImageId> {
+        if let Some(image) = self.fill_masks.image {
+            return Some(image);
+        }
+        let [width, height] = self.fill_masks.size();
+        let info = ImageInfo::new(ImageFlags::NEAREST, width, height, PixelFormat::Gray8);
+        let image = self.images.alloc(&mut self.renderer, info).ok()?;
+        // Whole, the rows kept and blank ones below them: an atlas that grew
+        // keeps the masks of the one before.
+        let mut whole = vec![0; width * height];
+        whole[..self.fill_masks.pixels.len()].copy_from_slice(&self.fill_masks.pixels);
+        let source = ImageSource::Gray(imgref::Img::new(whole.as_gray(), width, height));
+        if self.images.update(&mut self.renderer, image, source, 0, 0).is_err() {
+            self.images.remove(&mut self.renderer, image);
+            return None;
+        }
+        self.fill_masks.image = Some(image);
+        Some(image)
+    }
+
+    /// Uploads the fill masks made since the last flush: the rectangle they
+    /// span, in one update, before the commands that read them are drawn.
+    pub(crate) fn upload_fill_masks(&mut self) {
+        let Some(image) = self.fill_masks.image else {
+            return;
+        };
+        let Some(([x, y], [width, height], rows)) = self.fill_masks.take_upload() else {
+            return;
+        };
+        let source = ImageSource::Gray(imgref::Img::new(rows.as_gray(), width, height));
+        // A failed upload leaves the masks blank; the atlas starts over.
+        if self.images.update(&mut self.renderer, image, source, x, y).is_err() {
+            self.fill_masks.mark_full();
+        }
     }
 
     /// Takes the clip as a shape for the fragment shader, if `path` outlines
@@ -2676,4 +2848,478 @@ fn a_draw_coverage_cannot_bound_takes_a_mask_whole() {
     assert_eq!(stencil_clip_commands(&commands), 0);
     let hard: Vec<bool> = drawn_masks(&commands).iter().map(|mask| mask.unwrap().hard).collect();
     assert_eq!(hard, [false, true, false]);
+}
+
+/// A ring thinner than a pixel, both circles wound alike, covers the ring's
+/// area under even-odd, as a clip's mask and as a thin fill's: added up
+/// before the rule folds it, the winding counted the hole into each pixel
+/// the ring crosses.
+#[test]
+fn an_even_odd_ring_wound_alike_holds_its_area() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut ring = Path::new();
+    ring.circle(50.0, 50.0, 30.0);
+    ring.circle(50.0, 50.0, 29.6);
+    let area = std::f32::consts::PI * (30.0f32.powi(2) - 29.6f32.powi(2));
+    let ink = |pixels: &[u8]| pixels.iter().map(|&p| f32::from(p) / 255.0).sum::<f32>();
+
+    canvas.fill_path(&ring, &Paint::color(Color::black()).with_fill_rule(FillRule::EvenOdd));
+    let filled = ink(&canvas.fill_masks.pixels);
+    assert!(
+        (filled - area).abs() < 0.02 * area,
+        "the fill's mask: {filled:.1} for {area:.1}"
+    );
+
+    canvas.clip_path(&ring, FillRule::EvenOdd);
+    let ClipKind::Mask { mask, .. } = &canvas.clip_stack[0].kind else {
+        panic!("a ring is a mask");
+    };
+    let clipped = ink(&mask.pixels);
+    assert!(
+        (clipped - area).abs() < 0.02 * area,
+        "the clip's mask: {clipped:.1} for {area:.1}"
+    );
+}
+
+/// A strip `width` across along (10, 10) to (60, 40), shifted by `dx`.
+#[cfg(test)]
+fn thin_strip(dx: f32, width: f32) -> Path {
+    let (x0, y0, x1, y1) = (10.0 + dx, 10.0, 60.0 + dx, 40.0);
+    let length = f32::hypot(x1 - x0, y1 - y0);
+    let (nx, ny) = (-(y1 - y0) / length * width / 2.0, (x1 - x0) / length * width / 2.0);
+    let mut path = Path::new();
+    path.move_to(x0 + nx, y0 + ny);
+    path.line_to(x1 + nx, y1 + ny);
+    path.line_to(x1 - nx, y1 - ny);
+    path.line_to(x0 - nx, y0 - ny);
+    path.close();
+    path
+}
+
+#[cfg(test)]
+fn mask_quads(commands: &[Command], atlas: Option<ImageId>) -> usize {
+    commands
+        .iter()
+        .filter(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(id) if Some(id) == atlas))
+        .count()
+}
+
+/// A thin fill that has not changed, or has moved by whole pixels, finds its
+/// mask again: the second frame rasterizes nothing.
+#[test]
+fn a_thin_fill_is_rasterized_once() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    for dx in [0.0, 0.0, 3.0] {
+        canvas.fill_path(&thin_strip(dx, 0.3), &paint);
+        canvas.flush_to_output(());
+        assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 1);
+    }
+    assert_eq!(canvas.fill_masks.rasterized, 1);
+
+    // A fraction of a pixel over is another mask.
+    canvas.fill_path(&thin_strip(0.5, 0.3), &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.rasterized, 2);
+}
+
+/// At most 256 masks are made a frame; past them a thin fill is filled.
+#[test]
+fn a_frame_makes_its_share_of_masks() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    // Each strip a tenth of a pixel longer than the last: its own outline.
+    for i in 0..300 {
+        let mut strip = Path::new();
+        strip.move_to(10.0, 10.0);
+        strip.line_to(30.0 + i as f32 * 0.1, 10.2);
+        strip.line_to(30.0 + i as f32 * 0.1, 10.5);
+        strip.line_to(10.0, 10.3);
+        strip.close();
+        canvas.fill_path(&strip, &paint);
+    }
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    assert_eq!(mask_quads(&commands, canvas.fill_masks.image), 256);
+    assert_eq!(fills(&commands), 44);
+}
+
+/// The atlas starts small and doubles when a mask finds no room in it, in
+/// the frame: the masks it held keep their places, the quads drawn before
+/// read the image it outgrew, freed once the frame is drawn, and the next
+/// frame finds every mask in the new one.
+#[test]
+fn the_atlas_grows_when_a_mask_finds_no_room() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut small = Path::new();
+    small.rect(10.0, 50.0, 40.0, 0.4);
+    let mut bar = Path::new();
+    bar.rect(10.0, 10.0, 700.0, 0.4);
+    let images = |commands: &[Command]| -> Vec<ImageId> {
+        commands
+            .iter()
+            .filter_map(|command| match command.glyph_texture {
+                GlyphTexture::AlphaMask(id) => Some(id),
+                _ => None,
+            })
+            .collect()
+    };
+    let deleted = canvas.renderer.image_deletion_count;
+    canvas.fill_path(&small, &paint);
+    canvas.fill_path(&bar, &paint);
+    canvas.flush_to_output(());
+    let atlas = canvas.fill_masks.image;
+    let drawn = images(&recorded.borrow());
+    assert_eq!(drawn.len(), 2, "both through masks");
+    assert_ne!(Some(drawn[0]), atlas, "the first quad reads the atlas outgrown");
+    assert_eq!(Some(drawn[1]), atlas);
+    assert_eq!(canvas.fill_masks.size(), [1024, 512], "wider, not taller");
+    assert_eq!(
+        canvas.renderer.image_deletion_count,
+        deleted + 1,
+        "the outgrown atlas freed"
+    );
+
+    canvas.fill_path(&small, &paint);
+    canvas.fill_path(&bar, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(images(&recorded.borrow()), [atlas.unwrap(); 2]);
+    assert_eq!(canvas.fill_masks.rasterized, 2, "nothing made again");
+}
+
+/// The atlas stays within the backend's largest image: past it a mask keeps
+/// its fringe, and the atlas grows only as far as the backend allows.
+#[test]
+fn the_atlas_stays_within_the_backends_largest_image() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 600,
+        ..Default::default()
+    };
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut too_wide = Path::new();
+    too_wide.rect(10.0, 10.0, 700.0, 0.4);
+    let mut wide = Path::new();
+    wide.rect(10.0, 50.0, 560.0, 0.4);
+    canvas.fill_path(&too_wide, &paint);
+    canvas.fill_path(&wide, &paint);
+    canvas.flush_to_output(());
+    let image = canvas.fill_masks.image;
+    assert_eq!(mask_quads(&recorded.borrow(), image), 1, "the wide one only");
+    assert_eq!(canvas.fill_masks.size(), [600, 512]);
+}
+
+/// A scene in motion makes masks that no later frame asks for: the atlas
+/// starts over after each such frame instead of filling with them, and a
+/// still one keeps its mask.
+#[test]
+fn a_moving_thin_fill_does_not_fill_the_atlas() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    for frame in 0..10 {
+        canvas.fill_path(&thin_strip(frame as f32 * 0.37, 0.3), &paint);
+        canvas.flush_to_output(());
+    }
+    assert_eq!(canvas.fill_masks.held(), 0);
+    for _ in 0..3 {
+        canvas.fill_path(&thin_strip(0.0, 0.3), &paint);
+        canvas.flush_to_output(());
+    }
+    assert_eq!(canvas.fill_masks.held(), 1);
+}
+
+#[cfg(test)]
+fn fills(commands: &[Command]) -> usize {
+    commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            )
+        })
+        .count()
+}
+
+/// A degenerate contour, of which a fill draws nothing, plays no part in a
+/// mask: a path of one alone makes no atlas, one beside a square does not
+/// make the square thin, and one beside a thin fill leaves its outline, and
+/// its mask, as they were.
+#[test]
+fn degenerate_contours_play_no_part_in_masks() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+
+    // #341's bare collinear contour.
+    let mut line = Path::new();
+    line.move_to(0.2, 0.2);
+    line.line_to(0.2, 1.8);
+    line.close();
+    canvas.fill_path(&line, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.image, None);
+    assert_eq!(canvas.renderer.image_allocation_attempts, 0);
+
+    // A square 20 px wide beside a line traced 900 px back and forth, whose
+    // perimeter would have made the square's mean width 0.8.
+    let mut square = Path::new();
+    square.rect(10.0, 10.0, 20.0, 20.0);
+    square.move_to(0.0, 50.0);
+    for _ in 0..5 {
+        square.line_to(90.0, 50.0);
+        square.line_to(0.0, 50.0);
+    }
+    square.close();
+    canvas.fill_path(&square, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.image, None, "the square keeps its fringe");
+    assert_eq!(fills(&recorded.borrow()), 1);
+
+    canvas.fill_path(&thin_strip(0.0, 0.3), &paint);
+    canvas.flush_to_output(());
+    let mut beside = thin_strip(0.0, 0.3);
+    beside.move_to(70.0, 80.0);
+    beside.line_to(90.0, 80.0);
+    beside.close();
+    canvas.fill_path(&beside, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 1);
+    assert_eq!(canvas.fill_masks.rasterized, 1, "found by its outline");
+}
+
+/// A mask that finds no room in the atlas at its largest leaves the room
+/// there is to the smaller masks after it in the frame; the atlas starts
+/// over once the frame is drawn.
+#[test]
+fn a_mask_that_finds_no_room_leaves_it_to_smaller_ones() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 64,
+        ..Default::default()
+    };
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let diagonal = |side: f32| {
+        let mut path = Path::new();
+        path.move_to(2.0, 2.2);
+        path.line_to(2.0 + side, 2.2 + side);
+        path.line_to(2.2 + side, 2.0 + side);
+        path.line_to(2.2, 2.0);
+        path.close();
+        path
+    };
+    let mut small = Path::new();
+    small.rect(40.0, 5.0, 20.0, 0.3);
+    // 31 x 31 in the corner, then 59 x 59, which no place in a 64 x 64
+    // atlas has room for beside it, then 22 x 3, which the corner's right
+    // has.
+    canvas.fill_path(&diagonal(28.0), &paint);
+    canvas.fill_path(&diagonal(56.0), &paint);
+    canvas.fill_path(&small, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 2);
+    assert_eq!(fills(&recorded.borrow()), 1, "the large one keeps its fringe");
+    assert_eq!(canvas.fill_masks.held(), 0, "started over");
+}
+
+/// The atlas is made once a mask has its place in it, as large as that
+/// mask needs: a first thin fill that is refused makes none, and one wider
+/// than the first atlas makes only the one it needs.
+#[test]
+fn the_atlas_is_made_for_the_first_mask_placed() {
+    let renderer = RecordingRenderer {
+        max_texture_size: 600,
+        ..Default::default()
+    };
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut too_wide = Path::new();
+    too_wide.rect(10.0, 10.0, 700.0, 0.4);
+    canvas.fill_path(&too_wide, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.renderer.image_allocation_attempts, 0, "refused, no atlas");
+
+    let mut wide = Path::new();
+    wide.rect(10.0, 50.0, 560.0, 0.4);
+    canvas.fill_path(&wide, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.renderer.image_allocation_attempts, 1);
+    assert_eq!(canvas.renderer.image_deletion_count, 0, "none made to be let go");
+    assert_eq!(canvas.fill_masks.size(), [600, 512]);
+}
+
+/// The atlas grows only the way its masks need: a long sliver makes it wide,
+/// and so does a tall one, kept transposed; masks that fit it but find no
+/// room lengthen its shorter side.
+#[test]
+fn the_atlas_grows_only_the_way_its_masks_need() {
+    let paint = Paint::color(Color::black());
+    let grown = |width: u32, height: u32, paths: &[Path]| {
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(width, height, 1.0);
+        for path in paths {
+            canvas.fill_path(path, &paint);
+        }
+        canvas.flush_to_output(());
+        canvas.fill_masks.size()
+    };
+    let mut wide = Path::new();
+    wide.rect(10.0, 10.0, 1500.0, 0.4);
+    assert_eq!(grown(2000, 100, &[wide]), [2048, 512]);
+    let mut tall = Path::new();
+    tall.rect(10.0, 10.0, 0.4, 1500.0);
+    assert_eq!(grown(100, 2000, &[tall]), [2048, 512]);
+    // Strips 500 x 100 across, each a pixel shorter than the last, so that
+    // each is a mask of its own: four fit 512 x 512, the fifth finds no room.
+    let strips: Vec<Path> = (0..6)
+        .map(|i| {
+            let (y, end) = (10.0 + 90.0 * i as f32, 510.0 - i as f32);
+            let mut path = Path::new();
+            path.move_to(10.0, y);
+            path.line_to(end, y + 100.0);
+            path.line_to(end, y + 100.3);
+            path.line_to(10.0, y + 0.3);
+            path.close();
+            path
+        })
+        .collect();
+    assert_eq!(grown(600, 700, &strips), [512, 1024]);
+}
+
+/// The atlas keeps its rows on the CPU only down to its lowest mask: a
+/// sliver three rows tall in an atlas 1024 wide keeps three rows of it.
+#[test]
+fn the_atlas_keeps_only_the_rows_its_masks_reach() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let mut sliver = Path::new();
+    sliver.rect(10.0, 10.0, 700.0, 0.4);
+    canvas.fill_path(&sliver, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    let [width, _] = canvas.fill_masks.size();
+    assert_eq!(width, 1024);
+    assert_eq!(canvas.fill_masks.pixels.len(), 3 * width);
+}
+
+/// An atlas a long sliver made wide is made small again once the masks after
+/// it have fitted a smaller one at eight start-overs in a row, not before:
+/// here a short sliver in motion, whose atlas starts over every other frame.
+#[test]
+fn the_atlas_is_made_smaller_once_its_masks_stay_small() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(2000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut long = Path::new();
+    long.rect(10.0, 10.0, 1500.0, 0.4);
+    canvas.fill_path(&long, &paint);
+    canvas.flush_to_output(());
+    assert_eq!(canvas.fill_masks.size(), [2048, 512]);
+    let deleted = canvas.renderer.image_deletion_count;
+    for frame in 0..30 {
+        canvas.fill_path(&thin_strip(frame as f32 * 0.37, 0.3), &paint);
+        canvas.flush_to_output(());
+        if frame == 10 {
+            assert_eq!(canvas.fill_masks.size(), [2048, 512], "five start-overs are not enough");
+        }
+    }
+    assert_eq!(canvas.fill_masks.size(), [512, 512]);
+    assert_eq!(
+        canvas.renderer.image_deletion_count,
+        deleted + 1,
+        "the wide atlas freed"
+    );
+}
+
+/// A convex fill a pixel wide and more keeps its fringe, which draws it as
+/// it is - a rectangle of it exactly - while a concave one under two pixels
+/// wide, a mark whose mean width hides its hairlines, is drawn through a
+/// mask, and one past two keeps its fringe again.
+#[test]
+fn a_concave_fill_under_two_pixels_wide_is_thin_and_a_convex_one_over_a_pixel_is_not() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let masked = |canvas: &mut Canvas<RecordingRenderer>, path: &Path| {
+        canvas.fill_path(path, &paint);
+        canvas.flush_to_output(());
+        mask_quads(&recorded.borrow(), canvas.fill_masks.image)
+    };
+    let mut bar = Path::new();
+    bar.rect(10.0, 10.3, 60.0, 1.2);
+    assert_eq!(masked(&mut canvas, &bar), 0, "a rectangle 1.2 px tall");
+    let mut bars = Path::new();
+    bars.rect(10.0, 20.3, 60.0, 1.5);
+    bars.rect(10.0, 30.3, 60.0, 1.5);
+    assert_eq!(masked(&mut canvas, &bars), 0, "two of them, 1.5 px tall");
+    // A U whose strokes are `w` across.
+    let u = |w: f32| {
+        let mut path = Path::new();
+        path.move_to(40.0, 40.0);
+        path.line_to(40.0 + w, 40.0);
+        path.line_to(40.0 + w, 70.0 - w);
+        path.line_to(70.0 - w, 70.0 - w);
+        path.line_to(70.0 - w, 40.0);
+        path.line_to(70.0, 40.0);
+        path.line_to(70.0, 70.0);
+        path.line_to(40.0, 70.0);
+        path.close();
+        path
+    };
+    assert_eq!(masked(&mut canvas, &u(1.5)), 1, "a U of strokes 1.5 px across");
+    assert_eq!(masked(&mut canvas, &u(2.5)), 0, "a U of strokes 2.5 px across");
+}
+
+/// A mask taller than it is wide is kept transposed, and its quad reads it
+/// so: across the target is down the atlas, and down the target across it.
+#[test]
+fn a_tall_mask_is_kept_transposed() {
+    let renderer = RecordingRenderer::default();
+    let (recorded, verts) = (renderer.last_commands.clone(), renderer.last_verts.clone());
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut tall = Path::new();
+    tall.rect(20.0, 10.0, 0.4, 70.0);
+    canvas.fill_path(&tall, &Paint::color(Color::black()));
+    canvas.flush_to_output(());
+    let commands = recorded.borrow();
+    let quad = commands
+        .iter()
+        .find(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(_)))
+        .expect("drawn through a mask");
+    let (offset, count) = quad.triangles_verts.unwrap();
+    let verts = &verts.borrow()[offset..offset + count];
+    let at = |x: f32, y: f32| *verts.iter().find(|v| v.x == x && v.y == y).unwrap();
+    let ([x0, y0], [x1, y1]) = ([19.0, 9.0], [22.0, 81.0]);
+    let (corner, right, below) = (at(x0, y0), at(x1, y0), at(x0, y1));
+    assert_eq!(
+        (right.u, right.v - corner.v),
+        (corner.u, 3.0 / 512.0),
+        "across the target, down the atlas"
+    );
+    assert_eq!(
+        (below.u - corner.u, below.v),
+        (72.0 / 512.0, corner.v),
+        "down the target, across the atlas"
+    );
 }
