@@ -18,6 +18,11 @@ All notable changes to this project will be documented in this file.
   A mask is kept while its fill does not change or moves by whole pixels, at
   most 256 are made a frame, and `Canvas::set_thin_fill_masks(false)` turns
   them off.
+- Fixed even-odd clips letting paint through a hole that comes within a pixel
+  of the shape around it and is wound the same way: a clip to a ring thinner
+  than a pixel painted nearly a third more than the ring's area. The
+  `evenodd-clip-thin-ring` probe of the SVG test corpus now matches the
+  exact-area reference at half size, where 116 of its pixels were off before.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
