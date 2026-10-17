@@ -3,12 +3,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Fills thinner than a pixel are drawn by their area: the fringe that
-  antialiases each edge gave a fill about a pixel of ink across however thin
-  it was, so a sliver a tenth of a pixel wide came out nearly eight times as
-  dark as its area and a 0.3 px hairline nearly three times. Such a fill
-  (twice its area over its perimeter under a pixel, its bounds at most
-  65,536 pixels) is rasterized on the CPU into a mask in a shared atlas,
+- Thin fills are drawn by their area: the fringe that antialiases each edge
+  gave a fill about a pixel of ink across however thin it was, so a sliver a
+  tenth of a pixel wide came out nearly eight times as dark as its area, a
+  0.3 px hairline nearly three times, and a mark at thumbnail size, whose
+  hairlines are thinner than its stems, up to a quarter too dark. A fill
+  whose mean width (twice its area over its perimeter) is under two pixels
+  and whose bounds span at most 65,536 pixels is rasterized on the CPU into
+  a mask in a shared atlas,
   which grows from a quarter of a megabyte to four as frames need and shrinks
   when a moving scene's masks need less, and drawn as a quad that reads the
   mask as text reads its glyphs, with the fill's paint, scissor and clips, on

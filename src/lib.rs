@@ -442,7 +442,7 @@ pub struct Canvas<T: Renderer> {
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
     // The coverage masks of the clips that are no box.
     clip_masks: ClipMasks,
-    // The coverage masks of the fills thinner than a pixel.
+    // The coverage masks of thin fills.
     fill_masks: FillMasks,
     // The scissor and clip shape the last draw met, as the boxes they make.
     last_clip_boxes: Option<ClipBoxes>,
@@ -1315,13 +1315,13 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        // A fill thinner than a pixel, which the fringe would over-ink, is
-        // drawn through a coverage mask instead, unless its operation changes
+        // A thin fill, which the fringe would over-ink, is drawn through a
+        // coverage mask instead, unless its operation changes
         // what coverage does not reach: it would change the whole quad.
         if anti_alias && self.fill_masks.enabled() && self.state().composite_operation.takes_coverage() {
             let bounds = path_cache.bounds;
             if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
-                && path_cache.mean_width(fill_rule) < THIN_FILL_WIDTH
+                && clip::is_thin(path_cache.mean_width(fill_rule))
                 && self.fill_through_mask(path, &mut path_cache, &transform, &paint_flavor, fill_rule)
             {
                 return;
@@ -3183,20 +3183,21 @@ fn fill_text_selects_atlas_or_path_rendering() {
         // Atlas rendering blits glyphs from a glyph texture; outline rendering only
         // ever emits plain path fills (note: atlas cache misses also emit path fills
         // while rasterizing into the atlas, so the glyph texture is the reliable
-        // discriminator, not the absence of fills). An outline thinner than a pixel
-        // reads the atlas of fill masks, which is no glyph atlas.
+        // discriminator, not the absence of fills). A thin outline is filled through
+        // the atlas of fill masks, which is no glyph atlas.
         let fill_masks = canvas.fill_masks.image;
         let used_atlas = commands.iter().any(|c| match c.glyph_texture {
             GlyphTexture::None => false,
             GlyphTexture::AlphaMask(id) => Some(id) != fill_masks,
             GlyphTexture::ColorTexture(_) => true,
         });
-        let filled_outlines = commands.iter().any(|c| {
-            matches!(c.glyph_texture, GlyphTexture::None)
-                && matches!(
-                    c.cmd_type,
-                    CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
-                )
+        let filled_outlines = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => matches!(
+                c.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ),
+            GlyphTexture::AlphaMask(id) => Some(id) == fill_masks,
+            GlyphTexture::ColorTexture(_) => false,
         });
 
         match expect {

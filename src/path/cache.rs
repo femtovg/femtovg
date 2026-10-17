@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, f32::consts::PI, ops::Range};
+use std::{f32::consts::PI, ops::Range};
 
 use bitflags::bitflags;
 
@@ -54,6 +54,46 @@ pub enum Convexity {
     Convex,
     #[default]
     Unknown,
+}
+
+/// How often a contour's edges turn back along one axis, the turn from its
+/// last edge to its first included: a convex contour turns back twice along
+/// each.
+#[derive(Default)]
+struct AxisTurns {
+    sign: i8,
+    first: i8,
+    turns: u32,
+}
+
+impl AxisTurns {
+    fn add(&mut self, d: f32) {
+        let sign = if d > 0.0 {
+            1
+        } else if d < 0.0 {
+            -1
+        } else {
+            return;
+        };
+        if self.sign == 0 {
+            self.first = sign;
+        } else if self.sign != sign {
+            self.turns += 1;
+        }
+        self.sign = sign;
+    }
+
+    fn total(&self) -> u32 {
+        self.turns + u32::from(self.sign != self.first)
+    }
+}
+
+/// An outline's mean width under a fill rule (see [`PathCache::mean_width`])
+/// and whether each of its contours is convex.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutlineWidth {
+    pub(crate) mean: f32,
+    pub(crate) convex: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -201,7 +241,7 @@ pub struct PathCache {
     // The square of the farthest a point between two chords was moved off the curve.
     straddle: f32,
     // The outline's mean width under a fill rule, once a fill has asked for it.
-    mean_width: Option<(FillRule, f32)>,
+    mean_width: Option<(FillRule, OutlineWidth)>,
 }
 
 impl PathCache {
@@ -401,9 +441,12 @@ impl PathCache {
     /// radius. Each contour adds the area inside it, or takes it off if it
     /// bounds a hole, however it is wound. A degenerate contour, of which the
     /// fill draws nothing, adds no perimeter either, and a path of them alone
-    /// has no width to measure: it fills nothing, and needs no mask. Worked
-    /// out once a cache, which a path keeps while its transform does.
-    pub(crate) fn mean_width(&mut self, fill_rule: FillRule) -> f32 {
+    /// has no width to measure: it fills nothing, and needs no mask. Each
+    /// contour is convex when it turns the same way at every point and back
+    /// twice along each axis, as [`Self::calculate_joins`] finds once the
+    /// contours are oriented. Worked out once a cache, which a path keeps
+    /// while its transform does.
+    pub(crate) fn mean_width(&mut self, fill_rule: FillRule) -> OutlineWidth {
         if let Some((rule, width)) = self.mean_width {
             if rule == fill_rule {
                 return width;
@@ -415,7 +458,7 @@ impl PathCache {
         } else {
             Vec::new()
         };
-        let (mut area, mut perimeter) = (0.0, 0.0);
+        let (mut area, mut perimeter, mut convex) = (0.0, 0.0, true);
         for (i, contour) in self.contours.iter().enumerate() {
             let points = &self.points[contour.point_range.clone()];
             let (Some(first), Some(last)) = (points.first(), points.last()) else {
@@ -428,24 +471,34 @@ impl PathCache {
             let origin = first.pos;
             let mut from = last.pos - origin;
             let mut twice = 0.0f32;
+            let (mut leaving, mut left, mut right) = (last.dpos, 0, 0);
+            let (mut x, mut y) = (AxisTurns::default(), AxisTurns::default());
             for point in points {
                 let to = point.pos - origin;
                 twice += from.x * to.y - to.x * from.y;
                 // Each point knows the length of the edge that leaves it.
                 perimeter += point.len;
                 from = to;
+                let cross = leaving.cross(point.dpos);
+                left += usize::from(cross > 0.0);
+                right += usize::from(cross < 0.0);
+                x.add(point.dpos.x);
+                y.add(point.dpos.y);
+                leaving = point.dpos;
             }
+            convex &= (left == points.len() || right == points.len()) && x.total() == 2 && y.total() == 2;
             area += if hole.get(i) == Some(&true) {
                 -twice.abs()
             } else {
                 twice.abs()
             };
         }
-        let width = if perimeter > 0.0 {
+        let mean = if perimeter > 0.0 {
             area.abs() / perimeter
         } else {
             f32::INFINITY
         };
+        let width = OutlineWidth { mean, convex };
         self.mean_width = Some((fill_rule, width));
         width
     }
@@ -1074,12 +1127,7 @@ impl PathCache {
 
             contour.bevel = 0;
 
-            let mut x_sign = 0;
-            let mut y_sign = 0;
-            let mut x_first_sign = 0; // Sign of first nonzero edge vector x
-            let mut y_first_sign = 0; // Sign of first nonzero edge vector y
-            let mut x_flips = 0; // Number of sign changes in x
-            let mut y_flips = 0; // Number of sign changes in y
+            let (mut x_turns, mut y_turns) = (AxisTurns::default(), AxisTurns::default());
 
             for i in 0..points.len() {
                 let p0 = if i == 0 {
@@ -1119,49 +1167,8 @@ impl PathCache {
                 }
 
                 // Determine sign for convexity
-                match p1.dpos.x.partial_cmp(&0.0) {
-                    Some(Ordering::Greater) => {
-                        match x_sign.cmp(&0) {
-                            Ordering::Equal => x_first_sign = 1,
-                            Ordering::Less => x_flips += 1,
-                            Ordering::Greater => (),
-                        }
-
-                        x_sign = 1;
-                    }
-                    Some(Ordering::Less) => {
-                        match x_sign.cmp(&0) {
-                            Ordering::Equal => x_first_sign = -1,
-                            Ordering::Greater => x_flips += 1,
-                            Ordering::Less => (),
-                        }
-
-                        x_sign = -1;
-                    }
-                    _ => (),
-                }
-
-                match p1.dpos.y.partial_cmp(&0.0) {
-                    Some(Ordering::Greater) => {
-                        match y_sign.cmp(&0) {
-                            Ordering::Equal => y_first_sign = 1,
-                            Ordering::Less => y_flips += 1,
-                            Ordering::Greater => (),
-                        }
-
-                        y_sign = 1;
-                    }
-                    Some(Ordering::Less) => {
-                        match y_sign.cmp(&0) {
-                            Ordering::Equal => y_first_sign = -1,
-                            Ordering::Greater => y_flips += 1,
-                            Ordering::Less => (),
-                        }
-
-                        y_sign = -1;
-                    }
-                    _ => (),
-                }
+                x_turns.add(p1.dpos.x);
+                y_turns.add(p1.dpos.y);
 
                 // Calculate if we should use bevel or miter for inner join.
                 let limit = (p0.len.min(p1.len) * inv_stroke_width).max(1.01);
@@ -1186,15 +1193,7 @@ impl PathCache {
                 }
             }
 
-            if x_sign != 0 && x_first_sign != 0 && x_sign != x_first_sign {
-                x_flips += 1;
-            }
-
-            if y_sign != 0 && y_first_sign != 0 && y_sign != y_first_sign {
-                y_flips += 1;
-            }
-
-            let convex = x_flips == 2 && y_flips == 2;
+            let convex = x_turns.total() == 2 && y_turns.total() == 2;
 
             contour.convexity = if nleft == points.len() && convex {
                 Convexity::Convex

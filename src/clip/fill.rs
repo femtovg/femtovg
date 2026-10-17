@@ -1,18 +1,24 @@
-//! Fills thinner than a pixel, drawn through coverage masks. A fill's fringe
-//! antialiases each edge for itself, so two edges closer than a pixel each
-//! add their ramp: a sliver a tenth of a pixel wide comes out nearly eight
-//! times as dark as its area (#327). Such a fill is rasterized on the CPU
-//! instead, by the clip masks' exact coverage, into one atlas, and drawn as
+//! Thin fills, drawn through coverage masks. A fill's fringe antialiases
+//! each edge for itself, so two edges closer than a pixel each add their
+//! ramp: a sliver a tenth of a pixel wide comes out nearly eight times as
+//! dark as its area (#327). Such a fill is rasterized on the CPU instead,
+//! by the clip masks' exact coverage, into one atlas, and drawn as
 //! a quad that reads its mask as a glyph's is read: the paint, the scissor
 //! and every clip apply to it as they do to text. Skia's Graphite does the
 //! same for small paths (`RasterPathAtlas`, at most 256 of them a flush).
 
 use super::mask::{MaskKey, WordMap};
-use crate::{text::Atlas, ImageId};
+use crate::{path::OutlineWidth, text::Atlas, ImageId};
 
-/// A fill is thin when twice its area over its perimeter - its mean width -
-/// is under this, in device pixels.
-pub(crate) const THIN_FILL_WIDTH: f32 = 1.0;
+/// Whether a fill is thin: its mean width - twice its area over its
+/// perimeter - under two pixels, or under one if each of its contours is
+/// convex. A mark at thumbnail size has hairlines under a pixel beside stems
+/// over one, which its mean width hides (#327's New York Times marks at
+/// 50 px, 14 and 23 % over-inked); a convex contour a pixel wide and more is
+/// drawn by its fringe as before, a rectangle of it exactly.
+pub(crate) fn is_thin(width: OutlineWidth) -> bool {
+    width.mean < if width.convex { 1.0 } else { 2.0 }
+}
 
 /// The most pixels a thin fill's bounds may span to be drawn through a mask.
 pub(crate) const THIN_FILL_SPAN: f32 = 65_536.0;

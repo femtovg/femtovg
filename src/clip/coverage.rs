@@ -1,6 +1,5 @@
 //! The share of each pixel that outlines cover, worked out on the CPU: what
-//! a clip that is no box, or a fill thinner than a pixel, takes its edge
-//! from.
+//! a clip that is no box, or a thin fill, takes its edge from.
 //!
 //! Each edge adds, row by row, the signed area it sweeps to its right into
 //! the cells it crosses, so that a cell's winding is the sum of what the

@@ -11,7 +11,7 @@ mod coverage;
 mod fill;
 mod mask;
 mod shape;
-pub(crate) use fill::{FillMasks, THIN_FILL_SPAN, THIN_FILL_WIDTH};
+pub(crate) use fill::{is_thin, FillMasks, THIN_FILL_SPAN};
 use fill::{PlacedMask, Placement};
 use mask::MaskOutline;
 pub(crate) use mask::{ClipMasks, MaskImage};
@@ -307,10 +307,10 @@ where
         self.clip_masks.set_budget(bytes);
     }
 
-    /// Whether an antialiased fill thinner than a pixel - twice its area
-    /// over its perimeter under one, its bounds spanning at most 65,536
-    /// pixels - is drawn through a coverage mask, as it is by default: the
-    /// fringes of its edges would over-ink it. The masks share an atlas that
+    /// Whether an antialiased thin fill - twice its area over its perimeter
+    /// under two pixels, its bounds spanning at most 65,536 - is drawn
+    /// through a coverage mask, as it is by default: the fringes of its
+    /// edges would over-ink it. The masks share an atlas that
     /// grows from a quarter of a megabyte to four as frames need and shrinks
     /// when a moving scene's masks need less, and at most 256 are made a
     /// frame; past either a thin fill is filled as any other.
@@ -481,7 +481,7 @@ where
         true
     }
 
-    /// Draws a fill thinner than a pixel (see [`fill`]) as a quad over its
+    /// Draws a thin fill (see [`fill`]) as a quad over its
     /// coverage mask in the atlas of fill masks. `false` - the frame has made
     /// its share of masks, or the atlas has no room - leaves the fill to its
     /// fringe.
@@ -3247,6 +3247,47 @@ fn the_atlas_is_made_smaller_once_its_masks_stay_small() {
         deleted + 1,
         "the wide atlas freed"
     );
+}
+
+/// A convex fill a pixel wide and more keeps its fringe, which draws it as
+/// it is - a rectangle of it exactly - while a concave one under two pixels
+/// wide, a mark whose mean width hides its hairlines, is drawn through a
+/// mask, and one past two keeps its fringe again.
+#[test]
+fn a_concave_fill_under_two_pixels_wide_is_thin_and_a_convex_one_over_a_pixel_is_not() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let masked = |canvas: &mut Canvas<RecordingRenderer>, path: &Path| {
+        canvas.fill_path(path, &paint);
+        canvas.flush_to_output(());
+        mask_quads(&recorded.borrow(), canvas.fill_masks.image)
+    };
+    let mut bar = Path::new();
+    bar.rect(10.0, 10.3, 60.0, 1.2);
+    assert_eq!(masked(&mut canvas, &bar), 0, "a rectangle 1.2 px tall");
+    let mut bars = Path::new();
+    bars.rect(10.0, 20.3, 60.0, 1.5);
+    bars.rect(10.0, 30.3, 60.0, 1.5);
+    assert_eq!(masked(&mut canvas, &bars), 0, "two of them, 1.5 px tall");
+    // A U whose strokes are `w` across.
+    let u = |w: f32| {
+        let mut path = Path::new();
+        path.move_to(40.0, 40.0);
+        path.line_to(40.0 + w, 40.0);
+        path.line_to(40.0 + w, 70.0 - w);
+        path.line_to(70.0 - w, 70.0 - w);
+        path.line_to(70.0 - w, 40.0);
+        path.line_to(70.0, 40.0);
+        path.line_to(70.0, 70.0);
+        path.line_to(40.0, 70.0);
+        path.close();
+        path
+    };
+    assert_eq!(masked(&mut canvas, &u(1.5)), 1, "a U of strokes 1.5 px across");
+    assert_eq!(masked(&mut canvas, &u(2.5)), 0, "a U of strokes 2.5 px across");
 }
 
 /// A mask taller than it is wide is kept transposed, and its quad reads it
