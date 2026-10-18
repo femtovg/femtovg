@@ -7,13 +7,17 @@ All notable changes to this project will be documented in this file.
   slivers and the fine details of icons, logos and illustrations came out too
   dark, a sliver a tenth of a pixel wide nearly eight times its area and a
   logo 20 pixels tall twice as dark.
-- On a test corpus of real-world SVGs, images have 37-99% fewer mismatched pixels
-  versus Firefox, Chromium, and WebKit's reference; by collection: Mozilla's Firefox
-  illustrations improved 65%, the GooglePay mark 60%, the SolidJS banner 99%,
-  the New York Times marks now matches all browsers' ink within 2%. The WPT
-  reftests `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight`
-  now nearly identically match all major browsers while render time stays within 3%.
-  `Canvas::set_thin_fill_masks(false)` turns this off.
+- On a test corpus of real-world SVGs, images with thin shapes have 37% fewer
+  mismatched pixels against Firefox, 27% against Chromium and 26% against WebKit;
+  by collection, against the exact-area reference, Mozilla's Firefox illustrations
+  improved 65%, the GooglePay mark 60% and the SolidJS banner 99%, and the New
+  York Times marks now match all three browsers' ink within 2%. The WPT reftests
+  `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight` now match
+  Chromium and WebKit within 2 pixels (Firefox draws the figure-eight differently:
+  52 pixels off, from 142). Still frames render as fast as before, within 2% on a
+  desktop; thin shapes that move every frame are rasterized again each frame,
+  about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
+  29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
 - Fixed even-odd clips letting paint through a hole that comes within a pixel
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
