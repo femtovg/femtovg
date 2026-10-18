@@ -53,6 +53,16 @@ impl Params {
         self
     }
 
+    /// Gates a stencil pass by the coverage mask in force when it is hard.
+    /// The fill's cover then discards the pixels the mask takes less than
+    /// half of, which leaves the stencil there as it was: the winding pass
+    /// has to discard the same pixels, or the count it leaves there is never
+    /// zeroed and the next fill takes it for its own.
+    pub(crate) fn with_hard_clip_mask(mut self, clip: &crate::clip::DrawClip) -> Self {
+        self.clip_mask = clip.mask.filter(|mask| mask.hard);
+        self
+    }
+
     pub(crate) fn new<T>(
         images: &ImageStore<T>,
         global_transform: &Transform2D,
