@@ -110,7 +110,6 @@ pub(crate) fn minimal_font_without_optional_tables() -> Vec<u8> {
 }
 
 /// Builds a font whose only glyph is a PNG bitmap in an `sbix` strike.
-#[cfg(feature = "textlayout")]
 pub(crate) fn png_glyph_font() -> Vec<u8> {
     let mut png = std::io::Cursor::new(Vec::new());
     ::image::RgbaImage::from_pixel(24, 24, ::image::Rgba([255, 0, 64, 255]))

@@ -672,7 +672,11 @@ impl GlyphAtlas {
         normalized_coords: &[i16],
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
         #[cfg(feature = "swash")]
-        if mode == RenderMode::Fill {
+        if mode == RenderMode::Fill
+            || font
+                .glyph(font_face, glyph_id, normalized_coords)
+                .is_some_and(|glyph| glyph.path.is_none())
+        {
             if let Some(result) =
                 self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, normalized_coords)?
             {

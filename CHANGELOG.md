@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- PNG bitmap glyphs (color emoji) are now drawn in stroked text, and in text
+  drawn outside the glyph atlas, with the `swash` feature and without
+  `textlayout`. Text is drawn outside the atlas under a rotated, skewed,
+  flipped or non-uniformly scaled transform, larger than 92 pixels, or scaled
+  with a gradient or image paint. A stroked PNG glyph with `swash` and
+  `textlayout` is now drawn by swash like a filled one, at the same size.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
