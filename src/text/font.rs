@@ -867,6 +867,21 @@ impl Font {
             let font_ref = self.swash_font_ref()?;
 
             let mut scale_context = self.swash_scale_context().borrow_mut();
+
+            // Decode the bitmap at the size of its strike, for its metrics. The scaler below
+            // would resize it to units_per_em pixels.
+            let bitmap = font_ref
+                .color_strikes()
+                .find_by_largest_ppem(codepoint)
+                .and_then(|strike| {
+                    let image = scale_context
+                        .builder(font_ref)
+                        .build()
+                        .scale_color_bitmap(codepoint, swash::scale::StrikeWith::LargestSize)
+                        .filter(|image| image.content == swash::scale::image::Content::Color)?;
+                    Some((strike.ppem(), image.placement))
+                });
+
             let scaler_builder = scale_context
                 .builder(font_ref)
                 .size(self.units_per_em as f32)
@@ -874,7 +889,18 @@ impl Font {
                 .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
-            let maybe_glyph = if let Some(outline) = scaler.scale_outline(codepoint) {
+            let maybe_glyph = if let Some((ppem, placement)) = bitmap {
+                let scale = self.units_per_em as f32 / ppem as f32;
+                Some(Glyph {
+                    path: None,
+                    metrics: GlyphMetrics {
+                        width: placement.width as f32 * scale,
+                        height: placement.height as f32 * scale,
+                        bearing_x: placement.left as f32 * scale,
+                        bearing_y: placement.top as f32 * scale,
+                    },
+                })
+            } else if let Some(outline) = scaler.scale_outline(codepoint) {
                 use swash::zeno::{Command, PathData};
                 let bounds = outline.bounds();
                 let mut path = Path::new();
@@ -906,6 +932,12 @@ impl Font {
         }
 
         Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&cache_key)).ok()
+    }
+
+    /// Returns true if the glyph has no path, so that the atlas draws it as an image (e.g., a PNG color emoji).
+    pub(crate) fn is_bitmap_glyph(&self, face: &FontFaceRef<'_>, codepoint: u16, normalized_coords: &[i16]) -> bool {
+        self.glyph(face, codepoint, normalized_coords)
+            .is_some_and(|glyph| glyph.path.is_none())
     }
 
     #[cfg(feature = "textlayout")]
