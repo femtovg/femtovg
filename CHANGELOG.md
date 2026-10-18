@@ -12,6 +12,13 @@ All notable changes to this project will be documented in this file.
   slanted along both neighbouring edges, and a convex shape was filled
   through the stencil. The point is merged into the one before it, as in
   nanovg.
+- Fixed even-odd clips letting paint through a hole that comes within a pixel
+  of the shape around it and is wound the same way: a clip to a ring thinner
+  than a pixel painted nearly a third more than the ring's area. At half size,
+  the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
+  and the exact-area reference pixel for pixel, where 124 and 116 of its
+  pixels were off, and comes nearer Firefox and Chromium (181 to 118 and 214
+  to 185 pixels off).
 - `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
   outside the glyph atlas with the `swash` feature and without `textlayout`.
   It draws text outside the atlas under a rotated, skewed, flipped or
