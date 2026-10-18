@@ -503,7 +503,15 @@ where
         request.extend([self.tess_tol.to_bits(), self.dist_tol.to_bits()]);
         request.extend(within.map(|side| side as u32));
         let mut mask = self.fill_masks.asked(&request);
-        if mask.is_none() {
+        if self.fill_masks.image.is_none() {
+            self.fill_masks.limit(self.renderer.max_texture_size());
+        }
+        // A fill whose mask the atlas would refuse - past the frame's share,
+        // or larger than the atlas grows - builds no outline to find out.
+        let b = path_cache.bounds;
+        let r = mask::pixel_rect([b.minx, b.miny, b.maxx, b.maxy], within);
+        let size = [(r[2] - r[0]) as usize, (r[3] - r[1]) as usize];
+        if mask.is_none() && self.fill_masks.may_make(size) {
             mask = self.fill_mask(path_cache, fill_rule, within);
             if let Some(mask) = mask {
                 self.fill_masks.remember(request.clone(), mask);
@@ -561,15 +569,16 @@ where
         } else {
             outline.key(rect, None)
         };
+        #[cfg(test)]
+        {
+            self.fill_masks.keyed += 1;
+        }
         if let Some(atlas) = self.fill_masks.get(&key) {
             return Some(PlacedMask {
                 atlas,
                 rect,
                 transposed,
             });
-        }
-        if self.fill_masks.image.is_none() {
-            self.fill_masks.limit(self.renderer.max_texture_size());
         }
         let atlas = loop {
             match self.fill_masks.place(key.size()) {
@@ -578,12 +587,20 @@ where
                     // The masks made this frame go to the image their quads
                     // read before it is let go.
                     self.upload_fill_masks();
+                    if !self.fill_masks.may_make(key.size()) {
+                        return None;
+                    }
                     self.fill_masks.grow(key.size());
                 }
                 Placement::Refused => return None,
             }
         };
-        self.fill_mask_atlas()?;
+        // An atlas that cannot be made places no more masks this frame: the
+        // place just taken is never drawn, and the atlas starts over.
+        if self.fill_mask_atlas().is_none() {
+            self.fill_masks.fail();
+            return None;
+        }
         self.fill_masks.make(key, atlas);
         Some(PlacedMask {
             atlas,
@@ -625,9 +642,12 @@ where
             return;
         };
         let source = ImageSource::Gray(imgref::Img::new(rows.as_gray(), width, height));
-        // A failed upload leaves the masks blank; the atlas starts over.
+        // A failed upload leaves the frame's masks blank where their quads,
+        // recorded already, read them: those thin fills are missing from
+        // this frame, the later ones keep their fringe, and the atlas starts
+        // over to make them again in the next.
         if self.images.update(&mut self.renderer, image, source, x, y).is_err() {
-            self.fill_masks.mark_full();
+            self.fill_masks.fail();
         }
     }
 
@@ -2949,6 +2969,98 @@ fn a_frame_makes_its_share_of_masks() {
     let commands = recorded.borrow();
     assert_eq!(mask_quads(&commands, canvas.fill_masks.image), 256);
     assert_eq!(fills(&commands), 44);
+    assert_eq!(canvas.fill_masks.keyed, 256, "the 44 past the share build no outline");
+}
+
+/// One still thin fill among moving ones finds its own mask every frame, but
+/// each frame makes more masks than it finds: the atlas starts over every
+/// other frame and stays as small as a frame's masks need.
+#[test]
+fn a_still_thin_fill_among_moving_ones_does_not_hold_the_atlas() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let mut most = 0;
+    for frame in 0..400 {
+        canvas.fill_path(&thin_strip(0.0, 0.3), &paint);
+        for i in 1..=3 {
+            // Each at its own speed, so that no two share a mask.
+            canvas.fill_path(
+                &thin_strip(60.0 * i as f32 + frame as f32 * (0.26 + 0.11 * i as f32), 0.3),
+                &paint,
+            );
+        }
+        canvas.flush_to_output(());
+        most = most.max(canvas.fill_masks.held());
+    }
+    assert_eq!(canvas.fill_masks.size(), [512, 512]);
+    assert!(most <= 8, "{most} masks held at most");
+}
+
+/// An atlas whose image cannot be made places no more masks in the frame:
+/// its thin fills keep their fringe, none past the first builds an outline,
+/// and the next frame makes the atlas and the masks.
+#[test]
+fn an_atlas_that_cannot_be_made_leaves_the_frame_to_the_fringe() {
+    let renderer = RecordingRenderer {
+        fail_image_allocations: true,
+        ..Default::default()
+    };
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let draw = |canvas: &mut Canvas<RecordingRenderer>| {
+        canvas.fill_path(&thin_strip(0.0, 0.3), &paint);
+        canvas.fill_path(&thin_strip(20.0, 0.3), &paint);
+        canvas.flush_to_output(());
+    };
+    draw(&mut canvas);
+    assert_eq!(fills(&recorded.borrow()), 2);
+    assert_eq!(canvas.fill_masks.keyed, 1, "the second builds no outline");
+    canvas.renderer.fail_image_allocations = false;
+    draw(&mut canvas);
+    assert_eq!(mask_quads(&recorded.borrow(), canvas.fill_masks.image), 2);
+}
+
+/// An upload that fails before the atlas grows leaves the mask made before it
+/// blank in its frame - its quad is recorded already - and the frame's later
+/// thin fills to their fringe, the atlas not grown; the next frame makes them
+/// all again.
+#[test]
+fn a_failed_upload_leaves_the_rest_of_the_frame_to_the_fringe() {
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 100, 1.0);
+    let paint = Paint::color(Color::black());
+    let sliver = |x: f32, y: f32, length: f32| {
+        let mut path = Path::new();
+        path.rect(x, y, length, 0.4);
+        path
+    };
+    let quads = |commands: &[Command]| {
+        commands
+            .iter()
+            .filter(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(_)))
+            .count()
+    };
+    canvas.fill_path(&sliver(10.0, 50.0, 40.0), &paint);
+    canvas.flush_to_output(());
+    let frame = |canvas: &mut Canvas<RecordingRenderer>| {
+        canvas.fill_path(&sliver(100.0, 50.0, 41.0), &paint);
+        // Wider than the first atlas: it grows, uploading the one before.
+        canvas.fill_path(&sliver(10.0, 10.0, 700.0), &paint);
+        canvas.fill_path(&sliver(10.0, 80.0, 30.0), &paint);
+        canvas.flush_to_output(());
+    };
+    canvas.renderer.fail_image_updates = true;
+    frame(&mut canvas);
+    assert_eq!((quads(&recorded.borrow()), fills(&recorded.borrow())), (1, 2));
+    assert_eq!(canvas.fill_masks.size(), [512, 512], "not grown");
+    canvas.renderer.fail_image_updates = false;
+    frame(&mut canvas);
+    assert_eq!((quads(&recorded.borrow()), fills(&recorded.borrow())), (3, 0));
 }
 
 /// The atlas starts small and doubles when a mask finds no room in it, in

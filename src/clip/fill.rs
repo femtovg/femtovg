@@ -84,6 +84,9 @@ pub(crate) struct FillMasks {
     /// Masks the frame before made that the atlas still holds.
     made_before: usize,
     full: bool,
+    // The atlas's image could not be made or written this frame: no mask is
+    // found or placed until it starts over.
+    failed: bool,
     // The atlas's width and height.
     size: [usize; 2],
     // The largest side the atlas grows to: ATLAS_MOST, or less if the backend
@@ -108,6 +111,9 @@ pub(crate) struct FillMasks {
     /// Every mask rasterized, for the tests.
     #[cfg(test)]
     pub(crate) rasterized: usize,
+    /// Every outline keyed to be found or made, for the tests.
+    #[cfg(test)]
+    pub(crate) keyed: usize,
 }
 
 impl Default for FillMasks {
@@ -123,6 +129,7 @@ impl Default for FillMasks {
             found: 0,
             made_before: 0,
             full: false,
+            failed: false,
             size: [ATLAS_FIRST; 2],
             most: ATLAS_MOST,
             retired: Vec::new(),
@@ -135,6 +142,8 @@ impl Default for FillMasks {
             upload: Vec::new(),
             #[cfg(test)]
             rasterized: 0,
+            #[cfg(test)]
+            keyed: 0,
         }
     }
 }
@@ -164,7 +173,7 @@ impl FillMasks {
     }
 
     pub(crate) fn asked(&mut self, request: &[u32]) -> Option<PlacedMask> {
-        let mask = self.asked.get(request).copied();
+        let mask = self.asked.get(request).copied().filter(|_| !self.failed);
         self.found += usize::from(mask.is_some());
         mask
     }
@@ -179,9 +188,25 @@ impl FillMasks {
     }
 
     pub(crate) fn get(&mut self, key: &MaskKey) -> Option<[u32; 2]> {
-        let at = self.masks.get(key).copied();
+        let at = self.masks.get(key).copied().filter(|_| !self.failed);
         self.found += usize::from(at.is_some());
         at
+    }
+
+    /// Whether a new mask of `size` could be placed this frame: the frame has
+    /// not made its share, nor failed to make the atlas, and the atlas at its
+    /// largest holds it. Asked before a fill's outline is built, so that the
+    /// fills past the frame's share cost no more than a fringe.
+    pub(crate) fn may_make(&self, size: [usize; 2]) -> bool {
+        !self.failed && self.made < MASKS_A_FRAME && size[0] <= self.most && size[1] <= self.most
+    }
+
+    /// The atlas's image could not be made or written: the frame finds and
+    /// places no more masks, leaving its thin fills to their fringe, and the
+    /// atlas starts over once the frame is drawn.
+    pub(crate) fn fail(&mut self) {
+        self.failed = true;
+        self.full = true;
     }
 
     /// A place in the atlas for a new mask of `size`, if the frame has not
@@ -190,7 +215,7 @@ impl FillMasks {
     /// over once the frame is drawn, and the smaller masks after it still
     /// take the room there is.
     pub(crate) fn place(&mut self, size: [usize; 2]) -> Placement {
-        if self.made >= MASKS_A_FRAME || size[0] > self.most || size[1] > self.most {
+        if !self.may_make([size[0], size[1]]) {
             return Placement::Refused;
         }
         let fits = size[0] <= self.size[0] && size[1] <= self.size[1];
@@ -293,20 +318,15 @@ impl FillMasks {
         Some(([x0, y0], [x1 - x0, y1 - y0], &self.upload))
     }
 
-    /// The atlas starts over once the frame is drawn: what it holds cannot
-    /// be relied on.
-    pub(crate) fn mark_full(&mut self) {
-        self.full = true;
-    }
-
     /// The frame is drawn: an atlas that filled starts over, its masks made
     /// again as the frames that follow ask for them. So does one whose frame
-    /// found none of the masks the frame before made, making its own - a
-    /// scene in motion, whose masks no frame asks for again - so that the
-    /// atlas does not grow slower to pack into frame after frame. Returns the
-    /// images of the atlases the frame outgrew, to be freed.
+    /// made at least as many masks as it found, after a frame that made some
+    /// too - a scene in motion, whose masks no frame asks for again, if one
+    /// still thin fill among moving ones finds its own - so that the atlas
+    /// does not grow to pack them frame after frame. Returns the images of
+    /// the atlases the frame outgrew, to be freed.
     pub(crate) fn end_frame(&mut self) -> Vec<ImageId> {
-        if self.made > 0 && self.made_before > 0 && self.found == 0 {
+        if self.made > 0 && self.made_before > 0 && self.made >= self.found {
             self.full = true;
         }
         self.made_before = self.made;
@@ -317,6 +337,7 @@ impl FillMasks {
         }
         if self.full {
             self.full = false;
+            self.failed = false;
             self.made_before = 0;
             let needed = self
                 .reach
@@ -332,13 +353,15 @@ impl FillMasks {
                 self.smaller = (0, [0; 2]);
                 self.size = size;
                 self.retired.extend(self.image.take());
+                // The rows' room goes with the larger atlas.
                 self.pixels = Vec::new();
+            } else {
+                self.pixels.clear();
             }
             self.packer.reset(self.size[0], self.size[1]);
             self.masks.clear();
             self.asked.clear();
             self.reach = [0; 2];
-            self.pixels.clear();
             self.dirty = None;
         }
         std::mem::take(&mut self.retired)

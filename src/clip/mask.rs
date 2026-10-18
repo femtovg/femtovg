@@ -120,20 +120,7 @@ impl MaskOutline {
     /// `within`, a rect `[x0, y0, x1, y1]`. An outline that misses it is
     /// left a single pixel there, which nothing covers.
     pub(crate) fn rect(&self, within: [i32; 4]) -> [i32; 4] {
-        let [minx, miny, maxx, maxy] = self.bounds;
-        // Past a range any target has, and what a float holds exactly.
-        let pixel = |v: f32| v.clamp(-16_000_000.0, 16_000_000.0) as i32;
-        let rect = [
-            (pixel(minx.floor()) - 1).max(within[0]),
-            (pixel(miny.floor()) - 1).max(within[1]),
-            (pixel(maxx.ceil()) + 1).min(within[2]),
-            (pixel(maxy.ceil()) + 1).min(within[3]),
-        ];
-        if rect[0] < rect[2] && rect[1] < rect[3] {
-            rect
-        } else {
-            [within[0], within[1], within[0] + 1, within[1] + 1]
-        }
+        pixel_rect(self.bounds, within)
     }
 
     /// The key of this outline as a mask over `rect`, cut by `parent` - a
@@ -165,6 +152,25 @@ impl MaskOutline {
             parent,
             outline,
         }
+    }
+}
+
+/// The pixels a mask over `bounds`, `[minx, miny, maxx, maxy]`, spans (see
+/// [`MaskOutline::rect`]).
+pub(crate) fn pixel_rect(bounds: [f32; 4], within: [i32; 4]) -> [i32; 4] {
+    let [minx, miny, maxx, maxy] = bounds;
+    // Past a range any target has, and what a float holds exactly.
+    let pixel = |v: f32| v.clamp(-16_000_000.0, 16_000_000.0) as i32;
+    let rect = [
+        (pixel(minx.floor()) - 1).max(within[0]),
+        (pixel(miny.floor()) - 1).max(within[1]),
+        (pixel(maxx.ceil()) + 1).min(within[2]),
+        (pixel(maxy.ceil()) + 1).min(within[3]),
+    ];
+    if rect[0] < rect[2] && rect[1] < rect[3] {
+        rect
+    } else {
+        [within[0], within[1], within[0] + 1, within[1] + 1]
     }
 }
 
