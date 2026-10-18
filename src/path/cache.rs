@@ -360,14 +360,36 @@ impl PathCache {
         vertices
     }
 
-    /// Each contour's points in order: its outline, closed from the last
-    /// point to the first.
-    pub(crate) fn outlines(&self) -> impl Iterator<Item = Vec<[f32; 2]>> + '_ {
-        self.contours.iter().map(|contour| {
-            self.points[contour.point_range.clone()]
+    /// Each contour's points in order, closed from the last point to the
+    /// first: the outline a mask of a fill under `fill_rule` is rasterized
+    /// from. A mask adds up the winding over each pixel before the rule
+    /// folds it, exact where the pixel sees at most two windings, one apart:
+    /// a ring thinner than a pixel, both circles wound alike, sees 0, 1 and
+    /// 2, and its hole counted as ink. Even-odd does not ask which way a
+    /// contour is wound, so a hole's contour is wound against those around
+    /// it, and nested contours wind 0 or 1.
+    pub(crate) fn outlines(&mut self, fill_rule: FillRule) -> impl Iterator<Item = Vec<[f32; 2]>> + '_ {
+        let reverse: Vec<bool> = if fill_rule == FillRule::EvenOdd && self.contours.len() > 1 {
+            let hole = self.hole_contours(fill_rule);
+            // As `expand_fill` winds them: what is filled as `polygon_area`
+            // calls positive (own -1), a hole the other way.
+            self.contour_sides()
                 .iter()
-                .map(|point| [point.pos.x, point.pos.y])
+                .zip(hole)
+                .map(|(&(_, _, own), hole)| own == if hole { -1 } else { 1 })
                 .collect()
+        } else {
+            Vec::new()
+        };
+        let cache = &*self;
+        cache.contours.iter().enumerate().map(move |(i, contour)| {
+            let points = cache.points[contour.point_range.clone()].iter();
+            let outline = points.map(|point| [point.pos.x, point.pos.y]);
+            if reverse.get(i) == Some(&true) {
+                outline.rev().collect()
+            } else {
+                outline.collect()
+            }
         })
     }
 
