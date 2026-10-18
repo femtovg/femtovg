@@ -4707,7 +4707,7 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
 /// large to cache, or when a gradient or image paint is scaled. PNG glyphs
 /// have no outline to draw, so they go through an atlas that lives from the
 /// first such draw of a frame until the flush.
-#[cfg(feature = "textlayout")]
+#[cfg(any(feature = "textlayout", feature = "swash"))]
 #[test]
 fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     use crate::paint::GlyphTexture;
@@ -4731,9 +4731,10 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
         let paint = paint.clone().with_font_size(font_size);
         let renderer = RecordingRenderer::default();
         let recorded_commands = renderer.last_commands.clone();
-        let mut canvas = Canvas::new(renderer).unwrap();
+        let text_context = TextContext::default();
+        let font = text_context.add_font_mem(&font_data).unwrap();
+        let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
         canvas.set_size(400, 400, 1.0);
-        let font = canvas.add_font_mem(&font_data).unwrap();
         canvas.set_transform(&transform);
         let glyph = PositionedGlyph {
             x: 50.0,
@@ -4750,9 +4751,9 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
             canvas.flush_to_output(());
             assert!(canvas.ephemeral_glyph_atlas.is_none(), "{case}");
 
-            // Every fill and stroke draws the bitmap, which takes
+            // Every fill and stroke draws the bitmap, which takes `swash` or
             // `image-loading` to decode.
-            if cfg!(feature = "image-loading") {
+            if cfg!(any(feature = "swash", feature = "image-loading")) {
                 let commands = recorded_commands.borrow();
                 let color_draws = commands
                     .iter()

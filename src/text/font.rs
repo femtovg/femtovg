@@ -874,7 +874,19 @@ impl Font {
                 .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
-            let maybe_glyph = if let Some(outline) = scaler.scale_outline(codepoint) {
+            let maybe_glyph = if font_ref.color_strikes().any(|strike| strike.contains(codepoint)) {
+                // `place_glyph` draws a glyph without a path through swash, which places the
+                // bitmap itself, so these metrics are not used.
+                Some(Glyph {
+                    path: None,
+                    metrics: GlyphMetrics {
+                        width: 0.0,
+                        height: 0.0,
+                        bearing_x: 0.0,
+                        bearing_y: 0.0,
+                    },
+                })
+            } else if let Some(outline) = scaler.scale_outline(codepoint) {
                 use swash::zeno::{Command, PathData};
                 let bounds = outline.bounds();
                 let mut path = Path::new();
