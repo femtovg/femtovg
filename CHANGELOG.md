@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
   slanted along both neighbouring edges, and a convex shape was filled
   through the stencil. The point is merged into the one before it, as in
   nanovg.
+- `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
+  outside the glyph atlas with the `swash` feature and without `textlayout`.
+  It draws text outside the atlas under a rotated, skewed, flipped or
+  non-uniformly scaled transform, above 92 pixels, or under a scale with a
+  gradient or image paint. With both `swash` and `textlayout`, `Canvas` now
+  draws a stroked PNG glyph with swash, like a filled one and at the same size.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
