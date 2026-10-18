@@ -3234,9 +3234,8 @@ fn fill_text_selects_atlas_or_path_rendering() {
     }
 }
 
-/// Every glyph of text drawn as outlines gets the paint matrix that a path
-/// drawn under the same transform gets, so a gradient or image paint continues
-/// across the text and does not start again in each glyph.
+/// A thin glyph drawn through a coverage mask gets the run's paint matrix too,
+/// not the glyph's own placement.
 #[cfg(feature = "textlayout")]
 #[test]
 fn thin_text_drawn_through_masks_uses_one_paint_matrix_for_the_run() {
@@ -3283,6 +3282,10 @@ fn thin_text_drawn_through_masks_uses_one_paint_matrix_for_the_run() {
     );
 }
 
+/// Every glyph of text drawn as outlines gets the paint matrix that a path
+/// drawn under the same transform gets, so a gradient or image paint continues
+/// across the text and does not start again in each glyph.
+#[cfg(feature = "textlayout")]
 #[test]
 fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
     use renderer::CommandType;
