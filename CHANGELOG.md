@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Reduce CPU encode time by 4x or more on some SVG content: 
+  A cubic whose four points coincide is no longer halved ten times over
+  before it adds no point. Its chord is zero, so it never passed the
+  flatness test: each square corner of a `rounded_rect_varying` and every
+  curve under a transform that scales to nothing took 2,047 pieces, and
+  4,095 more when `Path::dashed` flattened it. A page of 300 tabs rounded
+  on top encoded in 3.4 ms a frame on an M4 Max, and now in 0.7 ms.
 - Fixed a point repeated in a path, or added within 0.01 device pixels of
   the one before, being kept as a zero-length edge. A line to the current
   point, the zero-length sides of a pill from `rounded_rect` (or of an SVG

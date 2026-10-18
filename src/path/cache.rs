@@ -224,6 +224,13 @@ impl PathCache {
                         let (c2x, c2y) = transform.transform_point(c2x, c2y);
                         let (x, y) = transform.transform_point(x, y);
 
+                        // A cubic whose four points coincide is the point it starts from. Its
+                        // chord is zero, so it would fail the flatness test to the depth limit.
+                        let start = (last.pos.x, last.pos.y);
+                        if [(x, y), (c1x, c1y), (c2x, c2y)] == [start; 3] {
+                            continue;
+                        }
+
                         cache.tesselate_bezier(
                             [last.pos.x, last.pos.y, c1x, c1y, c2x, c2y, x, y],
                             PointFlags::CORNER,
@@ -459,6 +466,9 @@ impl PathCache {
         let mut last = [curve[0], curve[1]];
 
         loop {
+            #[cfg(test)]
+            tests::BEZIER_PIECES.with(|pieces| pieces.set(pieces.get() + 1));
+
             let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
             let dx = x4 - x1;
             let dy = y4 - y1;
@@ -1385,6 +1395,61 @@ mod tests {
 
     use super::*;
     use crate::Path;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// The pieces `tesselate_bezier` has examined on this thread.
+        pub(super) static BEZIER_PIECES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn pieces_flattening(path: &Path, transform: &Transform2D) -> usize {
+        BEZIER_PIECES.with(|pieces| pieces.set(0));
+        PathCache::new(path.verbs(), transform, 0.25, 0.01);
+        BEZIER_PIECES.with(Cell::get)
+    }
+
+    /// A cubic whose four points coincide is the point it starts from, so it is
+    /// not subdivided. It never passes the flatness test - its chord is zero -
+    /// and was halved to the depth limit, 2,047 pieces that added no point:
+    /// the square corner of a `rounded_rect_varying`, any curve under a
+    /// transform that scales to nothing.
+    #[test]
+    fn a_cubic_that_is_a_point_is_not_subdivided() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.bezier_to(10.0, 0.0, 10.0, 0.0, 10.0, 0.0);
+        path.line_to(10.0, 10.0);
+        assert_eq!(pieces_flattening(&path, &Transform2D::identity()), 0);
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+
+        // A tab's square corners cost nothing: half the pieces of the same
+        // rect rounded all round.
+        let identity = Transform2D::identity();
+        let mut tab = Path::new();
+        tab.rounded_rect_varying(0.0, 0.0, 60.0, 24.0, 6.0, 6.0, 0.0, 0.0);
+        let mut rounded = Path::new();
+        rounded.rounded_rect(0.0, 0.0, 60.0, 24.0, 6.0);
+        assert_eq!(
+            2 * pieces_flattening(&tab, &identity),
+            pieces_flattening(&rounded, &identity)
+        );
+
+        assert_eq!(pieces_flattening(&rounded, &Transform2D::scaling(0.0, 0.0)), 0);
+    }
+
+    /// A cubic whose ends meet but whose control points do not is a loop, and
+    /// is still flattened.
+    #[test]
+    fn a_loop_whose_ends_meet_is_flattened() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.bezier_to(10.0, -10.0, 10.0, 10.0, 0.0, 0.0);
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours.len(), 1);
+        assert!(cache.contours[0].point_count() > 4);
+    }
 
     // A fixed sequence of numbers in [0, 1), so the tests below are repeatable.
     fn unit(seed: &mut u32) -> f32 {
