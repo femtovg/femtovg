@@ -110,14 +110,56 @@ pub(crate) fn minimal_font_without_optional_tables() -> Vec<u8> {
 }
 
 /// Builds a font whose only glyph is a PNG bitmap in an `sbix` strike.
-#[cfg(feature = "textlayout")]
 pub(crate) fn png_glyph_font() -> Vec<u8> {
+    font_with_png_glyph(&png(), Vec::new())
+}
+
+/// Encodes a 24 by 24 PNG of one color.
+fn png() -> Vec<u8> {
     let mut png = std::io::Cursor::new(Vec::new());
     ::image::RgbaImage::from_pixel(24, 24, ::image::Rgba([255, 0, 64, 255]))
         .write_to(&mut png, ::image::ImageFormat::Png)
         .unwrap();
-    let png = png.into_inner();
+    png.into_inner()
+}
 
+/// Builds a font whose only glyph has a square outline and a PNG in an `sbix`
+/// strike. The PNG ends after its header, so parsers can read its size but
+/// cannot decode it.
+#[cfg(all(feature = "textlayout", feature = "swash"))]
+pub(crate) fn outline_glyph_with_broken_png_font() -> Vec<u8> {
+    let png = png();
+
+    // One contour through four on-curve points, a 500-unit square. Each
+    // flag byte is 1 (on curve), so each coordinate is a 16-bit delta.
+    let mut glyf = Vec::new();
+    for value in [1, 0, 0, 500, 500] {
+        push_i16(&mut glyf, value); // numberOfContours, xMin, yMin, xMax, yMax
+    }
+    push_u16(&mut glyf, 3); // endPtsOfContours[0]
+    push_u16(&mut glyf, 0); // instructionLength
+    glyf.extend_from_slice(&[1; 4]); // flags
+    for delta in [0, 0, 500, 0, 0, 500, 0, -500] {
+        push_i16(&mut glyf, delta); // x deltas, then y deltas
+    }
+
+    let mut loca = Vec::new();
+    push_u16(&mut loca, 0); // offsets[0], in units of two bytes
+    push_u16(&mut loca, glyf.len() as u16 / 2); // offsets[1]
+
+    // swash reads `glyf` outlines only when the font has an `hmtx` table.
+    // `hhea` gives no glyph full metrics, so `hmtx` holds only the left side bearing.
+    let mut hmtx = Vec::new();
+    push_i16(&mut hmtx, 0); // leftSideBearings[0]
+
+    // The 8-byte signature and the 25-byte IHDR chunk.
+    let header = &png[..33];
+    font_with_png_glyph(header, vec![(*b"glyf", glyf), (*b"hmtx", hmtx), (*b"loca", loca)])
+}
+
+/// Builds a font whose only glyph is `png` in an `sbix` strike, with the
+/// required tables and `extra_tables`.
+fn font_with_png_glyph(png: &[u8], extra_tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
     let mut sbix = Vec::new();
     push_u16(&mut sbix, 1); // version
     push_u16(&mut sbix, 1); // flags
@@ -136,7 +178,7 @@ pub(crate) fn png_glyph_font() -> Vec<u8> {
     sbix.extend_from_slice(b"png "); // graphicType
     sbix.extend_from_slice(&png);
 
-    let mut tables = required_tables();
+    let mut tables = [required_tables(), extra_tables].concat();
     tables.push((*b"sbix", sbix));
     font_from_tables(TRUETYPE, tables)
 }
