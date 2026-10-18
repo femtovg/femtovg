@@ -417,18 +417,23 @@ impl PathCache {
     }
 
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
-        if let Some(contour) = self.contours.last_mut() {
-            let new_point = Point::new(x, y, flags);
-
-            // If last point equals this new point just OR the flags and ignore the new point
-            if let Some(last_point) = self.points.get_mut(contour.point_range.end) {
-                if last_point.approx_eq(&new_point, dist_tol) {
-                    last_point.flags |= new_point.flags;
+        if let Some(contour) = self.contours.last() {
+            // If the contour's last point equals this new point just OR the flags and ignore the new point
+            if let Some(last_point) = self.points[contour.point_range.clone()].last_mut() {
+                if last_point.approx_eq(&Point::new(x, y, flags), dist_tol) {
+                    last_point.flags |= flags;
                     return;
                 }
             }
+        }
 
-            self.points.push(new_point);
+        self.push_point(x, y, flags);
+    }
+
+    /// `add_point` for a point known to lie beyond `dist_tol` of the contour's last one.
+    fn push_point(&mut self, x: f32, y: f32, flags: PointFlags) {
+        if let Some(contour) = self.contours.last_mut() {
+            self.points.push(Point::new(x, y, flags));
             contour.point_range.end += 1;
         }
     }
@@ -450,6 +455,8 @@ impl PathCache {
         // The end of the last chord, held until the next chord's shift is
         // known, and its own shift.
         let mut held: Option<([f32; 2], [f32; 2])> = None;
+        // The contour's last point: the cubic's start, then each point taken.
+        let mut last = [curve[0], curve[1]];
 
         loop {
             let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
@@ -470,7 +477,13 @@ impl PathCache {
                 if let Some((at, previous)) = held.replace(([x4, y4], shift)) {
                     let mean = [(previous[0] + shift[0]) * 0.5, (previous[1] + shift[1]) * 0.5];
                     self.straddle = self.straddle.max(mean[0] * mean[0] + mean[1] * mean[1]);
-                    self.add_point(at[0] + mean[0], at[1] + mean[1], PointFlags::empty(), dist_tol);
+                    // A point within dist_tol of the last is dropped, as `add_point` would; it has no flags to merge.
+                    let point = [at[0] + mean[0], at[1] + mean[1]];
+                    let (ex, ey) = (point[0] - last[0], point[1] - last[1]);
+                    if ex * ex + ey * ey >= dist_tol * dist_tol {
+                        self.push_point(point[0], point[1], PointFlags::empty());
+                        last = point;
+                    }
                 }
             } else if depth < 10 {
                 let x12 = (x1 + x2) * 0.5;
@@ -1584,6 +1597,74 @@ mod tests {
         cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
         let rect = cache.path_fill_is_rect().expect("a mirrored rect is still a rect");
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (-40.0, 40.0, 30.0, 40.0));
+    }
+
+    /// A vertex repeated within the distance tolerance merges into the one
+    /// before it, as in nanovg's nvg__addPoint.
+    #[test]
+    fn a_repeated_vertex_is_merged() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+    }
+
+    /// The merged point takes the repeat's flags: a curve's end landing on
+    /// its last flattened point is still a corner.
+    #[test]
+    fn a_merged_vertex_keeps_the_corner_flag() {
+        let mut cache = PathCache::default();
+        cache.add_contour();
+        cache.add_point(0.0, 0.0, PointFlags::CORNER, 0.01);
+        cache.add_point(10.0, 0.0, PointFlags::empty(), 0.01);
+        cache.add_point(10.0, 0.005, PointFlags::CORNER, 0.01);
+
+        assert_eq!(cache.contours[0].point_count(), 2);
+        assert!(cache.points[1].flags.contains(PointFlags::CORNER));
+    }
+
+    /// A curve shorter than the tolerance merges into the point it starts from.
+    #[test]
+    fn a_tiny_curve_is_merged() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.bezier_to(10.0, 0.0, 10.0, 0.0, 10.005, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+    }
+
+    /// A pill from `rounded_rect` has zero-length sides, so each one repeats a
+    /// vertex. Merged, the pill is convex and filled without the stencil.
+    #[test]
+    fn a_pill_is_convex() {
+        let mut path = Path::new();
+        path.rounded_rect(0.0, 0.0, 40.0, 10.0, 5.0);
+
+        let mut cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        cache.expand_fill(1.0, LineJoin::Miter, 10.0, FillRule::NonZero);
+        assert_eq!(cache.contours[0].convexity, Convexity::Convex);
+    }
+
+    /// A contour's first point is never merged into the previous contour's
+    /// last one.
+    #[test]
+    fn a_new_contour_keeps_its_first_point() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.move_to(10.0, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let counts: Vec<usize> = cache.contours.iter().map(Contour::point_count).collect();
+        assert_eq!(counts, [2, 2]);
     }
 
     #[test]
