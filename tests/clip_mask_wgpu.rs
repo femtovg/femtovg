@@ -554,6 +554,59 @@ fn an_operation_coverage_cannot_bound_takes_a_mask_whole_or_not_at_all() {
     assert!(whole > 1000 && untouched > 1000);
 }
 
+/// Under a mask taken whole or not at all, a concave fill's cover discards
+/// the pixels the mask leaves out, and a discarded pixel keeps its stencil:
+/// the winding pass discards them too, so it counts nothing there for the
+/// cover to miss. Otherwise the next concave fill whose cover reaches those
+/// pixels paints them, outside its own shape.
+#[test]
+fn a_concave_fill_under_a_whole_or_nothing_mask_leaves_no_winding_behind() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // An L reaching past a triangular clip, then a U whose cover takes in a
+    // point of the L outside the clip - (40, 20) - while its gap leaves it out.
+    let l = polygon(&[
+        [8.0, 8.0],
+        [88.0, 8.0],
+        [88.0, 32.0],
+        [32.0, 32.0],
+        [32.0, 88.0],
+        [8.0, 88.0],
+    ]);
+    let u = polygon(&[
+        [28.0, 12.0],
+        [46.0, 12.0],
+        [46.0, 46.0],
+        [42.0, 46.0],
+        [42.0, 18.0],
+        [36.0, 18.0],
+        [36.0, 46.0],
+        [28.0, 46.0],
+    ]);
+    for operation in [
+        CompositeOperation::Copy,
+        CompositeOperation::SourceIn,
+        CompositeOperation::DestinationIn,
+    ] {
+        let frame = render(&device, &queue, |canvas| {
+            canvas.save();
+            canvas.clip_path(&polygon(&[[0.0, 0.0], [48.0, 0.0], [0.0, 48.0]]), FillRule::NonZero);
+            canvas.global_composite_operation(operation);
+            canvas.fill_path(&l, &red());
+            canvas.restore();
+            canvas.fill_path(&u, &Paint::color(Color::rgb(0, 0, 255)));
+        });
+        assert_eq!(px(&frame, 40, 15), [0, 0, 255], "{operation:?}: the U");
+        assert_eq!(
+            px(&frame, 40, 20),
+            WHITE,
+            "{operation:?}: the U's gap, outside the clip"
+        );
+    }
+}
+
 /// A clip that comes again a whole number of pixels away reads the same
 /// mask: both places get the same pixels. With no budget for masks a path
 /// clips on the stencil, as before.

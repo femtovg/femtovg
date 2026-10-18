@@ -8,6 +8,16 @@ All notable changes to this project will be documented in this file.
   antialiasing fringe, whose fill vertices move outward - so the next
   concave fill whose cover reached them painted them, outside its own shape.
   Such a fill now draws its fans again after the cover to zero them.
+- Fixed stray paint under a clip to a path other than a rectangle, rounded
+  rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
+  `destination-in` or `destination-atop`: a shape with a notch or a hole left
+  an invisible count where the clip cut it off, and the next such shape
+  painted those pixels outside its own outline. On the reftest suite's canvas
+  scenes of these operations, pixels off Chromium, Firefox and WebKit fall by
+  90% at 1x and 97% at 4x zoom (`hard-mask-source-in-triangle-l-arch`: 186 to
+  none), leaving only the clip's edge, and on WGPU a frame of 400 such shapes
+  takes half the CPU it used to. SVG content is unaffected: SVG puts no
+  compositing operator on a shape.
 - Reduce CPU encode time by 4x or more on some SVG content: 
   A cubic whose four points coincide is no longer halved ten times over
   before it adds no point. Its chord is zero, so it never passed the
