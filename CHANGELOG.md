@@ -18,6 +18,15 @@ All notable changes to this project will be documented in this file.
   desktop; thin shapes that move every frame are rasterized again each frame,
   about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
   29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
+- Fixed a point repeated in a path, or added within 0.01 device pixels of
+  the one before, being kept as a zero-length edge. A line to the current
+  point, the zero-length sides of a pill from `rounded_rect` (or of an SVG
+  `rect` whose radius is half its height) and segments that shrink below the
+  tolerance at small sizes all made one: a mitred join there lost its outer
+  corner, a square or round cap its extension, the fill's antialiased fringe
+  slanted along both neighbouring edges, and a convex shape was filled
+  through the stencil. Improves visual accuracy versus multiple browsers in
+  organic SVG content sources from SVGenius, SolidJS, New York Times, etc.
 - Fixed even-odd clips letting paint through a hole that comes within a pixel
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
