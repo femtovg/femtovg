@@ -1258,13 +1258,25 @@ where
 
     /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
-        self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
+        self.fill_path_internal(path, None, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
     }
 
-    fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
+    /// Fills `path` with its points mapped through `path_transform` and then
+    /// through the current transform. The paint's coordinates are mapped
+    /// through the current transform only. `render_direct()` passes the
+    /// transform that places a glyph's outline in its run.
+    fn fill_path_internal(
+        &mut self,
+        path: &Path,
+        path_transform: Option<&Transform2D>,
+        paint_flavor: &PaintFlavor,
+        anti_alias: bool,
+        fill_rule: FillRule,
+    ) {
         self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
-        let transform = self.state().transform;
+        let paint_transform = self.state().transform;
+        let transform = path_transform.map_or(paint_transform, |t| *t * paint_transform);
 
         let canvas_width = self.width();
         let canvas_height = self.height();
@@ -1286,7 +1298,7 @@ where
                 let path = path.clone();
                 let shadow_flavor = paint_flavor.clone();
                 self.render_shadow(bounds, move |canvas| {
-                    canvas.fill_path_internal(&path, &shadow_flavor, anti_alias, fill_rule);
+                    canvas.fill_path_internal(&path, path_transform, &shadow_flavor, anti_alias, fill_rule);
                 });
             }
         }
@@ -1344,9 +1356,9 @@ where
             !self.clip_active() && clip.shape.is_none() && clip.mask.is_none(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
+                self.render_unclipped_image_blit(&path_rect, &paint_transform, &paint_flavor);
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, &paint_flavor);
+                self.render_unclipped_image_blit(&intersection, &paint_transform, &paint_flavor);
             }
 
             return;
@@ -1356,7 +1368,7 @@ where
         let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
             let params = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
                 &clip.scissor,
@@ -1372,7 +1384,7 @@ where
 
             let fill_params = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
                 &clip.scissor,
@@ -1480,19 +1492,27 @@ where
 
     /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
-        self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
+        self.stroke_path_internal(path, None, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
     }
 
+    /// Strokes `path` with its points mapped through `path_transform` and then
+    /// through the current transform. The paint's coordinates are mapped
+    /// through the current transform only, as in
+    /// [`fill_path_internal`](Self::fill_path_internal). The line width
+    /// and the dash lengths of `stroke` are in the path's own coordinates, so
+    /// both transforms scale them.
     fn stroke_path_internal(
         &mut self,
         path: &Path,
+        path_transform: Option<&Transform2D>,
         paint_flavor: &PaintFlavor,
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
         self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
-        let transform = self.state().transform;
+        let paint_transform = self.state().transform;
+        let transform = path_transform.map_or(paint_transform, |t| *t * paint_transform);
 
         if !stroke.line_dash.is_empty() {
             let dashed_path = path.dashed_with_tolerance(&stroke.line_dash, stroke.line_dash_offset, self.tess_tol);
@@ -1503,7 +1523,7 @@ where
             let mut solid_stroke = stroke.clone();
             solid_stroke.line_dash.clear();
             solid_stroke.line_dash_offset = 0.0;
-            self.stroke_path_internal(&dashed_path, &paint_flavor, anti_alias, &solid_stroke);
+            self.stroke_path_internal(&dashed_path, path_transform, &paint_flavor, anti_alias, &solid_stroke);
             return;
         }
 
@@ -1533,7 +1553,7 @@ where
                 let stroke = stroke.clone();
                 let shadow_flavor = paint_flavor.clone();
                 self.render_shadow(bounds, move |canvas| {
-                    canvas.stroke_path_internal(&path, &shadow_flavor, anti_alias, &stroke);
+                    canvas.stroke_path_internal(&path, path_transform, &shadow_flavor, anti_alias, &stroke);
                 });
             }
         }
@@ -1601,7 +1621,7 @@ where
         // GPU uniforms
         let params = Params::new(
             &self.images,
-            &transform,
+            &paint_transform,
             &paint_flavor,
             &GlyphTexture::default(),
             &clip.scissor,
@@ -1614,7 +1634,7 @@ where
         let flavor = if stroke.stencil_strokes {
             let params2 = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
                 &clip.scissor,
@@ -2280,10 +2300,7 @@ where
         let glyphs_it = glyphs.into_iter();
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
-                if font
-                    .glyph(&font_face, glyph.glyph_id, normalized_coords)
-                    .is_some_and(|glyph| glyph.path.is_none())
-                {
+                if font.is_bitmap_glyph(&font_face, glyph.glyph_id, normalized_coords) {
                     color_glyphs.push(glyph.clone());
 
                     false
@@ -3174,6 +3191,198 @@ fn fill_text_selects_atlas_or_path_rendering() {
                 filled_outlines && !used_atlas,
                 "expected outline rendering for case: {description} (used_atlas={used_atlas}, filled_outlines={filled_outlines})"
             ),
+        }
+    }
+}
+
+/// Every glyph of text drawn as outlines gets the paint matrix that a path
+/// drawn under the same transform gets, so a gradient or image paint continues
+/// across the text and does not start again in each glyph.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
+    use renderer::CommandType;
+
+    // The paint matrices of the fills and strokes that `draw` records under a
+    // scale of 2. With a gradient or image paint under a scale, `draw_glyph_run`
+    // draws each glyph's outline instead of using the glyph atlas.
+    fn paint_matrices(draw: impl FnOnce(&mut Canvas<RecordingRenderer>, FontId, ImageId)) -> Vec<[f32; 12]> {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        let image = canvas
+            .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        canvas.scale(2.0, 2.0);
+        draw(&mut canvas, font, image);
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        let mut matrices = Vec::new();
+        for command in commands.iter() {
+            match &command.cmd_type {
+                CommandType::ConvexFill { params } | CommandType::Stroke { params } => matrices.push(params.paint_mat),
+                CommandType::ConcaveFill { fill_params, .. } => matrices.push(fill_params.paint_mat),
+                CommandType::StencilStroke { params1, params2 } => {
+                    matrices.extend([params1.paint_mat, params2.paint_mat]);
+                }
+                _ => {}
+            }
+        }
+        matrices
+    }
+
+    let cases: [(&str, fn(ImageId) -> Paint); 2] = [
+        ("gradient", |_| {
+            Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white())
+        }),
+        ("image", |image| Paint::image(image, 0.0, 0.0, 64.0, 64.0, 0.0, 1.0)),
+    ];
+
+    for (case, make_paint) in cases {
+        let on_a_path = paint_matrices(|canvas, _font, image| {
+            let mut path = Path::new();
+            path.circle(50.0, 50.0, 40.0);
+            canvas.fill_path(&path, &make_paint(image));
+        });
+
+        for stroke in [false, true] {
+            // "M" is a concave outline and "I" a convex one, which a fill draws
+            // with different commands.
+            let on_text = paint_matrices(|canvas, font, image| {
+                let paint = make_paint(image).with_font(&[font]);
+                if stroke {
+                    canvas.stroke_text(10.0, 40.0, "MI", &paint).unwrap();
+                } else {
+                    canvas.fill_text(10.0, 40.0, "MI", &paint).unwrap();
+                }
+            });
+
+            // A fill records one paint matrix for each glyph and a stroke two.
+            assert_eq!(on_text.len(), if stroke { 4 } else { 2 }, "{case}, stroke {stroke}");
+            assert!(
+                on_text.iter().all(|matrix| *matrix == on_a_path[0]),
+                "{case}, stroke {stroke}: expected {:?} for every glyph, got {on_text:?}",
+                on_a_path[0]
+            );
+        }
+    }
+}
+
+/// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` draw
+/// each outline glyph twice, once into the coverage image of the glyph's shadow
+/// and once on the canvas. Both draws sample an image paint at the vertex's
+/// position in user space, so the coverage image gets the alpha that the glyph
+/// has on the canvas.
+#[cfg(feature = "textlayout")]
+#[test]
+fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
+    use renderer::CommandType;
+
+    // The scale of the canvas transform. With an image paint under a scale,
+    // `draw_glyph_run` draws each glyph's outline instead of using the glyph
+    // atlas.
+    const SCALE: f32 = 2.0;
+    // How far, in image pixels, the position a draw samples may be from the
+    // vertex's position in user space. The two draws of a glyph go through
+    // different matrices, so they differ by rounding. A paint mapped through
+    // the glyph's own transform is sampled at the vertex's font-unit
+    // coordinates instead, which is far outside this tolerance.
+    const TOLERANCE: f32 = 0.01;
+
+    // The dash lengths are in font units, like the outline they are cut from.
+    let cases: [(&str, bool, &[f32]); 3] = [
+        ("fill", false, &[]),
+        ("stroke", true, &[]),
+        ("dashed stroke", true, &[300.0, 200.0]),
+    ];
+
+    for (case, stroke, dash) in cases {
+        let renderer = RecordingRenderer::default();
+        let recorded_commands = renderer.last_commands.clone();
+        let recorded_verts = renderer.last_verts.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        let image = canvas
+            .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        // The paint puts the image's origin at the origin of user space, so a
+        // point is sampled at its own user-space coordinates.
+        let paint = Paint::image(image, 0.0, 0.0, 64.0, 64.0, 0.0, 1.0)
+            .with_font(&[font])
+            .with_line_dash(dash);
+        let glyphs = canvas.measure_text(10.0, 40.0, "MI", &paint).unwrap().glyphs;
+        let glyphs: Vec<_> = glyphs
+            .iter()
+            .map(|glyph| PositionedGlyph {
+                x: glyph.x,
+                y: glyph.y,
+                glyph_id: glyph.glyph_id,
+            })
+            .collect();
+
+        canvas.scale(SCALE, SCALE);
+        canvas.set_shadow_color(Color::black());
+        canvas.set_shadow_offset(4.0, 4.0);
+        if stroke {
+            canvas
+                .stroke_glyph_run(font, &[], glyphs.iter().cloned(), &paint)
+                .unwrap();
+        } else {
+            canvas
+                .fill_glyph_run(font, &[], glyphs.iter().cloned(), &paint)
+                .unwrap();
+        }
+        canvas.flush_to_output(());
+
+        // The first vertex of every draw with `paint`, and the position in the
+        // image that the draw samples there.
+        let commands = recorded_commands.borrow();
+        let verts = recorded_verts.borrow();
+        let mut draws = Vec::new();
+        for command in commands.iter().filter(|command| command.image == Some(image)) {
+            let params = match &command.cmd_type {
+                CommandType::ConvexFill { params } | CommandType::StencilStroke { params1: params, .. } => params,
+                CommandType::ConcaveFill { fill_params, .. } => fill_params,
+                other => panic!("{case}: unexpected draw {other:?}"),
+            };
+            let drawable = &command.drawables[0];
+            let (first, _) = drawable.fill_verts.or(drawable.stroke_verts).unwrap();
+            let vertex = verts[first];
+            let [a, b, _, _, c, d, _, _, x, y, ..] = params.paint_mat;
+            let sampled = [a * vertex.x + c * vertex.y + x, b * vertex.x + d * vertex.y + y];
+            draws.push((vertex, sampled));
+        }
+
+        // Each glyph is drawn into the coverage image of its shadow and then
+        // on the canvas.
+        assert_eq!(draws.len(), 2 * glyphs.len(), "{case}");
+        for (glyph, glyph_draws) in glyphs.iter().zip(draws.chunks_exact(2)) {
+            let (on_canvas, _) = glyph_draws[1];
+            let in_user_space = [on_canvas.x / SCALE, on_canvas.y / SCALE];
+            // The outline is at the glyph's position. "M" and "I" are smaller
+            // than the font size, so the vertex is within that distance of the
+            // glyph's origin.
+            assert!(
+                (in_user_space[0] - glyph.x).abs() < paint.font_size()
+                    && (in_user_space[1] - glyph.y).abs() < paint.font_size(),
+                "{case}: the glyph at {:?} has a vertex at {in_user_space:?}",
+                (glyph.x, glyph.y)
+            );
+            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip(glyph_draws) {
+                assert!(
+                    (sampled[0] - in_user_space[0]).abs() < TOLERANCE
+                        && (sampled[1] - in_user_space[1]).abs() < TOLERANCE,
+                    "{case}, {draw}: a vertex at {in_user_space:?} samples the image at {sampled:?}"
+                );
+            }
         }
     }
 }
@@ -4707,7 +4916,7 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
 /// large to cache, or when a gradient or image paint is scaled. PNG glyphs
 /// have no outline to draw, so they go through an atlas that lives from the
 /// first such draw of a frame until the flush.
-#[cfg(feature = "textlayout")]
+#[cfg(any(feature = "textlayout", feature = "swash"))]
 #[test]
 fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     use crate::paint::GlyphTexture;
@@ -4731,9 +4940,10 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
         let paint = paint.clone().with_font_size(font_size);
         let renderer = RecordingRenderer::default();
         let recorded_commands = renderer.last_commands.clone();
-        let mut canvas = Canvas::new(renderer).unwrap();
+        let text_context = TextContext::default();
+        let font = text_context.add_font_mem(&font_data).unwrap();
+        let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
         canvas.set_size(400, 400, 1.0);
-        let font = canvas.add_font_mem(&font_data).unwrap();
         canvas.set_transform(&transform);
         let glyph = PositionedGlyph {
             x: 50.0,
@@ -4750,9 +4960,9 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
             canvas.flush_to_output(());
             assert!(canvas.ephemeral_glyph_atlas.is_none(), "{case}");
 
-            // Every fill and stroke draws the bitmap, which takes
+            // Every fill and stroke draws the bitmap, which takes `swash` or
             // `image-loading` to decode.
-            if cfg!(feature = "image-loading") {
+            if cfg!(any(feature = "swash", feature = "image-loading")) {
                 let commands = recorded_commands.borrow();
                 let color_draws = commands
                     .iter()
@@ -4762,6 +4972,62 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
             }
         }
     }
+}
+
+/// Without `image-loading`, drawing a PNG glyph directly at a font size too large
+/// for the atlas doesn't return an error. The draw skips the glyph instead.
+#[cfg(all(feature = "swash", not(feature = "image-loading")))]
+#[test]
+fn png_glyphs_too_large_for_the_atlas_are_skipped() {
+    use crate::text::test_fonts::png_glyph_font;
+
+    let text_context = TextContext::default();
+    let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
+    let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    // The bitmap is one em square, and an atlas texture is 512 by 512 pixels.
+    let paint = Paint::color(Color::black()).with_font_size(700.0);
+    let glyph = PositionedGlyph {
+        x: 50.0,
+        y: 100.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+}
+
+/// With `textlayout`, `Font::glyph` finds a PNG glyph without decoding it. When
+/// swash then cannot decode it, a stroke skips the glyph instead of drawing
+/// swash's fallback outline as a fill.
+#[cfg(all(feature = "textlayout", feature = "swash"))]
+#[test]
+fn stroked_png_glyphs_that_do_not_decode_are_skipped() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::outline_glyph_with_broken_png_font;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let text_context = TextContext::default();
+    let font = text_context
+        .add_font_mem(&outline_glyph_with_broken_png_font())
+        .unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let paint = Paint::color(Color::black()).with_font_size(24.0).with_line_width(6.0);
+    let glyph = PositionedGlyph {
+        x: 50.0,
+        y: 100.0,
+        glyph_id: 0,
+    };
+    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let glyph_draws = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| !matches!(command.glyph_texture, GlyphTexture::None))
+        .count();
+    assert_eq!(glyph_draws, 0);
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /
