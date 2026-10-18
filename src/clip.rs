@@ -390,8 +390,8 @@ where
         }
         let mut outline = MaskOutline::default();
         for &(path, fill_rule) in paths {
-            let path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
-            outline.child(fill_rule, path_cache.outlines());
+            let mut path_cache = path::PathCache::new(path.verbs(), &transform, tolerance, self.dist_tol);
+            outline.child(fill_rule, path_cache.outlines(fill_rule));
         }
         let rect = outline.rect(within);
         let origin = [rect[0], rect[1]];
@@ -2676,4 +2676,28 @@ fn a_draw_coverage_cannot_bound_takes_a_mask_whole() {
     assert_eq!(stencil_clip_commands(&commands), 0);
     let hard: Vec<bool> = drawn_masks(&commands).iter().map(|mask| mask.unwrap().hard).collect();
     assert_eq!(hard, [false, true, false]);
+}
+
+/// A ring thinner than a pixel, both circles wound alike, covers the ring's
+/// area as an even-odd clip: added up before the rule folds it, the winding
+/// counted the hole into each pixel the ring crosses.
+#[test]
+fn an_even_odd_ring_wound_alike_holds_its_area() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(100, 100, 1.0);
+    let mut ring = Path::new();
+    ring.circle(50.0, 50.0, 30.0);
+    ring.circle(50.0, 50.0, 29.6);
+    let area = std::f32::consts::PI * (30.0f32.powi(2) - 29.6f32.powi(2));
+    let ink = |pixels: &[u8]| pixels.iter().map(|&p| f32::from(p) / 255.0).sum::<f32>();
+
+    canvas.clip_path(&ring, FillRule::EvenOdd);
+    let ClipKind::Mask { mask, .. } = &canvas.clip_stack[0].kind else {
+        panic!("a ring is a mask");
+    };
+    let clipped = ink(&mask.pixels);
+    assert!(
+        (clipped - area).abs() < 0.02 * area,
+        "the clip's mask: {clipped:.1} for {area:.1}"
+    );
 }
