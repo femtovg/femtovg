@@ -3,12 +3,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- A cubic whose four points coincide is no longer halved ten times over
+- Reduce CPU encode time by 4x or more on some SVG content: 
+  A cubic whose four points coincide is no longer halved ten times over
   before it adds no point. Its chord is zero, so it never passed the
   flatness test: each square corner of a `rounded_rect_varying` and every
   curve under a transform that scales to nothing took 2,047 pieces, and
   4,095 more when `Path::dashed` flattened it. A page of 300 tabs rounded
   on top encoded in 3.4 ms a frame on an M4 Max, and now in 0.7 ms.
+- Fixed a point repeated in a path, or added within 0.01 device pixels of
+  the one before, being kept as a zero-length edge. A line to the current
+  point, the zero-length sides of a pill from `rounded_rect` (or of an SVG
+  `rect` whose radius is half its height) and segments that shrink below the
+  tolerance at small sizes all made one: a mitred join there lost its outer
+  corner, a square or round cap its extension, the fill's antialiased fringe
+  slanted along both neighbouring edges, and a convex shape was filled
+  through the stencil. Improves visual accuracy versus multiple browsers in
+  organic SVG content sources from SVGenius, SolidJS, New York Times, etc.
 - Fixed even-odd clips letting paint through a hole that comes within a pixel
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
