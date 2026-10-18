@@ -672,9 +672,9 @@ impl GlyphAtlas {
         normalized_coords: &[i16],
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
         #[cfg(feature = "swash")]
-        if mode == RenderMode::Fill {
+        if mode == RenderMode::Fill || font.is_bitmap_glyph(font_face, glyph_id, normalized_coords) {
             if let Some(result) =
-                self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, normalized_coords)?
+                self.render_glyph_swash(canvas, font, font_size, mode, glyph_id, _subpixel_x, normalized_coords)?
             {
                 return Ok(Some((result, None)));
             }
@@ -767,6 +767,7 @@ impl GlyphAtlas {
         canvas: &mut Canvas<T>,
         font: &Font,
         font_size: f32,
+        mode: RenderMode,
         glyph_id: u16,
         subpixel_x: f32,
         normalized_coords: &[i16],
@@ -804,14 +805,25 @@ impl GlyphAtlas {
             _ => return Ok(None),
         };
 
+        // swash cannot stroke, so a stroke takes only a color image from it. The atlas would draw
+        // a mask as a shifted fill (e.g., the outline of a glyph whose bitmap does not decode).
+        if mode == RenderMode::Stroke && image.content != swash::scale::image::Content::Color {
+            return Ok(None);
+        }
+
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
         let glyph_width = image.placement.width;
         let glyph_height = image.placement.height;
         let alloc_width = glyph_width + 2 * padding;
         let alloc_height = glyph_height + 2 * padding;
 
+        // Return None for a glyph too large for the atlas (e.g., an emoji drawn directly at a
+        // large font size). Without image-loading, place_glyph then skips it instead of failing.
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
-            self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize)?;
+            match self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize) {
+                Err(ErrorKind::FontSizeTooLargeForAtlas) => return Ok(None),
+                result => result?,
+            };
 
         let is_color = image.content == swash::scale::image::Content::Color;
 
