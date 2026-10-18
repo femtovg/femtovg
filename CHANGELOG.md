@@ -9,9 +9,9 @@ All notable changes to this project will be documented in this file.
   an invisible count where the clip cut it off, and the next such shape
   painted those pixels outside its own outline. On the reftest suite's canvas
   scenes of these operations, pixels off Chromium, Firefox and WebKit fall by
-  90 % at 1x and 97 % at 4x (`hard-mask-source-in-triangle-l-arch`: 186 to
+  90% at 1x and 97% at 4x zoom (`hard-mask-source-in-triangle-l-arch`: 186 to
   none), leaving only the clip's edge, and on WGPU a frame of 400 such shapes
-  takes half the CPU it did. SVG content is unaffected: SVG puts no
+  takes half the CPU it used to. SVG content is unaffected: SVG puts no
   compositing operator on a shape.
 - Reduce CPU encode time by 4x or more on some SVG content: 
   A cubic whose four points coincide is no longer halved ten times over
