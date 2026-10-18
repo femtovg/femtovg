@@ -10,8 +10,8 @@ All notable changes to this project will be documented in this file.
   tolerance at small sizes all made one: a mitred join there lost its outer
   corner, a square or round cap its extension, the fill's antialiased fringe
   slanted along both neighbouring edges, and a convex shape was filled
-  through the stencil. The point is merged into the one before it, as in
-  nanovg.
+  through the stencil. Improves visual accuracy versus multiple browsers in
+  organic SVG content sources from SVGenius, SolidJS, New York Times, etc.
 - Fixed even-odd clips letting paint through a hole that comes within a pixel
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
