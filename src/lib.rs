@@ -1334,7 +1334,14 @@ where
             let bounds = path_cache.bounds;
             if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
                 && clip::is_thin(path_cache.mean_width(fill_rule))
-                && self.fill_through_mask(path, &mut path_cache, &transform, &paint_flavor, fill_rule)
+                && self.fill_through_mask(
+                    path,
+                    &mut path_cache,
+                    &transform,
+                    &paint_transform,
+                    &paint_flavor,
+                    fill_rule,
+                )
             {
                 return;
             }
@@ -3231,6 +3238,51 @@ fn fill_text_selects_atlas_or_path_rendering() {
 /// drawn under the same transform gets, so a gradient or image paint continues
 /// across the text and does not start again in each glyph.
 #[cfg(feature = "textlayout")]
+#[test]
+fn thin_text_drawn_through_masks_uses_one_paint_matrix_for_the_run() {
+    use renderer::CommandType;
+
+    // At 3 px under a scale of 2, the glyphs' outlines are thin fills, each
+    // drawn as a quad over its mask; the circle is drawn as a convex fill.
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let font = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    canvas.scale(2.0, 2.0);
+    let paint = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    let mut path = Path::new();
+    path.circle(50.0, 50.0, 40.0);
+    canvas.fill_path(&path, &paint);
+    canvas
+        .fill_text(10.0, 40.0, "MI", &paint.with_font(&[font]).with_font_size(3.0))
+        .unwrap();
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let on_a_path = commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::ConvexFill { params } => Some(params.paint_mat),
+            _ => None,
+        })
+        .expect("the circle's fill");
+    let on_text: Vec<_> = commands
+        .iter()
+        .filter_map(|command| match &command.cmd_type {
+            CommandType::Triangles { params } if params.glyph_texture_type == 1 => Some(params.paint_mat),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(on_text.len(), 2, "one masked quad for each glyph");
+    assert!(
+        on_text.iter().all(|matrix| *matrix == on_a_path),
+        "expected {on_a_path:?} for every glyph, got {on_text:?}"
+    );
+}
+
 #[test]
 fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
     use renderer::CommandType;

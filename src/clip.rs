@@ -484,12 +484,15 @@ where
     /// Draws a thin fill (see [`fill`]) as a quad over its
     /// coverage mask in the atlas of fill masks. `false` - the frame has made
     /// its share of masks, or the atlas has no room - leaves the fill to its
-    /// fringe.
+    /// fringe. `transform` places the path and `paint_transform` the paint,
+    /// as in `fill_path_internal`: a glyph drawn as an outline is placed by
+    /// its own transform and painted by the run's.
     pub(crate) fn fill_through_mask(
         &mut self,
         path: &Path,
         path_cache: &mut PathCache,
         transform: &Transform2D,
+        paint_transform: &Transform2D,
         paint_flavor: &PaintFlavor,
         fill_rule: FillRule,
     ) -> bool {
@@ -546,7 +549,7 @@ where
             Vertex::new(x0, y1, s_below, t_below),
             Vertex::new(x1, y1, s1, t1),
         ];
-        self.render_triangles(&verts, transform, paint_flavor, GlyphTexture::AlphaMask(image));
+        self.render_triangles(&verts, paint_transform, paint_flavor, GlyphTexture::AlphaMask(image));
         true
     }
 
