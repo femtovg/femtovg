@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- With the `swash` feature, `Canvas` now draws filled text at a negative x
+  with the mask for each glyph's own subpixel offset. It used a mask
+  rasterized for another offset, which put each glyph up to a pixel from its
+  position and spaced the letters unevenly (e.g., in text centred or
+  right-aligned by translating the canvas to an anchor point).
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
