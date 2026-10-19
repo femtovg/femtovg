@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- With the `swash` feature, `Canvas` now draws filled text at a negative x
+  with the mask for each glyph's own subpixel offset. It used a mask
+  rasterized for another offset, which put each glyph up to a pixel from its
+  position and spaced the letters unevenly (e.g., in text centred or
+  right-aligned by translating the canvas to an anchor point).
 - Fixed: Thin shapes are drawn with the coverage browsers give them: hairlines,
   slivers and the fine details of icons, logos and illustrations came out too
   dark, a sliver a tenth of a pixel wide nearly eight times its area and a

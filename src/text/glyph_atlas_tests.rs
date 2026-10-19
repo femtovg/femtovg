@@ -1,5 +1,7 @@
 //! Tests that drawing text through the glyph atlas does not change the caller's
 //! canvas: open layers, state stack, current state and render target.
+//! With `swash`, they also check that a glyph is drawn with the mask for its
+//! own subpixel offset.
 
 use super::*;
 use crate::{
@@ -453,5 +455,95 @@ fn a_failed_png_glyph_upload_fails_the_draw_and_keeps_the_callers_state() {
             "only \"g\" is cached"
         );
         assert_every_cached_glyph_has_its_mask_queued(&canvas);
+    }
+}
+
+/// Renders a glyph of `FONT` with Swash at `font_size` and subpixel offset `subpixel_x`,
+/// with the hinting and format that `render_glyph_swash` uses.
+#[cfg(feature = "swash")]
+fn swash_image(glyph_id: u16, font_size: f32, subpixel_x: f32) -> swash::scale::image::Image {
+    use swash::scale::{Render, ScaleContext, Source};
+
+    let mut context = ScaleContext::new();
+    let mut scaler = context
+        .builder(swash::FontRef::from_index(FONT, 0).unwrap())
+        .size(font_size)
+        .hint(true)
+        .build();
+    Render::new(&[Source::Outline])
+        .format(swash::zeno::Format::Alpha)
+        .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
+        .render(&mut scaler, glyph_id)
+        .unwrap()
+}
+
+#[cfg(feature = "swash")]
+#[test]
+fn swash_fill_at_negative_x_uses_the_mask_for_its_subpixel_offset() {
+    const FONT_SIZE: f32 = 24.0;
+    let (mut canvas, font_id) = canvas();
+    canvas.renderer.retain_image_updates = true;
+    let glyph_id = swash::FontRef::from_index(FONT, 0).unwrap().charmap().map('g');
+
+    let atlas = canvas.glyph_atlas.clone();
+    let text_context = canvas.text_context.clone();
+    let text_context = RefCell::borrow(&text_context);
+    let font = text_context.font(font_id).unwrap();
+    let font_face = font.face_ref_with_normalized_coords(&[]);
+
+    // Each entry is (x, pixel, tenths). x rounded to a tenth of a pixel is
+    // `pixel + tenths / 10`, where `pixel` is a whole number. -0.96 rounds to -1.0.
+    for (x, pixel, tenths) in [
+        (-0.3, -1.0, 7_u8),
+        (-0.7, -1.0, 3),
+        (0.3, 0.0, 3),
+        (5.0, 5.0, 0),
+        (-0.96, -1.0, 0),
+        (-2.0, -2.0, 0),
+    ] {
+        let glyph = PositionedGlyph { x, y: 70.0, glyph_id };
+        let commands = atlas
+            .render_atlas(
+                &mut canvas,
+                font_id,
+                font,
+                &font_face,
+                [glyph].into_iter(),
+                FONT_SIZE,
+                0.0,
+                RenderMode::Fill,
+                &[],
+            )
+            .unwrap();
+        let command = &commands.alpha_glyphs[0];
+        let quad = &command.quads[0];
+
+        // The mask that the quad samples is the upload to the quad's atlas cell, without the
+        // padding. Its coverage is in the red channel.
+        let cell = (
+            (quad.s0 * TEXTURE_SIZE as f32).round() as usize,
+            (quad.t0 * TEXTURE_SIZE as f32).round() as usize,
+        );
+        let uploads = &canvas.images.get(command.image_id).unwrap().updates;
+        let (_, _, upload) = uploads
+            .iter()
+            .find(|(x, y, _)| (*x, *y) == cell)
+            .expect("Swash should have uploaded a mask to the quad's atlas cell");
+        let padding = GLYPH_PADDING as usize;
+        let (width, height) = (upload.width() - 2 * padding, upload.height() - 2 * padding);
+        let mask = upload.as_ref().sub_image(padding, padding, width, height);
+        let coverage: Vec<u8> = mask.pixels().map(|pixel| pixel.r).collect();
+
+        let expected = swash_image(glyph_id, FONT_SIZE, f32::from(tenths) / 10.0);
+        // `assert!`, not `assert_eq!`, so that a failure does not print both pixel arrays.
+        assert!(
+            (width, coverage) == (expected.placement.width as usize, expected.data),
+            "the glyph at x = {x} should sample Swash's image for the subpixel offset 0.{tenths}"
+        );
+        assert_eq!(
+            quad.x0,
+            pixel + expected.placement.left as f32 - GLYPH_PADDING as f32,
+            "left edge of the quad of the glyph at x = {x}"
+        );
     }
 }
