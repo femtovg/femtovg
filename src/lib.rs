@@ -4611,6 +4611,74 @@ fn letter_spacing_does_not_collide_in_the_shaping_cache() {
     );
 }
 
+/// The shaped-word cache keys on the exact font size: `shape_word` scales
+/// every advance by it, so the same word measured at two sizes must not
+/// share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn font_size_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let base = Paint::color(Color::black()).with_font(&[font_id]);
+
+    let at_30 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_font_size(30.0))
+        .unwrap()
+        .width();
+    let at_30_09 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.with_font_size(30.09))
+        .unwrap()
+        .width();
+    // Advances are linear in the font size, so the width must grow by the same ratio.
+    assert!(
+        (at_30_09 / at_30 - 30.09 / 30.0).abs() < 1e-4,
+        "a size in the same tenth as a cached one must get its own width: at 30 {at_30}, at 30.09 {at_30_09}"
+    );
+}
+
+/// The run cache keys on the exact `max_width`: `shape_run` breaks where the
+/// accumulated width reaches it, so the same text broken at two widths must
+/// not share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn max_width_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    let text = "cache key";
+    let width = canvas.measure_text(20.0, 100.0, text, &paint).unwrap().width();
+    // The two widths below must lie in the same whole unit, or the test
+    // passes without exercising the collision.
+    assert!(
+        width.fract() > 0.1 && width.fract() < 0.9,
+        "pick a text whose width is not within 0.1 of a whole number: {width}"
+    );
+
+    let broken = canvas.break_text(width - 0.1, text, &paint).unwrap();
+    let whole = canvas.break_text(width + 0.1, text, &paint).unwrap();
+    assert!(
+        broken < text.len(),
+        "the text must not fit in {}: broke at {broken}",
+        width - 0.1
+    );
+    assert_eq!(
+        whole,
+        text.len(),
+        "the whole text fits in {} and must not get the break position cached for {}",
+        width + 0.1,
+        width - 0.1
+    );
+}
+
 /// Bidi control characters are default-ignorable: isolate marks (U+2066..
 /// U+2069) and direction marks (U+200E/U+200F) must add no advance and no
 /// visible glyph, whether or not the font has real coverage for them - the
