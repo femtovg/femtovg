@@ -279,7 +279,7 @@ impl TextContextImpl {
                 let path = entry.path();
 
                 if path.is_dir() {
-                    self.add_font_dir(&path)?;
+                    fonts.extend(self.add_font_dir(&path)?);
                 } else if Some("ttf") == path.extension().and_then(OsStr::to_str) {
                     fonts.push(self.add_font_file(path)?);
                 } else if Some("ttc") == path.extension().and_then(OsStr::to_str) {

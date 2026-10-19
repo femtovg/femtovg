@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
+  ids of the fonts they load from subdirectories, not only of those directly
+  in the given directory.
 - Fixed stray paint under a clip to a path other than a rectangle, rounded
   rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
   `destination-in` or `destination-atop`: a shape with a notch or a hole left
