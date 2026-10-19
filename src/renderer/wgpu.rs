@@ -973,7 +973,7 @@ impl Renderer for WGPURenderer {
         );
 
         let mut current_render_target = RenderTarget::Screen;
-        // Whether the last `SampleRenderTarget` drew.
+        // Whether the last `StartBlur` drew.
         let mut sampled = false;
         for (command, &fans) in commands.into_iter().zip(&self.fan_indices.firsts) {
             render_pass_builder.set_clip_bounds(&command);
@@ -1105,7 +1105,7 @@ impl Renderer for WGPURenderer {
                         single_pass_filter(&mut pass, command, shader_type, slots, target_image);
                     }
                 },
-                super::CommandType::SampleRenderTarget {
+                super::CommandType::StartBlur {
                     target_image,
                     src,
                     sigma,
@@ -1116,7 +1116,7 @@ impl Renderer for WGPURenderer {
                         render_pass_builder: &mut render_pass_builder,
                         pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                     };
-                    sampled = sample_render_target(
+                    sampled = start_blur(
                         &mut pass,
                         &command,
                         &mut self.render_target_reader,
@@ -1125,7 +1125,7 @@ impl Renderer for WGPURenderer {
                         sigma,
                     );
                 }
-                super::CommandType::BlurRect { sigma, extent, region } => {
+                super::CommandType::FinishBlur { sigma, extent, region } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
@@ -1138,7 +1138,7 @@ impl Renderer for WGPURenderer {
                         render_pass_builder: &mut render_pass_builder,
                         pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
                     };
-                    blur_rect(&mut pass, &command, sigma, extent, region);
+                    finish_blur(&mut pass, &command, sigma, extent, region);
                 }
             }
         }
@@ -1472,8 +1472,8 @@ fn separable_filter(
 }
 
 /// Draws `src` of the render target the pass draws on over `target_image`:
-/// see `CommandType::SampleRenderTarget`. Returns whether it drew.
-fn sample_render_target(
+/// see `CommandType::StartBlur`. Returns whether it drew.
+fn start_blur(
     pass: &mut FilterPass<'_, '_>,
     command: &super::Command,
     reader: &mut RenderTargetReader,
@@ -1540,8 +1540,14 @@ fn sample_render_target(
 }
 
 /// Blurs `command.image` along y back onto the render target the pass draws
-/// on: see `CommandType::BlurRect`.
-fn blur_rect(pass: &mut FilterPass<'_, '_>, command: &super::Command, sigma: f32, extent: [u32; 2], region: [u32; 4]) {
+/// on: see `CommandType::FinishBlur`.
+fn finish_blur(
+    pass: &mut FilterPass<'_, '_>,
+    command: &super::Command,
+    sigma: f32,
+    extent: [u32; 2],
+    region: [u32; 4],
+) {
     let Some(source) = command.image else {
         return;
     };

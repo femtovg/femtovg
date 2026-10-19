@@ -802,14 +802,13 @@ where
     /// [`filter_image_chain`](Self::filter_image_chain) uses, and is drawn
     /// back up onto the target from there. Sigma is capped at 512.
     ///
-    /// An image target is read where it is; the screen can't be, so the
-    /// backend copies the rect and its reach first:
-    /// - WGPU: the output texture needs `wgpu::TextureUsages::COPY_SRC`, a
-    ///   single array layer and mip level, and a size equal to the output's;
-    ///   an image target needs `TEXTURE_BINDING`. Otherwise the blur is
-    ///   skipped with a warning.
-    /// - OpenGL: the framebuffer must be single-sampled.
-    /// - OpenGL ES: the default framebuffer needs an alpha channel.
+    /// The screen can't be read while drawn to, so it's copied first, which needs:
+    /// - WGPU: `wgpu::TextureUsages::COPY_SRC` on the output texture, and the
+    ///   output must be mip 0 of a single-layer texture.
+    /// - OpenGL: a single-sampled framebuffer.
+    ///
+    /// An image target is read in place; on WGPU it needs `TEXTURE_BINDING`.
+    /// The blur is skipped with a warning when a requirement isn't met.
     ///
     /// Returns [`ErrorKind::UnsupportedOperation`] while a
     /// [`begin_layer`](Self::begin_layer) capture is open,
@@ -889,7 +888,7 @@ where
             ),
         };
         let (width, height) = self.image_size(first).expect("a transient image has a size");
-        let mut cmd = Command::new(CommandType::SampleRenderTarget {
+        let mut cmd = Command::new(CommandType::StartBlur {
             target_image: first,
             src,
             sigma: first_sigma,
@@ -915,7 +914,7 @@ where
                 (level, 0.0, flipped)
             }
         };
-        let mut cmd = Command::new(CommandType::BlurRect {
+        let mut cmd = Command::new(CommandType::FinishBlur {
             sigma,
             extent: [footprint_width as u32, footprint_height as u32],
             region,
@@ -2031,12 +2030,12 @@ fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
     let kinds = canvas.commands[before..]
         .iter()
         .map(|command| match command.cmd_type {
-            CommandType::SampleRenderTarget { src, sigma, .. } => {
+            CommandType::StartBlur { src, sigma, .. } => {
                 sampled = Some((src, sigma, texture_rect(command)));
                 "sample"
             }
             CommandType::RenderFilteredImage { .. } => "filter",
-            CommandType::BlurRect { sigma, extent, region } => {
+            CommandType::FinishBlur { sigma, extent, region } => {
                 assert!(!command.clip_active, "a rect blur is a raw write");
                 written = Some(WriteBack {
                     extent,

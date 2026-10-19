@@ -70,6 +70,8 @@ pub struct OpenGl {
     // the screen can't be sampled. Kept at the screen's size, since a blur
     // drawn every frame copies every frame.
     screen_copy: Option<GlTexture>,
+    // Blurs run every frame, so a skipped one logs once, not per frame.
+    warned_blur_skipped: bool,
 }
 
 /// The texture parameters a rect blur's first draw reads an image target
@@ -330,6 +332,7 @@ impl OpenGl {
             current_render_target: RenderTarget::Screen,
             max_texture_size,
             screen_copy: None,
+            warned_blur_skipped: false,
         };
 
         unsafe {
@@ -802,22 +805,45 @@ impl OpenGl {
         self.check_error("set_uniforms texture");
     }
 
+    fn warn_skipped(&mut self, reason: &str) {
+        if !std::mem::replace(&mut self.warned_blur_skipped, true) {
+            log::warn!("rect blur skipped: {reason}");
+        }
+    }
+
     /// Copies `src` of the screen into `screen_copy` at the same place and
     /// returns the copy's texture.
     fn copy_screen(&mut self, [x, y, width, height]: [u32; 4]) -> Option<<glow::Context as glow::HasContext>::Texture> {
+        // glCopyTexSubImage2D can't resolve a multisampled framebuffer.
+        if unsafe { self.context.get_parameter_i32(glow::SAMPLE_BUFFERS) } > 0 {
+            self.warn_skipped("the screen framebuffer is multisampled");
+            return None;
+        }
+        // OpenGL ES can't copy a channel the framebuffer lacks, so an
+        // alphaless screen is copied into an RGB texture, which samples as
+        // opaque. Desktop GL fills the missing alpha with 1 itself.
+        let format =
+            if self.context.version().is_embedded && unsafe { self.context.get_parameter_i32(glow::ALPHA_BITS) } == 0 {
+                PixelFormat::Rgb8
+            } else {
+                PixelFormat::Rgba8
+            };
         let size = self.view.map(|extent| extent as usize);
-        if self
-            .screen_copy
-            .as_ref()
-            .is_none_or(|copy| [copy.info().width(), copy.info().height()] != size)
-        {
+        if self.screen_copy.as_ref().is_none_or(|copy| {
+            let info = copy.info();
+            [info.width(), info.height()] != size || info.format() != format
+        }) {
             if let Some(copy) = self.screen_copy.take() {
                 copy.delete(&self.context);
             }
-            let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, size[0], size[1], PixelFormat::Rgba8);
-            self.screen_copy = GlTexture::new(&self.context, info, self.is_opengles_2_0)
-                .inspect_err(|err| log::warn!("rect blur skipped: can't create the screen copy: {err:?}"))
-                .ok();
+            let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, size[0], size[1], format);
+            match GlTexture::new(&self.context, info, self.is_opengles_2_0) {
+                Ok(copy) => self.screen_copy = Some(copy),
+                Err(err) => {
+                    self.warn_skipped(&format!("can't create the screen copy: {err:?}"));
+                    return None;
+                }
+            }
         }
         let texture = self.screen_copy.as_ref()?.id();
         // The screen holds its rows bottom-up, as the copy does.
@@ -1139,8 +1165,8 @@ impl OpenGl {
     }
 
     /// Draws `src` of the current render target over `target_image`: see
-    /// `CommandType::SampleRenderTarget`. Returns whether it drew.
-    fn sample_render_target(
+    /// `CommandType::StartBlur`. Returns whether it drew.
+    fn start_blur(
         &mut self,
         images: &ImageStore<GlTexture>,
         cmd: &Command,
@@ -1204,7 +1230,7 @@ impl OpenGl {
                 self.context.tex_parameter_i32(glow::TEXTURE_2D, parameter, previous);
             }
         }
-        self.check_error("sample_render_target");
+        self.check_error("start_blur");
 
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
@@ -1212,8 +1238,8 @@ impl OpenGl {
     }
 
     /// Blurs `cmd.image` along y back onto the current render target: see
-    /// `CommandType::BlurRect`.
-    fn blur_rect(
+    /// `CommandType::FinishBlur`.
+    fn finish_blur(
         &mut self,
         images: &ImageStore<GlTexture>,
         cmd: &Command,
@@ -1445,7 +1471,7 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        // Whether the last `SampleRenderTarget` drew.
+        // Whether the last `StartBlur` drew.
         let mut sampled = false;
         for (index, cmd) in commands.into_iter().enumerate() {
             self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
@@ -1480,17 +1506,17 @@ impl Renderer for OpenGl {
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
                 }
-                CommandType::SampleRenderTarget {
+                CommandType::StartBlur {
                     target_image,
                     src,
                     sigma,
-                } => sampled = self.sample_render_target(images, &cmd, target_image, src, sigma),
-                CommandType::BlurRect { sigma, extent, region } => {
+                } => sampled = self.start_blur(images, &cmd, target_image, src, sigma),
+                CommandType::FinishBlur { sigma, extent, region } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
                     if sampled {
-                        self.blur_rect(images, &cmd, sigma, extent, region);
+                        self.finish_blur(images, &cmd, sigma, extent, region);
                     }
                 }
                 CommandType::ClipFill => {

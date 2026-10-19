@@ -139,7 +139,7 @@ pub enum CommandType {
     /// it samples, counted from the top: a renderer storing the target's
     /// rows bottom-up mirrors them. They can pass the target's edges, where
     /// taps clamp to the edge pixels.
-    SampleRenderTarget {
+    StartBlur {
         /// The image drawn into.
         target_image: ImageId,
         /// The pixels the draw reads, `[x, y, width, height]` in device
@@ -153,9 +153,9 @@ pub enum CommandType {
     /// resamples) onto `region` of the render target. The quad is
     /// `triangles_verts`, its texture coordinates the pixels of `image`,
     /// stretched over `extent`, it samples. Taps clamp at `image`'s edges.
-    /// A renderer whose last `SampleRenderTarget` didn't draw skips it:
+    /// A renderer whose last `StartBlur` didn't draw skips it:
     /// `image` then holds whatever was there before.
-    BlurRect {
+    FinishBlur {
         /// The standard deviation along y.
         sigma: f32,
         /// The size `image` is stretched over, in device pixels.

@@ -870,8 +870,8 @@ where
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
-                | CommandType::SampleRenderTarget { .. }
-                | CommandType::BlurRect { .. }
+                | CommandType::StartBlur { .. }
+                | CommandType::FinishBlur { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }
