@@ -4974,26 +4974,107 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     }
 }
 
-/// Without `image-loading`, drawing a PNG glyph directly at a font size too large
-/// for the atlas doesn't return an error. The draw skips the glyph instead.
-#[cfg(all(feature = "swash", not(feature = "image-loading")))]
+/// The atlas draws an oversized PNG glyph from a smaller copy, at its position
+/// and size at the font size, to within the copy's texel rounding.
+#[cfg(any(feature = "swash", all(feature = "textlayout", feature = "image-loading")))]
 #[test]
-fn png_glyphs_too_large_for_the_atlas_are_skipped() {
-    use crate::text::test_fonts::png_glyph_font;
+fn png_glyphs_too_large_for_the_atlas_are_drawn_at_the_font_size() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::{offset_png_glyph_font, png_glyph_font};
+    use crate::text::{MAX_GLYPH_SIDE, TEXTURE_SIZE};
 
-    let text_context = TextContext::default();
-    let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
-    let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
-    canvas.set_size(400, 400, 1.0);
-    // The bitmap is one em square, and an atlas texture is 512 by 512 pixels.
-    let paint = Paint::color(Color::black()).with_font_size(700.0);
-    let glyph = PositionedGlyph {
-        x: 50.0,
-        y: 100.0,
-        glyph_id: 0,
-    };
-    canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
-    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+    // (font, [width, height, x offset, y offset]) in pixels of the 24 ppem strike. The
+    // offsets place the bitmap's bottom left corner relative to the glyph origin, y up.
+    let square: (Vec<u8>, [f32; 4]) = (png_glyph_font(), [24.0, 24.0, 0.0, 0.0]);
+    let wide: (Vec<u8>, [f32; 4]) = (offset_png_glyph_font(), [36.0, 24.0, 3.0, -5.0]);
+    // The atlas shrinks a bitmap if its longer side is more than 507 pixels (MAX_GLYPH_SIDE),
+    // so the square bitmap keeps its size at 507 and is shrunk from 508 on. At 517.0958, f32
+    // rounding puts the copy's side just above 506 texels, and the atlas rounds it up to 507.
+    // The last number in each case is the allowed error per edge, in texels of the copy: the
+    // bearing and the size each round to a whole texel.
+    let cases = [
+        (&square, 507.0, 0.0),
+        (&square, 508.0, 0.0),
+        (&square, 1000.0, 0.0),
+        (&square, 517.0958, 2.0),
+        (&wide, 300.0, 2.0),
+        (&wide, 700.0, 2.0),
+        (&wide, 1000.0, 2.0),
+    ];
+    let (x, y) = (800.0, 1100.0);
+
+    for (bitmap, font_size, tolerance) in cases {
+        let [width, height, offset_x, offset_y] = bitmap.1;
+        let pixel = font_size / 24.0;
+        let shrunk = width.max(height) * pixel > MAX_GLYPH_SIDE as f32;
+        for stroke in [false, true] {
+            let case = format!("{width} by {height} bitmap at size {font_size}, stroke: {stroke}");
+            let renderer = RecordingRenderer::default();
+            let recorded_commands = renderer.last_commands.clone();
+            let recorded_verts = renderer.last_verts.clone();
+            let text_context = TextContext::default();
+            let font = text_context.add_font_mem(&bitmap.0).unwrap();
+            let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+            canvas.set_size(2000, 2000, 1.0);
+            let paint = Paint::color(Color::black()).with_font_size(font_size);
+            let glyph = [PositionedGlyph { x, y, glyph_id: 0 }];
+
+            let result = if stroke {
+                canvas.stroke_glyph_run(font, &[], glyph, &paint)
+            } else {
+                canvas.fill_glyph_run(font, &[], glyph, &paint)
+            };
+            assert!(result.is_ok(), "{case}: {result:?}");
+            canvas.flush_to_output(());
+
+            let color_quads: Vec<_> = recorded_commands
+                .borrow()
+                .iter()
+                .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)))
+                .filter_map(|command| command.triangles_verts)
+                .collect();
+            assert_eq!(color_quads.len(), 1, "{case}");
+
+            let (offset, count) = color_quads[0];
+            assert_eq!(count, 6, "{case}");
+            let verts = &recorded_verts.borrow()[offset..offset + count];
+            // The first two vertices are the quad's top left and bottom right corners.
+            let (left, top, right, bottom) = (verts[0].x, verts[0].y, verts[1].x, verts[1].y);
+            let texels = [
+                (verts[1].u - verts[0].u) * TEXTURE_SIZE as f32,
+                (verts[1].v - verts[0].v) * TEXTURE_SIZE as f32,
+            ];
+            let texel_size = (right - left) / texels[0];
+            if shrunk {
+                let longest_side = texels[0].max(texels[1]);
+                assert!(longest_side >= MAX_GLYPH_SIDE as f32, "{case}: the copy is {texels:?}");
+            } else {
+                assert!((texel_size - 1.0).abs() < 1e-4, "{case}: {texel_size}");
+            }
+
+            // Inset the quad by its one texel of padding to get the bitmap's rectangle.
+            let drawn = [
+                left + texel_size,
+                top + texel_size,
+                right - texel_size,
+                bottom - texel_size,
+            ];
+            let bitmap_left = x + offset_x * pixel;
+            let bitmap_bottom = y - offset_y * pixel;
+            let expected = [
+                bitmap_left,
+                bitmap_bottom - height * pixel,
+                bitmap_left + width * pixel,
+                bitmap_bottom,
+            ];
+            for (actual, wanted) in drawn.into_iter().zip(expected) {
+                assert!(
+                    (actual - wanted).abs() <= tolerance * texel_size + 0.01,
+                    "{case}: the bitmap is drawn at {drawn:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
 }
 
 /// With `textlayout`, `Font::glyph` finds a PNG glyph without decoding it. When

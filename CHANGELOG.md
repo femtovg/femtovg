@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `Canvas` now draws PNG bitmap glyphs (color emoji) larger than about 507
+  pixels by scaling up a smaller copy in the glyph atlas. The draw returned
+  `FontSizeTooLargeForAtlas` instead with the default `textlayout` and
+  `image-loading` features, after drawing only the run's outline glyphs.
 - Fixed stray paint under a clip to a path other than a rectangle, rounded
   rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
   `destination-in` or `destination-atop`: a shape with a notch or a hole left
