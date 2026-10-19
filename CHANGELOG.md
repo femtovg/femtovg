@@ -131,11 +131,19 @@ All notable changes to this project will be documented in this file.
   above 8 runs down the blur pyramid. An image target is read in place; the
   screen is copied first, so on WGPU it needs `COPY_SRC` usage on the output
   texture, which must be mip 0 of a single-layer texture, and an image
-  target needs `TEXTURE_BINDING`. It returns
-  `ErrorKind::UnsupportedOperation` while a `begin_layer` capture is open.
-- **Breaking:** `renderer::CommandType` has two new variants,
-  `SampleRenderTarget` and `BlurRect`: a `Renderer` implemented outside the
-  crate must handle them.
+  target needs `TEXTURE_BINDING`. The scissor and the clip apply as they do
+  to a fill; the transform, global alpha and the composite operation don't.
+  It returns `ErrorKind::UnsupportedOperation` while a `begin_layer` capture
+  is open.
+- Added `Canvas::blur_path`: blurs the current render target in place inside
+  a path, drawn back as a fill, for a backdrop blur with rounded corners or
+  under a rotation. Unlike `blur_rect`, the transform maps the path and
+  scales sigma, global alpha applies and the edge is antialiased. Like
+  `blur_rect`, it ignores the composite operation: it mixes each pixel
+  toward the blur by the fill's coverage, over a translucent target too. Its requirements and errors are those of `blur_rect`.
+- **Breaking:** `renderer::CommandType` has two new variants, `StartBlur`
+  and `FinishBlur`, and `renderer::ShaderType` one, `FillBlur`: a `Renderer`
+  implemented outside the crate must handle them.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with

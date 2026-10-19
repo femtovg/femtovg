@@ -666,23 +666,10 @@ impl RoundedBox {
 
     /// The device rectangle a box's corners span, as a path's bounds are.
     pub(crate) fn bounds(&self) -> Bounds {
-        [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
-            .map(|[x, y]| self.frame.transform_point(x * self.extent[0], y * self.extent[1]))
-            .into_iter()
-            .fold(
-                Bounds {
-                    minx: f32::INFINITY,
-                    miny: f32::INFINITY,
-                    maxx: f32::NEG_INFINITY,
-                    maxy: f32::NEG_INFINITY,
-                },
-                |bounds, (x, y)| Bounds {
-                    minx: bounds.minx.min(x),
-                    miny: bounds.miny.min(y),
-                    maxx: bounds.maxx.max(x),
-                    maxy: bounds.maxy.max(y),
-                },
-            )
+        Bounds::from_points(
+            [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+                .map(|[x, y]| self.frame.transform_point(x * self.extent[0], y * self.extent[1])),
+        )
     }
 
     /// The box as a path in its own frame, for the stencil.

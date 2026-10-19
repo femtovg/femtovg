@@ -785,16 +785,18 @@ where
     /// deviation `sigma`, such as the backdrop of a frosted panel drawn over
     /// it.
     ///
-    /// The blur reads the target up to three sigma beyond the rect, so the
-    /// rect's edges blend with what surrounds it rather than fading out;
-    /// where that reach passes the target's edge, the edge pixels repeat
-    /// outward, unlike the transparent surround of
-    /// [`filter_image`](Self::filter_image). Like
-    /// [`clear_rect`](Self::clear_rect), this is a raw operation: the
-    /// transform, scissor, clip and composite operation don't apply, and
-    /// only the rect's pixels change. The part of the rect beyond the render
-    /// target is skipped, and a `sigma` that is zero, negative or NaN leaves
-    /// the target alone.
+    /// The rect is in device pixels, so the transform doesn't apply, nor do
+    /// global alpha and the composite operation; the scissor and
+    /// [`clip_path`](Self::clip_path) clip it as they clip a fill. Only the
+    /// pixels of the rect the clips leave change, and the part of it beyond
+    /// the render target is skipped. A `sigma` that is zero, negative or NaN
+    /// leaves the target alone.
+    ///
+    /// The blur reads the target up to three sigma beyond what it changes,
+    /// so the rect's edges blend with what surrounds it rather than fading
+    /// out; where that reach passes the target's edge, the edge pixels
+    /// repeat outward, unlike the transparent surround of
+    /// [`filter_image`](Self::filter_image).
     ///
     /// The rect and its reach are blurred along x into a transient image,
     /// then along y back onto the target. A `sigma` above the 8 device
@@ -817,6 +819,46 @@ where
     /// [`ErrorKind::TransientImageBudgetExceeded`] when its images don't fit;
     /// on an error the target is left as it was.
     pub fn blur_rect(&mut self, x: u32, y: u32, width: u32, height: u32, sigma: f32) -> Result<(), ErrorKind> {
+        let mut rect = Path::new();
+        rect.rect(x as f32, y as f32, width as f32, height as f32);
+        self.blur_fill(&rect, &Transform2D::identity(), false, FillRule::NonZero, sigma, 1.0)
+    }
+
+    /// Blurs the current render target in place inside `path`, filled with
+    /// `fill_rule`: a backdrop blur behind a shape, such as a frosted panel
+    /// with rounded corners. Unlike [`blur_rect`](Self::blur_rect), the
+    /// current transform maps the path and scales `sigma` (by the square
+    /// root of its determinant's magnitude), the edge is antialiased and
+    /// global alpha scales the blur.
+    /// No shadow is drawn.
+    ///
+    /// Like `blur_rect`, it ignores the composite operation: each pixel is
+    /// mixed from its own value toward the blur by the fill's coverage, so a
+    /// pixel the path covers whole becomes the blur, translucent or not.
+    /// A part of the path thinner than about two pixels is covered twice,
+    /// as a translucent fill of it is, and comes out too bright.
+    ///
+    /// Requirements, the blur's reach and its errors are those of
+    /// [`blur_rect`](Self::blur_rect).
+    pub fn blur_path(&mut self, path: &Path, fill_rule: FillRule, sigma: f32) -> Result<(), ErrorKind> {
+        let transform = self.state().transform;
+        let Transform2D([a, b, c, d, ..]) = transform;
+        let sigma = sigma * (a * d - b * c).abs().sqrt();
+        self.blur_fill(path, &transform, true, fill_rule, sigma, self.state().alpha)
+    }
+
+    /// Blurs the current render target by `sigma` in place inside `path`
+    /// under `transform`, filled with `fill_rule` and clipped as a fill,
+    /// antialiased with `anti_alias` and scaled by `alpha`.
+    fn blur_fill(
+        &mut self,
+        path: &Path,
+        transform: &Transform2D,
+        anti_alias: bool,
+        fill_rule: FillRule,
+        sigma: f32,
+        alpha: f32,
+    ) -> Result<(), ErrorKind> {
         // An open capture draws into its store, not onto the render target.
         if self.layers.iter().any(|layer| layer.image.is_some()) {
             return Err(ErrorKind::UnsupportedOperation);
@@ -824,17 +866,18 @@ where
         let Some(sigma) = chain_blur_sigma(sigma) else {
             return Ok(());
         };
-        if self.commands_suppressed() {
+        if alpha <= 0.0 || self.commands_suppressed() {
             return Ok(());
         }
+        self.reconcile_current_clip_plane();
+        let mut shared = None;
+        let (clip, path_cache, fringe_width) = self.fill_outline(path, transform, anti_alias, fill_rule, &mut shared);
+        let Some([x, y, width, height]) = self.fill_region(path_cache.expanded_bounds(), &clip) else {
+            return Ok(());
+        };
         let (target_width, target_height) = self.render_target_size();
         let (target_width, target_height) = (target_width as u32, target_height as u32);
-        let right = x.saturating_add(width).min(target_width);
-        let bottom = y.saturating_add(height).min(target_height);
-        if right <= x || bottom <= y {
-            return Ok(());
-        }
-        let region = [x, y, right - x, bottom - y];
+        let (right, bottom) = (x + width, y + height);
         let reach = (3.0 * sigma).ceil() as u32;
         let (left, top) = (x.saturating_sub(reach), y.saturating_sub(reach));
         let src = [
@@ -844,14 +887,12 @@ where
             bottom.saturating_add(reach).min(target_height) - top,
         ];
         let mut passes = blur_passes(sigma, sigma);
-        // The footprint, the rect plus its reach, can pass the target's edges.
-        // The first draw fills that part with the edge pixels, so the draws
-        // after it never reach an edge and need no clamp. Within one pass,
-        // the y draw reads only the rect's columns, so the x scratch leaves
-        // out the reach beside them.
+        // The first draw clamps the footprint to the target's edges, so later
+        // draws need no clamp. Within one pass the y draw reads only the
+        // region's columns, so the x scratch needs no reach beside them.
         let reach_x = if passes.len() == 1 { 0 } else { reach };
-        let footprint_width = (region[2] + 2 * reach_x) as usize;
-        let footprint_height = (region[3] + 2 * reach) as usize;
+        let footprint_width = (width + 2 * reach_x) as usize;
+        let footprint_height = (height + 2 * reach) as usize;
         let work = filter_work(&passes, footprint_width, footprint_height);
         if !self.reserve_filter_work(work) {
             return Err(ErrorKind::FilterWorkBudgetExceeded);
@@ -887,25 +928,26 @@ where
                 0.0,
             ),
         };
-        let (width, height) = self.image_size(first).expect("a transient image has a size");
+        let (first_width, first_height) = self.image_size(first).expect("a transient image has a size");
+        let (footprint_x, footprint_y) = (x as f32 - reach_x as f32, y as f32 - reach as f32);
         let mut cmd = Command::new(CommandType::StartBlur {
             target_image: first,
             src,
             sigma: first_sigma,
-        });
-        let (footprint_x, footprint_y) = (x as f32 - reach_x as f32, y as f32 - reach as f32);
-        cmd.triangles_verts = Some(self.push_device_quad(
-            [0, 0, width as u32, height as u32],
-            [
+            // `first` stretches over the footprint.
+            sample_transform: Transform2D([
+                footprint_width as f32 / first_width as f32,
+                0.0,
+                0.0,
+                footprint_height as f32 / first_height as f32,
                 footprint_x,
                 footprint_y,
-                footprint_x + footprint_width as f32,
-                footprint_y + footprint_height as f32,
-            ],
-        ));
+            ]),
+        });
+        cmd.triangles_verts = Some(self.push_device_quad([0, 0, first_width as u32, first_height as u32]));
         self.append_cmd(cmd);
 
-        let (source, sigma, flip_y) = match x_scratch {
+        let (source, y_sigma, flip_y) = match x_scratch {
             Some(x_scratch) => (x_scratch, sigma, true),
             None => {
                 let (level, flipped) =
@@ -914,25 +956,37 @@ where
                 (level, 0.0, flipped)
             }
         };
+        // `source` stretches over the footprint, stored the other way up when
+        // `flip_y`.
+        let sample_transform = if flip_y {
+            Transform2D([1.0, 0.0, 0.0, -1.0, -footprint_x, footprint_height as f32 + footprint_y])
+        } else {
+            Transform2D([1.0, 0.0, 0.0, 1.0, -footprint_x, -footprint_y])
+        };
+        let fill_params = Params::blur_fill(
+            [footprint_width as f32, footprint_height as f32],
+            y_sigma,
+            &sample_transform,
+            alpha,
+            &clip,
+            self.fringe_width,
+        );
+        // Without a fringe, alpha or a clip that ramps, the fill covers every
+        // pixel it draws whole, and the blur replaces it.
+        let erase = fringe_width > 0.0
+            || alpha < 1.0
+            || clip.shape.and_then(|shape| shape.reach()).is_some()
+            || clip.mask.is_some()
+            || clip.scissor.reach(0.0).is_some();
+        let stencil_params = (!path_cache.is_convex()).then(|| Params::stencil().with_hard_clip_mask(&clip));
         let mut cmd = Command::new(CommandType::FinishBlur {
-            sigma,
-            extent: [footprint_width as u32, footprint_height as u32],
-            region,
+            stencil_params,
+            fill_params,
+            erase,
         });
         cmd.image = Some(source);
-        // `source` stretches over the footprint, read the other way up when
-        // it is stored flipped.
-        let [reach_x, reach] = [reach_x, reach].map(|v| v as f32);
-        let [width, height] = [region[2], region[3]].map(|v| v as f32);
-        let (u0, u1) = (reach_x, reach_x + width);
-        let (v0, v1) = if flip_y {
-            let footprint_height = footprint_height as f32;
-            (footprint_height - reach, footprint_height - reach - height)
-        } else {
-            (reach, reach + height)
-        };
-        cmd.triangles_verts = Some(self.push_device_quad(region, [u0, v0, u1, v1]));
-        cmd.composite_operation = CompositeOperationState::new(CompositeOperation::Copy);
+        cmd.fill_rule = fill_rule;
+        self.push_fill(&mut cmd, &path_cache, fringe_width);
         self.append_cmd(cmd);
 
         for id in x_scratch.into_iter().chain(pyramid.images()) {
@@ -941,21 +995,46 @@ where
         Ok(())
     }
 
+    /// The pixels of the render target a fill over `bounds`, in device
+    /// pixels and its fringe included, clipped by `clip`, can change,
+    /// rounded out to whole pixels; `None` for no pixel.
+    fn fill_region(&self, bounds: Bounds, clip: &DrawClip) -> Option<[u32; 4]> {
+        let reach = [
+            clip.scissor.reach(self.fringe_width),
+            clip.shape.and_then(|shape| shape.reach()),
+            clip.mask.map(|mask| mask.reach()),
+            self.stencil_clip_reach(),
+        ]
+        .into_iter()
+        .flatten()
+        .fold(bounds, Bounds::intersect);
+        if [reach.minx, reach.miny, reach.maxx, reach.maxy]
+            .iter()
+            .any(|v| v.is_nan())
+        {
+            return None;
+        }
+        let (target_width, target_height) = self.render_target_size();
+        let left = reach.minx.floor().max(0.0);
+        let top = reach.miny.floor().max(0.0);
+        let right = reach.maxx.ceil().min(target_width);
+        let bottom = reach.maxy.ceil().min(target_height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some([left, top, right - left, bottom - top].map(|v| v as u32))
+    }
+
     /// Pushes two triangles covering `rect`, `[x, y, width, height]` in
-    /// device pixels, whose texture coordinates run over `[u0, v0, u1, v1]`
-    /// from its top left to its bottom right, and returns their vertex range.
-    fn push_device_quad(&mut self, [x, y, width, height]: [u32; 4], [u0, v0, u1, v1]: [f32; 4]) -> (usize, usize) {
+    /// device pixels, as a fill without a fringe, and returns their vertex
+    /// range.
+    fn push_device_quad(&mut self, [x, y, width, height]: [u32; 4]) -> (usize, usize) {
         let (x0, y0) = (x as f32, y as f32);
         let (x1, y1) = (x0 + width as f32, y0 + height as f32);
         let start = self.verts.len();
-        self.verts.extend([
-            Vertex::new(x0, y0, u0, v0),
-            Vertex::new(x1, y1, u1, v1),
-            Vertex::new(x1, y0, u1, v0),
-            Vertex::new(x0, y0, u0, v0),
-            Vertex::new(x0, y1, u0, v1),
-            Vertex::new(x1, y1, u1, v1),
-        ]);
+        self.verts.extend(
+            [(x0, y0), (x1, y1), (x1, y0), (x0, y0), (x0, y1), (x1, y1)].map(|(x, y)| Vertex::new(x, y, 0.5, 1.0)),
+        );
         (start, 6)
     }
 
@@ -1994,90 +2073,124 @@ fn a_cropped_pass_carries_the_rect_in_the_rows_it_stores() {
     assert_eq!(crops(&[bright]), [None]);
 }
 
-/// What a rect blur records: the kinds of its commands, in order, and its
-/// first draw's read rect, sigma and texture coordinates and its
-/// write-back's extent, rect, sigma and texture coordinates, each `[u0, v0, u1, v1]`
-/// from the quad's top left to its bottom right.
+/// What a blur records: the kinds of its commands, in order, its first
+/// draw's read rect, sigma and sample transform, and its last draw.
 #[cfg(test)]
-struct RectBlurCommands {
+struct BlurCommands {
     kinds: Vec<&'static str>,
-    sampled: Option<([u32; 4], f32, [f32; 4])>,
-    written: Option<WriteBack>,
+    src: Option<[u32; 4]>,
+    start: Option<(f32, Transform2D)>,
+    fill: Option<FinishBlur>,
 }
 
 #[cfg(test)]
-struct WriteBack {
-    extent: [u32; 2],
-    region: [u32; 4],
-    sigma: f32,
-    texture_rect: [f32; 4],
+struct FinishBlur {
+    stencil: bool,
+    clip_active: bool,
+    params: Params,
+    draws: Vec<(CompositeOperationState, Params)>,
 }
 
 #[cfg(test)]
-fn rect_blur_commands(region: [u32; 4], sigma: f32) -> RectBlurCommands {
+fn blur_commands(
+    setup: impl FnOnce(&mut Canvas<RecordingRenderer>),
+    blur: impl FnOnce(&mut Canvas<RecordingRenderer>),
+) -> BlurCommands {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(256, 192, 1.0);
-    let [x, y, width, height] = region;
+    setup(&mut canvas);
     let before = canvas.commands.len();
-    canvas.blur_rect(x, y, width, height, sigma).unwrap();
-    let mut sampled = None;
-    let mut written = None;
-    let texture_rect = |command: &Command| {
-        let (start, _) = command.triangles_verts.expect("a rect blur draw has a quad");
-        let (top_left, bottom_right) = (&canvas.verts[start], &canvas.verts[start + 1]);
-        [top_left.u, top_left.v, bottom_right.u, bottom_right.v]
-    };
+    blur(&mut canvas);
+    let mut src = None;
+    let mut start = None;
+    let mut fill = None;
     let kinds = canvas.commands[before..]
         .iter()
-        .map(|command| match command.cmd_type {
-            CommandType::StartBlur { src, sigma, .. } => {
-                sampled = Some((src, sigma, texture_rect(command)));
+        .map(|command| match &command.cmd_type {
+            CommandType::StartBlur {
+                src: read,
+                sigma,
+                sample_transform,
+                ..
+            } => {
+                src = Some(*read);
+                start = Some((*sigma, *sample_transform));
                 "sample"
             }
             CommandType::RenderFilteredImage { .. } => "filter",
-            CommandType::FinishBlur { sigma, extent, region } => {
-                assert!(!command.clip_active, "a rect blur is a raw write");
-                written = Some(WriteBack {
-                    extent,
-                    region,
-                    sigma,
-                    texture_rect: texture_rect(command),
+            CommandType::FinishBlur {
+                stencil_params,
+                fill_params,
+                ..
+            } => {
+                assert!(!command.drawables.is_empty(), "a blur fills its outline");
+                fill = Some(FinishBlur {
+                    stencil: stencil_params.is_some(),
+                    clip_active: command.clip_active,
+                    params: *fill_params,
+                    draws: command.finish_blur_draws().collect(),
                 });
-                "blur"
+                "finish"
             }
             _ => "other",
         })
         .collect();
     // Everything it took goes back to the pool.
     assert_eq!(canvas.transients.free.len(), canvas.transients.images.len());
-    RectBlurCommands {
+    BlurCommands {
         kinds,
-        sampled,
-        written,
+        src,
+        start,
+        fill,
     }
+}
+
+#[cfg(test)]
+fn rect_blur_commands(region: [u32; 4], sigma: f32) -> BlurCommands {
+    let [x, y, width, height] = region;
+    blur_commands(|_| {}, |canvas| canvas.blur_rect(x, y, width, height, sigma).unwrap())
+}
+
+/// Where `params` samples for the fragment at (`x`, `y`).
+#[cfg(test)]
+fn sampled_at(params: &Params, x: f32, y: f32) -> (f32, f32) {
+    let m = params.paint_mat;
+    (m[0] * x + m[4] * y + m[8], m[1] * x + m[5] * y + m[9])
 }
 
 /// A blur within one shader pass blurs the rect's columns along x into a
 /// scratch, with three sigma above and below.
 /// It reads the target only where that reach is within it.
-/// The y draw writes back onto the target, reading the scratch the other way up.
+/// The y draw writes back onto the target, reading the scratch the other
+/// way up, in one draw.
 #[test]
 fn a_rect_blur_within_one_pass_reads_its_reach_and_draws_back() {
     let commands = rect_blur_commands([4, 100, 64, 300], 3.0);
-    assert_eq!(commands.kinds, ["sample", "blur"]);
-    let (src, first_sigma, read) = commands.sampled.unwrap();
-    let WriteBack {
-        extent,
-        region,
-        sigma,
-        texture_rect: written,
-    } = commands.written.unwrap();
-    assert_eq!(src, [0, 91, 77, 101]);
-    assert_eq!(read, [4.0, 91.0, 68.0, 201.0], "the reach passes the bottom");
-    assert_eq!(extent, [64, 110]);
-    assert_eq!(region, [4, 100, 64, 92]);
-    assert_eq!(written, [0.0, 101.0, 64.0, 9.0], "the scratch is read the other way up");
-    assert_eq!((first_sigma, sigma), (3.0, 3.0));
+    assert_eq!(commands.kinds, ["sample", "finish"]);
+    assert_eq!(commands.src, Some([0, 91, 77, 101]));
+    let (first_sigma, read) = commands.start.unwrap();
+    assert_eq!(read.transform_point(0.0, 0.0), (4.0, 91.0));
+    assert_eq!(
+        read.transform_point(64.0, 110.0),
+        (68.0, 201.0),
+        "the reach passes the bottom"
+    );
+    let fill = commands.fill.unwrap();
+    let params = fill.params;
+    assert_eq!(params.extent, [64.0, 110.0]);
+    assert_eq!(
+        sampled_at(&params, 4.0, 100.0),
+        (0.0, 101.0),
+        "the scratch is read the other way up"
+    );
+    assert_eq!(sampled_at(&params, 68.0, 192.0), (64.0, 9.0));
+    assert_eq!((first_sigma, params.image_blur_filter_sigma), (3.0, 3.0));
+    assert!(!fill.stencil && !fill.clip_active);
+    assert_eq!(fill.draws.len(), 1, "a whole coverage takes no erase");
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Copy)
+    );
 }
 
 /// A blur above one pass reads the rect halved, as the pyramid's first
@@ -2090,54 +2203,263 @@ fn a_rect_blur_above_one_pass_draws_back_from_the_pyramid() {
         let commands = rect_blur_commands([96, 72, 64, 48], sigma);
         let mut expected = vec!["sample"];
         expected.extend(std::iter::repeat_n("filter", halvings));
-        expected.push("blur");
+        expected.push("finish");
         assert_eq!(commands.kinds, expected, "sigma {sigma}");
         assert_eq!(
-            commands.sampled.unwrap().1,
+            commands.start.unwrap().0,
             0.0,
             "sigma {sigma}: the first halving is a resample"
         );
-        let WriteBack {
-            sigma: drawn_sigma,
-            texture_rect: [_, v0, _, v1],
-            ..
-        } = commands.written.unwrap();
-        assert_eq!(drawn_sigma, 0.0, "sigma {sigma}: the scale back up is a resample");
+        let params = commands.fill.unwrap().params;
+        assert!(
+            params.image_blur_filter_sigma < 0.5,
+            "sigma {sigma}: the scale back up is a resample"
+        );
+        let (_, v0) = sampled_at(&params, 96.0, 72.0);
+        let (_, v1) = sampled_at(&params, 96.0, 120.0);
         assert_eq!(v0 > v1, flip_y, "sigma {sigma}");
     }
 }
 
-/// Nothing to blur records nothing: a degenerate sigma, or a rect off the
-/// target.
+/// A rect blur is clipped as a fill: the scissor cuts what it reads and
+/// ramps its coverage, so it mixes toward the blur through an erase; the
+/// stencil clip gates it.
 #[test]
-fn a_rect_blur_of_nothing_records_nothing() {
-    for (region, sigma) in [
-        ([0, 0, 16, 16], 0.0),
-        ([0, 0, 16, 16], -1.0),
-        ([0, 0, 16, 16], f32::NAN),
-        ([300, 0, 16, 16], 4.0),
-        ([0, 0, 0, 16], 4.0),
-    ] {
-        let commands = rect_blur_commands(region, sigma);
-        assert!(
-            commands.kinds.is_empty(),
-            "{region:?} sigma {sigma}: {:?}",
-            commands.kinds
-        );
+fn a_rect_blur_is_clipped_as_a_fill() {
+    let scissored = blur_commands(
+        |canvas| canvas.scissor(100.0, 50.0, 20.0, 20.0),
+        |canvas| canvas.blur_rect(0, 0, 256, 192, 3.0).unwrap(),
+    );
+    assert_eq!(scissored.src, Some([90, 40, 40, 40]));
+    let fill = scissored.fill.unwrap();
+    assert_eq!(fill.draws.len(), 2);
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Lighter)
+    );
+
+    let mut triangle = Path::new();
+    triangle.move_to(40.0, 40.0);
+    triangle.line_to(150.0, 60.0);
+    triangle.line_to(60.0, 120.0);
+    triangle.close();
+    let stencil = blur_commands(
+        |canvas| {
+            canvas.set_clip_mask_budget(0);
+            canvas.clip_path(&triangle, FillRule::NonZero);
+        },
+        |canvas| canvas.blur_rect(0, 0, 256, 192, 3.0).unwrap(),
+    );
+    let fill = stencil.fill.unwrap();
+    assert!(fill.clip_active);
+    assert_eq!(fill.draws.len(), 1, "the stencil takes a pixel whole or not at all");
+}
+
+#[cfg(test)]
+fn path_blur_commands(setup: impl FnOnce(&mut Canvas<RecordingRenderer>), path: &Path, sigma: f32) -> BlurCommands {
+    blur_commands(setup, |canvas| {
+        canvas.blur_path(path, FillRule::NonZero, sigma).unwrap()
+    })
+}
+
+#[cfg(test)]
+fn rect_path(x: f32, y: f32, width: f32, height: f32) -> Path {
+    let mut path = Path::new();
+    path.rect(x, y, width, height);
+    path
+}
+
+/// A convex path is filled back in one draw; a concave one, or one with a
+/// hole, through the stencil.
+#[test]
+fn a_path_blur_fills_back_through_the_stencil_only_when_concave() {
+    let commands = path_blur_commands(|_| {}, &rect_path(32.0, 32.0, 64.0, 48.0), 3.0);
+    assert_eq!(commands.kinds, ["sample", "finish"]);
+    let fill = commands.fill.unwrap();
+    assert!(!fill.stencil);
+    assert_eq!(fill.params.shader_type, ShaderType::FillBlur);
+
+    let mut star = Path::new();
+    star.move_to(96.0, 16.0);
+    star.line_to(112.0, 80.0);
+    star.line_to(160.0, 48.0);
+    star.line_to(96.0, 64.0);
+    star.line_to(32.0, 48.0);
+    star.close();
+    let mut ring = rect_path(32.0, 32.0, 64.0, 64.0);
+    ring.rect(48.0, 48.0, 32.0, 32.0);
+    ring.solidity(Solidity::Hole);
+    for path in [star, ring] {
+        let commands = path_blur_commands(|_| {}, &path, 3.0);
+        assert_eq!(commands.kinds, ["sample", "finish"]);
+        assert!(commands.fill.unwrap().stencil);
     }
+}
+
+/// The erase is clipped as the fill is, so the two mix the target toward the
+/// blur by the same coverage, whatever the composite operation.
+#[test]
+fn a_path_blur_erases_what_it_fills() {
+    let mut rounded = Path::new();
+    rounded.rounded_rect(48.0, 48.0, 64.0, 48.0, 12.0);
+    let fill = path_blur_commands(
+        |canvas| {
+            canvas.set_global_alpha(0.25);
+            canvas.global_composite_operation(CompositeOperation::Xor);
+            canvas.scissor(40.0, 40.0, 100.0, 80.0);
+            canvas.clip_path(&rounded, FillRule::NonZero);
+        },
+        &rect_path(32.0, 32.0, 128.0, 96.0),
+        3.0,
+    )
+    .fill
+    .unwrap();
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Lighter)
+    );
+    let params = fill.params;
+    let [(erase_operation, erase), _] = fill.draws[..] else {
+        panic!("a partial coverage takes an erase");
+    };
+    assert_eq!(
+        erase_operation,
+        CompositeOperationState::new(CompositeOperation::DestinationOut)
+    );
+    assert_eq!(params.inner_col[3], 0.25);
+    assert_eq!(erase.clip, params.clip);
+    assert_eq!(erase.shader_type, ShaderType::FillColor);
+    assert_eq!(erase.inner_col, [0.0, 0.0, 0.0, 0.25]);
+}
+
+/// The last draw is gated by the stencil clip as a fill is, and carries a
+/// clip shape or mask in its parameters.
+#[test]
+fn a_path_blur_is_clipped_as_a_fill() {
+    let path = rect_path(32.0, 32.0, 128.0, 96.0);
+    let mut triangle = Path::new();
+    triangle.move_to(40.0, 40.0);
+    triangle.line_to(150.0, 60.0);
+    triangle.line_to(60.0, 120.0);
+    triangle.close();
+
+    let unclipped = path_blur_commands(|_| {}, &path, 3.0).fill.unwrap();
+    assert!(!unclipped.clip_active);
+    assert!(unclipped.params.clip.is_none() && unclipped.params.clip_mask.is_none());
+
+    let stencil = path_blur_commands(
+        |canvas| {
+            canvas.set_clip_mask_budget(0);
+            canvas.clip_path(&triangle, FillRule::NonZero);
+        },
+        &path,
+        3.0,
+    );
+    assert!(stencil.fill.unwrap().clip_active);
+    // Cut to the clip's bounds, a pixel out, and read three sigma around.
+    assert_eq!(stencil.src, Some([30, 30, 130, 100]));
+
+    let masked = path_blur_commands(|canvas| canvas.clip_path(&triangle, FillRule::NonZero), &path, 3.0);
+    let masked = masked.fill.unwrap();
+    assert!(!masked.clip_active);
+    assert!(masked.params.clip_mask.is_some());
+
+    let mut rounded = Path::new();
+    rounded.rounded_rect(48.0, 48.0, 64.0, 48.0, 12.0);
+    let shaped = path_blur_commands(|canvas| canvas.clip_path(&rounded, FillRule::NonZero), &path, 3.0);
+    // The rect cut to the shape is filled where the shape covers it.
+    assert_eq!(shaped.kinds, ["sample", "finish"]);
+    let [x, y, width, height] = shaped.src.unwrap();
+    assert!(x >= 48 - 10 && y >= 48 - 10 && x + width <= 112 + 10 && y + height <= 96 + 10);
+}
+
+/// The region is the bounds of the transformed path's fill and fringe, and
+/// a transform's scale scales sigma.
+#[test]
+fn a_path_blur_reads_around_the_transformed_path() {
+    let square = rect_path(-20.0, -20.0, 40.0, 40.0);
+    let rotated = path_blur_commands(
+        |canvas| {
+            canvas.translate(128.0, 96.0);
+            canvas.rotate(std::f32::consts::FRAC_PI_4);
+        },
+        &square,
+        3.0,
+    );
+    // 128 and 96 ± 20√2 and the fringe's miter at a right corner, √2 half
+    // pixels, rounded out, plus 9 of reach.
+    assert_eq!(rotated.src, Some([90, 58, 76, 76]));
+    assert_eq!(rotated.fill.unwrap().params.extent, [58.0, 76.0]);
+
+    let scaled = path_blur_commands(
+        |canvas| {
+            canvas.translate(128.0, 96.0);
+            canvas.scale(2.0, 2.0);
+        },
+        &rect_path(-10.0, -10.0, 20.0, 20.0),
+        2.0,
+    );
+    // Sigma 4 reaches 12.
+    assert_eq!(scaled.src, Some([95, 63, 66, 66]));
+    assert_eq!(scaled.fill.unwrap().params.image_blur_filter_sigma, 4.0);
+}
+
+/// The region stops at the scissor.
+#[test]
+fn a_path_blur_reads_only_within_the_scissor() {
+    let commands = path_blur_commands(
+        |canvas| canvas.scissor(100.0, 50.0, 20.0, 20.0),
+        &rect_path(0.0, 0.0, 256.0, 192.0),
+        3.0,
+    );
+    assert_eq!(commands.src, Some([90, 40, 40, 40]));
+}
+
+/// Within one pass, the draw back samples the x scratch the other way up
+/// through the paint matrix.
+#[test]
+fn a_path_blur_samples_its_source_where_it_draws() {
+    let path = rect_path(96.0, 72.0, 64.0, 48.0);
+    let one_pass = path_blur_commands(|_| {}, &path, 3.0);
+    let params = one_pass.fill.unwrap().params;
+    // The region is [95, 71, 66, 50], its footprint 9 rows taller each way.
+    assert_eq!(params.extent, [66.0, 68.0]);
+    assert_eq!(sampled_at(&params, 95.0, 71.0), (0.0, 59.0));
+    assert_eq!(sampled_at(&params, 161.0, 121.0), (66.0, 9.0));
+}
+
+/// Nothing to blur records nothing: a degenerate sigma, an empty path, a
+/// rect with no width or a path off the target.
+#[test]
+fn a_path_blur_of_nothing_records_nothing() {
+    let on = rect_path(0.0, 0.0, 16.0, 16.0);
+    for (path, sigma) in [
+        (&on, 0.0),
+        (&on, -1.0),
+        (&on, f32::NAN),
+        (&Path::new(), 4.0),
+        (&rect_path(0.0, 0.0, 0.0, 16.0), 4.0),
+        (&rect_path(300.0, 0.0, 16.0, 16.0), 4.0),
+    ] {
+        let commands = path_blur_commands(|_| {}, path, sigma);
+        assert!(commands.kinds.is_empty(), "sigma {sigma}: {:?}", commands.kinds);
+    }
+    let commands = path_blur_commands(|canvas| canvas.scissor(200.0, 0.0, 16.0, 16.0), &on, 4.0);
+    assert!(commands.kinds.is_empty(), "outside the scissor: {:?}", commands.kinds);
 }
 
 /// An open capture draws into its store, so there is no render target to
 /// blur.
 #[test]
-fn a_rect_blur_is_unsupported_inside_a_layer() {
+fn a_path_blur_is_unsupported_inside_a_layer() {
     let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
     canvas.set_size(64, 64, 1.0);
+    let path = rect_path(0.0, 0.0, 16.0, 16.0);
     assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
     assert!(matches!(
-        canvas.blur_rect(0, 0, 16, 16, 4.0),
+        canvas.blur_path(&path, FillRule::NonZero, 4.0),
         Err(ErrorKind::UnsupportedOperation)
     ));
     canvas.end_layer();
-    assert!(canvas.blur_rect(0, 0, 16, 16, 4.0).is_ok());
+    assert!(canvas.blur_path(&path, FillRule::NonZero, 4.0).is_ok());
 }

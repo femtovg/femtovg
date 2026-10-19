@@ -10,7 +10,7 @@ use rustybuzz::ttf_parser;
 
 mod cache;
 pub(crate) use cache::OutlineWidth;
-pub use cache::{Convexity, PathCache};
+pub use cache::PathCache;
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
 const KAPPA90: f32 = 0.552_284_8; // 0.552_284_749_3;

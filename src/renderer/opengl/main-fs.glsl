@@ -33,11 +33,6 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 // An image paint's transfer (0 none, 1 to sRGB, 2 to linearRGB) in the paint
 // matrix's first column's w, which no image paint reads.
 #define imageTransfer int(frag[3].w)
-// Whether a blur tap beyond the source reads its edge texel, and whether the
-// sample positions mirror to `extent.y - y`: they ride the clip shape's
-// slots, which no filter draw reads.
-#define filterClamp frag[13].z
-#define filterFlipY frag[13].w
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -64,6 +59,7 @@ varying vec2 fpos;
  #define SHADER_TYPE_FilterImageBlend 15
  #define SHADER_TYPE_FilterImageMorphology 16
  #define SHADER_TYPE_FilterImageOffset 17
+ #define SHADER_TYPE_FillBlur 18
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -333,13 +329,17 @@ vec4 renderPlainTextureCopy() {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades. With `filterClamp` set, the
-// sampler's clamp to edge applies instead.
+// weight stays in the sum, so an edge fades. A blur's own draws clamp to the
+// edge instead: their reach and a fill's fringe pass the source's edges.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 vec4 blurTap(vec2 pos) {
     vec2 uv = pos / extent;
-    vec2 inside = max(step(vec2(0.0), uv) * step(uv, vec2(1.0)), vec2(filterClamp));
+#if SELECT_SHADER == SHADER_TYPE_FillBlur
+    vec2 inside = vec2(1.0);
+#else
+    vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+#endif
     vec4 color = texture2D(tex, uv);
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (radius > 0.5) color = vec4(0.0, 0.0, 0.0, color.w);
@@ -350,10 +350,9 @@ vec4 blurTap(vec2 pos) {
 // to a premultiplied color.
 vec4 colorMatrixOn(vec4 premultiplied);
 
-vec4 renderFilteredImage() {
-    // The quad's texture coordinates say where in the source it samples.
-    vec2 center = ftcoord;
-    if (filterFlipY > 0.5) center.y = extent.y - center.y;
+// The Gaussian along imageBlurFilterDirection, centered on `center` in
+// source pixels.
+vec4 blurAt(vec2 center) {
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
 
     vec3 gaussian_coeff = imageBlurFilterCoeff;
@@ -379,13 +378,24 @@ vec4 renderFilteredImage() {
         gaussian_coeff.xy *= gaussian_coeff.yz;
     }
 
-    vec4 color = color_sum / coefficient_sum;
+    return color_sum / coefficient_sum;
+}
+
+vec4 renderFilteredImage() {
+    // The quad's texture coordinates say where in the source it samples.
+    vec4 color = blurAt(ftcoord);
 
     // A color matrix fused into this second draw.
     if (feather > 0.5) color = colorMatrixOn(color);
     if (texType == 2) color = vec4(color.x);
 
     return color;
+}
+
+// A blur's draw as a fill: its texture coordinates carry the fill's fringe,
+// so paintMat maps the fragment to where it samples.
+vec4 renderFillBlur() {
+    return blurAt((paintMat * vec3(fpos, 1.0)).xy) * innerCol.a;
 }
 
 // The filter passes, defined in filters.glsl.
@@ -451,6 +461,8 @@ void main(void) {
     result = renderMorphology();
 #elif SELECT_SHADER == SHADER_TYPE_FilterImageOffset
     result = renderOffset();
+#elif SELECT_SHADER == SHADER_TYPE_FillBlur
+    result = renderFillBlur();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
