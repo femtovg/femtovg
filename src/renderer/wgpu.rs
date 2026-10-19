@@ -1617,6 +1617,11 @@ fn start_blur(
     src: [u32; 4],
     sigma: f32,
 ) -> bool {
+    // The stencil plan ends the pass here (`StencilUse::PassEnd`), so the
+    // pass ends whether the blur goes ahead or is skipped: a skipped blur
+    // that left it open would have the draws after it run in a pass planned
+    // only up to here, without the stencil they test or write.
+    pass.render_pass_builder.end_render_pass();
     if pass.images.get(target_image).is_none() {
         return false;
     }
