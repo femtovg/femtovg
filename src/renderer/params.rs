@@ -28,13 +28,6 @@ pub struct Params {
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
     pub(crate) conic_start_angle: f32,
-    /// Whether a blur draw mirrors its sample positions to `extent[1] - y`:
-    /// a rect blur's first draw reads a source stored the other way up on
-    /// some backends.
-    pub(crate) filter_flip_y: bool,
-    /// Whether a blur tap beyond the source reads its edge texel rather than
-    /// transparent.
-    pub(crate) filter_clamp: bool,
     /// The clip shape in force on the draw's target, if any.
     pub(crate) clip: Option<ClipCoverage>,
     /// The coverage mask in force on the draw's target, if any.
@@ -45,24 +38,44 @@ pub struct Params {
 }
 
 impl Params {
-    /// One axis, 0 for x and 1 for y, of a rect blur's Gaussian of `sigma`
-    /// over a premultiplied source of `extent` pixels.
-    /// It samples at its vertices' texture coordinates, mirrored with
-    /// `flip_y`, and clamps its taps at the source's edges.
-    pub(crate) fn rect_blur(extent: [f32; 2], sigma: f32, axis: usize, flip_y: bool) -> Self {
+    /// A blur's Gaussian of `sigma` along `direction`, a unit axis, over a
+    /// premultiplied source of `extent` pixels, drawn as a fill with no clip:
+    /// it samples where `sample_transform` maps each fragment's position and
+    /// clamps its taps at the source's edges.
+    pub(crate) fn blur_axis(extent: [f32; 2], sigma: f32, direction: [f32; 2], sample_transform: &Transform2D) -> Self {
         let (coeff, sigma) = super::gaussian_blur_coefficients(sigma);
         Self {
+            paint_mat: sample_transform.to_mat3x4(),
+            inner_col: [1.0; 4],
             scissor_ext: [1.0, 1.0],
             scissor_scale: [1.0, 1.0],
             extent,
-            shader_type: ShaderType::FilterImage,
-            image_blur_filter_direction: if axis == 0 { [1.0, 0.0] } else { [0.0, 1.0] },
+            stroke_mult: 1.0,
+            stroke_thr: -1.0,
+            shader_type: ShaderType::FillBlur,
+            image_blur_filter_direction: direction,
             image_blur_filter_sigma: sigma,
             image_blur_filter_coeff: coeff,
-            filter_flip_y: flip_y,
-            filter_clamp: true,
             ..Self::default()
         }
+    }
+
+    /// A blur's last draw: [`blur_axis`](Self::blur_axis) along y, scaled by
+    /// `alpha` and clipped by `clip` as a fill is.
+    pub(crate) fn blur_fill(
+        extent: [f32; 2],
+        sigma: f32,
+        sample_transform: &Transform2D,
+        alpha: f32,
+        clip: &crate::clip::DrawClip,
+        fringe_width: f32,
+    ) -> Self {
+        let mut params = Self {
+            inner_col: [alpha; 4],
+            ..Self::blur_axis(extent, sigma, [0.0, 1.0], sample_transform)
+        };
+        params.set_scissor(&clip.scissor, fringe_width);
+        params.with_clip(clip)
     }
 
     /// The parameters of a stencil-only pass - winding accumulation, clip
@@ -104,26 +117,7 @@ impl Params {
         stroke_thr: f32,
     ) -> Self {
         let mut params = Self::default();
-
-        // Scissor
-        let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
-            if ext[0] < -0.5 || ext[1] < -0.5 {
-                ([1.0, 1.0], [1.0, 1.0])
-            } else {
-                params.scissor_mat = scissor.transform.inverse().to_mat3x4();
-
-                let Transform2D([a, b, c, d, ..]) = scissor.transform;
-                let scissor_scale = [a.hypot(c) / fringe_width, b.hypot(d) / fringe_width];
-
-                (ext, scissor_scale)
-            }
-        } else {
-            ([1.0, 1.0], [1.0, 1.0])
-        };
-
-        params.scissor_ext = scissor_ext;
-        params.scissor_scale = scissor_scale;
-        params.scissor_radius = scissor.radius;
+        params.set_scissor(scissor, fringe_width);
 
         params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
@@ -392,6 +386,27 @@ impl Params {
         params.paint_mat = inv_transform.to_mat3x4();
 
         params
+    }
+
+    fn set_scissor(&mut self, scissor: &Scissor, fringe_width: f32) {
+        let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
+            if ext[0] < -0.5 || ext[1] < -0.5 {
+                ([1.0, 1.0], [1.0, 1.0])
+            } else {
+                self.scissor_mat = scissor.transform.inverse().to_mat3x4();
+
+                let Transform2D([a, b, c, d, ..]) = scissor.transform;
+                let scissor_scale = [a.hypot(c) / fringe_width, b.hypot(d) / fringe_width];
+
+                (ext, scissor_scale)
+            }
+        } else {
+            ([1.0, 1.0], [1.0, 1.0])
+        };
+
+        self.scissor_ext = scissor_ext;
+        self.scissor_scale = scissor_scale;
+        self.scissor_radius = scissor.radius;
     }
 
     pub(crate) fn uses_glyph_texture(self) -> bool {
