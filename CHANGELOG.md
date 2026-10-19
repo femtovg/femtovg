@@ -32,6 +32,75 @@ All notable changes to this project will be documented in this file.
   `flush_to_surface`. `Canvas::renderer` and
   `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
   reports the passes per command buffer of the last frame.
+- Fixed text getting the glyph advances it had at an earlier font size when
+  both sizes were in the same tenth of a device pixel (e.g., 12 and 12.09):
+  `measure_text` returned the earlier width, `break_text` broke the text by
+  it, and `fill_text` placed its glyphs by it.
+- Fixed `break_text` and `break_text_vec` breaking the text where an earlier
+  `max_width` broke it when both widths were in the same whole device pixel
+  (e.g., 100.2 and 100.9), even when the text fit at one width and not at the
+  other.
+- With the `swash` feature, `Canvas` now draws filled text at a negative x
+  with the mask for each glyph's own subpixel offset. It used a mask
+  rasterized for another offset, which put each glyph up to a pixel from its
+  position and spaced the letters unevenly (e.g., in text centred or
+  right-aligned by translating the canvas to an anchor point).
+- Fixed: Thin shapes are drawn with the coverage browsers give them: hairlines,
+  slivers and the fine details of icons, logos and illustrations came out too
+  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
+  logo 20 pixels tall twice as dark.
+- On a test corpus of real-world SVGs, images with thin shapes have 37% fewer
+  mismatched pixels against Firefox, 27% against Chromium and 26% against WebKit;
+  by collection, against the exact-area reference, Mozilla's Firefox illustrations
+  improved 65%, the GooglePay mark 60% and the SolidJS banner 99%, and the New
+  York Times marks now match all three browsers' ink within 2%. The WPT reftests
+  `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight` now match
+  Chromium and WebKit within 2 pixels (Firefox draws the figure-eight differently:
+  52 pixels off, from 142). Still frames render as fast as before, within 2% on a
+  desktop; thin shapes that move every frame are rasterized again each frame,
+  about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
+  29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
+- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
+  ids of the fonts they load from subdirectories, not only of those directly
+  in the given directory.
+- Fixed stray paint under a clip to a path other than a rectangle, rounded
+  rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
+  `destination-in` or `destination-atop`: a shape with a notch or a hole left
+  an invisible count where the clip cut it off, and the next such shape
+  painted those pixels outside its own outline. On the reftest suite's canvas
+  scenes of these operations, pixels off Chromium, Firefox and WebKit fall by
+  90% at 1x and 97% at 4x zoom (`hard-mask-source-in-triangle-l-arch`: 186 to
+  none), leaving only the clip's edge, and on WGPU a frame of 400 such shapes
+  takes half the CPU it used to. SVG content is unaffected: SVG puts no
+  compositing operator on a shape.
+- Reduce CPU encode time by 4x or more on some SVG content: 
+  A cubic whose four points coincide is no longer halved ten times over
+  before it adds no point. Its chord is zero, so it never passed the
+  flatness test: each square corner of a `rounded_rect_varying` and every
+  curve under a transform that scales to nothing took 2,047 pieces, and
+  4,095 more when `Path::dashed` flattened it. A page of 300 tabs rounded
+  on top encoded in 3.4 ms a frame on an M4 Max, and now in 0.7 ms.
+- Fixed a point repeated in a path, or added within 0.01 device pixels of
+  the one before, being kept as a zero-length edge. A line to the current
+  point, the zero-length sides of a pill from `rounded_rect` (or of an SVG
+  `rect` whose radius is half its height) and segments that shrink below the
+  tolerance at small sizes all made one: a mitred join there lost its outer
+  corner, a square or round cap its extension, the fill's antialiased fringe
+  slanted along both neighbouring edges, and a convex shape was filled
+  through the stencil. Improves visual accuracy versus multiple browsers in
+  organic SVG content sources from SVGenius, SolidJS, New York Times, etc.
+- Fixed even-odd clips letting paint through a hole that comes within a pixel
+  of the shape around it and is wound the same way: a clip to a ring thinner
+  than a pixel painted nearly a third more than the ring's area. At half size,
+  the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
+  and the exact-area reference pixel for pixel, and comes nearer Firefox and
+  Chromium.
+- `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
+  outside the glyph atlas with the `swash` feature and without `textlayout`.
+  It draws text outside the atlas under a rotated, skewed, flipped or
+  non-uniformly scaled transform, above 92 pixels, or under a scale with a
+  gradient or image paint. With both `swash` and `textlayout`, `Canvas` now
+  draws a stroked PNG glyph with swash, like a filled one and at the same size.
 - Fixed text getting the width it had at an earlier letter spacing when both
   letter spacings were below a tenth of a device pixel (every negative one
   included) or in the same tenth above that (e.g., 2 and 2.05):
@@ -56,6 +125,17 @@ All notable changes to this project will be documented in this file.
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
   used are dropped first.
+- Added `Canvas::blur_rect`: blurs a rect of the current render target,
+  the screen included, in place, reading up to three sigma around it and
+  repeating the target's edge pixels where that passes the edge. A sigma
+  above 8 runs down the blur pyramid. An image target is read in place; the
+  screen is copied first, so on WGPU it needs `COPY_SRC` usage on the output
+  texture, which must be mip 0 of a single-layer texture, and an image
+  target needs `TEXTURE_BINDING`. It returns
+  `ErrorKind::UnsupportedOperation` while a `begin_layer` capture is open.
+- **Breaking:** `renderer::CommandType` has two new variants,
+  `SampleRenderTarget` and `BlurRect`: a `Renderer` implemented outside the
+  crate must handle them.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with

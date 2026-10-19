@@ -100,7 +100,7 @@ pub struct RenderedGlyphId {
     size: u32,
     line_width: u32,
     render_mode: RenderMode,
-    subpixel_location: u8,
+    subpixel_location: i8,
     variation_hash: u64,
 }
 
@@ -111,7 +111,7 @@ impl RenderedGlyphId {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        subpixel_location: u8,
+        subpixel_location: i8,
         normalized_coords: &[i16],
     ) -> Self {
         use std::hash::Hasher;
@@ -279,7 +279,7 @@ impl TextContextImpl {
                 let path = entry.path();
 
                 if path.is_dir() {
-                    self.add_font_dir(&path)?;
+                    fonts.extend(self.add_font_dir(&path)?);
                 } else if Some("ttf") == path.extension().and_then(OsStr::to_str) {
                     fonts.push(self.add_font_file(path)?);
                 } else if Some("ttc") == path.extension().and_then(OsStr::to_str) {
@@ -496,6 +496,7 @@ impl PendingMask<'_> {
             if mode == RenderMode::Stroke {
                 canvas.stroke_path_internal(
                     &self.path,
+                    None,
                     &PaintFlavor::Color(mask_color),
                     false,
                     &StrokeSettings {
@@ -504,7 +505,13 @@ impl PendingMask<'_> {
                     },
                 );
             } else {
-                canvas.fill_path_internal(&self.path, &PaintFlavor::Color(mask_color), false, FillRule::NonZero);
+                canvas.fill_path_internal(
+                    &self.path,
+                    None,
+                    &PaintFlavor::Color(mask_color),
+                    false,
+                    FillRule::NonZero,
+                );
             }
         }
     }
@@ -561,7 +568,12 @@ impl GlyphAtlas {
         };
 
         let mut add_glyph = |canvas: &mut Canvas<T>, glyph: PositionedGlyph| -> Result<(), ErrorKind> {
-            let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
+            // The fraction of x in tenths of a pixel, -10 to 10, with the sign of x. It is the
+            // offset of the glyph from `glyph.x.trunc()`, where the quad is placed below.
+            // `quantize` rounds to the nearest step only for a non-negative value, so it is given
+            // the absolute value.
+            let fract = glyph.x.fract();
+            let subpixel_location = (crate::geometry::quantize(fract.abs(), 0.1) * 10.0).copysign(fract) as i8;
 
             let id = RenderedGlyphId::new(
                 glyph.glyph_id,
@@ -569,7 +581,7 @@ impl GlyphAtlas {
                 font_size,
                 line_width,
                 mode,
-                subpixel_location as u8,
+                subpixel_location,
                 normalized_coords,
             );
 
@@ -586,7 +598,7 @@ impl GlyphAtlas {
                         font,
                         font_face,
                         glyph.glyph_id,
-                        subpixel_location / 10.0,
+                        f32::from(subpixel_location) / 10.0,
                         normalized_coords,
                     )?;
                     if let Some((_, Some(mask))) = &placed {
@@ -672,9 +684,9 @@ impl GlyphAtlas {
         normalized_coords: &[i16],
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
         #[cfg(feature = "swash")]
-        if mode == RenderMode::Fill {
+        if mode == RenderMode::Fill || font.is_bitmap_glyph(font_face, glyph_id, normalized_coords) {
             if let Some(result) =
-                self.render_glyph_swash(canvas, font, font_size, glyph_id, _subpixel_x, normalized_coords)?
+                self.render_glyph_swash(canvas, font, font_size, mode, glyph_id, _subpixel_x, normalized_coords)?
             {
                 return Ok(Some((result, None)));
             }
@@ -767,6 +779,7 @@ impl GlyphAtlas {
         canvas: &mut Canvas<T>,
         font: &Font,
         font_size: f32,
+        mode: RenderMode,
         glyph_id: u16,
         subpixel_x: f32,
         normalized_coords: &[i16],
@@ -804,14 +817,25 @@ impl GlyphAtlas {
             _ => return Ok(None),
         };
 
+        // swash cannot stroke, so a stroke takes only a color image from it. The atlas would draw
+        // a mask as a shifted fill (e.g., the outline of a glyph whose bitmap does not decode).
+        if mode == RenderMode::Stroke && image.content != swash::scale::image::Content::Color {
+            return Ok(None);
+        }
+
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
         let glyph_width = image.placement.width;
         let glyph_height = image.placement.height;
         let alloc_width = glyph_width + 2 * padding;
         let alloc_height = glyph_height + 2 * padding;
 
+        // Return None for a glyph too large for the atlas (e.g., an emoji drawn directly at a
+        // large font size). Without image-loading, place_glyph then skips it instead of failing.
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
-            self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize)?;
+            match self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize) {
+                Err(ErrorKind::FontSizeTooLargeForAtlas) => return Ok(None),
+                result => result?,
+            };
 
         let is_color = image.content == swash::scale::image::Content::Color;
 
@@ -979,21 +1003,23 @@ pub fn render_direct<T: Renderer>(
             (glyph_rendering, scale)
         };
 
-        canvas.save();
-
         let line_width = match mode {
             RenderMode::Fill => stroke.line_width,
             RenderMode::Stroke => stroke.line_width / scale,
         };
 
-        canvas.translate(glyph.x, glyph.y);
-        canvas.scale(scale, -scale);
+        // Maps the outline from font units (y up) to the glyph's position in the
+        // run. It is passed with the path and not set on the canvas because the
+        // canvas transform also maps the paint's coordinates, and a gradient or
+        // image paint has to be mapped the same way for every glyph of the run.
+        let outline_transform = Transform2D::new(scale, 0.0, 0.0, -scale, glyph.x, glyph.y);
 
         match glyph_rendering {
             GlyphRendering::RenderAsPath(path) => {
                 if mode == RenderMode::Stroke {
                     canvas.stroke_path_internal(
                         path.borrow(),
+                        Some(&outline_transform),
                         paint_flavor,
                         anti_alias,
                         &StrokeSettings {
@@ -1002,14 +1028,18 @@ pub fn render_direct<T: Renderer>(
                         },
                     );
                 } else {
-                    canvas.fill_path_internal(path.borrow(), paint_flavor, anti_alias, FillRule::NonZero);
+                    canvas.fill_path_internal(
+                        path.borrow(),
+                        Some(&outline_transform),
+                        paint_flavor,
+                        anti_alias,
+                        FillRule::NonZero,
+                    );
                 }
             }
             #[cfg(feature = "image-loading")]
             GlyphRendering::RenderAsImage(_) => unreachable!(),
         }
-
-        canvas.restore();
     }
 
     Ok(())
