@@ -2788,6 +2788,10 @@ fn a_concave_fill_whose_stencil_pass_reaches_past_its_cover_zeroes_its_fans() {
     let recorded_verts = renderer.last_verts.clone();
     let mut canvas = Canvas::new(renderer).unwrap();
     canvas.set_size(256, 256, 1.0);
+    // The triangles are thin enough for coverage masks, which draw a fill
+    // without the stencil; a thin fill the masks refuse or are off for is
+    // stencilled as these are.
+    canvas.set_thin_fill_masks(false);
 
     let polygon = |path: &mut Path, points: &[(f32, f32)]| {
         path.move_to(points[0].0, points[0].1);

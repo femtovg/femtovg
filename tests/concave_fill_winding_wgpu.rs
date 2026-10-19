@@ -65,6 +65,10 @@ fn a_concave_fill_leaves_no_winding_past_its_cover() {
         H,
         Color::white(),
         |canvas: &mut Canvas<WGPURenderer>| {
+            // The triangles are thin enough for coverage masks, which draw a
+            // fill without the stencil; a thin fill the masks refuse or are
+            // off for is stencilled as these are.
+            canvas.set_thin_fill_masks(false);
             for i in 0..4 {
                 for j in 0..4 {
                     let (dx, dy) = (0.25 * j as f32, 0.25 * i as f32);
