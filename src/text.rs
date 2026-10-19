@@ -41,7 +41,10 @@ const GLYPH_PADDING: u32 = 1;
 // zero-initialized on both backends, so margin texels are blank.
 const GLYPH_MARGIN: u32 = 1;
 
-const TEXTURE_SIZE: usize = 512;
+pub(crate) const TEXTURE_SIZE: usize = 512;
+// The longest glyph side that fits in a new atlas texture. Atlas::add_rect() refuses
+// a cell as tall as the texture, hence the - 1.
+pub(crate) const MAX_GLYPH_SIDE: u32 = TEXTURE_SIZE as u32 - 1 - 2 * (GLYPH_PADDING + GLYPH_MARGIN);
 #[cfg(feature = "textlayout")]
 const DEFAULT_LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -139,6 +142,7 @@ pub struct RenderedGlyph {
     atlas_x: u32,
     atlas_y: u32,
     color_glyph: bool,
+    quad_scale: f32,
 }
 
 #[derive(Debug)]
@@ -630,10 +634,12 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.x1 = q.x0 + rendered.width as f32;
-                q.y1 = q.y0 + rendered.height as f32;
+                q.x0 = glyph.x.trunc()
+                    + (rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32) * rendered.quad_scale;
+                q.y0 = glyph.y.round()
+                    - (rendered.bearing_y as f32 + line_width_offset + GLYPH_PADDING as f32) * rendered.quad_scale;
+                q.x1 = q.x0 + rendered.width as f32 * rendered.quad_scale;
+                q.y1 = q.y0 + rendered.height as f32 * rendered.quad_scale;
 
                 q.s0 = rendered.atlas_x as f32 * itw;
                 q.t0 = rendered.atlas_y as f32 * ith;
@@ -678,11 +684,37 @@ impl GlyphAtlas {
         _subpixel_x: f32,
         normalized_coords: &[i16],
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
+        let maybe_glyph_metrics = font
+            .glyph(font_face, glyph_id, normalized_coords)
+            .map(|g| g.metrics.clone());
+
+        // If a bitmap glyph doesn't fit the atlas at font_size, rasterize it smaller and let
+        // render_atlas() scale its quad back up by quad_scale. Aim one texel below MAX_GLYPH_SIDE
+        // because f32 rounding can land just above the aim and the cell size below rounds up.
+        let bitmap_glyph = font.is_bitmap_glyph(font_face, glyph_id, normalized_coords);
+        let longest_bitmap_side = maybe_glyph_metrics
+            .as_ref()
+            .filter(|_| bitmap_glyph)
+            .map_or(0.0, |metrics| metrics.width.max(metrics.height) * font.scale(font_size));
+        let (raster_size, quad_scale) = if longest_bitmap_side > MAX_GLYPH_SIDE as f32 {
+            let raster_size = font_size * (MAX_GLYPH_SIDE - 1) as f32 / longest_bitmap_side;
+            (raster_size, font_size / raster_size)
+        } else {
+            (font_size, 1.0)
+        };
+
         #[cfg(feature = "swash")]
-        if mode == RenderMode::Fill || font.is_bitmap_glyph(font_face, glyph_id, normalized_coords) {
-            if let Some(result) =
-                self.render_glyph_swash(canvas, font, font_size, mode, glyph_id, _subpixel_x, normalized_coords)?
-            {
+        if mode == RenderMode::Fill || bitmap_glyph {
+            if let Some(result) = self.render_glyph_swash(
+                canvas,
+                font,
+                raster_size,
+                quad_scale,
+                mode,
+                glyph_id,
+                _subpixel_x,
+                normalized_coords,
+            )? {
                 return Ok(Some((result, None)));
             }
         }
@@ -690,13 +722,10 @@ impl GlyphAtlas {
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
         let (glyph_representation, glyph_metrics, scale) = {
-            let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font
-                .glyph(font_face, glyph_id, normalized_coords)
-                .map(|g| g.metrics.clone());
+            let scale = font.scale(raster_size);
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, normalized_coords),
+                font.glyph_rendering_representation(font_face, glyph_id, raster_size as u16, normalized_coords),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -738,6 +767,7 @@ impl GlyphAtlas {
             atlas_y: dst_y as u32 + GLYPH_MARGIN,
             texture_index: dst_index,
             color_glyph,
+            quad_scale,
         };
 
         let pending_mask = match glyph_representation {
@@ -774,6 +804,7 @@ impl GlyphAtlas {
         canvas: &mut Canvas<T>,
         font: &Font,
         font_size: f32,
+        quad_scale: f32,
         mode: RenderMode,
         glyph_id: u16,
         subpixel_x: f32,
@@ -824,8 +855,8 @@ impl GlyphAtlas {
         let alloc_width = glyph_width + 2 * padding;
         let alloc_height = glyph_height + 2 * padding;
 
-        // Return None for a glyph too large for the atlas (e.g., an emoji drawn directly at a
-        // large font size). Without image-loading, place_glyph then skips it instead of failing.
+        // Return None for a glyph too large for the atlas. Without image-loading, place_glyph
+        // then skips it instead of failing.
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
             match self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize) {
                 Err(ErrorKind::FontSizeTooLargeForAtlas) => return Ok(None),
@@ -878,6 +909,7 @@ impl GlyphAtlas {
             atlas_x: dst_x as u32 + GLYPH_MARGIN,
             atlas_y: dst_y as u32 + GLYPH_MARGIN,
             color_glyph: is_color,
+            quad_scale,
         }))
     }
 
