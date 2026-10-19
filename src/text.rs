@@ -100,7 +100,7 @@ pub struct RenderedGlyphId {
     size: u32,
     line_width: u32,
     render_mode: RenderMode,
-    subpixel_location: u8,
+    subpixel_location: i8,
     variation_hash: u64,
 }
 
@@ -111,7 +111,7 @@ impl RenderedGlyphId {
         font_size: f32,
         line_width: f32,
         mode: RenderMode,
-        subpixel_location: u8,
+        subpixel_location: i8,
         normalized_coords: &[i16],
     ) -> Self {
         use std::hash::Hasher;
@@ -568,7 +568,12 @@ impl GlyphAtlas {
         };
 
         let mut add_glyph = |canvas: &mut Canvas<T>, glyph: PositionedGlyph| -> Result<(), ErrorKind> {
-            let subpixel_location = crate::geometry::quantize(glyph.x.fract(), 0.1) * 10.0;
+            // The fraction of x in tenths of a pixel, -10 to 10, with the sign of x. It is the
+            // offset of the glyph from `glyph.x.trunc()`, where the quad is placed below.
+            // `quantize` rounds to the nearest step only for a non-negative value, so it is given
+            // the absolute value.
+            let fract = glyph.x.fract();
+            let subpixel_location = (crate::geometry::quantize(fract.abs(), 0.1) * 10.0).copysign(fract) as i8;
 
             let id = RenderedGlyphId::new(
                 glyph.glyph_id,
@@ -576,7 +581,7 @@ impl GlyphAtlas {
                 font_size,
                 line_width,
                 mode,
-                subpixel_location as u8,
+                subpixel_location,
                 normalized_coords,
             );
 
@@ -593,7 +598,7 @@ impl GlyphAtlas {
                         font,
                         font_face,
                         glyph.glyph_id,
-                        subpixel_location / 10.0,
+                        f32::from(subpixel_location) / 10.0,
                         normalized_coords,
                     )?;
                     if let Some((_, Some(mask))) = &placed {
