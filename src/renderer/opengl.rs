@@ -12,13 +12,13 @@ use rgb::RGBA8;
 
 use crate::{
     renderer::{GlyphTexture, ImageId, Vertex},
-    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageInfo, ImageSource, ImageStore,
-    Scissor, Transform2D,
+    BlendFactor, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageFlags, ImageInfo, ImageSource,
+    ImageStore, PixelFormat, Scissor, Transform2D,
 };
 
 use glow::HasContext;
 
-use super::{Command, CommandType, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
+use super::{Command, CommandType, FanIndices, Params, RenderTarget, Renderer, ShaderType, SurfacelessRenderer};
 
 mod program;
 use program::MainProgram;
@@ -55,12 +55,33 @@ pub struct OpenGl {
     current_program_clips: (bool, bool),
     vert_arr: Option<<glow::Context as glow::HasContext>::VertexArray>,
     vert_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
+    // The fill fans as triangles of 32-bit indices, on WebGL alone: its
+    // implementations (ANGLE) emulate a fan draw by draw, where a native
+    // driver draws one for less than an indexed draw costs (Apple's: by
+    // about 7,000 instructions).
+    fan_indices: FanIndices,
+    fan_index_buff: Option<<glow::Context as glow::HasContext>::Buffer>,
     framebuffers: FnvHashMap<ImageId, Result<Framebuffer, ErrorKind>>,
     context: Rc<glow::Context>,
     screen_target: Option<Framebuffer>,
     current_render_target: RenderTarget,
     max_texture_size: usize,
+    // The screen's pixels a rect blur reads, at their place on the screen:
+    // the screen can't be sampled. Kept at the screen's size, since a blur
+    // drawn every frame copies every frame.
+    screen_copy: Option<GlTexture>,
+    // Blurs run every frame, so a skipped one logs once, not per frame.
+    warned_blur_skipped: bool,
 }
+
+/// The texture parameters a rect blur's first draw reads an image target
+/// with.
+const RECT_BLUR_SAMPLING: [(u32, u32); 4] = [
+    (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
+    (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
+    (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+    (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+];
 
 impl OpenGl {
     /// Creates a new OpenGL renderer from a function loader.
@@ -76,7 +97,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a function loader that takes C-style strings.
@@ -92,7 +113,7 @@ impl OpenGl {
         let context = glow::Context::from_loader_function_cstr(load_fn);
         let version = context.get_parameter_string(glow::VERSION);
         let is_opengles_2_0 = version.starts_with("OpenGL ES 2.");
-        Self::new_from_context(context, is_opengles_2_0)
+        Self::new_from_context(context, is_opengles_2_0, false)
     }
 
     /// Creates a new OpenGL renderer from a Glutin display.
@@ -119,10 +140,10 @@ impl OpenGl {
         };
 
         let context = glow::Context::from_webgl2_context(webgl2_context);
-        Self::new_from_context(context, true)
+        Self::new_from_context(context, true, true)
     }
 
-    fn new_from_context(context: glow::Context, is_opengles_2_0: bool) -> Result<Self, ErrorKind> {
+    fn new_from_context(context: glow::Context, is_opengles_2_0: bool, indexed_fans: bool) -> Result<Self, ErrorKind> {
         let debug = cfg!(debug_assertions);
         let antialias = true;
 
@@ -303,11 +324,15 @@ impl OpenGl {
             current_program_clips: (false, false),
             vert_arr: None,
             vert_buff: None,
+            fan_indices: FanIndices::default(),
+            fan_index_buff: None,
             framebuffers: HashMap::default(),
             context,
             screen_target: None,
             current_render_target: RenderTarget::Screen,
             max_texture_size,
+            screen_copy: None,
+            warned_blur_skipped: false,
         };
 
         unsafe {
@@ -315,6 +340,9 @@ impl OpenGl {
 
             opengl.vert_arr = opengl.context.create_vertex_array().ok();
             opengl.vert_buff = opengl.context.create_buffer().ok();
+            if indexed_fans {
+                opengl.fan_index_buff = opengl.context.create_buffer().ok();
+            }
         }
 
         Ok(opengl)
@@ -476,15 +504,32 @@ impl OpenGl {
         self.check_error("clip_reset");
     }
 
-    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, gpu_paint: &Params) {
+    /// Draws the fan of `count` vertices from `start`: as triangles of the
+    /// frame's fan indices from `first`, moved past them, or without fan
+    /// indices as a fan.
+    fn draw_fan(&self, first: &mut Option<u32>, start: usize, count: usize) {
+        unsafe {
+            match first {
+                Some(first) => {
+                    let indices = FanIndices::count(count);
+                    let offset = (*first as usize * mem::size_of::<u32>()) as i32;
+                    self.context
+                        .draw_elements(glow::TRIANGLES, indices as i32, glow::UNSIGNED_INT, offset);
+                    *first += indices;
+                }
+                None => self.context.draw_arrays(glow::TRIANGLE_FAN, start as i32, count as i32),
+            }
+        }
+    }
+
+    fn convex_fill(&mut self, images: &ImageStore<GlTexture>, cmd: &Command, fans: Option<u32>, gpu_paint: &Params) {
         self.begin_clip_guard(cmd.clip_active);
         self.set_uniforms(images, gpu_paint, cmd.image, cmd.glyph_texture);
+        let mut first = fans;
 
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
 
             if let Some((start, count)) = drawable.stroke_verts {
@@ -503,6 +548,7 @@ impl OpenGl {
         &mut self,
         images: &ImageStore<GlTexture>,
         cmd: &Command,
+        fans: Option<u32>,
         stencil_paint: &Params,
         fill_paint: &Params,
     ) {
@@ -531,11 +577,10 @@ impl OpenGl {
             self.context.disable(glow::CULL_FACE);
         }
 
+        let mut first = fans;
         for drawable in &cmd.drawables {
             if let Some((start, count)) = drawable.fill_verts {
-                unsafe {
-                    self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
-                }
+                self.draw_fan(&mut first, start, count);
             }
         }
 
@@ -758,6 +803,68 @@ impl OpenGl {
         }
 
         self.check_error("set_uniforms texture");
+    }
+
+    fn warn_skipped(&mut self, reason: &str) {
+        if !std::mem::replace(&mut self.warned_blur_skipped, true) {
+            log::warn!("rect blur skipped: {reason}");
+        }
+    }
+
+    /// Copies `src` of the screen into `screen_copy` at the same place and
+    /// returns the copy's texture.
+    fn copy_screen(&mut self, [x, y, width, height]: [u32; 4]) -> Option<<glow::Context as glow::HasContext>::Texture> {
+        // glCopyTexSubImage2D can't resolve a multisampled framebuffer.
+        if unsafe { self.context.get_parameter_i32(glow::SAMPLE_BUFFERS) } > 0 {
+            self.warn_skipped("the screen framebuffer is multisampled");
+            return None;
+        }
+        // OpenGL ES can't copy a channel the framebuffer lacks, so an
+        // alphaless screen is copied into an RGB texture, which samples as
+        // opaque. Desktop GL fills the missing alpha with 1 itself.
+        let format =
+            if self.context.version().is_embedded && unsafe { self.context.get_parameter_i32(glow::ALPHA_BITS) } == 0 {
+                PixelFormat::Rgb8
+            } else {
+                PixelFormat::Rgba8
+            };
+        let size = self.view.map(|extent| extent as usize);
+        if self.screen_copy.as_ref().is_none_or(|copy| {
+            let info = copy.info();
+            [info.width(), info.height()] != size || info.format() != format
+        }) {
+            if let Some(copy) = self.screen_copy.take() {
+                copy.delete(&self.context);
+            }
+            let info = ImageInfo::new(ImageFlags::PREMULTIPLIED, size[0], size[1], format);
+            match GlTexture::new(&self.context, info, self.is_opengles_2_0) {
+                Ok(copy) => self.screen_copy = Some(copy),
+                Err(err) => {
+                    self.warn_skipped(&format!("can't create the screen copy: {err:?}"));
+                    return None;
+                }
+            }
+        }
+        let texture = self.screen_copy.as_ref()?.id();
+        // The screen holds its rows bottom-up, as the copy does.
+        let row = self.view[1] as i32 - (y + height) as i32;
+        unsafe {
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.context.copy_tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                x as i32,
+                row,
+                x as i32,
+                row,
+                width as i32,
+                height as i32,
+            );
+            self.context.bind_texture(glow::TEXTURE_2D, None);
+        }
+        self.check_error("copy_screen");
+        Some(texture)
     }
 
     fn clear_rect(&self, x: u32, y: u32, width: u32, height: u32, color: Color, keep_clip: bool) {
@@ -1057,6 +1164,94 @@ impl OpenGl {
         self.main_program().set_view(self.view);
     }
 
+    /// Draws `src` of the current render target over `target_image`: see
+    /// `CommandType::StartBlur`. Returns whether it drew.
+    fn start_blur(
+        &mut self,
+        images: &ImageStore<GlTexture>,
+        cmd: &Command,
+        target_image: ImageId,
+        src: [u32; 4],
+        sigma: f32,
+    ) -> bool {
+        let Some(target_info) = images.get(target_image).map(GlTexture::info) else {
+            return false;
+        };
+        // An image target is read where it is; the screen through a copy.
+        let (source, size, is_image) = match self.current_render_target {
+            RenderTarget::Image(id) => {
+                let Some(texture) = images.get(id) else {
+                    return false;
+                };
+                let info = texture.info();
+                (texture.id(), [info.width() as f32, info.height() as f32], true)
+            }
+            RenderTarget::Screen => {
+                let Some(copy) = self.copy_screen(src) else {
+                    return false;
+                };
+                (copy, self.view, false)
+            }
+        };
+        let (target_width, target_height) = (target_info.width(), target_info.height());
+        // Every OpenGL target holds its rows bottom-up.
+        let params = Params::rect_blur(size, sigma, 0, true);
+
+        let original_render_target = self.current_render_target;
+        self.set_target(images, RenderTarget::Image(target_image));
+        self.main_program().set_view(self.view);
+        self.clear_rect(
+            0,
+            0,
+            target_width as u32,
+            target_height as u32,
+            Color::rgbaf(0., 0., 0., 0.),
+            false,
+        );
+        self.set_uniforms(images, &params, None, GlyphTexture::None);
+        unsafe {
+            self.context.active_texture(glow::TEXTURE0);
+            self.context.bind_texture(glow::TEXTURE_2D, Some(source));
+            // The taps clamp and the first halving averages only through a
+            // linear, clamped lookup of the base level, whatever the image's
+            // own flags (or, for a native texture, its owner) set.
+            let saved = is_image.then(|| {
+                RECT_BLUR_SAMPLING.map(|(parameter, value)| {
+                    let previous = self.context.get_tex_parameter_i32(glow::TEXTURE_2D, parameter);
+                    self.context
+                        .tex_parameter_i32(glow::TEXTURE_2D, parameter, value as i32);
+                    (parameter, previous)
+                })
+            });
+            if let Some((start, count)) = cmd.triangles_verts {
+                self.context.draw_arrays(glow::TRIANGLES, start as i32, count as i32);
+            }
+            for (parameter, previous) in saved.into_iter().flatten() {
+                self.context.tex_parameter_i32(glow::TEXTURE_2D, parameter, previous);
+            }
+        }
+        self.check_error("start_blur");
+
+        self.set_target(images, original_render_target);
+        self.main_program().set_view(self.view);
+        true
+    }
+
+    /// Blurs `cmd.image` along y back onto the current render target: see
+    /// `CommandType::FinishBlur`.
+    fn finish_blur(
+        &mut self,
+        images: &ImageStore<GlTexture>,
+        cmd: &Command,
+        sigma: f32,
+        extent: [u32; 2],
+        region: [u32; 4],
+    ) {
+        let params = Params::rect_blur(extent.map(|v| v as f32), sigma, 1, false);
+        self.set_clip_bounds(Some(region));
+        self.triangles(images, cmd, &params);
+    }
+
     /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
     /// by `sigma[0]`, then vertical by `sigma[1]`. A degenerate sigma makes
     /// that draw a copy.
@@ -1247,6 +1442,18 @@ impl Renderer for OpenGl {
             self.context
                 .buffer_data_u8_slice(glow::ARRAY_BUFFER, verts.align_to().1, glow::STREAM_DRAW);
 
+            if self.fan_index_buff.is_some() {
+                self.fan_indices.build(&commands);
+                // Bound with the vertex array, which keeps it for the frame.
+                self.context
+                    .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, self.fan_index_buff);
+                self.context.buffer_data_u8_slice(
+                    glow::ELEMENT_ARRAY_BUFFER,
+                    self.fan_indices.indices().align_to().1,
+                    glow::STREAM_DRAW,
+                );
+            }
+
             self.context.enable_vertex_attrib_array(0);
             self.context.enable_vertex_attrib_array(1);
 
@@ -1264,16 +1471,19 @@ impl Renderer for OpenGl {
 
         self.check_error("render prepare");
 
-        for cmd in commands {
+        // Whether the last `StartBlur` drew.
+        let mut sampled = false;
+        for (index, cmd) in commands.into_iter().enumerate() {
             self.set_clip_bounds(cmd.clip_bounds([self.view[0] as u32, self.view[1] as u32]));
             self.set_composite_operation(cmd.composite_operation);
+            let fans = self.fan_index_buff.map(|_| self.fan_indices.firsts[index]);
 
             match cmd.cmd_type {
-                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, params),
+                CommandType::ConvexFill { ref params } => self.convex_fill(images, &cmd, fans, params),
                 CommandType::ConcaveFill {
                     ref stencil_params,
                     ref fill_params,
-                } => self.concave_fill(images, &cmd, stencil_params, fill_params),
+                } => self.concave_fill(images, &cmd, fans, stencil_params, fill_params),
                 CommandType::Stroke { ref params } => self.stroke(images, &cmd, params),
                 CommandType::StencilStroke {
                     ref params1,
@@ -1295,6 +1505,19 @@ impl Renderer for OpenGl {
                 }
                 CommandType::RenderFilteredImage { target_image, filter } => {
                     self.render_filtered_image(images, cmd, target_image, filter)
+                }
+                CommandType::StartBlur {
+                    target_image,
+                    src,
+                    sigma,
+                } => sampled = self.start_blur(images, &cmd, target_image, src, sigma),
+                CommandType::FinishBlur { sigma, extent, region } => {
+                    // Its source is the first draw's image, or that image run
+                    // down a pyramid: without that draw it would write back
+                    // whatever the image held before.
+                    if sampled {
+                        self.finish_blur(images, &cmd, sigma, extent, region);
+                    }
                 }
                 CommandType::ClipFill => {
                     let stencil_params = Params::stencil();
@@ -1435,10 +1658,13 @@ impl Drop for OpenGl {
             }
         }
 
-        if let Some(vert_buff) = self.vert_buff {
+        for buffer in [self.vert_buff, self.fan_index_buff].into_iter().flatten() {
             unsafe {
-                self.context.delete_buffer(vert_buff);
+                self.context.delete_buffer(buffer);
             }
+        }
+        if let Some(copy) = self.screen_copy.take() {
+            copy.delete(&self.context);
         }
     }
 }

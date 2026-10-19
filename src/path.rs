@@ -9,6 +9,7 @@ use crate::geometry::{Position, Transform2D, Vector};
 use rustybuzz::ttf_parser;
 
 mod cache;
+pub(crate) use cache::OutlineWidth;
 pub use cache::{Convexity, PathCache};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
@@ -255,6 +256,13 @@ impl Path {
                     push_flattened_point(&mut current.points, current_pos, dist_tol);
                 }
                 Verb::BezierTo(c1x, c1y, c2x, c2y, x, y) => {
+                    // A cubic whose four points coincide is the point it starts from, as
+                    // `PathCache::new` takes it: its chord is zero, so it would fail the
+                    // flatness test to the depth limit.
+                    let start = (current_pos.x, current_pos.y);
+                    if [(x, y), (c1x, c1y), (c2x, c2y)] == [start; 3] {
+                        continue;
+                    }
                     let c1 = Position { x: c1x, y: c1y };
                     let c2 = Position { x: c2x, y: c2y };
                     let end = Position { x, y };
@@ -886,6 +894,7 @@ impl Path {
 
         self.verbs.extend_from_slice(verbs);
         self.coords.extend_from_slice(coords);
+        *self.cache.get_mut() = None;
     }
 }
 
@@ -1014,6 +1023,9 @@ fn flatten_bezier(
     tess_tol: f32,
     dist_tol: f32,
 ) {
+    #[cfg(test)]
+    tests::BEZIER_PIECES.with(|pieces| pieces.set(pieces.get() + 1));
+
     if level > 10 {
         push_flattened_point(points, p3, dist_tol);
         return;
@@ -1134,6 +1146,29 @@ impl ttf_parser::OutlineBuilder for Path {
 #[cfg(test)]
 mod tests {
     use super::{svg_arc_angle, Path, Verb, PI};
+    use std::cell::Cell;
+
+    thread_local! {
+        /// The pieces `flatten_bezier` has examined on this thread.
+        pub(super) static BEZIER_PIECES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A cubic whose four points coincide adds nothing to a dashed outline
+    /// either, and is not subdivided to the depth limit on the way: a tab's
+    /// square corners cost half the pieces of the same rect rounded all round.
+    #[test]
+    fn dashing_a_cubic_that_is_a_point_flattens_nothing() {
+        let pieces_dashing = |path: &Path| {
+            BEZIER_PIECES.with(|pieces| pieces.set(0));
+            path.dashed(&[4.0, 2.0], 0.0);
+            BEZIER_PIECES.with(Cell::get)
+        };
+        let mut tab = Path::new();
+        tab.rounded_rect_varying(0.0, 0.0, 60.0, 24.0, 6.0, 6.0, 0.0, 0.0);
+        let mut rounded = Path::new();
+        rounded.rounded_rect(0.0, 0.0, 60.0, 24.0, 6.0);
+        assert_eq!(2 * pieces_dashing(&tab), pieces_dashing(&rounded));
+    }
 
     fn line_path(length: f32) -> Path {
         let mut path = Path::new();
