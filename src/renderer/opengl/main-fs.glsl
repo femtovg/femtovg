@@ -33,6 +33,11 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 // An image paint's transfer (0 none, 1 to sRGB, 2 to linearRGB) in the paint
 // matrix's first column's w, which no image paint reads.
 #define imageTransfer int(frag[3].w)
+// Whether a blur tap beyond the source reads its edge texel, and whether the
+// sample positions mirror to `extent.y - y`: they ride the clip shape's
+// slots, which no filter draw reads.
+#define filterClamp frag[13].z
+#define filterFlipY frag[13].w
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -328,12 +333,13 @@ vec4 renderPlainTextureCopy() {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades.
+// weight stays in the sum, so an edge fades. With `filterClamp` set, the
+// sampler's clamp to edge applies instead.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 vec4 blurTap(vec2 pos) {
     vec2 uv = pos / extent;
-    vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+    vec2 inside = max(step(vec2(0.0), uv) * step(uv, vec2(1.0)), vec2(filterClamp));
     vec4 color = texture2D(tex, uv);
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (radius > 0.5) color = vec4(0.0, 0.0, 0.0, color.w);
@@ -345,11 +351,14 @@ vec4 blurTap(vec2 pos) {
 vec4 colorMatrixOn(vec4 premultiplied);
 
 vec4 renderFilteredImage() {
+    // The quad's texture coordinates say where in the source it samples.
+    vec2 center = ftcoord;
+    if (filterFlipY > 0.5) center.y = extent.y - center.y;
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
 
     vec3 gaussian_coeff = imageBlurFilterCoeff;
 
-    vec4 color_sum = blurTap(fpos.xy) * gaussian_coeff.x;
+    vec4 color_sum = blurTap(center) * gaussian_coeff.x;
     float coefficient_sum = gaussian_coeff.x;
     gaussian_coeff.xy *= gaussian_coeff.yz;
 
@@ -361,8 +370,8 @@ vec4 renderFilteredImage() {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += blurTap(fpos.xy - i * imageBlurFilterDirection) * gaussian_coeff.x;
-        color_sum += blurTap(fpos.xy + i * imageBlurFilterDirection) * gaussian_coeff.x;
+        color_sum += blurTap(center - i * imageBlurFilterDirection) * gaussian_coeff.x;
+        color_sum += blurTap(center + i * imageBlurFilterDirection) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:

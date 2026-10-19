@@ -133,6 +133,36 @@ pub enum CommandType {
         /// Image filter to apply.
         filter: ImageFilter,
     },
+    /// First draw of a rect blur: the render target blurred along x by
+    /// `sigma` (zero resamples) into `target_image`. The quad is
+    /// `triangles_verts`, its texture coordinates the render target pixels
+    /// it samples, counted from the top: a renderer storing the target's
+    /// rows bottom-up mirrors them. They can pass the target's edges, where
+    /// taps clamp to the edge pixels.
+    StartBlur {
+        /// The image drawn into.
+        target_image: ImageId,
+        /// The pixels the draw reads, `[x, y, width, height]` in device
+        /// pixels, within the target: what a renderer that can't sample the
+        /// target copies first.
+        src: [u32; 4],
+        /// The standard deviation along x.
+        sigma: f32,
+    },
+    /// Last draw of a rect blur: `image` blurred along y by `sigma` (zero
+    /// resamples) onto `region` of the render target. The quad is
+    /// `triangles_verts`, its texture coordinates the pixels of `image`,
+    /// stretched over `extent`, it samples. Taps clamp at `image`'s edges.
+    /// A renderer whose last `StartBlur` didn't draw skips it:
+    /// `image` then holds whatever was there before.
+    FinishBlur {
+        /// The standard deviation along y.
+        sigma: f32,
+        /// The size `image` is stretched over, in device pixels.
+        extent: [u32; 2],
+        /// The rect written, in device pixels.
+        region: [u32; 4],
+    },
 }
 
 /// The colour matrices a two-draw filter pass carries in its draws: an
