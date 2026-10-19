@@ -8,6 +8,21 @@ All notable changes to this project will be documented in this file.
   antialiasing fringe, whose fill vertices move outward - so the next
   concave fill whose cover reached them painted them, outside its own shape.
   Such a fill now draws its fans again after the cover to zero them.
+- Fixed: Thin shapes are drawn with the coverage browsers give them: hairlines,
+  slivers and the fine details of icons, logos and illustrations came out too
+  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
+  logo 20 pixels tall twice as dark.
+- On a test corpus of real-world SVGs, images with thin shapes have 37% fewer
+  mismatched pixels against Firefox, 27% against Chromium and 26% against WebKit;
+  by collection, against the exact-area reference, Mozilla's Firefox illustrations
+  improved 65%, the GooglePay mark 60% and the SolidJS banner 99%, and the New
+  York Times marks now match all three browsers' ink within 2%. The WPT reftests
+  `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight` now match
+  Chromium and WebKit within 2 pixels (Firefox draws the figure-eight differently:
+  52 pixels off, from 142). Still frames render as fast as before, within 2% on a
+  desktop; thin shapes that move every frame are rasterized again each frame,
+  about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
+  29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
 - `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
   ids of the fonts they load from subdirectories, not only of those directly
   in the given directory.
@@ -41,9 +56,8 @@ All notable changes to this project will be documented in this file.
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
   the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
-  and the exact-area reference pixel for pixel, where 124 and 116 of its
-  pixels were off, and comes nearer Firefox and Chromium (181 to 118 and 214
-  to 185 pixels off).
+  and the exact-area reference pixel for pixel, and comes nearer Firefox and
+  Chromium.
 - `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
   outside the glyph atlas with the `swash` feature and without `textlayout`.
   It draws text outside the atlas under a rotated, skewed, flipped or

@@ -9,6 +9,7 @@ use crate::geometry::{Position, Transform2D, Vector};
 use rustybuzz::ttf_parser;
 
 mod cache;
+pub(crate) use cache::OutlineWidth;
 pub use cache::{Convexity, PathCache};
 
 // Length proportional to radius of a cubic bezier handle for 90deg arcs.
