@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
   desktop; thin shapes that move every frame are rasterized again each frame,
   about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
   29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
+- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
+  ids of the fonts they load from subdirectories, not only of those directly
+  in the given directory.
 - Fixed stray paint under a clip to a path other than a rectangle, rounded
   rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
   `destination-in` or `destination-atop`: a shape with a notch or a hole left
@@ -80,6 +83,17 @@ All notable changes to this project will be documented in this file.
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
   used are dropped first.
+- Added `Canvas::blur_rect`: blurs a rect of the current render target,
+  the screen included, in place, reading up to three sigma around it and
+  repeating the target's edge pixels where that passes the edge. A sigma
+  above 8 runs down the blur pyramid. An image target is read in place; the
+  screen is copied first, so on WGPU it needs `COPY_SRC` usage on the output
+  texture, which must be mip 0 of a single-layer texture, and an image
+  target needs `TEXTURE_BINDING`. It returns
+  `ErrorKind::UnsupportedOperation` while a `begin_layer` capture is open.
+- **Breaking:** `renderer::CommandType` has two new variants,
+  `SampleRenderTarget` and `BlurRect`: a `Renderer` implemented outside the
+  crate must handle them.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
