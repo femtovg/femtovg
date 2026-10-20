@@ -3,6 +3,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- WGPU: a render pass attaches the stencil only when something it draws
+  tests or writes it, and clears it on load and discards it on store unless
+  a clip plane armed on the target outlives the pass. On a tiled GPU the
+  stencil stays in tile memory instead of being read and written back at
+  every pass, and an image whose passes draw no fill that needs it gets no
+  stencil texture.
+- The WGPU backend begins a render pass only when a draw needs it. A
+  target that was set and left again undrawn - the one every image filter
+  hands back, the screen ahead of a frame's first target switch - used to
+  get a pass that loaded and stored it for nothing, and on Metal a command
+  buffer of its own: a quarter of the passes of a filter-heavy frame (849
+  to 632 for a 178-layer BuseyBench portrait). No pixel changes.
+- Added `WGPURenderer::set_submission_slicing`: with a `SubmissionSlicing`,
+  a frame is submitted in slices of at most that many render passes (64 by
+  default) instead of one submission holding every pass. wgpu opens a Metal
+  command buffer for every render pass and the driver keeps about 2.3 MiB
+  for each until it completes (gfx-rs/wgpu#5738), so one submission per
+  frame held gigabytes for a frame of hundreds of layers or a long blur
+  chain: 1,600 opacity layers failed buffer creation on an M4 Max, and a
+  176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
+  Sliced, the driver recycles the command buffers that complete while the
+  rest of the frame is encoded, which lowers the peak without bounding it:
+  the renderer never polls the device. The
+  slices before the returned command buffer are submitted during the
+  flush, so work that must run before the frame is submitted before it;
+  off by default, which keeps the one-command-buffer contract of
+  `flush_to_surface`. `Canvas::renderer` and
+  `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
+  reports the passes per command buffer of the last frame.
+- Fixed text getting the glyph advances it had at an earlier font size when
+  both sizes were in the same tenth of a device pixel (e.g., 12 and 12.09):
+  `measure_text` returned the earlier width, `break_text` broke the text by
+  it, and `fill_text` placed its glyphs by it.
+- Fixed `break_text` and `break_text_vec` breaking the text where an earlier
+  `max_width` broke it when both widths were in the same whole device pixel
+  (e.g., 100.2 and 100.9), even when the text fit at one width and not at the
+  other.
+- With the `swash` feature, `Canvas` now draws filled text at a negative x
+  with the mask for each glyph's own subpixel offset. It used a mask
+  rasterized for another offset, which put each glyph up to a pixel from its
+  position and spaced the letters unevenly (e.g., in text centred or
+  right-aligned by translating the canvas to an anchor point).
+- Fixed: Thin shapes are drawn with the coverage browsers give them: hairlines,
+  slivers and the fine details of icons, logos and illustrations came out too
+  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
+  logo 20 pixels tall twice as dark.
+- On a test corpus of real-world SVGs, images with thin shapes have 37% fewer
+  mismatched pixels against Firefox, 27% against Chromium and 26% against WebKit;
+  by collection, against the exact-area reference, Mozilla's Firefox illustrations
+  improved 65%, the GooglePay mark 60% and the SolidJS banner 99%, and the New
+  York Times marks now match all three browsers' ink within 2%. The WPT reftests
+  `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight` now match
+  Chromium and WebKit within 2 pixels (Firefox draws the figure-eight differently:
+  52 pixels off, from 142). Still frames render as fast as before, within 2% on a
+  desktop; thin shapes that move every frame are rasterized again each frame,
+  about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
+  29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
+- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
+  ids of the fonts they load from subdirectories, not only of those directly
+  in the given directory.
+- Fixed stray paint under a clip to a path other than a rectangle, rounded
+  rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
+  `destination-in` or `destination-atop`: a shape with a notch or a hole left
+  an invisible count where the clip cut it off, and the next such shape
+  painted those pixels outside its own outline. On the reftest suite's canvas
+  scenes of these operations, pixels off Chromium, Firefox and WebKit fall by
+  90% at 1x and 97% at 4x zoom (`hard-mask-source-in-triangle-l-arch`: 186 to
+  none), leaving only the clip's edge, and on WGPU a frame of 400 such shapes
+  takes half the CPU it used to. SVG content is unaffected: SVG puts no
+  compositing operator on a shape.
 - Reduce CPU encode time by 4x or more on some SVG content: 
   A cubic whose four points coincide is no longer halved ten times over
   before it adds no point. Its chord is zero, so it never passed the
@@ -23,9 +93,8 @@ All notable changes to this project will be documented in this file.
   of the shape around it and is wound the same way: a clip to a ring thinner
   than a pixel painted nearly a third more than the ring's area. At half size,
   the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
-  and the exact-area reference pixel for pixel, where 124 and 116 of its
-  pixels were off, and comes nearer Firefox and Chromium (181 to 118 and 214
-  to 185 pixels off).
+  and the exact-area reference pixel for pixel, and comes nearer Firefox and
+  Chromium.
 - `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
   outside the glyph atlas with the `swash` feature and without `textlayout`.
   It draws text outside the atlas under a rotated, skewed, flipped or
@@ -56,6 +125,17 @@ All notable changes to this project will be documented in this file.
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
   used are dropped first.
+- Added `Canvas::blur_rect`: blurs a rect of the current render target,
+  the screen included, in place, reading up to three sigma around it and
+  repeating the target's edge pixels where that passes the edge. A sigma
+  above 8 runs down the blur pyramid. An image target is read in place; the
+  screen is copied first, so on WGPU it needs `COPY_SRC` usage on the output
+  texture, which must be mip 0 of a single-layer texture, and an image
+  target needs `TEXTURE_BINDING`. It returns
+  `ErrorKind::UnsupportedOperation` while a `begin_layer` capture is open.
+- **Breaking:** `renderer::CommandType` has two new variants,
+  `SampleRenderTarget` and `BlurRect`: a `Renderer` implemented outside the
+  crate must handle them.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with

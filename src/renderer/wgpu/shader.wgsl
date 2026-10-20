@@ -465,6 +465,43 @@ fn renderImageGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
 }
 
+// The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
+// the unpremultiplied color, alpha untouched: to sRGB when to_srgb, else to
+// linearRGB.
+fn transferColor(color: vec4<f32>, to_srgb: bool) -> vec4<f32> {
+    var c: vec4<f32> = color;
+    if (c.a > 0.0) {
+        c = vec4<f32>(c.rgb / c.a, c.a);
+    }
+    let x = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var y: vec3<f32>;
+    if (to_srgb) {
+        // mix evaluates both sides: keep pow off 0, where an exp2(log2) under fast math can give a NaN that
+        // mix carries even at weight 0. The clamp only touches the side step leaves out.
+        y = mix(x * 12.92, 1.055 * pow(max(x, vec3<f32>(0.0031308)), vec3<f32>(1.0 / 2.4)) - 0.055, step(vec3<f32>(0.0031308), x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3<f32>(2.4)), step(vec3<f32>(0.04045), x));
+    }
+    return vec4<f32>(y * c.a, c.a);
+}
+
+// A sampled image texel as the paint uses it: premultiplied, converted by
+// the paint's transfer if it has one - rounded to 8 bits, as the transfer's
+// pass stores its result - then tinted.
+fn paintTexel(texel: vec4<f32>, params: Params) -> vec4<f32> {
+    var color: vec4<f32> = texel;
+    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
+    if (params.tex_type == 2) { color = vec4(color.x); }
+    // The transfer is the paint matrix's first column's w (0 none, 1 to
+    // sRGB, 2 to linearRGB), which no image paint reads.
+    let transfer = params.paint_mat[0].w;
+    if (transfer > 0.5) {
+        color = floor(transferColor(color, transfer < 1.5) * 255.0 + 0.5) / 255.0;
+    }
+    // Apply color tint and alpha.
+    return color * params.inner_col;
+}
+
 fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate color from texture
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy / params.extent;
@@ -472,24 +509,11 @@ fn renderImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Half a level toward the larger mip: browsers minify sharper than plain
     // trilinear (Chromium samples the larger level, Firefox downsamples
     // directly); no effect without mipmaps or under magnification.
-    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, pt, -0.5);
-
-    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
-    if (params.tex_type == 2) { color = vec4(color.x); }
-
-    // Apply color tint and alpha.
-    color *= params.inner_col;
-    return color;
+    return paintTexel(textureSampleBias(image_texture, image_sampler, pt, -0.5), params);
 }
 
 fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    var color: vec4<f32> = textureSampleBias(image_texture, image_sampler, vertex.ftcoord, -0.5);
-
-    if (params.tex_type == 1) { color = vec4(color.xyz * color.w, color.w); }
-    if (params.tex_type == 2) { color = vec4(color.x); }
-    // Apply color tint and alpha.
-    color *= params.inner_col;
-    return color;
+    return paintTexel(textureSampleBias(image_texture, image_sampler, vertex.ftcoord, -0.5), params);
 }
 
 // A blur tap, premultiplied: a straight-alpha source is converted per tap,
@@ -497,12 +521,14 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades.
+// weight stays in the sum, so an edge fades. With `clip_inner.x` set, which
+// no filter draw reads otherwise, the sampler's clamp to edge applies
+// instead.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
     let uv = pos / params.extent;
-    let inside = all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0));
+    let inside = (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) || params.clip_inner.x > 0.5;
     var color: vec4<f32> = textureSample(image_texture, image_sampler, uv);
     if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
     if (params.radius > 0.5) { color = vec4<f32>(0.0, 0.0, 0.0, color.w); }
@@ -510,11 +536,14 @@ fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
 }
 
 fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    // The quad's texture coordinates say where in the source it samples;
+    // `clip_inner.y`, which no filter draw reads otherwise, mirrors them.
+    let center = select(vertex.ftcoord, vec2<f32>(vertex.ftcoord.x, params.extent.y - vertex.ftcoord.y), params.clip_inner.y > 0.5);
     let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
 
-    var color_sum: vec4<f32> = blurTap(vertex.fpos.xy, params) * gaussian_coeff.x;
+    var color_sum: vec4<f32> = blurTap(center, params) * gaussian_coeff.x;
     var coefficient_sum: f32 = gaussian_coeff.x;
     gaussian_coeff.x *= gaussian_coeff.y;
     gaussian_coeff.y *= gaussian_coeff.z;
@@ -527,8 +556,8 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += blurTap(vertex.fpos.xy - i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
-        color_sum += blurTap(vertex.fpos.xy + i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
+        color_sum += blurTap(center - i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
+        color_sum += blurTap(center + i * params.image_blur_filter_direction, params) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:

@@ -263,6 +263,29 @@ impl GradientColors {
     }
 }
 
+/// A colour-space conversion an image paint applies to each texel it
+/// samples: the sRGB transfer curve on the unpremultiplied colour, alpha
+/// untouched, rounded to 8 bits - what
+/// [`ImageFilter::LinearRgbToSrgb`](crate::ImageFilter::LinearRgbToSrgb) and
+/// its inverse store as a pass. A layer whose chain is one conversion
+/// composites through it instead (see `LayerEffects::composite_transfer`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    ToSrgb,
+    ToLinearRgb,
+}
+
+impl Transfer {
+    /// The value the shaders read for it: 1 to sRGB, 2 to linearRGB (0, no
+    /// transfer, is the uniform's default).
+    pub(crate) fn uniform(self) -> f32 {
+        match self {
+            Self::ToSrgb => 1.0,
+            Self::ToLinearRgb => 2.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PaintFlavor {
@@ -275,6 +298,7 @@ pub enum PaintFlavor {
         height: f32,
         angle: f32,
         tint: Color,
+        transfer: Option<Transfer>,
     },
     LinearGradient {
         start: Position,
@@ -621,6 +645,7 @@ impl Paint {
             height,
             angle,
             tint: Color::rgbaf(1.0, 1.0, 1.0, alpha),
+            transfer: None,
         })
     }
 
@@ -634,7 +659,16 @@ impl Paint {
             height,
             angle,
             tint,
+            transfer: None,
         })
+    }
+
+    /// This image paint converting each texel by `transfer` as it samples it.
+    pub(crate) fn with_transfer(mut self, transfer: Option<Transfer>) -> Self {
+        if let PaintFlavor::Image { transfer: t, .. } = &mut self.flavor {
+            *t = transfer;
+        }
+        self
     }
 
     /// Creates and returns a linear gradient paint.

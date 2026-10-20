@@ -1,7 +1,7 @@
 use crate::{
     clip::{ClipCoverage, MaskCoverage},
     geometry::Position,
-    paint::{GlyphTexture, GradientColors},
+    paint::{GlyphTexture, GradientColors, Transfer},
     ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
@@ -28,13 +28,43 @@ pub struct Params {
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
     pub(crate) conic_start_angle: f32,
+    /// Whether a blur draw mirrors its sample positions to `extent[1] - y`:
+    /// a rect blur's first draw reads a source stored the other way up on
+    /// some backends.
+    pub(crate) filter_flip_y: bool,
+    /// Whether a blur tap beyond the source reads its edge texel rather than
+    /// transparent.
+    pub(crate) filter_clamp: bool,
     /// The clip shape in force on the draw's target, if any.
     pub(crate) clip: Option<ClipCoverage>,
     /// The coverage mask in force on the draw's target, if any.
     pub(crate) clip_mask: Option<MaskCoverage>,
+    /// The colour-space conversion an image paint applies to each texel, if
+    /// any.
+    pub(crate) image_transfer: Option<Transfer>,
 }
 
 impl Params {
+    /// One axis, 0 for x and 1 for y, of a rect blur's Gaussian of `sigma`
+    /// over a premultiplied source of `extent` pixels.
+    /// It samples at its vertices' texture coordinates, mirrored with
+    /// `flip_y`, and clamps its taps at the source's edges.
+    pub(crate) fn rect_blur(extent: [f32; 2], sigma: f32, axis: usize, flip_y: bool) -> Self {
+        let (coeff, sigma) = super::gaussian_blur_coefficients(sigma);
+        Self {
+            scissor_ext: [1.0, 1.0],
+            scissor_scale: [1.0, 1.0],
+            extent,
+            shader_type: ShaderType::FilterImage,
+            image_blur_filter_direction: if axis == 0 { [1.0, 0.0] } else { [0.0, 1.0] },
+            image_blur_filter_sigma: sigma,
+            image_blur_filter_coeff: coeff,
+            filter_flip_y: flip_y,
+            filter_clamp: true,
+            ..Self::default()
+        }
+    }
+
     /// The parameters of a stencil-only pass - winding accumulation, clip
     /// arm/resolve: the stencil shader, no paint, no stroke threshold.
     pub(crate) fn stencil() -> Self {
@@ -50,6 +80,16 @@ impl Params {
     pub(crate) fn with_clip(mut self, clip: &crate::clip::DrawClip) -> Self {
         self.clip = clip.shape;
         self.clip_mask = clip.mask;
+        self
+    }
+
+    /// Gates a stencil pass by the coverage mask in force when it is hard.
+    /// The fill's cover then discards the pixels the mask takes less than
+    /// half of, which leaves the stencil there as it was: the winding pass
+    /// has to discard the same pixels, or the count it leaves there is never
+    /// zeroed and the next fill takes it for its own.
+    pub(crate) fn with_hard_clip_mask(mut self, clip: &crate::clip::DrawClip) -> Self {
+        self.clip_mask = clip.mask.filter(|mask| mask.hard);
         self
     }
 
@@ -111,6 +151,7 @@ impl Params {
                 height,
                 angle,
                 tint,
+                transfer,
             } => {
                 let Some(image_info) = images.info(*id) else {
                     return params;
@@ -118,6 +159,7 @@ impl Params {
 
                 params.extent[0] = *width;
                 params.extent[1] = *height;
+                params.image_transfer = *transfer;
 
                 let color = tint;
 

@@ -84,7 +84,7 @@ use geometry::*;
 mod paint;
 pub use paint::Paint;
 pub use paint::TextDecoration;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings, Transfer};
 use renderer::{BlendPass, Fused};
 
 mod path;
@@ -442,6 +442,8 @@ pub struct Canvas<T: Renderer> {
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
     // The coverage masks of the clips that are no box.
     clip_masks: ClipMasks,
+    // The coverage masks of thin fills.
+    fill_masks: FillMasks,
     // The scissor and clip shape the last draw met, as the boxes they make.
     last_clip_boxes: Option<ClipBoxes>,
     // Whether the last draw carried a clip shape: the shader variant the
@@ -483,6 +485,18 @@ impl<T> Canvas<T>
 where
     T: Renderer,
 {
+    /// The renderer this canvas draws with, for backend-specific settings
+    /// and diagnostics such as `WGPURenderer::set_submission_slicing` and
+    /// `WGPURenderer::last_frame_slices`.
+    pub fn renderer(&self) -> &T {
+        &self.renderer
+    }
+
+    /// The renderer this canvas draws with, mutably; see [`Self::renderer`].
+    pub fn renderer_mut(&mut self) -> &mut T {
+        &mut self.renderer
+    }
+
     /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let text_context = Rc::new(RefCell::new(TextContextImpl::default()));
@@ -517,6 +531,7 @@ where
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
             clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -561,6 +576,7 @@ where
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
             clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
             last_clip_boxes: None,
             shape_carried: false,
         };
@@ -683,6 +699,7 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush_to_output(&mut self, output: impl Into<T::RenderOutput>) -> T::CommandBuffer {
+        self.upload_fill_masks();
         let command_buffer = self.renderer.render(
             output,
             &mut self.images,
@@ -691,6 +708,9 @@ where
         );
         self.verts.clear();
         for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
         self.release_pending_images();
@@ -860,8 +880,9 @@ where
         }
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
-        // to gate; clear_rect is a raw clear that neither backend clips; a
-        // filter pass draws into its own target image, not the clipped one.
+        // to gate; clear_rect and a rect blur are raw writes that neither
+        // backend clips; a filter pass or a rect blur's first draw writes its
+        // own target image, not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
@@ -869,6 +890,8 @@ where
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
+                | CommandType::StartBlur { .. }
+                | CommandType::FinishBlur { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }
@@ -1319,6 +1342,26 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
+        // A thin fill, which the fringe would over-ink, is drawn through a
+        // coverage mask instead, unless its operation changes
+        // what coverage does not reach: it would change the whole quad.
+        if anti_alias && self.fill_masks.enabled() && self.state().composite_operation.takes_coverage() {
+            let bounds = path_cache.bounds;
+            if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
+                && clip::is_thin(path_cache.mean_width(fill_rule))
+                && self.fill_through_mask(
+                    path,
+                    &mut path_cache,
+                    &transform,
+                    &paint_transform,
+                    &paint_flavor,
+                    fill_rule,
+                )
+            {
+                return;
+            }
+        }
+
         let (clip, rect) = self.fill_clip(
             || path_cache.bounds,
             Some((&path_cache, 0.0)),
@@ -1380,7 +1423,7 @@ where
 
             CommandType::ConvexFill { params }
         } else {
-            let stencil_params = Params::stencil();
+            let stencil_params = Params::stencil().with_hard_clip_mask(&clip);
 
             let fill_params = Params::new(
                 &self.images,
@@ -2111,8 +2154,8 @@ where
             if self.shadow_could_be_visible(device) {
                 let text = text.to_owned();
                 // Draw the text with its *real* paint so the shadow is built from
-                // the glyphs' true coverage/alpha; render_shadow recolors it by the
-                // shadow color while preserving that alpha.
+                // the glyphs' true coverage/alpha; render_shadow keeps that alpha
+                // and colours it by the shadow color after the blur.
                 let shadow_paint = paint.clone();
                 self.render_shadow(device, move |canvas| {
                     let _ = canvas.draw_text(x, y, &text, &shadow_paint, render_mode);
@@ -2519,10 +2562,14 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush(&mut self) {
+        self.upload_fill_masks();
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
         for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
             self.images.remove(&mut self.renderer, image);
         }
         self.release_pending_images();
@@ -2581,6 +2628,9 @@ pub struct RecordingRenderer {
     pub image_allocation_attempts: usize,
     /// Number of backend images released.
     pub image_deletion_count: usize,
+    /// When true, each image stores the pixels of every RGBA `update_image` call it
+    /// receives.
+    pub retain_image_updates: bool,
 }
 
 #[cfg(test)]
@@ -2609,7 +2659,10 @@ impl Renderer for RecordingRenderer {
         if self.fail_image_allocations {
             return Err(ErrorKind::UnknownError);
         }
-        Ok(Self::Image { info })
+        Ok(Self::Image {
+            info,
+            updates: Vec::new(),
+        })
     }
 
     fn create_image_from_native_texture(
@@ -2639,6 +2692,11 @@ impl Renderer for RecordingRenderer {
         if self.fail_image_updates {
             return Err(ErrorKind::UnknownError);
         }
+        if let (true, crate::ImageSource::Rgba(pixels)) = (self.retain_image_updates, data) {
+            let (pixels, width, height) = pixels.to_contiguous_buf();
+            let pixels = imgref::ImgVec::new(pixels.into_owned(), width, height);
+            image.updates.push((x, y, pixels));
+        }
         Ok(())
     }
 
@@ -2664,6 +2722,9 @@ impl Renderer for RecordingRenderer {
 #[derive(Debug)]
 pub struct DummyImage {
     info: ImageInfo,
+    /// The destination `(x, y)` and the pixels of each RGBA `update_image` call on this image,
+    /// in call order. Empty unless `RecordingRenderer::retain_image_updates` is set.
+    updates: Vec<(usize, usize, imgref::ImgVec<rgb::RGBA8>)>,
 }
 
 /// A contour longer than a fan may be goes as several fans about its first
@@ -3175,14 +3236,21 @@ fn fill_text_selects_atlas_or_path_rendering() {
         // Atlas rendering blits glyphs from a glyph texture; outline rendering only
         // ever emits plain path fills (note: atlas cache misses also emit path fills
         // while rasterizing into the atlas, so the glyph texture is the reliable
-        // discriminator, not the absence of fills).
-        let used_atlas = commands.iter().any(|c| !matches!(c.glyph_texture, GlyphTexture::None));
-        let filled_outlines = commands.iter().any(|c| {
-            matches!(c.glyph_texture, GlyphTexture::None)
-                && matches!(
-                    c.cmd_type,
-                    CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
-                )
+        // discriminator, not the absence of fills). A thin outline is filled through
+        // the atlas of fill masks, which is no glyph atlas.
+        let fill_masks = canvas.fill_masks.image;
+        let used_atlas = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => false,
+            GlyphTexture::AlphaMask(id) => Some(id) != fill_masks,
+            GlyphTexture::ColorTexture(_) => true,
+        });
+        let filled_outlines = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => matches!(
+                c.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ),
+            GlyphTexture::AlphaMask(id) => Some(id) == fill_masks,
+            GlyphTexture::ColorTexture(_) => false,
         });
 
         match expect {
@@ -3193,6 +3261,54 @@ fn fill_text_selects_atlas_or_path_rendering() {
             ),
         }
     }
+}
+
+/// A thin glyph drawn through a coverage mask gets the run's paint matrix too,
+/// not the glyph's own placement.
+#[cfg(feature = "textlayout")]
+#[test]
+fn thin_text_drawn_through_masks_uses_one_paint_matrix_for_the_run() {
+    use renderer::CommandType;
+
+    // At 3 px under a scale of 2, the glyphs' outlines are thin fills, each
+    // drawn as a quad over its mask; the circle is drawn as a convex fill.
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let font = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    canvas.scale(2.0, 2.0);
+    let paint = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    let mut path = Path::new();
+    path.circle(50.0, 50.0, 40.0);
+    canvas.fill_path(&path, &paint);
+    canvas
+        .fill_text(10.0, 40.0, "MI", &paint.with_font(&[font]).with_font_size(3.0))
+        .unwrap();
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let on_a_path = commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::ConvexFill { params } => Some(params.paint_mat),
+            _ => None,
+        })
+        .expect("the circle's fill");
+    let on_text: Vec<_> = commands
+        .iter()
+        .filter_map(|command| match &command.cmd_type {
+            CommandType::Triangles { params } if params.glyph_texture_type == 1 => Some(params.paint_mat),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(on_text.len(), 2, "one masked quad for each glyph");
+    assert!(
+        on_text.iter().all(|matrix| *matrix == on_a_path),
+        "expected {on_a_path:?} for every glyph, got {on_text:?}"
+    );
 }
 
 /// Every glyph of text drawn as outlines gets the paint matrix that a path
@@ -4379,6 +4495,74 @@ fn letter_spacing_does_not_collide_in_the_shaping_cache() {
     assert!(
         slight > plain + 4.0 * 0.05,
         "letter spacing under a tenth must widen the cached word: plain {plain}, slight {slight}"
+    );
+}
+
+/// The shaped-word cache keys on the exact font size: `shape_word` scales
+/// every advance by it, so the same word measured at two sizes must not
+/// share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn font_size_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let base = Paint::color(Color::black()).with_font(&[font_id]);
+
+    let at_30 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_font_size(30.0))
+        .unwrap()
+        .width();
+    let at_30_09 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.with_font_size(30.09))
+        .unwrap()
+        .width();
+    // Advances are linear in the font size, so the width must grow by the same ratio.
+    assert!(
+        (at_30_09 / at_30 - 30.09 / 30.0).abs() < 1e-4,
+        "a size in the same tenth as a cached one must get its own width: at 30 {at_30}, at 30.09 {at_30_09}"
+    );
+}
+
+/// The run cache keys on the exact `max_width`: `shape_run` breaks where the
+/// accumulated width reaches it, so the same text broken at two widths must
+/// not share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn max_width_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    let text = "cache key";
+    let width = canvas.measure_text(20.0, 100.0, text, &paint).unwrap().width();
+    // The two widths below must lie in the same whole unit, or the test
+    // passes without exercising the collision.
+    assert!(
+        width.fract() > 0.1 && width.fract() < 0.9,
+        "pick a text whose width is not within 0.1 of a whole number: {width}"
+    );
+
+    let broken = canvas.break_text(width - 0.1, text, &paint).unwrap();
+    let whole = canvas.break_text(width + 0.1, text, &paint).unwrap();
+    assert!(
+        broken < text.len(),
+        "the text must not fit in {}: broke at {broken}",
+        width - 0.1
+    );
+    assert_eq!(
+        whole,
+        text.len(),
+        "the whole text fits in {} and must not get the break position cached for {}",
+        width + 0.1,
+        width - 0.1
     );
 }
 
