@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Measured and drawn text no longer keeps missing glyphs after a font that
+  covers them is added. Its cached shaping was used until the text dropped out
+  of the shaping cache.
 - Fixed a concave fill leaving winding counts in the stencil where its fill
   reached past the quad that covers it - a feature thinner than the
   antialiasing fringe, whose fill vertices move outward - so the next
