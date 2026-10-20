@@ -108,21 +108,10 @@ vec4 renderTurbulence() {
     return vec4(c.rgb * c.a, c.a);
 }
 
-// The sRGB transfer curve (IEC 61966-2-1) on unpremultiplied color, alpha
-// untouched: frag[0].x > 0.5 converts linearRGB to sRGB, otherwise the reverse.
+// The sRGB transfer curve as a pass (see transferColor): frag[0].x > 0.5
+// converts linearRGB to sRGB, otherwise the reverse.
 vec4 renderTransfer() {
-    vec4 c = texture2D(tex, fpos.xy / extent);
-    if (c.a > 0.0) {
-        c.rgb /= c.a;
-    }
-    vec3 x = clamp(c.rgb, 0.0, 1.0);
-    vec3 y;
-    if (frag[0].x > 0.5) {
-        y = mix(x * 12.92, 1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
-    } else {
-        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3(2.4)), step(0.04045, x));
-    }
-    return vec4(y * c.a, c.a);
+    return transferColor(texture2D(tex, fpos.xy / extent), frag[0].x > 0.5);
 }
 
 
