@@ -1,7 +1,7 @@
 use crate::{
     clip::{ClipCoverage, MaskCoverage},
     geometry::Position,
-    paint::{GlyphTexture, GradientColors},
+    paint::{GlyphTexture, GradientColors, Transfer},
     ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
@@ -39,6 +39,9 @@ pub struct Params {
     pub(crate) clip: Option<ClipCoverage>,
     /// The coverage mask in force on the draw's target, if any.
     pub(crate) clip_mask: Option<MaskCoverage>,
+    /// The colour-space conversion an image paint applies to each texel, if
+    /// any.
+    pub(crate) image_transfer: Option<Transfer>,
 }
 
 impl Params {
@@ -148,6 +151,7 @@ impl Params {
                 height,
                 angle,
                 tint,
+                transfer,
             } => {
                 let Some(image_info) = images.info(*id) else {
                     return params;
@@ -155,6 +159,7 @@ impl Params {
 
                 params.extent[0] = *width;
                 params.extent[1] = *height;
+                params.image_transfer = *transfer;
 
                 let color = tint;
 

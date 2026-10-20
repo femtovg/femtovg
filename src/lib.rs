@@ -84,7 +84,7 @@ use geometry::*;
 mod paint;
 pub use paint::Paint;
 pub use paint::TextDecoration;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings, Transfer};
 use renderer::{BlendPass, Fused};
 
 mod path;
@@ -485,6 +485,18 @@ impl<T> Canvas<T>
 where
     T: Renderer,
 {
+    /// The renderer this canvas draws with, for backend-specific settings
+    /// and diagnostics such as `WGPURenderer::set_submission_slicing` and
+    /// `WGPURenderer::last_frame_slices`.
+    pub fn renderer(&self) -> &T {
+        &self.renderer
+    }
+
+    /// The renderer this canvas draws with, mutably; see [`Self::renderer`].
+    pub fn renderer_mut(&mut self) -> &mut T {
+        &mut self.renderer
+    }
+
     /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let text_context = Rc::new(RefCell::new(TextContextImpl::default()));
@@ -2154,8 +2166,8 @@ where
             if self.shadow_could_be_visible(device) {
                 let text = text.to_owned();
                 // Draw the text with its *real* paint so the shadow is built from
-                // the glyphs' true coverage/alpha; render_shadow recolors it by the
-                // shadow color while preserving that alpha.
+                // the glyphs' true coverage/alpha; render_shadow keeps that alpha
+                // and colours it by the shadow color after the blur.
                 let shadow_paint = paint.clone();
                 self.render_shadow(device, move |canvas| {
                     let _ = canvas.draw_text(x, y, &text, &shadow_paint, render_mode);

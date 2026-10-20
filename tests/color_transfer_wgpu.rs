@@ -4,7 +4,7 @@
 //! round trip that the chain folds away.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{Color, ImageFilter, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use femtovg::{Color, ImageFilter, ImageFlags, LayerEffects, Paint, Path, PixelFormat, RenderTarget};
 
 mod common;
 use common::headless_device;
@@ -169,4 +169,49 @@ fn transfer_round_trip_folds_to_identity() {
     assert!(ImageFilter::LinearRgbToSrgb
         .fold_with(ImageFilter::LinearRgbToSrgb)
         .is_none());
+}
+
+/// A layer whose chain is one conversion converts as its composite samples
+/// the layer, and lands where the conversion's pass would: each texel of the
+/// layer's 8-bit store converted, rounded to 8 bits as the pass stores its
+/// result, and composited.
+#[test]
+fn a_layer_of_one_conversion_composites_as_its_pass_would() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (w, h) = (96, 40);
+    let content = [40.0f64, 120.0, 200.0];
+    let alphas = [1.0f64, 0.5, 0.2];
+    let stored = |x: f64| (x * 255.0).round() / 255.0;
+    for (filter, convert) in [
+        (ImageFilter::LinearRgbToSrgb, linear_to_srgb as fn(f64) -> f64),
+        (ImageFilter::SrgbToLinearRgb, srgb_to_linear),
+    ] {
+        let px = common::render_rgba(&device, &queue, w, h, Color::rgb(128, 128, 128), |canvas| {
+            let _ = canvas.begin_layer(&LayerEffects::new().with_filters(&[filter]));
+            for (i, &alpha) in alphas.iter().enumerate() {
+                let mut path = Path::new();
+                path.rect(8.0 + 28.0 * i as f32, 8.0, 24.0, 24.0);
+                let mut color = Color::rgb(40, 120, 200);
+                color.set_alphaf(alpha as f32);
+                canvas.fill_path(&path, &Paint::color(color));
+            }
+            canvas.end_layer();
+        });
+        for (i, &alpha) in alphas.iter().enumerate() {
+            let at = ((20 * w + 20 + 28 * i as u32) * 4) as usize;
+            let a = stored(alpha);
+            for c in 0..3 {
+                let texel = stored(content[c] / 255.0 * alpha);
+                let result = stored(convert(texel / a) * a);
+                let expected = 128.0 * (1.0 - a) + 255.0 * result;
+                let got = px[at + c] as f64;
+                assert!(
+                    (got - expected).abs() <= 1.0,
+                    "{filter:?} at alpha {alpha}, channel {c}: {got} against {expected:.2}"
+                );
+            }
+        }
+    }
 }

@@ -113,17 +113,26 @@ where
     /// fill, or a gradient/image with transparent texels, must cast a
     /// correspondingly weaker shadow. To achieve this the closure draws the real
     /// source (its actual paint and per-pixel alpha) into a transient offscreen
-    /// image, then a solid `shadowColor` is composited over it with
-    /// `CompositeOperation::SourceIn`, which masks the shadow color by the source's
-    /// alpha. The result carries `shadowColor.rgb` with alpha
-    /// `source.alpha * shadowColor.a` per pixel. That image is then
-    /// Gaussian-blurred (standard deviation `shadowBlur / 2`) through the
-    /// chain planner's passes ([`blur_passes`]): a sigma above the shader's
-    /// per-pass bound runs down the pyramid and back, and the result is
-    /// composited into the current render target, translated by the
-    /// device-space shadow offset and drawn *under* the actual shape. The
-    /// current scissor, global alpha and composite operation are honored
-    /// when compositing.
+    /// image, then opaque white is composited over it with
+    /// `CompositeOperation::SourceIn`, which leaves the source's alpha in every
+    /// channel. That image is then Gaussian-blurred (standard deviation
+    /// `shadowBlur / 2`) through the chain planner's passes ([`blur_passes`]):
+    /// a sigma above the shader's per-pass bound runs down the pyramid and
+    /// back, and the result is composited into the current render target,
+    /// translated by the device-space shadow offset, drawn *under* the actual
+    /// shape and tinted by `shadowColor` as it lands, so each pixel gets
+    /// `shadowColor.rgb` at alpha `blurred alpha * shadowColor.a`. The current
+    /// scissor, global alpha and composite operation are honored when
+    /// compositing.
+    ///
+    /// The colour goes on after the blur, rounded once into the target, in
+    /// Canvas 2D's order (copy the alpha, blur it, then colour it), as
+    /// Firefox applies it too. Coloured first, an 8-bit store
+    /// holds the colour premultiplied by the shadow's alpha at every blur
+    /// pass. That is a fraction of a step for a near-black colour, the more so
+    /// in linearRGB, where `#0b0d10` at alpha 0.6 is 0.5 to 0.8 of one. Each
+    /// pass rounds it to a whole step, and unpremultiplied the shadow comes out
+    /// up to twice its colour.
     ///
     /// `draw_coverage` is expected to issue the shape's normal draw command(s) with
     /// its real paint; the canvas transform in effect during the call already maps
@@ -249,20 +258,26 @@ where
 
         // The coverage pass: the real source (its actual paint and per-pixel
         // alpha) drawn into the coverage image, in device space translated so
-        // the padded bbox origin maps to (0, 0), then recolored by the shadow
-        // color under SourceIn so the image carries shadowColor.rgb with
-        // alpha = source.alpha * shadowColor.a - a transparent source casts
-        // nothing, a half-alpha source a half-strength shadow. Then the blur:
-        // the planner's passes from the coverage image into the blurred one,
-        // through the scratches reserved for them; a sharp shadow composites
-        // the coverage directly.
+        // the padded bbox origin maps to (0, 0), then recolored opaque white
+        // under SourceIn so every channel carries source.alpha - a transparent
+        // source casts nothing, a half-alpha source a half-strength shadow.
+        // Then the blur: the planner's passes from the coverage image into the
+        // blurred one, through the scratches reserved for them; a sharp shadow
+        // composites the coverage directly. The colour comes in at the
+        // composite below.
         let mut coverage_transform = Transform2D::translation(-minx, -miny);
         coverage_transform.premultiply(&state.transform);
         let source_image = self.offscreen_pass(RenderTarget::Image(coverage_image), coverage_transform, |canvas| {
             canvas.clear_rect(0, 0, width as u32, height as u32, Color::rgbaf(0.0, 0.0, 0.0, 0.0));
             draw_coverage(canvas);
             canvas.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceIn);
-            canvas.fill_device_rect(0.0, 0.0, width as f32, height as f32, &PaintFlavor::Color(shadow_color));
+            canvas.fill_device_rect(
+                0.0,
+                0.0,
+                width as f32,
+                height as f32,
+                &PaintFlavor::Color(Color::white()),
+            );
             let (Some(blurred_image), Some(scratch)) = (blurred_image, scratch) else {
                 return coverage_image;
             };
@@ -274,10 +289,16 @@ where
         let dst_x = minx + txx;
         let dst_y = miny + txy;
 
-        // The shadow image already carries shadowColor.rgb and per-pixel alpha
-        // `source.alpha * shadowColor.a` (baked in by the SourceIn mask above), so
-        // here we only fold in the current global alpha.
-        let tint = Color::rgbaf(1.0, 1.0, 1.0, state.alpha);
+        // The shadow image carries the blurred source alpha in every channel
+        // (white, premultiplied); the tint, premultiplied by the paint, scales
+        // it to shadowColor at shadowColor.a times the current global alpha,
+        // computed per pixel and rounded once into the target.
+        let tint = Color::rgbaf(
+            shadow_color.r,
+            shadow_color.g,
+            shadow_color.b,
+            shadow_color.a * state.alpha,
+        );
         let mut shadow_paint = Paint::image_tint(source_image, dst_x, dst_y, width as f32, height as f32, 0.0, tint);
         shadow_paint.set_anti_alias(false);
 
