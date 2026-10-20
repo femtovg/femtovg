@@ -553,8 +553,7 @@ impl WGPURenderer {
         let Texture::Internal(texture) = &image.texture else {
             return Err(crate::ErrorKind::UnsupportedOperation);
         };
-        let texture = texture.clone();
-        self.submit_pending_copies_of(&texture);
+        self.submit_pending_copies_of(texture);
         self.queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source,
@@ -1530,8 +1529,7 @@ impl Renderer for WGPURenderer {
                 });
                 return Ok(());
             }
-            let texture = texture.clone();
-            self.submit_pending_copies_of(&texture);
+            self.submit_pending_copies_of(texture);
             let mut target = texture.as_image_copy();
             target.origin.x = x as _;
             target.origin.y = y as _;
@@ -1550,7 +1548,7 @@ impl Renderer for WGPURenderer {
                     depth_or_array_layers: 1,
                 },
             );
-            self.generate_mipmaps(&texture);
+            self.generate_mipmaps(texture);
         }
         Ok(())
     }
