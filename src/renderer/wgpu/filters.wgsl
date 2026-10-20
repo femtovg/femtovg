@@ -120,22 +120,11 @@ fn renderTurbulence(vertex: VertexOutput, params: Params) -> vec4<f32> {
     return vec4<f32>(c.rgb * c.a, c.a);
 }
 
-// The sRGB transfer curve (IEC 61966-2-1) on unpremultiplied color, alpha
-// untouched: scissor_mat[0].x > 0.5 converts linearRGB to sRGB, otherwise the
-// reverse.
+// The sRGB transfer curve as a pass (see transferColor): scissor_mat[0].x >
+// 0.5 converts linearRGB to sRGB, otherwise the reverse.
 fn renderTransfer(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    var c: vec4<f32> = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent);
-    if (c.a > 0.0) {
-        c = vec4<f32>(c.rgb / c.a, c.a);
-    }
-    let x = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    var y: vec3<f32>;
-    if (params.scissor_mat[0].x > 0.5) {
-        y = mix(x * 12.92, 1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, step(vec3<f32>(0.0031308), x));
-    } else {
-        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3<f32>(2.4)), step(vec3<f32>(0.04045), x));
-    }
-    return vec4<f32>(y * c.a, c.a);
+    let c = textureSample(image_texture, image_sampler, vertex.fpos.xy / params.extent);
+    return transferColor(c, params.scissor_mat[0].x > 0.5);
 }
 
 

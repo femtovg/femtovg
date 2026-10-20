@@ -232,6 +232,52 @@ fn blur_spreads_coverage_beyond_edge() {
     );
 }
 
+/// The shadow's colour goes on after its blur, rounded once, as Canvas 2D
+/// orders it: a colour channel of one 8-bit step at alpha 0.6 is 0.6 of a
+/// step times the blurred coverage, so it rounds away where the coverage is
+/// under 0.83. Coloured before the blur, it would round to a whole step at
+/// full coverage and spread as one wherever the coverage is over a half.
+#[test]
+fn shadow_is_coloured_after_its_blur() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+
+    let mut rect = Path::new();
+    rect.rect(40.0, 10.0, 32.0, 32.0); // occupies [40,72) x [10,42)
+    let shadowed = |color: Color| {
+        render_to_pixels(&device, &queue, |canvas| {
+            canvas.set_shadow_color(color);
+            canvas.set_shadow_offset(0.0, 30.0);
+            canvas.set_shadow_blur(12.0);
+            canvas.fill_path(&rect, &Paint::color(Color::rgb(0, 0, 0)));
+        })
+    };
+    // The blurred coverage, from the shadow in opaque white.
+    let coverage = shadowed(Color::rgb(255, 255, 255));
+    let faint = shadowed(Color::rgbaf(1.0 / 255.0, 0.0, 0.0, 0.6));
+    let mut checked = 0;
+    for y in 0..H {
+        for x in 0..W {
+            if (40..72).contains(&x) && (10..42).contains(&y) {
+                continue;
+            }
+            let a = pixel(&coverage, x, y)[3] as f32 / 255.0;
+            if !(0.55..=0.78).contains(&a) {
+                continue;
+            }
+            assert_eq!(
+                pixel(&faint, x, y)[..3],
+                [0, 0, 0],
+                "({x}, {y}) at coverage {a:.3}: the colour was spread before the blur"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no pixel has coverage between 0.55 and 0.78");
+}
+
 /// Drop shadows must also render under offscreen image render targets, not just
 /// the screen. This also confirms shadows compose correctly when the current
 /// render target is an image.
