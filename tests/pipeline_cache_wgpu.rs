@@ -57,7 +57,9 @@ fn pipelines_stay_alive_across_flushes_that_do_not_use_them() {
         }
         canvas.restore();
         let drawn = live_pipelines_after_flush(&device, &queue, &mut canvas, &target);
-        canvas.clear_rect(0, 0, SIZE, SIZE, Color::black());
+        // Part of the target: a clear of all of it before any draw is the
+        // pass's load op and binds no pipeline.
+        canvas.clear_rect(0, 0, SIZE, SIZE - 1, Color::black());
         let cleared = live_pipelines_after_flush(&device, &queue, &mut canvas, &target);
 
         let expected_drawn = if round == 0 { STATES - 1 } else { STATES };
