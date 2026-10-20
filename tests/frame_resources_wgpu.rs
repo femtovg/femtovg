@@ -9,7 +9,10 @@
 //! `counters` feature on the `wgpu` dev-dependency.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use femtovg::{
+    renderer::{SubmissionSlicing, WGPURenderer},
+    Canvas, Color, ImageFlags, LayerEffects, Paint, Path, PixelFormat, RenderTarget,
+};
 use imgref::Img;
 use rgb::RGBA8;
 
@@ -302,4 +305,62 @@ fn an_upload_larger_than_a_staging_chunk_keeps_its_place_in_order() {
         [0, 0, 255, 255],
         "the later, whole upload"
     );
+}
+
+/// With slicing on, a short frame flushed and held while a longer frame is
+/// flushed, the two then submitted together, against the slicing contract:
+/// the later frame, whose first slices ran during its flush, still draws its
+/// own square and image, the uploads having gone through the queue ahead of
+/// it. Copies carried in the held frame's command buffer would have run
+/// after those slices and over the data its last slice draws with.
+#[test]
+fn with_slicing_the_later_of_two_frames_submitted_together_draws_its_own() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (first, second) = (target(&device, W, H), target(&device, W, H));
+    let mut renderer = WGPURenderer::new(device.clone(), queue.clone());
+    renderer.set_submission_slicing(Some(SubmissionSlicing { passes: 1 }));
+    let mut canvas = Canvas::new(renderer).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let red = vec![RGBA8::new(255, 0, 0, 255); 16];
+    let blue = vec![RGBA8::new(0, 0, 255, 255); 16];
+    let image = canvas
+        .create_image(Img::new(red.as_slice(), 4, 4), ImageFlags::NEAREST)
+        .expect("image");
+    let mut right = Path::new();
+    right.rect(32.0, 0.0, 32.0, H as f32);
+    let paint = Paint::image(image, 32.0, 0.0, 32.0, H as f32, 0.0, 1.0);
+
+    // One pass: one command buffer, held.
+    frame_with_square(&mut canvas, 4.0, Color::rgb(0, 255, 0));
+    let a = canvas.flush_to_output(&first);
+    // A blue square on the left, layers in slices of their own, then the image on the right.
+    canvas
+        .update_image(image, Img::new(blue.as_slice(), 4, 4), 0, 0)
+        .expect("update");
+    let mut square = Path::new();
+    square.rect(4.0, 24.0, 16.0, 16.0);
+    canvas.fill_path(&square, &Paint::color(Color::rgb(0, 0, 255)));
+    for _ in 0..3 {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+        let mut dot = Path::new();
+        dot.rect(24.0, 2.0, 2.0, 2.0);
+        canvas.fill_path(&dot, &Paint::color(Color::black()));
+        canvas.end_layer();
+    }
+    canvas.fill_path(&right, &paint);
+    let b = canvas.flush_to_output(&second);
+    assert!(
+        canvas.renderer().last_frame_slices().len() > 1,
+        "the second frame was not sliced"
+    );
+    queue.submit(a.into_iter().chain(b));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+
+    let second = readback(&device, &queue, &second);
+    assert_eq!(pixel(&second, 12, 32), [0, 0, 255, 255], "the second frame's square");
+    assert_eq!(pixel(&second, 48, 32), [0, 0, 255, 255], "the second frame's image");
 }
