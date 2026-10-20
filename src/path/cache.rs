@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, f32::consts::PI, ops::Range};
+use std::{f32::consts::PI, ops::Range};
 
 use bitflags::bitflags;
 
@@ -54,6 +54,46 @@ pub enum Convexity {
     Convex,
     #[default]
     Unknown,
+}
+
+/// How often a contour's edges turn back along one axis, the turn from its
+/// last edge to its first included: a convex contour turns back twice along
+/// each.
+#[derive(Default)]
+struct AxisTurns {
+    sign: i8,
+    first: i8,
+    turns: u32,
+}
+
+impl AxisTurns {
+    fn add(&mut self, d: f32) {
+        let sign = if d > 0.0 {
+            1
+        } else if d < 0.0 {
+            -1
+        } else {
+            return;
+        };
+        if self.sign == 0 {
+            self.first = sign;
+        } else if self.sign != sign {
+            self.turns += 1;
+        }
+        self.sign = sign;
+    }
+
+    fn total(&self) -> u32 {
+        self.turns + u32::from(self.sign != self.first)
+    }
+}
+
+/// An outline's mean width under a fill rule (see [`PathCache::mean_width`])
+/// and whether each of its contours is convex.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct OutlineWidth {
+    pub(crate) mean: f32,
+    pub(crate) convex: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -200,6 +240,8 @@ pub struct PathCache {
     contour_sides: Option<Vec<(i32, u32, i32)>>,
     // The square of the farthest a point between two chords was moved off the curve.
     straddle: f32,
+    // The outline's mean width under a fill rule, once a fill has asked for it.
+    mean_width: Option<(FillRule, OutlineWidth)>,
 }
 
 impl PathCache {
@@ -223,6 +265,13 @@ impl PathCache {
                         let (c1x, c1y) = transform.transform_point(c1x, c1y);
                         let (c2x, c2y) = transform.transform_point(c2x, c2y);
                         let (x, y) = transform.transform_point(x, y);
+
+                        // A cubic whose four points coincide is the point it starts from. Its
+                        // chord is zero, so it would fail the flatness test to the depth limit.
+                        let start = (last.pos.x, last.pos.y);
+                        if [(x, y), (c1x, c1y), (c2x, c2y)] == [start; 3] {
+                            continue;
+                        }
 
                         cache.tesselate_bezier(
                             [last.pos.x, last.pos.y, c1x, c1y, c2x, c2y, x, y],
@@ -354,15 +403,111 @@ impl PathCache {
         vertices
     }
 
-    /// Each contour's points in order: its outline, closed from the last
-    /// point to the first.
-    pub(crate) fn outlines(&self) -> impl Iterator<Item = Vec<[f32; 2]>> + '_ {
-        self.contours.iter().map(|contour| {
-            self.points[contour.point_range.clone()]
+    /// Each contour's points in order, closed from the last point to the
+    /// first: the outline a mask of a fill under `fill_rule` is rasterized
+    /// from. A mask adds up the winding over each pixel before the rule
+    /// folds it, exact where the pixel sees at most two windings, one apart:
+    /// a ring thinner than a pixel, both circles wound alike, sees 0, 1 and
+    /// 2, and its hole counted as ink. Even-odd does not ask which way a
+    /// contour is wound, so a hole's contour is wound against those around
+    /// it, and nested contours wind 0 or 1. A degenerate contour is left
+    /// out, as [`Self::expand_fill`] leaves it: the mask is of what the fill
+    /// would draw.
+    pub(crate) fn outlines(&mut self, fill_rule: FillRule) -> impl Iterator<Item = Vec<[f32; 2]>> + '_ {
+        let reverse: Vec<bool> = if fill_rule == FillRule::EvenOdd && self.contours.len() > 1 {
+            let hole = self.hole_contours(fill_rule);
+            // As `expand_fill` winds them: what is filled as `polygon_area`
+            // calls positive (own -1), a hole the other way.
+            self.contour_sides()
                 .iter()
-                .map(|point| [point.pos.x, point.pos.y])
+                .zip(hole)
+                .map(|(&(_, _, own), hole)| own == if hole { -1 } else { 1 })
                 .collect()
+        } else {
+            Vec::new()
+        };
+        let cache = &*self;
+        let drawn = cache
+            .contours
+            .iter()
+            .enumerate()
+            .filter(|(_, contour)| !contour.degenerate);
+        drawn.map(move |(i, contour)| {
+            let points = cache.points[contour.point_range.clone()].iter();
+            let outline = points.map(|point| [point.pos.x, point.pos.y]);
+            if reverse.get(i) == Some(&true) {
+                outline.rev().collect()
+            } else {
+                outline.collect()
+            }
         })
+    }
+
+    /// Twice the area a fill of the outline under `fill_rule` covers, over
+    /// the outline's perimeter, in device pixels: a sliver's width, a disc's
+    /// radius. Each contour adds the area inside it, or takes it off if it
+    /// bounds a hole, however it is wound. A degenerate contour, of which the
+    /// fill draws nothing, adds no perimeter either, and a path of them alone
+    /// has no width to measure: it fills nothing, and needs no mask. Each
+    /// contour is convex when it turns the same way at every point and back
+    /// twice along each axis, as [`Self::calculate_joins`] finds once the
+    /// contours are oriented. Worked out once a cache, which a path keeps
+    /// while its transform does.
+    pub(crate) fn mean_width(&mut self, fill_rule: FillRule) -> OutlineWidth {
+        if let Some((rule, width)) = self.mean_width {
+            if rule == fill_rule {
+                return width;
+            }
+        }
+        // One contour bounds no hole: no need to ask which do.
+        let hole = if self.contours.len() > 1 {
+            self.hole_contours(fill_rule)
+        } else {
+            Vec::new()
+        };
+        let (mut area, mut perimeter, mut convex) = (0.0, 0.0, true);
+        for (i, contour) in self.contours.iter().enumerate() {
+            let points = &self.points[contour.point_range.clone()];
+            let (Some(first), Some(last)) = (points.first(), points.last()) else {
+                continue;
+            };
+            if contour.degenerate {
+                continue;
+            }
+            // From the contour's first point, so that the products stay small.
+            let origin = first.pos;
+            let mut from = last.pos - origin;
+            let mut twice = 0.0f32;
+            let (mut leaving, mut left, mut right) = (last.dpos, 0, 0);
+            let (mut x, mut y) = (AxisTurns::default(), AxisTurns::default());
+            for point in points {
+                let to = point.pos - origin;
+                twice += from.x * to.y - to.x * from.y;
+                // Each point knows the length of the edge that leaves it.
+                perimeter += point.len;
+                from = to;
+                let cross = leaving.cross(point.dpos);
+                left += usize::from(cross > 0.0);
+                right += usize::from(cross < 0.0);
+                x.add(point.dpos.x);
+                y.add(point.dpos.y);
+                leaving = point.dpos;
+            }
+            convex &= (left == points.len() || right == points.len()) && x.total() == 2 && y.total() == 2;
+            area += if hole.get(i) == Some(&true) {
+                -twice.abs()
+            } else {
+                twice.abs()
+            };
+        }
+        let mean = if perimeter > 0.0 {
+            area.abs() / perimeter
+        } else {
+            f32::INFINITY
+        };
+        let width = OutlineWidth { mean, convex };
+        self.mean_width = Some((fill_rule, width));
+        width
     }
 
     /// The farthest a point between two chords stands off its curve (see
@@ -395,18 +540,23 @@ impl PathCache {
     }
 
     fn add_point(&mut self, x: f32, y: f32, flags: PointFlags, dist_tol: f32) {
-        if let Some(contour) = self.contours.last_mut() {
-            let new_point = Point::new(x, y, flags);
-
-            // If last point equals this new point just OR the flags and ignore the new point
-            if let Some(last_point) = self.points.get_mut(contour.point_range.end) {
-                if last_point.approx_eq(&new_point, dist_tol) {
-                    last_point.flags |= new_point.flags;
+        if let Some(contour) = self.contours.last() {
+            // If the contour's last point equals this new point just OR the flags and ignore the new point
+            if let Some(last_point) = self.points[contour.point_range.clone()].last_mut() {
+                if last_point.approx_eq(&Point::new(x, y, flags), dist_tol) {
+                    last_point.flags |= flags;
                     return;
                 }
             }
+        }
 
-            self.points.push(new_point);
+        self.push_point(x, y, flags);
+    }
+
+    /// `add_point` for a point known to lie beyond `dist_tol` of the contour's last one.
+    fn push_point(&mut self, x: f32, y: f32, flags: PointFlags) {
+        if let Some(contour) = self.contours.last_mut() {
+            self.points.push(Point::new(x, y, flags));
             contour.point_range.end += 1;
         }
     }
@@ -428,8 +578,13 @@ impl PathCache {
         // The end of the last chord, held until the next chord's shift is
         // known, and its own shift.
         let mut held: Option<([f32; 2], [f32; 2])> = None;
+        // The contour's last point: the cubic's start, then each point taken.
+        let mut last = [curve[0], curve[1]];
 
         loop {
+            #[cfg(test)]
+            tests::BEZIER_PIECES.with(|pieces| pieces.set(pieces.get() + 1));
+
             let [x1, y1, x2, y2, x3, y3, x4, y4] = piece;
             let dx = x4 - x1;
             let dy = y4 - y1;
@@ -448,7 +603,13 @@ impl PathCache {
                 if let Some((at, previous)) = held.replace(([x4, y4], shift)) {
                     let mean = [(previous[0] + shift[0]) * 0.5, (previous[1] + shift[1]) * 0.5];
                     self.straddle = self.straddle.max(mean[0] * mean[0] + mean[1] * mean[1]);
-                    self.add_point(at[0] + mean[0], at[1] + mean[1], PointFlags::empty(), dist_tol);
+                    // A point within dist_tol of the last is dropped, as `add_point` would; it has no flags to merge.
+                    let point = [at[0] + mean[0], at[1] + mean[1]];
+                    let (ex, ey) = (point[0] - last[0], point[1] - last[1]);
+                    if ex * ex + ey * ey >= dist_tol * dist_tol {
+                        self.push_point(point[0], point[1], PointFlags::empty());
+                        last = point;
+                    }
                 }
             } else if depth < 10 {
                 let x12 = (x1 + x2) * 0.5;
@@ -989,12 +1150,7 @@ impl PathCache {
 
             contour.bevel = 0;
 
-            let mut x_sign = 0;
-            let mut y_sign = 0;
-            let mut x_first_sign = 0; // Sign of first nonzero edge vector x
-            let mut y_first_sign = 0; // Sign of first nonzero edge vector y
-            let mut x_flips = 0; // Number of sign changes in x
-            let mut y_flips = 0; // Number of sign changes in y
+            let (mut x_turns, mut y_turns) = (AxisTurns::default(), AxisTurns::default());
 
             for i in 0..points.len() {
                 let p0 = if i == 0 {
@@ -1034,49 +1190,8 @@ impl PathCache {
                 }
 
                 // Determine sign for convexity
-                match p1.dpos.x.partial_cmp(&0.0) {
-                    Some(Ordering::Greater) => {
-                        match x_sign.cmp(&0) {
-                            Ordering::Equal => x_first_sign = 1,
-                            Ordering::Less => x_flips += 1,
-                            Ordering::Greater => (),
-                        }
-
-                        x_sign = 1;
-                    }
-                    Some(Ordering::Less) => {
-                        match x_sign.cmp(&0) {
-                            Ordering::Equal => x_first_sign = -1,
-                            Ordering::Greater => x_flips += 1,
-                            Ordering::Less => (),
-                        }
-
-                        x_sign = -1;
-                    }
-                    _ => (),
-                }
-
-                match p1.dpos.y.partial_cmp(&0.0) {
-                    Some(Ordering::Greater) => {
-                        match y_sign.cmp(&0) {
-                            Ordering::Equal => y_first_sign = 1,
-                            Ordering::Less => y_flips += 1,
-                            Ordering::Greater => (),
-                        }
-
-                        y_sign = 1;
-                    }
-                    Some(Ordering::Less) => {
-                        match y_sign.cmp(&0) {
-                            Ordering::Equal => y_first_sign = -1,
-                            Ordering::Greater => y_flips += 1,
-                            Ordering::Less => (),
-                        }
-
-                        y_sign = -1;
-                    }
-                    _ => (),
-                }
+                x_turns.add(p1.dpos.x);
+                y_turns.add(p1.dpos.y);
 
                 // Calculate if we should use bevel or miter for inner join.
                 let limit = (p0.len.min(p1.len) * inv_stroke_width).max(1.01);
@@ -1101,15 +1216,7 @@ impl PathCache {
                 }
             }
 
-            if x_sign != 0 && x_first_sign != 0 && x_sign != x_first_sign {
-                x_flips += 1;
-            }
-
-            if y_sign != 0 && y_first_sign != 0 && y_sign != y_first_sign {
-                y_flips += 1;
-            }
-
-            let convex = x_flips == 2 && y_flips == 2;
+            let convex = x_turns.total() == 2 && y_turns.total() == 2;
 
             contour.convexity = if nleft == points.len() && convex {
                 Convexity::Convex
@@ -1350,6 +1457,61 @@ mod tests {
 
     use super::*;
     use crate::Path;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// The pieces `tesselate_bezier` has examined on this thread.
+        pub(super) static BEZIER_PIECES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn pieces_flattening(path: &Path, transform: &Transform2D) -> usize {
+        BEZIER_PIECES.with(|pieces| pieces.set(0));
+        PathCache::new(path.verbs(), transform, 0.25, 0.01);
+        BEZIER_PIECES.with(Cell::get)
+    }
+
+    /// A cubic whose four points coincide is the point it starts from, so it is
+    /// not subdivided. It never passes the flatness test - its chord is zero -
+    /// and was halved to the depth limit, 2,047 pieces that added no point:
+    /// the square corner of a `rounded_rect_varying`, any curve under a
+    /// transform that scales to nothing.
+    #[test]
+    fn a_cubic_that_is_a_point_is_not_subdivided() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.bezier_to(10.0, 0.0, 10.0, 0.0, 10.0, 0.0);
+        path.line_to(10.0, 10.0);
+        assert_eq!(pieces_flattening(&path, &Transform2D::identity()), 0);
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+
+        // A tab's square corners cost nothing: half the pieces of the same
+        // rect rounded all round.
+        let identity = Transform2D::identity();
+        let mut tab = Path::new();
+        tab.rounded_rect_varying(0.0, 0.0, 60.0, 24.0, 6.0, 6.0, 0.0, 0.0);
+        let mut rounded = Path::new();
+        rounded.rounded_rect(0.0, 0.0, 60.0, 24.0, 6.0);
+        assert_eq!(
+            2 * pieces_flattening(&tab, &identity),
+            pieces_flattening(&rounded, &identity)
+        );
+
+        assert_eq!(pieces_flattening(&rounded, &Transform2D::scaling(0.0, 0.0)), 0);
+    }
+
+    /// A cubic whose ends meet but whose control points do not is a loop, and
+    /// is still flattened.
+    #[test]
+    fn a_loop_whose_ends_meet_is_flattened() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.bezier_to(10.0, -10.0, 10.0, 10.0, 0.0, 0.0);
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours.len(), 1);
+        assert!(cache.contours[0].point_count() > 4);
+    }
 
     // A fixed sequence of numbers in [0, 1), so the tests below are repeatable.
     fn unit(seed: &mut u32) -> f32 {
@@ -1562,6 +1724,74 @@ mod tests {
         cache.expand_fill(0.0, LineJoin::Miter, 10.0, FillRule::NonZero);
         let rect = cache.path_fill_is_rect().expect("a mirrored rect is still a rect");
         assert_eq!((rect.x, rect.y, rect.w, rect.h), (-40.0, 40.0, 30.0, 40.0));
+    }
+
+    /// A vertex repeated within the distance tolerance merges into the one
+    /// before it, as in nanovg's nvg__addPoint.
+    #[test]
+    fn a_repeated_vertex_is_merged() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+    }
+
+    /// The merged point takes the repeat's flags: a curve's end landing on
+    /// its last flattened point is still a corner.
+    #[test]
+    fn a_merged_vertex_keeps_the_corner_flag() {
+        let mut cache = PathCache::default();
+        cache.add_contour();
+        cache.add_point(0.0, 0.0, PointFlags::CORNER, 0.01);
+        cache.add_point(10.0, 0.0, PointFlags::empty(), 0.01);
+        cache.add_point(10.0, 0.005, PointFlags::CORNER, 0.01);
+
+        assert_eq!(cache.contours[0].point_count(), 2);
+        assert!(cache.points[1].flags.contains(PointFlags::CORNER));
+    }
+
+    /// A curve shorter than the tolerance merges into the point it starts from.
+    #[test]
+    fn a_tiny_curve_is_merged() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.bezier_to(10.0, 0.0, 10.0, 0.0, 10.005, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        assert_eq!(cache.contours[0].point_count(), 3);
+    }
+
+    /// A pill from `rounded_rect` has zero-length sides, so each one repeats a
+    /// vertex. Merged, the pill is convex and filled without the stencil.
+    #[test]
+    fn a_pill_is_convex() {
+        let mut path = Path::new();
+        path.rounded_rect(0.0, 0.0, 40.0, 10.0, 5.0);
+
+        let mut cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        cache.expand_fill(1.0, LineJoin::Miter, 10.0, FillRule::NonZero);
+        assert_eq!(cache.contours[0].convexity, Convexity::Convex);
+    }
+
+    /// A contour's first point is never merged into the previous contour's
+    /// last one.
+    #[test]
+    fn a_new_contour_keeps_its_first_point() {
+        let mut path = Path::new();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        path.move_to(10.0, 0.0);
+        path.line_to(10.0, 10.0);
+
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let counts: Vec<usize> = cache.contours.iter().map(Contour::point_count).collect();
+        assert_eq!(counts, [2, 2]);
     }
 
     #[test]

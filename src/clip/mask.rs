@@ -9,11 +9,59 @@
 use std::{
     cell::Cell,
     collections::HashMap,
+    hash::{BuildHasherDefault, Hasher},
     rc::{Rc, Weak},
 };
 
 use super::coverage::{self, Coverage, SUBPIXELS};
 use crate::{FillRule, ImageId};
+
+/// A map keyed by a mask's outline or a request for one: words, a few
+/// kilobytes of them, hashed eight bytes at a time as rustc's FxHasher does.
+/// std's SipHash took a twentieth of the cycles of a frame whose thin fills
+/// move; these keys come from the scene's paths, which nothing picks to
+/// collide.
+pub(crate) type WordMap<K, V> = HashMap<K, V, BuildHasherDefault<WordHasher>>;
+
+#[derive(Default)]
+pub(crate) struct WordHasher(u64);
+
+impl WordHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = self.0.wrapping_add(word).wrapping_mul(0xf135_7aea_2e62_a9c5);
+    }
+}
+
+impl Hasher for WordHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for word in &mut words {
+            self.add(u64::from_le_bytes(word.try_into().unwrap_or_default()));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut word = [0; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.add(u64::from(value));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.add(value);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.add(value as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0.rotate_left(26)
+    }
+}
 
 /// What identifies a mask: its size, the mask around it that it was cut by
 /// and where in it, and each child's fill rule and contours.
@@ -54,25 +102,25 @@ impl MaskOutline {
         self.children.push((rule, contours));
     }
 
+    /// Swaps the outlines' x and y.
+    pub(crate) fn transpose(&mut self) {
+        for point in self
+            .children
+            .iter_mut()
+            .flat_map(|(_, contours)| contours.iter_mut().flatten())
+        {
+            point.swap(0, 1);
+        }
+        let [minx, miny, maxx, maxy] = self.bounds;
+        self.bounds = [miny, minx, maxy, maxx];
+    }
+
     /// The pixels the mask spans: the outlines' bounds and a pixel around
     /// them - the empty border that a draw past the mask reads - cut to
     /// `within`, a rect `[x0, y0, x1, y1]`. An outline that misses it is
     /// left a single pixel there, which nothing covers.
     pub(crate) fn rect(&self, within: [i32; 4]) -> [i32; 4] {
-        let [minx, miny, maxx, maxy] = self.bounds;
-        // Past a range any target has, and what a float holds exactly.
-        let pixel = |v: f32| v.clamp(-16_000_000.0, 16_000_000.0) as i32;
-        let rect = [
-            (pixel(minx.floor()) - 1).max(within[0]),
-            (pixel(miny.floor()) - 1).max(within[1]),
-            (pixel(maxx.ceil()) + 1).min(within[2]),
-            (pixel(maxy.ceil()) + 1).min(within[3]),
-        ];
-        if rect[0] < rect[2] && rect[1] < rect[3] {
-            rect
-        } else {
-            [within[0], within[1], within[0] + 1, within[1] + 1]
-        }
+        pixel_rect(self.bounds, within)
     }
 
     /// The key of this outline as a mask over `rect`, cut by `parent` - a
@@ -107,6 +155,25 @@ impl MaskOutline {
     }
 }
 
+/// The pixels a mask over `bounds`, `[minx, miny, maxx, maxy]`, spans (see
+/// [`MaskOutline::rect`]).
+pub(crate) fn pixel_rect(bounds: [f32; 4], within: [i32; 4]) -> [i32; 4] {
+    let [minx, miny, maxx, maxy] = bounds;
+    // Past a range any target has, and what a float holds exactly.
+    let pixel = |v: f32| v.clamp(-16_000_000.0, 16_000_000.0) as i32;
+    let rect = [
+        (pixel(minx.floor()) - 1).max(within[0]),
+        (pixel(miny.floor()) - 1).max(within[1]),
+        (pixel(maxx.ceil()) + 1).min(within[2]),
+        (pixel(maxy.ceil()) + 1).min(within[3]),
+    ];
+    if rect[0] < rect[2] && rect[1] < rect[3] {
+        rect
+    } else {
+        [within[0], within[1], within[0] + 1, within[1] + 1]
+    }
+}
+
 fn subpixel(v: f32) -> i32 {
     // Far outside the mask the point only has to stay on its side of it.
     (v * SUBPIXELS).round().clamp(-1e9, 1e9) as i32
@@ -128,8 +195,24 @@ impl MaskKey {
     pub(crate) fn rasterize(&self, coverage: &mut Coverage) -> Vec<u8> {
         let [width, height] = self.size();
         let mut mask = vec![0; width * height];
+        self.rasterize_onto(coverage, &mut mask);
+        mask
+    }
+
+    /// Rasterizes the outline into `mask`, which it resizes to the key's.
+    pub(crate) fn rasterize_into(&self, coverage: &mut Coverage, mask: &mut Vec<u8>) {
+        let [width, height] = self.size();
+        // Zeroed as a slice, which is a memset, and grown only past its length.
+        mask.truncate(width * height);
+        mask.fill(0);
+        mask.resize(width * height, 0);
+        self.rasterize_onto(coverage, mask);
+    }
+
+    fn rasterize_onto(&self, coverage: &mut Coverage, mask: &mut [u8]) {
+        let [width, height] = self.size();
         coverage.reset(width, height);
-        let mut contour = Vec::new();
+        let mut contour = std::mem::take(&mut coverage.points);
         let mut words = self.outline.iter().copied();
         while let (Some(rule), Some(contours)) = (words.next(), words.next()) {
             for _ in 0..contours {
@@ -147,9 +230,9 @@ impl MaskKey {
             } else {
                 FillRule::EvenOdd
             };
-            coverage.resolve(rule, &mut mask);
+            coverage.resolve(rule, mask);
         }
-        mask
+        coverage.points = contour;
     }
 }
 
@@ -187,8 +270,10 @@ impl MaskImage {
 /// let go wait, a few of them, for a mask of their size to come.
 #[derive(Debug)]
 pub(crate) struct ClipMasks {
-    masks: HashMap<MaskKey, Rc<MaskImage>>,
-    asked: HashMap<Vec<u32>, Asked>,
+    masks: WordMap<MaskKey, Rc<MaskImage>>,
+    asked: WordMap<Vec<u32>, Asked>,
+    /// The request being asked, built where the last one was.
+    pub(crate) request: Vec<u32>,
     bytes: usize,
     budget: usize,
     frame: u64,
@@ -236,8 +321,9 @@ fn bytes_of(size: [usize; 2]) -> usize {
 impl Default for ClipMasks {
     fn default() -> Self {
         Self {
-            masks: HashMap::new(),
-            asked: HashMap::new(),
+            masks: WordMap::default(),
+            asked: WordMap::default(),
+            request: Vec::new(),
             bytes: 0,
             budget: DEFAULT_MASK_BUDGET,
             frame: 0,

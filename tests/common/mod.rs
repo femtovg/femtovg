@@ -107,11 +107,26 @@ pub fn render_rgba(
     clear: Color,
     draw: impl FnOnce(&mut Canvas<WGPURenderer>),
 ) -> Vec<u8> {
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    render_rgba_on(device, queue, width, height, clear, renderer, draw).0
+}
+
+/// [`render_rgba`] on a renderer the caller configured; hands the canvas
+/// back with the pixels, for the renderer's diagnostics.
+pub fn render_rgba_on(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    clear: Color,
+    renderer: WGPURenderer,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> (Vec<u8>, Canvas<WGPURenderer>) {
     let mut draw = Some(draw);
-    render_frames(device, queue, width, height, clear, 1, |canvas, _| {
+    let (mut frames, canvas) = render_frames_on(device, queue, width, height, clear, renderer, 1, |canvas, _| {
         (draw.take().unwrap())(canvas)
-    })
-    .remove(0)
+    });
+    (frames.remove(0), canvas)
 }
 
 /// Renders `frames` frames in turn on one fresh canvas of `width` x
@@ -124,8 +139,25 @@ pub fn render_frames(
     height: u32,
     clear: Color,
     frames: usize,
-    mut draw: impl FnMut(&mut Canvas<WGPURenderer>, usize),
+    draw: impl FnMut(&mut Canvas<WGPURenderer>, usize),
 ) -> Vec<Vec<u8>> {
+    let renderer = WGPURenderer::new(device.clone(), queue.clone());
+    render_frames_on(device, queue, width, height, clear, renderer, frames, draw).0
+}
+
+/// [`render_frames`] on a renderer the caller configured; hands the canvas
+/// back with the frames' pixels.
+#[allow(clippy::too_many_arguments)]
+pub fn render_frames_on(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    clear: Color,
+    renderer: WGPURenderer,
+    frames: usize,
+    mut draw: impl FnMut(&mut Canvas<WGPURenderer>, usize),
+) -> (Vec<Vec<u8>>, Canvas<WGPURenderer>) {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("femtovg test target"),
         size: wgpu::Extent3d {
@@ -140,10 +172,9 @@ pub fn render_frames(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    let renderer = WGPURenderer::new(device.clone(), queue.clone());
     let mut canvas = Canvas::new(renderer).expect("canvas");
     canvas.set_size(width, height, 1.0);
-    (0..frames)
+    let pixels = (0..frames)
         .map(|frame| {
             canvas.clear_rect(0, 0, width, height, clear);
             draw(&mut canvas, frame);
@@ -207,5 +238,6 @@ pub fn render_frames(
             readback.unmap();
             pixels
         })
-        .collect()
+        .collect();
+    (pixels, canvas)
 }
