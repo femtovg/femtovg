@@ -4602,6 +4602,46 @@ fn max_width_does_not_collide_in_the_shaping_cache() {
     );
 }
 
+/// Adding a font clears the run shaping cache. A paint falls back to every
+/// registered font for characters its own fonts lack, so text measured before
+/// the font was added is shaped again and takes its glyphs from that font.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_measured_before_a_font_is_added_takes_its_glyphs_from_that_font() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let roboto = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[roboto]).with_font_size(30.0);
+    let arabic = "\u{0633}\u{0644}\u{0627}\u{0645}";
+    let font_ids = |canvas: &Canvas<RecordingRenderer>| {
+        canvas
+            .measure_text(20.0, 100.0, arabic, &paint)
+            .unwrap()
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.font_id)
+            .collect::<Vec<_>>()
+    };
+
+    let before = font_ids(&canvas);
+    assert!(
+        !before.is_empty() && before.iter().all(|&font_id| font_id == roboto),
+        "with only Roboto Flex registered, the Arabic text must be shaped with it: {before:?}"
+    );
+
+    let amiri = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let after = font_ids(&canvas);
+    assert!(
+        !after.is_empty() && after.iter().all(|&font_id| font_id == amiri),
+        "after Amiri is added, the Arabic text must take its glyphs from it: {after:?}"
+    );
+}
+
 /// Bidi control characters are default-ignorable: isolate marks (U+2066..
 /// U+2069) and direction marks (U+200E/U+200F) must add no advance and no
 /// visible glyph, whether or not the font has real coverage for them - the

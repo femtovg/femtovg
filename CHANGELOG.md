@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Measured and drawn text no longer keeps missing glyphs after a font that
+  covers them is added. Its cached shaping was used until the text dropped out
+  of the shaping cache.
 - WGPU: a render pass attaches the stencil only when something it draws
   tests or writes it, and clears it on load and discards it on store unless
   a clip plane armed on the target outlives the pass. On a tiled GPU the
