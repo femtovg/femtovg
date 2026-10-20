@@ -125,15 +125,29 @@ const MIN_VERTEX_BYTES: u64 = 4096;
 // What a frame uploads goes through staging chunks of this size, or larger for a larger upload.
 const STAGING_CHUNK_BYTES: u64 = 1 << 20;
 
-/// An image upload staged in the belt: where its rows lie and where they go.
+/// An image upload staged for the next frame's command buffer: where it is
+/// copied from and where it goes.
 #[derive(Debug)]
 struct PendingCopy {
-    buffer: wgpu::Buffer,
-    offset: u64,
-    bytes_per_row: u32,
+    source: CopySource,
     texture: wgpu::Texture,
     origin: [u32; 2],
     size: [u32; 2],
+}
+
+/// Where a staged upload is copied from.
+#[derive(Debug)]
+enum CopySource {
+    /// Bytes in the staging belt, or in a buffer of the upload's own.
+    Buffer {
+        buffer: wgpu::Buffer,
+        offset: u64,
+        bytes_per_row: u32,
+    },
+    /// A browser image source, which the queue copied into a texture of its
+    /// own when it was uploaded.
+    #[cfg(wasm_unknown)]
+    Texture(wgpu::Texture),
 }
 
 const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
@@ -354,6 +368,13 @@ enum Texture {
 pub struct Image {
     texture: Texture,
     info: ImageInfo,
+    /// The renderer made the texture. Only its uploads wait for the next
+    /// frame's command buffer: a caller's texture takes them at once, as it
+    /// takes the caller's own writes, and may be destroyed by the caller.
+    owned: bool,
+    /// `WGPURenderer::flush_count` when the image was made: an image made
+    /// since the last flush is drawn by no frame yet.
+    flushes_at_alloc: u64,
 }
 
 // Only these flags change a sampler descriptor; the rest would split the cache for nothing.
@@ -494,7 +515,7 @@ pub struct WGPURenderer {
     // Staging for a frame's vertices, fan indices, uniforms and image uploads, copied by the frame's own command
     // buffers.
     staging_belt: wgpu::util::StagingBelt,
-    // Image uploads staged in the belt, copied at the start of the next frame's command buffer.
+    // Image uploads staged for the next frame's command buffer, copied at its start.
     pending_copies: Vec<PendingCopy>,
     screen_stencil: TargetStencil,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, TargetStencil>,
@@ -540,7 +561,8 @@ fn rasterize_to_canvas(
 }
 
 impl WGPURenderer {
-    /// Uploads a browser-side image source straight into an image's texture.
+    /// Uploads a browser-side image source into an image's texture, staged
+    /// through a texture of its own when the image stages uploads.
     #[cfg(wasm_unknown)]
     fn copy_external_image(
         &mut self,
@@ -553,6 +575,61 @@ impl WGPURenderer {
         let Texture::Internal(texture) = &image.texture else {
             return Err(crate::ErrorKind::UnsupportedOperation);
         };
+        let extent = wgpu::Extent3d {
+            width: size.width as _,
+            height: size.height as _,
+            depth_or_array_layers: 1,
+        };
+        if extent.width == 0 || extent.height == 0 {
+            return Ok(());
+        }
+        // An image no frame has drawn yet (`Canvas::create_image` from an
+        // element) cannot be overwritten by a frame's staged copies: the copy
+        // goes straight into it, after any upload staged before.
+        if self.stages_uploads(image) && image.flushes_at_alloc < self.flush_count {
+            // Staged as a byte upload is. The queue copies the source now,
+            // and copying it straight into the image would run before a frame
+            // flushed earlier and submitted later, whose own staged copies
+            // would then land over it for good. So the queue copies it into a
+            // texture of its own, and the next frame's command buffer copies
+            // that into the image after the uploads staged before it.
+            let staging = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("femtovg image source"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture.format(),
+                // copy_external_image_to_texture needs COPY_DST and RENDER_ATTACHMENT.
+                usage: wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            self.queue.copy_external_image_to_texture(
+                &wgpu::CopyExternalImageSourceInfo {
+                    source,
+                    origin: wgpu::Origin2d::ZERO,
+                    flip_y: false,
+                },
+                wgpu::CopyExternalImageDestInfo {
+                    texture: &staging,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                    color_space: wgpu::PredefinedColorSpace::Srgb,
+                    premultiplied_alpha: true,
+                },
+                extent,
+            );
+            self.pending_copies.push(PendingCopy {
+                source: CopySource::Texture(staging),
+                texture: texture.clone(),
+                origin: [x as u32, y as u32],
+                size: [extent.width, extent.height],
+            });
+            return Ok(());
+        }
         self.submit_pending_copies_of(texture);
         self.queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
@@ -572,11 +649,7 @@ impl WGPURenderer {
                 color_space: wgpu::PredefinedColorSpace::Srgb,
                 premultiplied_alpha: true,
             },
-            wgpu::Extent3d {
-                width: size.width as _,
-                height: size.height as _,
-                depth_or_array_layers: 1,
-            },
+            extent,
         );
         self.generate_mipmaps(texture);
         Ok(())
@@ -694,50 +767,76 @@ impl WGPURenderer {
         }
     }
 
+    /// Whether an upload to `image` waits for the next frame's command buffer
+    /// (see `update_image`): an image the renderer made, without mip levels,
+    /// with slicing off.
+    fn stages_uploads(&self, image: &Image) -> bool {
+        matches!(&image.texture, Texture::Internal(texture) if texture.mip_level_count() == 1)
+            && image.owned
+            && self.slicing.is_none()
+    }
+
     /// Submits the uploads staged since the last frame if any of them is to
     /// `texture`: the queue copies an upload it is given before the next
     /// frame's command buffer runs, so the ones staged before go first, and do
     /// not land on what it copies.
     fn submit_pending_copies_of(&mut self, texture: &wgpu::Texture) {
         if self.pending_copies.iter().any(|copy| copy.texture == *texture) {
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            self.encode_pending_copies(&mut encoder);
-            self.staging_belt.finish_and_recall_on_submit(&encoder);
-            self.queue.submit(Some(encoder.finish()));
+            self.submit_pending_copies();
         }
+    }
+
+    /// Submits every upload staged since the last frame on its own.
+    fn submit_pending_copies(&mut self) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        self.encode_pending_copies(&mut encoder);
+        self.staging_belt.finish_and_recall_on_submit(&encoder);
+        self.queue.submit(Some(encoder.finish()));
     }
 
     /// Copies the uploads staged since the last frame into their images, in
     /// the order they were made.
     fn encode_pending_copies(&mut self, encoder: &mut wgpu::CommandEncoder) {
         for copy in self.pending_copies.drain(..) {
-            encoder.copy_buffer_to_texture(
-                wgpu::TexelCopyBufferInfo {
-                    buffer: &copy.buffer,
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: copy.offset,
-                        bytes_per_row: Some(copy.bytes_per_row),
-                        rows_per_image: None,
+            let destination = wgpu::TexelCopyTextureInfo {
+                texture: &copy.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: copy.origin[0],
+                    y: copy.origin[1],
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            };
+            let size = wgpu::Extent3d {
+                width: copy.size[0],
+                height: copy.size[1],
+                depth_or_array_layers: 1,
+            };
+            match &copy.source {
+                CopySource::Buffer {
+                    buffer,
+                    offset,
+                    bytes_per_row,
+                } => encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: *offset,
+                            bytes_per_row: Some(*bytes_per_row),
+                            rows_per_image: None,
+                        },
                     },
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &copy.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: copy.origin[0],
-                        y: copy.origin[1],
-                        z: 0,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: copy.size[0],
-                    height: copy.size[1],
-                    depth_or_array_layers: 1,
-                },
-            );
+                    destination,
+                    size,
+                ),
+                #[cfg(wasm_unknown)]
+                CopySource::Texture(source) => {
+                    encoder.copy_texture_to_texture(source.as_image_copy(), destination, size)
+                }
+            }
         }
     }
 
@@ -916,6 +1015,13 @@ impl WGPURenderer {
     /// [`SubmissionSlicing`]. `None`, the default, encodes the frame into the
     /// one command buffer that the flush returns.
     pub fn set_submission_slicing(&mut self, slicing: Option<SubmissionSlicing>) {
+        // Sliced frames upload through the queue (see `SubmissionSlicing`), so
+        // uploads staged before, waiting for the next frame's command buffer,
+        // go now: a short sliced frame's one command buffer may be held while
+        // the queue takes a later upload to the same image.
+        if slicing.is_some() && self.slicing.is_none() && !self.pending_copies.is_empty() {
+            self.submit_pending_copies();
+        }
         self.slicing = slicing;
     }
 
@@ -1397,6 +1503,8 @@ impl Renderer for WGPURenderer {
                 view_formats: &[],
             })),
             info,
+            owned: true,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1408,6 +1516,8 @@ impl Renderer for WGPURenderer {
         Ok(Image {
             texture: Texture::Internal(native_texture),
             info,
+            owned: false,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1419,6 +1529,8 @@ impl Renderer for WGPURenderer {
         Ok(Image {
             texture: Texture::External(external_texture),
             info,
+            owned: false,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1475,10 +1587,12 @@ impl Renderer for WGPURenderer {
             // was flushed: from staging the belt reuses, or, for an upload larger than a chunk, from a buffer of
             // its own, which the belt would keep once recalled. write_texture would copy an upload before every
             // one staged before it. An image with mip levels keeps write_texture: the levels are generated
-            // from it at once. With slicing on, frames are submitted during their flush and upload through the
-            // queue, as they did before (see `SubmissionSlicing`).
+            // from it at once; so does a caller's texture (`create_image_from_native_texture`), which takes the
+            // caller's own writes through the queue and may be destroyed by the caller. With slicing on, frames
+            // are submitted during their flush and upload through the queue, as they did before (see
+            // `SubmissionSlicing`).
             let size = data.dimensions();
-            if texture.mip_level_count() == 1 && self.slicing.is_none() {
+            if self.stages_uploads(image) {
                 let row = bpp as u64 * size.width as u64;
                 let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
                 let padded = row.div_ceil(align) * align;
@@ -1520,9 +1634,11 @@ impl Renderer for WGPURenderer {
                     }
                 };
                 self.pending_copies.push(PendingCopy {
-                    buffer,
-                    offset,
-                    bytes_per_row: padded as u32,
+                    source: CopySource::Buffer {
+                        buffer,
+                        offset,
+                        bytes_per_row: padded as u32,
+                    },
                     texture: texture.clone(),
                     origin: [x as u32, y as u32],
                     size: [size.width as u32, size.height as u32],

@@ -3,7 +3,9 @@
 //! flushes to the same size, and the renderer keeps those of only so many
 //! sizes. A frame's command buffer carries the vertices, fan indices and
 //! uniforms it draws with, so frames recorded before any of them is submitted
-//! each draw their own: a frame does not read data a later flush wrote.
+//! each draw their own: a frame does not read data a later flush wrote. A
+//! texture of the caller's is the exception: it takes uploads at once, as it
+//! takes the caller's own writes.
 //!
 //! Live bind groups are read from wgpu's internal counters, enabled by the
 //! `counters` feature on the `wgpu` dev-dependency.
@@ -11,7 +13,7 @@
 
 use femtovg::{
     renderer::{SubmissionSlicing, WGPURenderer},
-    Canvas, Color, ImageFlags, LayerEffects, Paint, Path, PixelFormat, RenderTarget,
+    Canvas, Color, ImageFlags, ImageInfo, LayerEffects, Paint, Path, PixelFormat, RenderTarget,
 };
 use imgref::Img;
 use rgb::RGBA8;
@@ -264,6 +266,155 @@ fn frames_flushed_before_a_submit_each_draw_the_image_they_were_given() {
         [0, 0, 255, 255],
         "the second frame's image"
     );
+}
+
+/// An upload staged with slicing off, slicing then turned on, a short frame
+/// (its one command buffer the caller's to submit) flushed and held, and the
+/// image updated again, which a sliced frame sends through the queue: the
+/// next frame draws the later upload. The staged upload goes when slicing
+/// turns on; drained into the held frame instead, it would have run after
+/// the later upload and over it.
+#[test]
+fn turning_slicing_on_sends_staged_uploads_ahead_of_later_ones() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let (first, second) = (target(&device, W, H), target(&device, W, H));
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let red = vec![RGBA8::new(255, 0, 0, 255); 16];
+    let blue = vec![RGBA8::new(0, 0, 255, 255); 16];
+    let image = canvas
+        .create_image(Img::new(red.as_slice(), 4, 4), ImageFlags::NEAREST)
+        .expect("image");
+    canvas
+        .renderer_mut()
+        .set_submission_slicing(Some(SubmissionSlicing::default()));
+    let mut whole = Path::new();
+    whole.rect(0.0, 0.0, W as f32, H as f32);
+    let paint = Paint::image(image, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0);
+
+    canvas.fill_path(&whole, &paint);
+    let held = canvas.flush_to_output(&first);
+    canvas
+        .update_image(image, Img::new(blue.as_slice(), 4, 4), 0, 0)
+        .expect("update");
+    queue.submit(held);
+    canvas.fill_path(&whole, &paint);
+    queue.submit(canvas.flush_to_output(&second));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+
+    assert_eq!(
+        pixel(&readback(&device, &queue, &second), 32, 32),
+        [0, 0, 255, 255],
+        "the later upload"
+    );
+}
+
+/// A 4 x 4 texture of the caller's, for `create_image_from_native_texture`.
+fn callers_texture(device: &wgpu::Device) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width: 4,
+            height: 4,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+/// A texture of the caller's, wrapped as an image and updated through the
+/// canvas, then written by the caller itself before the frame that draws it:
+/// the frame draws the caller's write. The canvas's upload goes through the
+/// queue at once, as the caller's does; staged for the frame's command
+/// buffer it would have been copied over the caller's write.
+#[test]
+fn an_upload_to_a_callers_texture_lands_before_the_callers_next_write() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let output = target(&device, W, H);
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let texture = callers_texture(&device);
+    let image = canvas
+        .create_image_from_native_texture(
+            texture.clone(),
+            ImageInfo::new(ImageFlags::NEAREST, 4, 4, PixelFormat::Rgba8),
+        )
+        .expect("image");
+    let red = vec![RGBA8::new(255, 0, 0, 255); 16];
+    canvas
+        .update_image(image, Img::new(red.as_slice(), 4, 4), 0, 0)
+        .expect("update");
+    let blue = [0u8, 0, 255, 255].repeat(16);
+    queue.write_texture(
+        texture.as_image_copy(),
+        &blue,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(16),
+            rows_per_image: None,
+        },
+        texture.size(),
+    );
+    let mut whole = Path::new();
+    whole.rect(0.0, 0.0, W as f32, H as f32);
+    canvas.fill_path(&whole, &Paint::image(image, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0));
+    queue.submit(canvas.flush_to_output(&output));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+
+    assert_eq!(
+        pixel(&readback(&device, &queue, &output), 32, 32),
+        [0, 0, 255, 255],
+        "the caller's write, made after the canvas's upload"
+    );
+}
+
+/// A texture of the caller's, updated through the canvas, deleted as an image
+/// and destroyed by the caller, as `create_image_from_native_texture` leaves
+/// it to: the next frame submits without an error. A staged upload would
+/// have been copied into the destroyed texture by that frame.
+#[test]
+fn a_callers_texture_destroyed_after_an_upload_leaves_the_next_frame_valid() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let output = target(&device, W, H);
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(W, H, 1.0);
+    let texture = callers_texture(&device);
+    let image = canvas
+        .create_image_from_native_texture(
+            texture.clone(),
+            ImageInfo::new(ImageFlags::NEAREST, 4, 4, PixelFormat::Rgba8),
+        )
+        .expect("image");
+    let red = vec![RGBA8::new(255, 0, 0, 255); 16];
+    canvas
+        .update_image(image, Img::new(red.as_slice(), 4, 4), 0, 0)
+        .expect("update");
+    canvas.delete_image(image);
+    texture.destroy();
+
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    frame_with_square(&mut canvas, 8.0, Color::rgb(0, 255, 0));
+    queue.submit(canvas.flush_to_output(&output));
+    let error = pollster::block_on(scope.pop());
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("device poll failed");
+    assert!(error.is_none(), "the frame after the destroy: {error:?}");
 }
 
 /// An image updated in a corner and then whole, the second upload larger

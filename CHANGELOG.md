@@ -125,10 +125,12 @@ All notable changes to this project will be documented in this file.
   images of a later one when the later frame was flushed before the earlier
   one was submitted. A frame's command buffer now carries its own uploads,
   in the order they were made, through staging reused from frame to frame
-  (an image upload larger than a megabyte has a buffer of its own); an
-  image with mipmaps is still uploaded at once. With submission slicing on,
-  whose frames are submitted during their flush, uploads go through the
-  queue ahead of the frame, as before.
+  (an image upload larger than a megabyte has a buffer of its own, and an
+  image or canvas element on the web a texture of its own); an image with
+  mipmaps, or one wrapping a texture of the caller's
+  (`create_image_from_native_texture`), is still uploaded at once. With
+  submission slicing on, whose frames are submitted during their flush,
+  uploads go through the queue ahead of the frame, as before.
 - The WGPU backend keeps the viewport uniform of each render target size
   from one flush to the next instead of creating it again for every pass
   on a target of another size, up to a thousand times a frame on pages
