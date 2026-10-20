@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- The WGPU backend makes each bind group once a flush instead of at every
+  change of what a draw binds. Under a soft clip mask a concave fill's
+  winding pass and its cover bind different resources, so every such fill
+  made two bind groups: 400 concave fills under a star mask took twice the
+  render thread's time of the same fills unclipped.
 - WGPU: a render pass attaches the stencil only when something it draws
   tests or writes it, and clears it on load and discards it on store unless
   a clip plane armed on the target outlives the pass. On a tiled GPU the
