@@ -9,10 +9,10 @@
 //! Skips without a GPU adapter.
 #![cfg(feature = "wgpu")]
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFlags, Paint, Path};
 
 mod common;
-use common::{headless_device, render_rgba};
+use common::{headless_device, render_on_image, render_rgba};
 
 const W: u32 = 256;
 const H: u32 = 192;
@@ -127,42 +127,12 @@ fn on_screen(axis: Axis, sigma: f32) {
     assert_blurred(&out, axis, sigma as f64);
 }
 
-/// Renders `draw` on an image target with `flags` besides its own, cleared
-/// to `clear`, drawn onto the screen afterwards.
-fn render_on_image(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    flags: ImageFlags,
-    clear: Color,
-    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
-) -> Vec<u8> {
-    render_rgba(device, queue, W, H, clear, |canvas| {
-        let image = canvas
-            .create_image_empty(
-                W as usize,
-                H as usize,
-                PixelFormat::Rgba8,
-                flags | ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED,
-            )
-            .expect("image");
-        canvas.with_render_target(RenderTarget::Image(image), |canvas| {
-            canvas.clear_rect(0, 0, W, H, clear);
-            draw(canvas);
-        });
-        let mut path = Path::new();
-        path.rect(0.0, 0.0, W as f32, H as f32);
-        let mut paint = Paint::image(image, 0.0, 0.0, W as f32, H as f32, 0.0, 1.0);
-        paint.set_anti_alias(false);
-        canvas.fill_path(&path, &paint);
-    })
-}
-
 /// The same blur on an image target with `flags`.
 fn on_image(flags: ImageFlags, axis: Axis, sigma: f32) {
     let Some((device, queue)) = headless_device() else {
         return;
     };
-    let out = render_on_image(&device, &queue, flags, Color::white(), |canvas| {
+    let out = render_on_image(&device, &queue, W, H, flags, Color::white(), |canvas| {
         draw_step(canvas, axis);
         blur(canvas, sigma);
     });
@@ -210,7 +180,7 @@ fn a_blur_ignores_the_image_targets_sampling_flags() {
     };
 
     // White, with black along the right that only a wrap reaches.
-    let out = render_on_image(&device, &queue, flags, Color::white(), |canvas| {
+    let out = render_on_image(&device, &queue, W, H, flags, Color::white(), |canvas| {
         let mut path = Path::new();
         path.rect((W - 16) as f32, 0.0, 16.0, H as f32);
         canvas.fill_path(&path, &without_aa(Color::black()));
@@ -229,7 +199,7 @@ fn a_blur_ignores_the_image_targets_sampling_flags() {
 
     // A one-pixel checkerboard: its pairs average to mid grey, while picking
     // one pixel of each would pick the same colour everywhere.
-    let out = render_on_image(&device, &queue, flags, Color::white(), |canvas| {
+    let out = render_on_image(&device, &queue, W, H, flags, Color::white(), |canvas| {
         let mut path = Path::new();
         for y in 0..H {
             for x in (y % 2..W).step_by(2) {
@@ -267,7 +237,7 @@ fn a_blur_at_the_targets_edges_repeats_them() {
             canvas.blur_rect(W - 64, H - 48, 64, 48, sigma).expect("blur_rect");
         };
         let on_screen = render_rgba(&device, &queue, W, H, color, blur_corners);
-        let on_image = render_on_image(&device, &queue, ImageFlags::empty(), color, blur_corners);
+        let on_image = render_on_image(&device, &queue, W, H, ImageFlags::empty(), color, blur_corners);
         for (target, out) in [("screen", on_screen), ("image", on_image)] {
             for (i, pixel) in out.chunks_exact(4).enumerate() {
                 let (x, y) = (i as u32 % W, i as u32 / W);

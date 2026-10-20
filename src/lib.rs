@@ -23,7 +23,7 @@ extern crate serde;
 #[cfg(feature = "textlayout")]
 use std::ops::Range;
 use std::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     collections::{HashMap, HashSet},
     path::Path as FilePath,
     rc::Rc,
@@ -88,7 +88,7 @@ use paint::{GlyphTexture, PaintFlavor, StrokeSettings, Transfer};
 use renderer::{BlendPass, Fused};
 
 mod path;
-use path::Convexity;
+use path::PathCache;
 pub use path::{Path, PathIter, Solidity, Verb};
 
 mod gradient_store;
@@ -283,6 +283,23 @@ impl Scissor {
             half_width * 2.0,
             half_height * 2.0,
         ))
+    }
+
+    /// The device rect outside which the scissor's coverage is zero: its
+    /// corners under any transform, a fringe of `fringe_width` out. `None`
+    /// when it clips nothing, which [`Params`] takes an extent below -0.5 for.
+    fn reach(&self, fringe_width: f32) -> Option<Bounds> {
+        let extent = self.extent.filter(|&[x, y]| x >= -0.5 && y >= -0.5)?;
+        let [x, y] = extent.map(|v| v.max(0.0));
+        let corners = Bounds::from_points(
+            [[-x, -y], [x, -y], [x, y], [-x, y]].map(|[x, y]| self.transform.transform_point(x, y)),
+        );
+        Some(Bounds {
+            minx: corners.minx - fringe_width,
+            miny: corners.miny - fringe_width,
+            maxx: corners.maxx + fringe_width,
+            maxy: corners.maxy + fringe_width,
+        })
     }
 
     /// The scissor's device-space rect for sizing a layer's store: like
@@ -880,9 +897,9 @@ where
         }
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
-        // to gate; clear_rect and a rect blur are raw writes that neither
-        // backend clips; a filter pass or a rect blur's first draw writes its
-        // own target image, not the clipped one.
+        // to gate; clear_rect is a raw write that neither backend clips; a
+        // filter pass or a blur's first draw writes its own target image,
+        // not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
@@ -891,7 +908,6 @@ where
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
                 | CommandType::StartBlur { .. }
-                | CommandType::FinishBlur { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }
@@ -1327,14 +1343,13 @@ where
         }
 
         // The path cache saves a flattened and transformed version of the path.
-        let shared;
-        let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+        let bounds = path.cache(&transform, self.tess_tol, self.dist_tol).bounds;
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > canvas_width as f32
-            || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > canvas_height as f32
+        if bounds.maxx < 0.0
+            || bounds.minx > canvas_width as f32
+            || bounds.maxy < 0.0
+            || bounds.miny > canvas_height as f32
         {
             return;
         }
@@ -1346,7 +1361,7 @@ where
         // coverage mask instead, unless its operation changes
         // what coverage does not reach: it would change the whole quad.
         if anti_alias && self.fill_masks.enabled() && self.state().composite_operation.takes_coverage() {
-            let bounds = path_cache.bounds;
+            let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
             if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
                 && clip::is_thin(path_cache.mean_width(fill_rule))
                 && self.fill_through_mask(
@@ -1362,30 +1377,8 @@ where
             }
         }
 
-        let (clip, rect) = self.fill_clip(
-            || path_cache.bounds,
-            Some((&path_cache, 0.0)),
-            anti_alias.then_some((path, &transform)),
-        );
-        // An upright rect under an upright clip shape is filled as the rect
-        // the two share, or as the shape it covers: an edge they have in
-        // common is antialiased once, by the rect's fringe or by the shape.
-        let (rect, fringed) = match rect {
-            Some(RectFill::Shared(rect)) => (Some(rect), anti_alias),
-            Some(RectFill::Covered(rect)) => (Some(rect), false),
-            None => (None, anti_alias),
-        };
-        if let Some(rect) = rect {
-            drop(path_cache);
-            shared = rect.path();
-            path_cache = shared.cache(&rect.frame, self.tess_tol, self.dist_tol);
-        }
-
-        // Calculate fill vertices.
-        // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
-        // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_width = if fringed { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
+        let mut shared = None;
+        let (clip, path_cache, fringe_width) = self.fill_outline(path, &transform, anti_alias, fill_rule, &mut shared);
 
         // Detect if this path fill is in fact just an unclipped image copy
 
@@ -1408,7 +1401,7 @@ where
         }
 
         // GPU uniforms
-        let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
+        let flavor = if path_cache.is_convex() {
             let params = Params::new(
                 &self.images,
                 &paint_transform,
@@ -1457,6 +1450,51 @@ where
                 .ok();
         }
 
+        self.push_fill(&mut cmd, &path_cache, fringe_width);
+        self.append_cmd(cmd);
+    }
+
+    /// Expands a fill of `path` under `transform` into its fans and fringes.
+    /// Returns what clips the fill, the expanded outline and the fringe's width.
+    /// The outline is the path, or the rect it shares with the clip, kept in `shared`.
+    fn fill_outline<'a>(
+        &mut self,
+        path: &'a Path,
+        transform: &Transform2D,
+        anti_alias: bool,
+        fill_rule: FillRule,
+        shared: &'a mut Option<Path>,
+    ) -> (DrawClip, RefMut<'a, PathCache>, f32) {
+        let mut path_cache = path.cache(transform, self.tess_tol, self.dist_tol);
+        let (clip, rect) = self.fill_clip(
+            || path_cache.bounds,
+            Some((&path_cache, 0.0)),
+            anti_alias.then_some((path, transform)),
+        );
+        // An upright rect under an upright clip shape is filled as the rect
+        // the two share, or as the shape it covers: an edge they have in
+        // common is antialiased once, by the rect's fringe or by the shape.
+        let (rect, fringed) = match rect {
+            Some(RectFill::Shared(rect)) => (Some(rect), anti_alias),
+            Some(RectFill::Covered(rect)) => (Some(rect), false),
+            None => (None, anti_alias),
+        };
+        if let Some(rect) = rect {
+            drop(path_cache);
+            path_cache = shared
+                .insert(rect.path())
+                .cache(&rect.frame, self.tess_tol, self.dist_tol);
+        }
+
+        let fringe_width = if fringed { self.fringe_width } else { 0.0 };
+        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
+        (clip, path_cache, fringe_width)
+    }
+
+    /// Pushes the vertices of `path_cache`'s fill, expanded with a fringe of
+    /// `fringe_width`, as `cmd`'s drawables, and for a concave fill the
+    /// quad covering it.
+    fn push_fill(&mut self, cmd: &mut Command, path_cache: &PathCache, fringe_width: f32) {
         // All verts from all shapes are kept in a single buffer here in the canvas.
         // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
@@ -1498,7 +1536,7 @@ where
             cmd.drawables.push(drawable);
         }
 
-        if let CommandType::ConcaveFill { .. } = cmd.cmd_type {
+        if !path_cache.is_convex() {
             // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
             // over the shape area with stencil test enabled to produce the final fill. These are
             // the verts needed for the covering quad
@@ -1529,8 +1567,6 @@ where
 
             cmd.triangles_verts = Some((offset, 4));
         }
-
-        self.append_cmd(cmd);
     }
 
     /// Strokes the provided Path with the specified Paint.
@@ -4563,6 +4599,46 @@ fn max_width_does_not_collide_in_the_shaping_cache() {
         "the whole text fits in {} and must not get the break position cached for {}",
         width + 0.1,
         width - 0.1
+    );
+}
+
+/// Adding a font clears the run shaping cache. A paint falls back to every
+/// registered font for characters its own fonts lack, so text measured before
+/// the font was added is shaped again and takes its glyphs from that font.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_measured_before_a_font_is_added_takes_its_glyphs_from_that_font() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let roboto = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[roboto]).with_font_size(30.0);
+    let arabic = "\u{0633}\u{0644}\u{0627}\u{0645}";
+    let font_ids = |canvas: &Canvas<RecordingRenderer>| {
+        canvas
+            .measure_text(20.0, 100.0, arabic, &paint)
+            .unwrap()
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.font_id)
+            .collect::<Vec<_>>()
+    };
+
+    let before = font_ids(&canvas);
+    assert!(
+        !before.is_empty() && before.iter().all(|&font_id| font_id == roboto),
+        "with only Roboto Flex registered, the Arabic text must be shaped with it: {before:?}"
+    );
+
+    let amiri = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let after = font_ids(&canvas);
+    assert!(
+        !after.is_empty() && after.iter().all(|&font_id| font_id == amiri),
+        "after Amiri is added, the Arabic text must take its glyphs from it: {after:?}"
     );
 }
 

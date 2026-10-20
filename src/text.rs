@@ -317,10 +317,9 @@ impl TextContextImpl {
     }
 
     pub fn add_font_mem_with_index(&mut self, data: &[u8], face_index: u32) -> Result<FontId, ErrorKind> {
-        self.clear_caches();
-
         let data_copy = data.to_owned();
         let font = Font::new_with_data(data_copy, face_index, self)?;
+        self.clear_caches();
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -329,9 +328,8 @@ impl TextContextImpl {
         data: T,
         face_index: u32,
     ) -> Result<FontId, ErrorKind> {
-        self.clear_caches();
-
         let font = Font::new_with_data(data, face_index, self)?;
+        self.clear_caches();
         Ok(FontId(self.fonts.insert(font)))
     }
 
@@ -378,6 +376,8 @@ impl TextContextImpl {
     }
 
     fn clear_caches(&mut self) {
+        #[cfg(feature = "textlayout")]
+        self.shaping_run_cache.clear();
         #[cfg(feature = "textlayout")]
         self.shaped_words_cache.clear();
     }
@@ -1043,4 +1043,38 @@ pub fn render_direct<T: Renderer>(
     }
 
     Ok(())
+}
+
+#[cfg(all(test, feature = "textlayout"))]
+#[test]
+fn rejected_fonts_preserve_shaping_caches() {
+    let data = include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf");
+    for shared in [false, true] {
+        let context = TextContext::default();
+        let font = context.add_font_mem(data).unwrap();
+        let paint = Paint::color(crate::Color::black()).with_font(&[font]);
+        context.measure_text(0.0, 0.0, "cached text", &paint).unwrap();
+
+        let mut context = context.0.borrow_mut();
+        let cached = (context.shaping_run_cache.len(), context.shaped_words_cache.len());
+        assert!(cached.0 > 0 && cached.1 > 0);
+        for (data, index) in [(b"invalid font".as_slice(), 0), (data.as_slice(), 1)] {
+            let result = if shared {
+                context.add_shared_font_with_index(data, index)
+            } else {
+                context.add_font_mem_with_index(data, index)
+            };
+            assert!(matches!(result, Err(ErrorKind::FontParseError)));
+            assert_eq!(
+                (context.shaping_run_cache.len(), context.shaped_words_cache.len()),
+                cached
+            );
+        }
+        if shared {
+            context.add_shared_font_with_index(data.as_slice(), 0).unwrap();
+        } else {
+            context.add_font_mem_with_index(data, 0).unwrap();
+        }
+        assert!(context.shaping_run_cache.is_empty() && context.shaped_words_cache.is_empty());
+    }
 }

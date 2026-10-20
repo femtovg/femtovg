@@ -15,6 +15,7 @@ use crate::ImageId;
 use crate::ImageInfo;
 use crate::RenderTarget;
 use crate::Scissor;
+use crate::Transform2D;
 
 use super::Renderer;
 
@@ -237,14 +238,6 @@ impl UniformArray {
         }
     }
 
-    /// Whether a blur draw clamps its taps to the source's edge and mirrors
-    /// its sample positions, in the clip shape's slots: a filter draw is
-    /// never under a clip.
-    pub fn set_filter_sampling(&mut self, clamp: bool, flip_y: bool) {
-        self.0[54] = f32::from(u8::from(clamp));
-        self.0[55] = f32::from(u8::from(flip_y));
-    }
-
     /// The coverage mask, read by the shader variant of a draw under one:
     /// where its corner lies, the pixels it spans and what one of them is
     /// of its image, in the halves of the scissor matrix's columns that no
@@ -293,10 +286,6 @@ impl From<&Params> for UniformArray {
         arr.set_image_blur_filter_coeff(params.image_blur_filter_coeff);
         arr.set_conic_start_angle(params.conic_start_angle);
         arr.set_clip(params.clip.as_ref());
-        if params.shader_type == ShaderType::FilterImage {
-            debug_assert!(params.clip.is_none(), "a filter draw is never under a clip");
-            arr.set_filter_sampling(params.filter_clamp, params.filter_flip_y);
-        }
         arr.set_clip_mask(params.clip_mask.as_ref());
         arr.set_image_transfer(params.image_transfer);
 
@@ -832,11 +821,11 @@ impl WGPURenderer {
     }
 }
 
-/// What a rect blur's first draw reads the render target through, and
+/// What a blur's first draw reads the render target through, and
 /// whether a blur was skipped yet.
 #[derive(Debug, Default)]
 struct RenderTargetReader {
-    /// The screen's pixels a rect blur reads, at their place on the screen:
+    /// The screen's pixels a blur reads, at their place on the screen:
     /// a surface texture can be copied, not sampled. Kept at the output's
     /// size, as the stencil buffer is, since a blur drawn every frame copies
     /// every frame.
@@ -848,7 +837,7 @@ struct RenderTargetReader {
 impl RenderTargetReader {
     fn warn_skipped(&mut self, reason: &str) {
         if !std::mem::replace(&mut self.warned, true) {
-            log::warn!("rect blur skipped: {reason}");
+            log::warn!("blur skipped: {reason}");
         }
     }
 
@@ -1188,6 +1177,7 @@ impl Renderer for WGPURenderer {
                     target_image,
                     src,
                     sigma,
+                    sample_transform,
                 } => {
                     let mut pass = FilterPass {
                         images,
@@ -1202,22 +1192,40 @@ impl Renderer for WGPURenderer {
                         target_image,
                         src,
                         sigma,
+                        sample_transform,
                     );
                 }
-                super::CommandType::FinishBlur { sigma, extent, region } => {
+                super::CommandType::FinishBlur { stencil_params, .. } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
                     if !sampled {
                         continue;
                     }
-                    let mut pass = FilterPass {
-                        images,
-                        current_render_target: &mut current_render_target,
-                        render_pass_builder: &mut render_pass_builder,
-                        pipeline_and_bindgroup_mapper: &mut pipeline_and_bindgroup_mapper,
-                    };
-                    finish_blur(&mut pass, &command, sigma, extent, region);
+                    // The fills take their blend from the command.
+                    let mut command = command;
+                    for (composite_operation, params) in command.finish_blur_draws() {
+                        command.composite_operation = composite_operation;
+                        match &stencil_params {
+                            Some(stencil_params) => concave_fill(
+                                &command,
+                                fans,
+                                &mut pipeline_and_bindgroup_mapper,
+                                &mut render_pass_builder,
+                                stencil_params,
+                                images,
+                                &params,
+                            ),
+                            None => convex_fill(
+                                &command,
+                                fans,
+                                &mut pipeline_and_bindgroup_mapper,
+                                &mut render_pass_builder,
+                                &params,
+                                images,
+                            ),
+                        }
+                    }
                 }
             }
         }
@@ -1627,6 +1635,7 @@ fn start_blur(
     target_image: ImageId,
     src: [u32; 4],
     sigma: f32,
+    sample_transform: Transform2D,
 ) -> bool {
     // The stencil plan ends the pass here (`StencilUse::PassEnd`), so the
     // pass ends whether the blur goes ahead or is skipped: a skipped blur
@@ -1666,7 +1675,12 @@ fn start_blur(
             (MainTexture::View(view), [size.width as f32, size.height as f32], false)
         }
     };
-    let params = Params::rect_blur(size, sigma, 0, flip_y);
+    let sample_transform = if flip_y {
+        sample_transform * Transform2D([1.0, 0.0, 0.0, -1.0, 0.0, size[1]])
+    } else {
+        sample_transform
+    };
+    let params = Params::blur_axis(size, sigma, [1.0, 0.0], &sample_transform);
 
     pass.render_pass_builder.set_filter_target_image(
         pass.images,
@@ -1689,46 +1703,6 @@ fn start_blur(
     }
     pass.restore_target(previous_render_target);
     true
-}
-
-/// Blurs `command.image` along y back onto the render target the pass draws
-/// on: see `CommandType::FinishBlur`.
-fn finish_blur(
-    pass: &mut FilterPass<'_, '_>,
-    command: &super::Command,
-    sigma: f32,
-    extent: [u32; 2],
-    region: [u32; 4],
-) {
-    let Some(source) = command.image else {
-        return;
-    };
-    let params = Params::rect_blur(extent.map(|v| v as f32), sigma, 1, false);
-    // The canvas can be larger than the output, and a scissor beyond the
-    // target fails validation.
-    let [viewport_width, viewport_height] = pass.render_pass_builder.viewport.map(|extent| extent as u32);
-    let [left, top, region_width, region_height] = region;
-    let right = (left + region_width).min(viewport_width);
-    let bottom = (top + region_height).min(viewport_height);
-    if right <= left || bottom <= top {
-        return;
-    }
-    if let Some((start, count)) = command.triangles_verts {
-        pass.render_pass_builder
-            .scissor_to(Some([left, top, right - left, bottom - top]));
-        pass.pipeline_and_bindgroup_mapper.update_renderpass(
-            pass.render_pass_builder,
-            blend_state(command).into(),
-            wgpu::PrimitiveTopology::TriangleList,
-            StencilTest::Disabled,
-            None,
-            &params,
-            pass.images,
-            Some(source),
-            GlyphTexture::None,
-        );
-        pass.render_pass_builder.draw(start as u32..(start + count) as u32);
-    }
 }
 
 /// Two-pass Gaussian blur of `command.image` into `target_image`: horizontal
@@ -2882,7 +2856,7 @@ enum StencilTarget {
 /// What a command does with its target's stencil.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum StencilUse {
-    /// Ends the pass: a change of target, or a filter or a rect blur's first
+    /// Ends the pass: a change of target, or a filter or a blur's first
     /// draw, which draw into targets of their own.
     PassEnd,
     /// Draws without it.
@@ -2902,8 +2876,15 @@ impl StencilUse {
             CommandType::SetRenderTarget(_)
             | CommandType::RenderFilteredImage { .. }
             | CommandType::StartBlur { .. } => Self::PassEnd,
-            // A rect blur's last draw takes no clip.
-            CommandType::FinishBlur { .. } => Self::Unused,
+            // A blur's draw back is a fill: concave, or under the clip plane,
+            // it takes the stencil as any fill does.
+            CommandType::FinishBlur { stencil_params, .. } => {
+                if stencil_params.is_some() || command.clip_active {
+                    Self::Used
+                } else {
+                    Self::Unused
+                }
+            }
             CommandType::ClipReset { visible: true } => Self::Arms,
             CommandType::ClipReset { visible: false } => Self::Disarms,
             CommandType::ClipFill | CommandType::ConcaveFill { .. } | CommandType::StencilStroke { .. } => Self::Used,
@@ -2958,12 +2939,14 @@ fn a_pass_takes_the_stencil_only_for_commands_that_use_it_and_keeps_only_an_arme
     };
     let params = Params::default();
     assert_eq!(of(CommandType::SetRenderTarget(RenderTarget::Screen), false), PassEnd);
-    let finish_blur = CommandType::FinishBlur {
-        sigma: 2.0,
-        extent: [8, 8],
-        region: [0, 0, 8, 8],
+    let finish_blur = |stencil_params| CommandType::FinishBlur {
+        stencil_params,
+        fill_params: params,
+        erase: false,
     };
-    assert_eq!(of(finish_blur, true), Unused, "takes no clip");
+    assert_eq!(of(finish_blur(None), false), Unused);
+    assert_eq!(of(finish_blur(None), true), Used, "tests the clip plane");
+    assert_eq!(of(finish_blur(Some(params)), false), Used, "counts winding");
     assert_eq!(of(CommandType::ConvexFill { params }, false), Unused);
     assert_eq!(
         of(CommandType::ConvexFill { params }, true),
@@ -3051,7 +3034,7 @@ struct RenderPassBuilder<'a> {
     // The scissor rect set on the open pass; none is the whole target.
     current_clip_bounds: Option<[u32; 4]>,
     /// What the draws that follow are scissored to: what the current
-    /// command's clip leaves of the target, or a rect blur's region.
+    /// command's clip leaves of the target.
     clip_bounds: Option<[u32; 4]>,
 }
 
@@ -3119,15 +3102,7 @@ impl<'a> RenderPassBuilder<'a> {
     /// Scissors the target's draws to the pixels `command`'s clip leaves
     /// them, or to the whole target again.
     fn set_clip_bounds(&mut self, command: &super::Command) {
-        let bounds = command.clip_bounds([self.viewport[0] as u32, self.viewport[1] as u32]);
-        self.scissor_to(bounds);
-    }
-
-    /// Scissors the draws that follow to `bounds` - x, y, width and height
-    /// from the target's top left - or lifts the scissor: the open pass now,
-    /// a pass not yet begun when a draw begins it.
-    fn scissor_to(&mut self, bounds: Option<[u32; 4]>) {
-        self.clip_bounds = bounds;
+        self.clip_bounds = command.clip_bounds([self.viewport[0] as u32, self.viewport[1] as u32]);
         if self.rpass.is_some() {
             self.apply_clip_bounds();
         }

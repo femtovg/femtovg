@@ -5,7 +5,7 @@
 pub mod blend;
 pub mod pipelines;
 
-use femtovg::{renderer::WGPURenderer, Canvas, Color};
+use femtovg::{renderer::WGPURenderer, Canvas, Color, ImageFlags, Paint, Path, PixelFormat, RenderTarget};
 
 /// Set `FEMTOVG_REQUIRE_GPU` to turn "no adapter" from a skip into a failure:
 /// any value (`1`, `true`, `any`) requires that some adapter was found, and a
@@ -127,6 +127,46 @@ pub fn render_rgba_on(
         (draw.take().unwrap())(canvas)
     });
     (frames.remove(0), canvas)
+}
+
+/// Renders `draw` on a `width` x `height` image target with `flags` besides
+/// its own, cleared to `clear`, then draws the image over the screen cleared
+/// to white and returns the screen's RGBA8 pixels, rows tightly packed.
+pub fn render_on_image(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    flags: ImageFlags,
+    clear: Color,
+    draw: impl FnOnce(&mut Canvas<WGPURenderer>),
+) -> Vec<u8> {
+    render_rgba(device, queue, width, height, Color::white(), |canvas| {
+        let image = canvas
+            .create_image_empty(
+                width as usize,
+                height as usize,
+                PixelFormat::Rgba8,
+                flags | ImageFlags::FLIP_Y | ImageFlags::PREMULTIPLIED,
+            )
+            .expect("image");
+        canvas.with_render_target(RenderTarget::Image(image), |canvas| {
+            canvas.clear_rect(0, 0, width, height, clear);
+            draw(canvas);
+        });
+        let (w, h) = (width as f32, height as f32);
+        let mut path = Path::new();
+        path.rect(0.0, 0.0, w, h);
+        let mut paint = Paint::image(image, 0.0, 0.0, w, h, 0.0, 1.0);
+        paint.set_anti_alias(false);
+        canvas.fill_path(&path, &paint);
+    })
+}
+
+/// The RGBA8 pixel at (`x`, `y`) of tightly packed rows `width` wide.
+pub fn pixel(out: &[u8], width: u32, x: u32, y: u32) -> &[u8] {
+    let i = ((y * width + x) * 4) as usize;
+    &out[i..i + 4]
 }
 
 /// Renders `frames` frames in turn on one fresh canvas of `width` x
