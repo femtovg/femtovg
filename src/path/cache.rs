@@ -251,6 +251,23 @@ pub struct PathCache {
 }
 
 impl PathCache {
+    /// Whether the fill is one convex contour, which needs no stencil.
+    pub(crate) fn is_convex(&self) -> bool {
+        self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex
+    }
+
+    /// The bounds of the vertices the last expansion left, its fringe
+    /// included: past the path's own bounds by up to the miter limit times
+    /// half the fringe at a sharp corner.
+    pub(crate) fn expanded_bounds(&self) -> Bounds {
+        Bounds::from_points(
+            self.contours
+                .iter()
+                .flat_map(|contour| contour.fill.iter().chain(&contour.stroke))
+                .map(|vertex| (vertex.x, vertex.y)),
+        )
+    }
+
     pub fn new(verbs: impl Iterator<Item = Verb>, transform: &Transform2D, tess_tol: f32, dist_tol: f32) -> Self {
         let mut cache = Self::default();
 
@@ -931,7 +948,7 @@ impl PathCache {
 
         self.calculate_joins(fringe_width, line_join, miter_limit);
 
-        let convex = self.contours.len() == 1 && self.contours[0].convexity == Convexity::Convex;
+        let convex = self.is_convex();
         self.fill_bounds = Bounds::default();
 
         for contour in &mut self.contours {

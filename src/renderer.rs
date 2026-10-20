@@ -4,9 +4,8 @@ use imgref::ImgVec;
 use rgb::RGBA8;
 
 use crate::{
-    geometry::{Bounds, Position},
-    paint::GlyphTexture,
-    Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId, ImageInfo, ImageSource, ImageStore,
+    geometry::Position, paint::GlyphTexture, Color, CompositeOperationState, ErrorKind, FillRule, ImageFilter, ImageId,
+    ImageInfo, ImageSource, ImageStore,
 };
 
 mod opengl;
@@ -49,7 +48,7 @@ impl FanIndices {
             self.firsts.push(3 * self.triangles.len() as u32);
             if matches!(
                 command.cmd_type,
-                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. } | CommandType::FinishBlur { .. }
             ) {
                 for (start, count) in command.drawables.iter().filter_map(|drawable| drawable.fill_verts) {
                     let (hub, end) = (start as u32, (start + count) as u32);
@@ -133,12 +132,9 @@ pub enum CommandType {
         /// Image filter to apply.
         filter: ImageFilter,
     },
-    /// First draw of a rect blur: the render target blurred along x by
-    /// `sigma` (zero resamples) into `target_image`. The quad is
-    /// `triangles_verts`, its texture coordinates the render target pixels
-    /// it samples, counted from the top: a renderer storing the target's
-    /// rows bottom-up mirrors them. They can pass the target's edges, where
-    /// taps clamp to the edge pixels.
+    /// First draw of a blur: the render target blurred along x by `sigma`
+    /// (zero resamples) into all of `target_image`, with
+    /// [`ShaderType::FillBlur`]. The quad is `triangles_verts`.
     StartBlur {
         /// The image drawn into.
         target_image: ImageId,
@@ -148,20 +144,30 @@ pub enum CommandType {
         src: [u32; 4],
         /// The standard deviation along x.
         sigma: f32,
+        /// The map from the pixels of `target_image` to the render target
+        /// pixels they sample, counted from the top: a renderer storing the
+        /// target's rows bottom-up mirrors them. Taps past the target's edges
+        /// clamp to the edge pixels.
+        sample_transform: crate::Transform2D,
     },
-    /// Last draw of a rect blur: `image` blurred along y by `sigma` (zero
-    /// resamples) onto `region` of the render target. The quad is
-    /// `triangles_verts`, its texture coordinates the pixels of `image`,
-    /// stretched over `extent`, it samples. Taps clamp at `image`'s edges.
-    /// A renderer whose last `StartBlur` didn't draw skips it:
-    /// `image` then holds whatever was there before.
+    /// Last draws of a blur, each filled through the drawables as
+    /// `ConvexFill` (no `stencil_params`) or `ConcaveFill` would: with
+    /// `erase`, first `fill_params` as black at its alpha under
+    /// [`CompositeOperation::DestinationOut`], then `image`, blurred along
+    /// y and sampled through `fill_params`, under
+    /// [`CompositeOperation::Lighter`] after an erase and
+    /// [`CompositeOperation::Copy`] without one. The command's own composite
+    /// operation doesn't apply. A renderer whose last `StartBlur` didn't draw
+    /// skips both: `image` then holds whatever was there before.
     FinishBlur {
-        /// The standard deviation along y.
-        sigma: f32,
-        /// The size `image` is stretched over, in device pixels.
-        extent: [u32; 2],
-        /// The rect written, in device pixels.
-        region: [u32; 4],
+        /// Rendering parameters for the stencil operation of a concave path.
+        stencil_params: Option<Params>,
+        /// Rendering parameters for the fill operation.
+        fill_params: Params,
+        /// Whether the fill's coverage can be partial: mixing the target
+        /// toward the blur by it takes an erase first, as one blend can't do
+        /// it for alpha.
+        erase: bool,
     },
 }
 
@@ -243,6 +249,34 @@ impl Command {
         }
     }
 
+    /// The fills a `FinishBlur` draws, in order, each under its composite
+    /// operation: see `CommandType::FinishBlur`.
+    pub(crate) fn finish_blur_draws(&self) -> impl Iterator<Item = (CompositeOperationState, Params)> {
+        let (fill_params, erase) = match self.cmd_type {
+            CommandType::FinishBlur { fill_params, erase, .. } => (fill_params, erase),
+            _ => unreachable!("only a `FinishBlur` draws its blur"),
+        };
+        // After the erase, the target is scaled by one minus the coverage, and
+        // the blur adds to it.
+        let (erase, blur_operation) = if erase {
+            let erase = Params {
+                inner_col: [0.0, 0.0, 0.0, fill_params.inner_col[3]],
+                shader_type: ShaderType::FillColor,
+                ..fill_params
+            };
+            (
+                Some((crate::CompositeOperation::DestinationOut, erase)),
+                crate::CompositeOperation::Lighter,
+            )
+        } else {
+            (None, crate::CompositeOperation::Copy)
+        };
+        erase
+            .into_iter()
+            .chain([(blur_operation, fill_params)])
+            .map(|(operation, params)| (CompositeOperationState::new(operation), params))
+    }
+
     /// The pixels of a target of `size` that the clip leaves the command's
     /// draws - x, y, width and height from the top left - when they carry a
     /// shape that ends somewhere, a mask, or both. Outside them the clip's
@@ -259,18 +293,16 @@ impl Command {
             | CommandType::ConcaveFill {
                 fill_params: params, ..
             }
+            | CommandType::FinishBlur {
+                fill_params: params, ..
+            }
             | CommandType::StencilStroke { params1: params, .. } => params,
             _ => return None,
         };
         let shape = params.clip.and_then(|shape| shape.reach());
         let mask = params.clip_mask.map(|mask| mask.reach());
         let reach = match (shape, mask) {
-            (Some(shape), Some(mask)) => Bounds {
-                minx: shape.minx.max(mask.minx),
-                miny: shape.miny.max(mask.miny),
-                maxx: shape.maxx.min(mask.maxx),
-                maxy: shape.maxy.min(mask.maxy),
-            },
+            (Some(shape), Some(mask)) => shape.intersect(mask),
             (shape, mask) => shape.or(mask)?,
         };
         if width == 0 || height == 0 {
@@ -473,6 +505,11 @@ pub enum ShaderType {
     FilterImageMorphology,
     /// Offset shader (SVG `feOffset`): the image shifted by a pixel offset.
     FilterImageOffset,
+    /// Blur shader: a fill whose color is the image blurred along one axis
+    /// at the position the paint matrix maps the fragment to, its taps
+    /// clamped at the image's edges. A blur draws with it onto and from the
+    /// render target.
+    FillBlur,
 }
 
 impl ShaderType {
@@ -497,6 +534,7 @@ impl ShaderType {
             Self::FilterImageBlend => 15,
             Self::FilterImageMorphology => 16,
             Self::FilterImageOffset => 17,
+            Self::FillBlur => 18,
         }
     }
 
