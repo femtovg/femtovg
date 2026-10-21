@@ -28,6 +28,9 @@ All notable changes to this project will be documented in this file.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.
+- Multi-stop gradient textures now hold each texel's color at its centre,
+  where the shaders sample it. They were half a texel behind, up to 12 levels
+  off in a `LinearRgb` ramp near black.
 - Measured and drawn text no longer keeps missing glyphs after a font that
   covers them is added. Its cached shaping was used until the text dropped out
   of the shaping cache.
