@@ -122,11 +122,16 @@ impl FontVariations {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GradientStop(pub f32, pub Color);
 
+// `total_cmp` orders -0.0 before 0.0; they draw the same, so must share a ramp.
+fn key_cmp(a: f32, b: f32) -> Ordering {
+    (a + 0.0).total_cmp(&(b + 0.0))
+}
+
 fn color_total_cmp(a: &Color, b: &Color) -> Ordering {
-    a.r.total_cmp(&b.r)
-        .then_with(|| a.g.total_cmp(&b.g))
-        .then_with(|| a.b.total_cmp(&b.b))
-        .then_with(|| a.a.total_cmp(&b.a))
+    key_cmp(a.r, b.r)
+        .then_with(|| key_cmp(a.g, b.g))
+        .then_with(|| key_cmp(a.b, b.b))
+        .then_with(|| key_cmp(a.a, b.a))
 }
 
 fn is_finite_color(color: &Color) -> bool {
@@ -144,9 +149,7 @@ impl PartialEq for GradientStop {
 impl Eq for GradientStop {}
 impl Ord for GradientStop {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .total_cmp(&other.0)
-            .then_with(|| color_total_cmp(&self.1, &other.1))
+        key_cmp(self.0, other.0).then_with(|| color_total_cmp(&self.1, &other.1))
     }
 }
 
@@ -233,7 +236,7 @@ impl Ord for MultiStopGradient {
     fn cmp(&self, other: &Self) -> Ordering {
         self.shared_stops
             .cmp(&other.shared_stops)
-            .then_with(|| self.tint.total_cmp(&other.tint))
+            .then_with(|| key_cmp(self.tint, other.tint))
             .then_with(|| self.interpolation.cmp(&other.interpolation))
     }
 }
@@ -2041,6 +2044,25 @@ mod tests {
 
         let channel_nan = GradientStop(0.5, Color::rgbaf(f32::NAN, 1.0, 1.0, 1.0));
         assert_ne!(channel_nan.cmp(&GradientStop(0.5, Color::white())), Ordering::Equal);
+    }
+
+    /// -0.0 and 0.0 draw the same ramp, so `GradientStore` must not make two textures.
+    #[test]
+    fn multi_stop_gradient_ordering_equates_signed_zeros() {
+        let gradient = |offset: f32, channel: f32, tint: f32| MultiStopGradient {
+            shared_stops: [
+                GradientStop(offset, Color::rgbaf(channel, 0.0, 0.0, 1.0)),
+                GradientStop(0.5, Color::white()),
+                GradientStop(1.0, Color::black()),
+            ]
+            .into(),
+            tint,
+            interpolation: Interpolation::default(),
+        };
+
+        assert_eq!(gradient(-0.0, 0.0, 1.0), gradient(0.0, 0.0, 1.0));
+        assert_eq!(gradient(0.0, -0.0, 1.0), gradient(0.0, 0.0, 1.0));
+        assert_eq!(gradient(0.0, 0.0, -0.0), gradient(0.0, 0.0, 0.0));
     }
 
     #[test]
