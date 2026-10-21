@@ -330,14 +330,13 @@ impl GradientColors {
     /// Sets the color space the stop colors are interpolated in.
     pub(crate) fn set_interpolation_space(&mut self, space: ColorSpace) {
         self.interpolation_mut().space = space;
-        // The two-stop shader path only interpolates in sRGB; other spaces go through the LUT.
-        if let Self::TwoStop {
-            start_color,
-            end_color,
-            interpolation,
-        } = self
-        {
-            if space != ColorSpace::Srgb {
+        match self {
+            // The two-stop shader path only interpolates in sRGB; other spaces go through the LUT.
+            Self::TwoStop {
+                start_color,
+                end_color,
+                interpolation,
+            } if space != ColorSpace::Srgb => {
                 *self = Self::MultiStop {
                     stops: MultiStopGradient {
                         shared_stops: [GradientStop(0.0, *start_color), GradientStop(1.0, *end_color)].into(),
@@ -346,6 +345,22 @@ impl GradientColors {
                     },
                 };
             }
+            // Only promotion makes a two-stop `MultiStop` spanning the extents
+            // (`from_stops` gives those `TwoStop`), so this undoes it.
+            Self::MultiStop { stops }
+                if space == ColorSpace::Srgb
+                    && stops.len() == 2
+                    && stops.shared_stops[0].0 <= 0.0
+                    && stops.shared_stops[1].0 >= 1.0 =>
+            {
+                // `get` folds the tint into alpha, as `mul_alpha` does for `TwoStop`.
+                *self = Self::TwoStop {
+                    start_color: stops.get(0).1,
+                    end_color: stops.get(1).1,
+                    interpolation: stops.interpolation,
+                };
+            }
+            _ => {}
         }
     }
 
@@ -1843,6 +1858,31 @@ mod tests {
             panic!("expected LinearGradient");
         };
         assert!(matches!(colors, GradientColors::TwoStop { .. }));
+    }
+
+    #[test]
+    fn with_interpolation_space_srgb_restores_promoted_two_stop_gradient() {
+        let (start, end) = (Color::rgbf(1.0, 0.0, 0.0), Color::rgbf(0.0, 1.0, 0.0));
+        let mut paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, start, end)
+            .with_interpolation_space(ColorSpace::Oklab)
+            .with_premultiplied_interpolation(true);
+        paint.flavor.mul_alpha(0.5);
+        paint.set_interpolation_space(ColorSpace::Srgb);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        assert_eq!(
+            colors,
+            GradientColors::TwoStop {
+                start_color: Color::rgbaf(1.0, 0.0, 0.0, 0.5),
+                end_color: Color::rgbaf(0.0, 1.0, 0.0, 0.5),
+                interpolation: Interpolation {
+                    space: ColorSpace::Srgb,
+                    premultiplied: true,
+                },
+            }
+        );
     }
 
     #[test]
