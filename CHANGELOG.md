@@ -124,7 +124,7 @@ All notable changes to this project will be documented in this file.
   hit-tested still being drawn and hit-tested as the old path under the same
   transform: the flattened copy a `Path` keeps was not dropped when verbs were
   added.
-- Fixed the WGPU backend drawing a frame with the vertices, uniforms and
+- Fixed WGPU drawing performance when a frame with the vertices, uniforms and
   images of a later one when the later frame was flushed before the earlier
   one was submitted. A frame's command buffer now carries its own uploads,
   in the order they were made, through staging reused from frame to frame
