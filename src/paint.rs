@@ -307,6 +307,20 @@ impl GradientColors {
                     },
                 };
             }
+            // Only promotion makes a two-stop `MultiStop` spanning the extents
+            // (`from_stops` gives those `TwoStop`), so this undoes it.
+            Self::MultiStop { stops }
+                if space == ColorSpace::Srgb
+                    && stops.len() == 2
+                    && stops.shared_stops[0].0 <= 0.0
+                    && stops.shared_stops[1].0 >= 1.0 =>
+            {
+                // `get` folds the tint into alpha, as `mul_alpha` does for `TwoStop`.
+                *self = Self::TwoStop {
+                    start_color: stops.get(0).1,
+                    end_color: stops.get(1).1,
+                };
+            }
             Self::MultiStop { stops } => stops.set_interpolation_space(space),
         }
     }
@@ -1788,6 +1802,26 @@ mod tests {
             panic!("expected LinearGradient");
         };
         assert!(matches!(colors, GradientColors::TwoStop { .. }));
+    }
+
+    #[test]
+    fn with_interpolation_space_srgb_restores_promoted_two_stop_gradient() {
+        let (start, end) = (Color::rgbf(1.0, 0.0, 0.0), Color::rgbf(0.0, 1.0, 0.0));
+        let mut paint =
+            Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, start, end).with_interpolation_space(ColorSpace::Oklab);
+        paint.flavor.mul_alpha(0.5);
+        paint.set_interpolation_space(ColorSpace::Srgb);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        assert_eq!(
+            colors,
+            GradientColors::TwoStop {
+                start_color: Color::rgbaf(1.0, 0.0, 0.0, 0.5),
+                end_color: Color::rgbaf(0.0, 1.0, 0.0, 0.5),
+            }
+        );
     }
 
     #[test]
