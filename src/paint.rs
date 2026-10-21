@@ -421,7 +421,7 @@ impl PaintFlavor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum GlyphTexture {
     #[default]
     None,

@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 - Measured and drawn text no longer keeps missing glyphs after a font that
   covers them is added. Its cached shaping was used until the text dropped out
   of the shaping cache.
+- The WGPU backend now saves a lot of memory by making each bind group a flush
+  instead once instead of at everyvchange of what a draw binds. Under a soft
+  clip mask a concave fill's winding pass and its cover bind different
+  resources, so every such fill made two bind groups: 400 concave fills under
+  a star mask took twice the render thread's time of the same fills unclipped.
 - WGPU: a render pass attaches the stencil only when something it draws
   tests or writes it, and clears it on load and discards it on store unless
   a clip plane armed on the target outlives the pass. On a tiled GPU the

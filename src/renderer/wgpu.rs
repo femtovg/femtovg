@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use fnv::FnvHashMap;
 use rgb::bytemuck;
 use wgpu::util::DeviceExt;
 
@@ -3071,13 +3072,13 @@ impl DrawLayout {
 
 /// The texture a draw samples as its image: one of the canvas's, or a view
 /// the renderer holds itself.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 enum MainTexture {
     Image(Option<ImageId>),
     View(wgpu::TextureView),
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct BindGroupState {
     image: MainTexture,
     glyph_texture: GlyphTexture,
@@ -3837,6 +3838,12 @@ struct CommandToPipelineAndBindGroupMapper {
 
     current_bind_group_state: Option<BindGroupState>,
     current_bind_group: Option<wgpu::BindGroup>,
+    /// The flush's bind groups by what they bind. Draws alternate between a
+    /// few states - a concave fill's winding pass carries no soft clip mask
+    /// and its cover does, a glyph quad binds its atlas between fills - so
+    /// each is made once a flush, not at every change. The images and the
+    /// uniform buffer they hold do not change within a flush.
+    bind_groups: FnvHashMap<BindGroupState, wgpu::BindGroup>,
     /// Without and with a coverage mask.
     draw_layouts: [DrawLayout; 2],
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
@@ -3863,6 +3870,7 @@ impl CommandToPipelineAndBindGroupMapper {
             shader_module,
             current_bind_group_state: None,
             current_bind_group: None,
+            bind_groups: FnvHashMap::default(),
             draw_layouts,
             pipeline_cache,
             flush_count,
@@ -3930,10 +3938,10 @@ impl CommandToPipelineAndBindGroupMapper {
             clip_mask: params.clip_mask.map(|mask| mask.image),
         };
 
-        let bind_group_changed = self.current_bind_group_state != Some(bind_group_state.clone());
+        let bind_group_changed = self.current_bind_group_state.as_ref() != Some(&bind_group_state);
         if bind_group_changed {
-            self.current_bind_group = bind_group_state
-                .materialize(
+            let bind_group = self.bind_groups.entry(bind_group_state.clone()).or_insert_with(|| {
+                bind_group_state.materialize(
                     &self.device,
                     images,
                     &self.draw_layouts[usize::from(bind_group_state.clip_mask.is_some())].bind_group,
@@ -3941,7 +3949,8 @@ impl CommandToPipelineAndBindGroupMapper {
                     &self.sampler_cache,
                     &self.uniform_buffer,
                 )
-                .into();
+            });
+            self.current_bind_group = Some(bind_group.clone());
             self.current_bind_group_state = Some(bind_group_state);
         }
 
