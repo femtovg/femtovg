@@ -90,7 +90,8 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 /// 27 portraits of 87 to 991 passes the sliced frames held between a
 /// quarter and all of the unsliced driver memory on the M4 Max, 60 % at the
 /// median, and the 969-pass frame held 0.6 GiB; a frame of fewer passes
-/// than a slice is submitted exactly as without slicing.
+/// than a slice is submitted as without slicing, in the command buffer the
+/// flush returns.
 ///
 /// The slices before the command buffer
 /// [`Canvas::flush_to_output`](crate::Canvas::flush_to_output) returns are
@@ -100,6 +101,13 @@ const UNIFORM_SLOTS_PER_COMMAND: u64 = 2;
 /// with the returned one runs after the slices and a clear there erases
 /// them. Each of those submits, like the caller's own, fires the map and
 /// work-done callbacks of work that has already completed.
+///
+/// So the returned command buffer has to be submitted before the next
+/// flush, which would otherwise run its slices first. With slicing on, a
+/// frame's vertices, uniforms and image uploads therefore go through the
+/// queue, ahead of its first slice, rather than in the frame's command
+/// buffers as without slicing. Changing the slicing between a flush and the
+/// submit of the command buffer it returned is not supported.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SubmissionSlicing {
     /// Render passes per submitted command buffer; at least one.
@@ -115,6 +123,33 @@ impl Default for SubmissionSlicing {
 
 const MIN_UNIFORM_SLOTS: u64 = 64;
 const MIN_VERTEX_BYTES: u64 = 4096;
+// What a frame uploads goes through staging chunks of this size, or larger for a larger upload.
+const STAGING_CHUNK_BYTES: u64 = 1 << 20;
+
+/// An image upload staged for the next frame's command buffer: where it is
+/// copied from and where it goes.
+#[derive(Debug)]
+struct PendingCopy {
+    source: CopySource,
+    texture: wgpu::Texture,
+    origin: [u32; 2],
+    size: [u32; 2],
+}
+
+/// Where a staged upload is copied from.
+#[derive(Debug)]
+enum CopySource {
+    /// Bytes in the staging belt, or in a buffer of the upload's own.
+    Buffer {
+        buffer: wgpu::Buffer,
+        offset: u64,
+        bytes_per_row: u32,
+    },
+    /// A browser image source, which the queue copied into a texture of its
+    /// own when it was uploaded.
+    #[cfg(wasm_unknown)]
+    Texture(wgpu::Texture),
+}
 
 const UNIFORM_BUFFER_LABEL: &str = "Fragment Uniform Buffer";
 const UNIFORM_BUFFER_USAGE: wgpu::BufferUsages = wgpu::BufferUsages::UNIFORM.union(wgpu::BufferUsages::COPY_DST);
@@ -322,6 +357,13 @@ enum Texture {
 pub struct Image {
     texture: Texture,
     info: ImageInfo,
+    /// The renderer made the texture. Only its uploads wait for the next
+    /// frame's command buffer: a caller's texture takes them at once, as it
+    /// takes the caller's own writes, and may be destroyed by the caller.
+    owned: bool,
+    /// `WGPURenderer::flush_count` when the image was made: an image made
+    /// since the last flush is drawn by no frame yet.
+    flushes_at_alloc: u64,
 }
 
 // Only these flags change a sampler descriptor; the rest would split the cache for nothing.
@@ -347,20 +389,22 @@ struct CachedPipeline {
     last_used: u64,
 }
 
-/// Evicts the entries whose `last_used` flush is oldest until at most `PIPELINE_CACHE_CAPACITY` remain, but none
-/// used within the last `PIPELINE_RECENT_FLUSHES` flushes: a frame that binds more states than that keeps them all.
+/// Evicts the entries whose `last_used` flush is oldest until at most `capacity` remain, but none used within the
+/// last `recent_flushes` flushes: a frame that binds more states than that keeps them all.
 fn evict_least_recently_used<K: Clone + Eq + std::hash::Hash, V>(
     cache: &mut HashMap<K, V>,
     flush: u64,
+    capacity: usize,
+    recent_flushes: u64,
     last_used: impl Fn(&V) -> u64,
 ) {
-    if cache.len() <= PIPELINE_CACHE_CAPACITY {
+    if cache.len() <= capacity {
         return;
     }
-    let excess = cache.len() - PIPELINE_CACHE_CAPACITY;
+    let excess = cache.len() - capacity;
     let mut unused: Vec<(u64, K)> = cache
         .iter()
-        .filter(|(_, value)| flush.saturating_sub(last_used(value)) > PIPELINE_RECENT_FLUSHES)
+        .filter(|(_, value)| flush.saturating_sub(last_used(value)) > recent_flushes)
         .map(|(key, value)| (last_used(value), key.clone()))
         .collect();
     unused.sort_unstable_by_key(|&(stamp, _)| stamp);
@@ -383,7 +427,13 @@ mod pipeline_eviction_tests {
             let flush = len as u64;
             let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, i as u64)).collect();
             cache.insert(0, flush);
-            evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+            evict_least_recently_used(
+                &mut cache,
+                flush,
+                PIPELINE_CACHE_CAPACITY,
+                PIPELINE_RECENT_FLUSHES,
+                |&last_used| last_used,
+            );
             assert_eq!(cache.len(), len.min(PIPELINE_CACHE_CAPACITY), "pipelines kept of {len}");
             if len > PIPELINE_CACHE_CAPACITY {
                 assert!(!cache.contains_key(&1), "pipeline 1, used longest ago, was kept");
@@ -392,7 +442,13 @@ mod pipeline_eviction_tests {
 
         let len = PIPELINE_CACHE_CAPACITY + 1;
         let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, 1)).collect();
-        evict_least_recently_used(&mut cache, 1, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            1,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert_eq!(cache.len(), len, "a flush binding {len} states evicted some of them");
 
         // Past capacity, the oldest pipeline is kept while its last use is within PIPELINE_RECENT_FLUSHES flushes,
@@ -400,14 +456,26 @@ mod pipeline_eviction_tests {
         let flush = PIPELINE_RECENT_FLUSHES + 2;
         let mut cache: HashMap<usize, u64> = (0..len).map(|i| (i, flush - 1)).collect();
         cache.insert(1, flush - PIPELINE_RECENT_FLUSHES);
-        evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            flush,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert_eq!(
             cache.len(),
             len,
             "pipeline 1, used {PIPELINE_RECENT_FLUSHES} flushes ago, was evicted"
         );
         cache.insert(1, flush - PIPELINE_RECENT_FLUSHES - 1);
-        evict_least_recently_used(&mut cache, flush, |&last_used| last_used);
+        evict_least_recently_used(
+            &mut cache,
+            flush,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
+            |&last_used| last_used,
+        );
         assert!(
             !cache.contains_key(&1),
             "pipeline 1, used {} flushes ago, was kept",
@@ -433,9 +501,14 @@ pub struct WGPURenderer {
     vertex_buffer: wgpu::Buffer,
     fan_indices: FanIndices,
     fan_index_buffer: wgpu::Buffer,
+    // Staging for a frame's vertices, fan indices, uniforms and image uploads, copied by the frame's own command
+    // buffers.
+    staging_belt: wgpu::util::StagingBelt,
+    // Image uploads staged for the next frame's command buffer, copied at its start.
+    pending_copies: Vec<PendingCopy>,
     screen_stencil: TargetStencil,
     stencil_buffer_for_textures: HashMap<wgpu::Texture, TargetStencil>,
-    viewport_bind_group_layout: wgpu::BindGroupLayout,
+    viewport_bind_groups: ViewportBindGroups,
     /// Without and with a coverage mask.
     draw_layouts: [DrawLayout; 2],
     pipeline_cache: Rc<RefCell<HashMap<PipelineState, CachedPipeline>>>,
@@ -477,7 +550,8 @@ fn rasterize_to_canvas(
 }
 
 impl WGPURenderer {
-    /// Uploads a browser-side image source straight into an image's texture.
+    /// Uploads a browser-side image source into an image's texture, staged
+    /// through a texture of its own when the image stages uploads.
     #[cfg(wasm_unknown)]
     fn copy_external_image(
         &mut self,
@@ -490,6 +564,62 @@ impl WGPURenderer {
         let Texture::Internal(texture) = &image.texture else {
             return Err(crate::ErrorKind::UnsupportedOperation);
         };
+        let extent = wgpu::Extent3d {
+            width: size.width as _,
+            height: size.height as _,
+            depth_or_array_layers: 1,
+        };
+        if extent.width == 0 || extent.height == 0 {
+            return Ok(());
+        }
+        // An image no frame has drawn yet (`Canvas::create_image` from an
+        // element) cannot be overwritten by a frame's staged copies: the copy
+        // goes straight into it, after any upload staged before.
+        if self.stages_uploads(image) && image.flushes_at_alloc < self.flush_count {
+            // Staged as a byte upload is. The queue copies the source now,
+            // and copying it straight into the image would run before a frame
+            // flushed earlier and submitted later, whose own staged copies
+            // would then land over it for good. So the queue copies it into a
+            // texture of its own, and the next frame's command buffer copies
+            // that into the image after the uploads staged before it.
+            let staging = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("femtovg image source"),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: texture.format(),
+                // copy_external_image_to_texture needs COPY_DST and RENDER_ATTACHMENT.
+                usage: wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            self.queue.copy_external_image_to_texture(
+                &wgpu::CopyExternalImageSourceInfo {
+                    source,
+                    origin: wgpu::Origin2d::ZERO,
+                    flip_y: false,
+                },
+                wgpu::CopyExternalImageDestInfo {
+                    texture: &staging,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                    color_space: wgpu::PredefinedColorSpace::Srgb,
+                    premultiplied_alpha: true,
+                },
+                extent,
+            );
+            self.pending_copies.push(PendingCopy {
+                source: CopySource::Texture(staging),
+                texture: texture.clone(),
+                origin: [x as u32, y as u32],
+                size: [extent.width, extent.height],
+            });
+            return Ok(());
+        }
+        self.submit_pending_copies_of(texture);
         self.queue.copy_external_image_to_texture(
             &wgpu::CopyExternalImageSourceInfo {
                 source,
@@ -508,11 +638,7 @@ impl WGPURenderer {
                 color_space: wgpu::PredefinedColorSpace::Srgb,
                 premultiplied_alpha: true,
             },
-            wgpu::Extent3d {
-                width: size.width as _,
-                height: size.height as _,
-                depth_or_array_layers: 1,
-            },
+            extent,
         );
         self.generate_mipmaps(texture);
         Ok(())
@@ -601,6 +727,8 @@ impl WGPURenderer {
         });
 
         Self {
+            staging_belt: wgpu::util::StagingBelt::new(device.clone(), STAGING_CHUNK_BYTES),
+            pending_copies: Vec::new(),
             device,
             queue,
 
@@ -617,7 +745,7 @@ impl WGPURenderer {
             fan_index_buffer,
             screen_stencil: TargetStencil::default(),
             stencil_buffer_for_textures: HashMap::new(),
-            viewport_bind_group_layout,
+            viewport_bind_groups: ViewportBindGroups::new(viewport_bind_group_layout),
             draw_layouts,
             pipeline_cache: Default::default(),
             slicing: None,
@@ -625,6 +753,79 @@ impl WGPURenderer {
             mipmaps: None,
             flush_count: 0,
             render_target_reader: RenderTargetReader::default(),
+        }
+    }
+
+    /// Whether an upload to `image` waits for the next frame's command buffer
+    /// (see `update_image`): an image the renderer made, without mip levels,
+    /// with slicing off.
+    fn stages_uploads(&self, image: &Image) -> bool {
+        matches!(&image.texture, Texture::Internal(texture) if texture.mip_level_count() == 1)
+            && image.owned
+            && self.slicing.is_none()
+    }
+
+    /// Submits the uploads staged since the last frame if any of them is to
+    /// `texture`: the queue copies an upload it is given before the next
+    /// frame's command buffer runs, so the ones staged before go first, and do
+    /// not land on what it copies.
+    fn submit_pending_copies_of(&mut self, texture: &wgpu::Texture) {
+        if self.pending_copies.iter().any(|copy| copy.texture == *texture) {
+            self.submit_pending_copies();
+        }
+    }
+
+    /// Submits every upload staged since the last frame on its own.
+    fn submit_pending_copies(&mut self) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        self.encode_pending_copies(&mut encoder);
+        self.staging_belt.finish_and_recall_on_submit(&encoder);
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Copies the uploads staged since the last frame into their images, in
+    /// the order they were made.
+    fn encode_pending_copies(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        for copy in self.pending_copies.drain(..) {
+            let destination = wgpu::TexelCopyTextureInfo {
+                texture: &copy.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: copy.origin[0],
+                    y: copy.origin[1],
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            };
+            let size = wgpu::Extent3d {
+                width: copy.size[0],
+                height: copy.size[1],
+                depth_or_array_layers: 1,
+            };
+            match &copy.source {
+                CopySource::Buffer {
+                    buffer,
+                    offset,
+                    bytes_per_row,
+                } => encoder.copy_buffer_to_texture(
+                    wgpu::TexelCopyBufferInfo {
+                        buffer,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: *offset,
+                            bytes_per_row: Some(*bytes_per_row),
+                            rows_per_image: None,
+                        },
+                    },
+                    destination,
+                    size,
+                ),
+                #[cfg(wasm_unknown)]
+                CopySource::Texture(source) => {
+                    encoder.copy_texture_to_texture(source.as_image_copy(), destination, size)
+                }
+            }
         }
     }
 
@@ -803,6 +1004,13 @@ impl WGPURenderer {
     /// [`SubmissionSlicing`]. `None`, the default, encodes the frame into the
     /// one command buffer that the flush returns.
     pub fn set_submission_slicing(&mut self, slicing: Option<SubmissionSlicing>) {
+        // Sliced frames upload through the queue (see `SubmissionSlicing`), so
+        // uploads staged before, waiting for the next frame's command buffer,
+        // go now: a short sliced frame's one command buffer may be held while
+        // the queue takes a later upload to the same image.
+        if slicing.is_some() && self.slicing.is_none() && !self.pending_copies.is_empty() {
+            self.submit_pending_copies();
+        }
         self.slicing = slicing;
     }
 
@@ -968,8 +1176,21 @@ impl Renderer for WGPURenderer {
             VERTEX_BUFFER_LABEL,
             VERTEX_BUFFER_USAGE,
         );
-        if !vertex_bytes.is_empty() {
-            self.queue.write_buffer(&self.vertex_buffer, 0, vertex_bytes);
+        // Unsliced, the copies come first in the frame's own command buffer, so a frame flushed before the one
+        // before it is submitted cannot overwrite what that one draws with. Sliced, the frame is submitted during
+        // the flush and uploads through the queue, ahead of its first slice (see `SubmissionSlicing`).
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        self.encode_pending_copies(&mut encoder);
+        if self.slicing.is_some() {
+            if !vertex_bytes.is_empty() {
+                self.queue.write_buffer(&self.vertex_buffer, 0, vertex_bytes);
+            }
+        } else if let Some(size) = wgpu::BufferSize::new(vertex_bytes.len() as u64) {
+            self.staging_belt
+                .write_buffer(&mut encoder, &self.vertex_buffer, 0, size)
+                .copy_from_slice(vertex_bytes);
         }
         let vertex_buffer = self.vertex_buffer.clone();
         self.fan_indices.build(&commands);
@@ -981,8 +1202,14 @@ impl Renderer for WGPURenderer {
             FAN_INDEX_LABEL,
             FAN_INDEX_USAGE,
         );
-        if !fan_index_bytes.is_empty() {
-            self.queue.write_buffer(&self.fan_index_buffer, 0, fan_index_bytes);
+        if self.slicing.is_some() {
+            if !fan_index_bytes.is_empty() {
+                self.queue.write_buffer(&self.fan_index_buffer, 0, fan_index_bytes);
+            }
+        } else if let Some(size) = wgpu::BufferSize::new(fan_index_bytes.len() as u64) {
+            self.staging_belt
+                .write_buffer(&mut encoder, &self.fan_index_buffer, 0, size)
+                .copy_from_slice(fan_index_bytes);
         }
 
         // A screen of another size starts over: its clip plane went with the old stencil.
@@ -996,16 +1223,32 @@ impl Renderer for WGPURenderer {
         }
         let stencil_uses = commands.iter().map(StencilUse::of).collect();
 
+        // Unsliced, the frame's one command buffer copies the uniform slots first, written as the commands are
+        // recorded; the slots past the last one used are copied too, and never read. Sliced, each slice's slots
+        // are written on the queue ahead of its submit.
+        let uniforms = match self.slicing {
+            None => FrameUniforms::Mapped {
+                slots: self.staging_belt.write_buffer(
+                    &mut encoder,
+                    &self.uniform_buffer,
+                    0,
+                    wgpu::BufferSize::new(needed_slots * self.uniform_stride).expect("a frame has commands"),
+                ),
+                bytes: 0,
+            },
+            Some(_) => FrameUniforms::Staged {
+                staging: Vec::new(),
+                written: 0,
+            },
+        };
         let frame = FrameEncoder {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            encoder: self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
+            encoder,
+            staging_belt: &mut self.staging_belt,
             uniform_buffer: self.uniform_buffer.clone(),
             uniform_stride: self.uniform_stride,
-            uniform_staging: Vec::new(),
-            uniforms_written: 0,
+            uniforms,
             slicing: self.slicing,
             slices: Vec::new(),
             passes: 0,
@@ -1015,7 +1258,8 @@ impl Renderer for WGPURenderer {
             frame,
             output.format,
             self.screen_view,
-            self.viewport_bind_group_layout.clone(),
+            &mut self.viewport_bind_groups,
+            self.flush_count,
             &mut self.screen_stencil,
             &mut self.stencil_buffer_for_textures,
             stencil_uses,
@@ -1229,13 +1473,15 @@ impl Renderer for WGPURenderer {
             }
         }
 
-        // The uniform slots are uploaded ahead of the caller's submit.
         let (command_buffer, slices) = render_pass_builder.finish();
         self.last_frame_slices = slices;
 
+        self.viewport_bind_groups.evict(self.flush_count);
         evict_least_recently_used(
             &mut self.pipeline_cache.borrow_mut(),
             self.flush_count,
+            PIPELINE_CACHE_CAPACITY,
+            PIPELINE_RECENT_FLUSHES,
             |cached_pipeline| cached_pipeline.last_used,
         );
 
@@ -1265,6 +1511,8 @@ impl Renderer for WGPURenderer {
                 view_formats: &[],
             })),
             info,
+            owned: true,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1276,6 +1524,8 @@ impl Renderer for WGPURenderer {
         Ok(Image {
             texture: Texture::Internal(native_texture),
             info,
+            owned: false,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1287,6 +1537,8 @@ impl Renderer for WGPURenderer {
         Ok(Image {
             texture: Texture::External(external_texture),
             info,
+            owned: false,
+            flushes_at_alloc: self.flush_count,
         })
     }
 
@@ -1338,6 +1590,70 @@ impl Renderer for WGPURenderer {
         };
 
         if let Texture::Internal(texture) = &image.texture {
+            // An image without mip levels is copied at the start of the next frame's own command buffer,
+            // every upload in the order it was made, so that a frame draws the image as it was when the frame
+            // was flushed: from staging the belt reuses, or, for an upload larger than a chunk, from a buffer of
+            // its own, which the belt would keep once recalled. write_texture would copy an upload before every
+            // one staged before it. An image with mip levels keeps write_texture: the levels are generated
+            // from it at once; so does a caller's texture (`create_image_from_native_texture`), which takes the
+            // caller's own writes through the queue and may be destroyed by the caller. With slicing on, frames
+            // are submitted during their flush and upload through the queue, as they did before (see
+            // `SubmissionSlicing`).
+            let size = data.dimensions();
+            if self.stages_uploads(image) {
+                let row = bpp as u64 * size.width as u64;
+                let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as u64;
+                let padded = row.div_ceil(align) * align;
+                let total = padded * size.height as u64;
+                let Some(bytes_needed) = wgpu::BufferSize::new(total) else {
+                    return Ok(());
+                };
+                let write = |mut view: wgpu::BufferViewMut| {
+                    let (row, padded) = (row as usize, padded as usize);
+                    for (line, source) in bytes.chunks_exact(row).take(size.height).enumerate() {
+                        view.slice(line * padded..line * padded + row).copy_from_slice(source);
+                    }
+                };
+                let staged = (total <= STAGING_CHUNK_BYTES)
+                    .then(|| {
+                        let slice = self
+                            .staging_belt
+                            .allocate(bytes_needed, wgpu::BufferSize::new(align).expect("not zero"));
+                        let view = slice.get_mapped_range_mut().ok()?;
+                        write(view);
+                        Some((slice.buffer().clone(), slice.offset()))
+                    })
+                    .flatten();
+                let (buffer, offset) = match staged {
+                    Some(staged) => staged,
+                    None => {
+                        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("femtovg image upload"),
+                            size: total,
+                            usage: wgpu::BufferUsages::COPY_SRC,
+                            mapped_at_creation: true,
+                        });
+                        let view = buffer.get_mapped_range_mut(..).map_err(|error| {
+                            crate::ErrorKind::GeneralError(format!("mapping an image upload: {error}"))
+                        })?;
+                        write(view);
+                        buffer.unmap();
+                        (buffer, 0)
+                    }
+                };
+                self.pending_copies.push(PendingCopy {
+                    source: CopySource::Buffer {
+                        buffer,
+                        offset,
+                        bytes_per_row: padded as u32,
+                    },
+                    texture: texture.clone(),
+                    origin: [x as u32, y as u32],
+                    size: [size.width as u32, size.height as u32],
+                });
+                return Ok(());
+            }
+            self.submit_pending_copies_of(texture);
             let mut target = texture.as_image_copy();
             target.origin.x = x as _;
             target.origin.y = y as _;
@@ -1416,14 +1732,16 @@ mod transient_cost_tests {
 /// pipeline mapper.
 /// The frame's command encoding: the encoder, the uniform slots staged for
 /// it, and, with slicing on, the command buffers submitted so far.
-struct FrameEncoder {
+struct FrameEncoder<'a> {
     device: wgpu::Device,
     queue: wgpu::Queue,
     encoder: wgpu::CommandEncoder,
+    /// The belt the frame's uploads are staged in, finished before each of
+    /// the frame's command buffers is: their copies read staging it maps.
+    staging_belt: &'a mut wgpu::util::StagingBelt,
     uniform_buffer: wgpu::Buffer,
     uniform_stride: u64,
-    uniform_staging: Vec<u8>,
-    uniforms_written: usize,
+    uniforms: FrameUniforms,
     slicing: Option<SubmissionSlicing>,
     /// Render passes in each command buffer submitted so far.
     slices: Vec<u32>,
@@ -1431,7 +1749,17 @@ struct FrameEncoder {
     passes: u32,
 }
 
-impl FrameEncoder {
+/// Where a frame stages its uniform slots.
+enum FrameUniforms {
+    /// Unsliced: in the belt, whose copy into the uniform buffer the frame's
+    /// one command buffer records first; the bytes of it used so far.
+    Mapped { slots: wgpu::BufferViewMut, bytes: usize },
+    /// Sliced: in memory, each slice's uploaded ahead of its submit, and how
+    /// many bytes have been.
+    Staged { staging: Vec<u8>, written: usize },
+}
+
+impl FrameEncoder<'_> {
     /// Counts a render pass about to begin on the encoder, which must hold
     /// no open pass; with slicing on, an encoder that already holds the
     /// configured passes is submitted first.
@@ -1451,6 +1779,9 @@ impl FrameEncoder {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor::default()),
         );
         self.write_uniforms();
+        // The first slice copies the image uploads staged while slicing was
+        // off from the belt; its chunks come back once the slice has run.
+        self.staging_belt.finish_and_recall_on_submit(&encoder);
         self.queue.submit(Some(encoder.finish()));
         self.slices.push(self.passes);
         self.passes = 0;
@@ -1458,28 +1789,47 @@ impl FrameEncoder {
 
     /// Stages one uniform slot.
     fn stage_uniforms(&mut self, uniforms: &[u8]) {
-        let end = self.uniform_staging.len() + self.uniform_stride as usize;
-        self.uniform_staging.extend_from_slice(uniforms);
-        self.uniform_staging.resize(end, 0);
-        debug_assert!(
-            self.uniform_staging.len() as u64 <= self.uniform_buffer.size(),
-            "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
-        );
+        let stride = self.uniform_stride as usize;
+        match &mut self.uniforms {
+            FrameUniforms::Mapped { slots, bytes } => {
+                let start = *bytes;
+                *bytes += stride;
+                debug_assert!(
+                    *bytes <= slots.len(),
+                    "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
+                );
+                slots.slice(start..start + uniforms.len()).copy_from_slice(uniforms);
+            }
+            FrameUniforms::Staged { staging, .. } => {
+                let end = staging.len() + stride;
+                staging.extend_from_slice(uniforms);
+                staging.resize(end, 0);
+                debug_assert!(
+                    staging.len() as u64 <= self.uniform_buffer.size(),
+                    "a command recorded more than UNIFORM_SLOTS_PER_COMMAND uniform slots"
+                );
+            }
+        }
     }
 
     /// The dynamic offset of the last staged slot.
     fn current_uniform_offset(&self) -> u32 {
-        (self.uniform_staging.len() - self.uniform_stride as usize) as u32
+        let used = match &self.uniforms {
+            FrameUniforms::Mapped { bytes, .. } => *bytes,
+            FrameUniforms::Staged { staging, .. } => staging.len(),
+        };
+        (used - self.uniform_stride as usize) as u32
     }
 
     /// Uploads the slots staged since the previous upload, ordered ahead of
-    /// the next submit.
+    /// the next submit; the frame's command buffer copies mapped ones itself.
     fn write_uniforms(&mut self) {
-        let pending = &self.uniform_staging[self.uniforms_written..];
-        if !pending.is_empty() {
-            self.queue
-                .write_buffer(&self.uniform_buffer, self.uniforms_written as u64, pending);
-            self.uniforms_written = self.uniform_staging.len();
+        if let FrameUniforms::Staged { staging, written } = &mut self.uniforms {
+            let pending = &staging[*written..];
+            if !pending.is_empty() {
+                self.queue.write_buffer(&self.uniform_buffer, *written as u64, pending);
+                *written = staging.len();
+            }
         }
     }
 
@@ -1487,6 +1837,13 @@ impl FrameEncoder {
     /// every command buffer, that one last.
     fn finish(mut self) -> (wgpu::CommandBuffer, Vec<u32>) {
         self.write_uniforms();
+        // The view goes before the belt unmaps its chunk, which comes back for
+        // reuse once the command buffer has been submitted and run.
+        self.uniforms = FrameUniforms::Staged {
+            staging: Vec::new(),
+            written: 0,
+        };
+        self.staging_belt.finish_and_recall_on_submit(&self.encoder);
         self.slices.push(self.passes);
         (self.encoder.finish(), self.slices)
     }
@@ -2817,6 +3174,70 @@ impl BindGroupState {
     }
 }
 
+/// Viewport bind groups kept between flushes beyond those the last one bound. One costs about 5 KB to keep and
+/// 10 microseconds to make again.
+const VIEWPORT_BIND_GROUP_CAPACITY: usize = 128;
+
+/// The viewport uniform of each render target size, bound as group 0 by every
+/// pass on a target of that size. A frame's targets repeat their sizes, within
+/// the frame and from one frame or flush to the next, so the uniform and bind
+/// group made for a size are kept: up to `VIEWPORT_BIND_GROUP_CAPACITY` sizes
+/// beyond those the last flush bound, the least recently bound dropped first.
+#[derive(Debug)]
+struct ViewportBindGroups {
+    layout: wgpu::BindGroupLayout,
+    /// The bind group of each size and the last flush that bound it.
+    groups: HashMap<[u32; 2], (wgpu::BindGroup, u64)>,
+}
+
+impl ViewportBindGroups {
+    fn new(layout: wgpu::BindGroupLayout) -> Self {
+        Self {
+            layout,
+            groups: HashMap::new(),
+        }
+    }
+
+    fn get(&mut self, device: &wgpu::Device, viewport: [f32; 2], flush: u64) -> wgpu::BindGroup {
+        let (group, last_used) = self
+            .groups
+            .entry(viewport.map(|extent| extent as u32))
+            .or_insert_with(|| (Self::create(device, &self.layout, viewport), flush));
+        *last_used = flush;
+        group.clone()
+    }
+
+    fn evict(&mut self, flush: u64) {
+        evict_least_recently_used(
+            &mut self.groups,
+            flush,
+            VIEWPORT_BIND_GROUP_CAPACITY,
+            0,
+            |(_, last_used)| *last_used,
+        );
+    }
+
+    fn create(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, viewport: [f32; 2]) -> wgpu::BindGroup {
+        // WebGL requires 16 byte alignment for uniforms, so pad accordingly.
+        let viewport_padded: [f32; 4] = [viewport[0], viewport[1], 0.0, 0.0];
+
+        let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Uniform Buffer for Viewport"),
+            contents: bytemuck::cast_slice(&viewport_padded),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: view_buf.as_entire_binding(),
+            }],
+            label: None,
+        })
+    }
+}
+
 /// A render target's stencil: the texture its passes attach, made by the first
 /// pass that needs one, and whether a clip plane armed in it outlives the pass
 /// that wrote it. A fill zeroes the winding it counted before the next command
@@ -2997,7 +3418,7 @@ fn a_pass_takes_the_stencil_only_for_commands_that_use_it_and_keeps_only_an_arme
 
 struct RenderPassBuilder<'a> {
     device: wgpu::Device,
-    frame: FrameEncoder,
+    frame: FrameEncoder<'a>,
     surface_view: wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
     texture_view: wgpu::TextureView,
@@ -3009,7 +3430,8 @@ struct RenderPassBuilder<'a> {
     vertex_buffer: wgpu::Buffer,
     fan_indices: wgpu::Buffer,
     rendering_to_texture: bool,
-    viewport_bind_group_layout: wgpu::BindGroupLayout,
+    viewport_bind_groups: &'a mut ViewportBindGroups,
+    flush_count: u64,
     rpass: Option<wgpu::RenderPass<'a>>,
     /// The load op the current target's pass begins with, while no draw has
     /// begun it: a clear of the whole target before any draw is one, see
@@ -3040,10 +3462,11 @@ struct RenderPassBuilder<'a> {
 impl<'a> RenderPassBuilder<'a> {
     fn new(
         device: wgpu::Device,
-        frame: FrameEncoder,
+        frame: FrameEncoder<'a>,
         screen_surface_format: wgpu::TextureFormat,
         screen_view: [f32; 2],
-        viewport_bind_group_layout: wgpu::BindGroupLayout,
+        viewport_bind_groups: &'a mut ViewportBindGroups,
+        flush_count: u64,
         screen_stencil: &'a mut TargetStencil,
         stencil_buffer_for_textures: &'a mut HashMap<wgpu::Texture, TargetStencil>,
         stencil_uses: Vec<StencilUse>,
@@ -3051,7 +3474,7 @@ impl<'a> RenderPassBuilder<'a> {
         vertex_buffer: wgpu::Buffer,
         fan_indices: wgpu::Buffer,
     ) -> Self {
-        let viewport_bind_group = Self::create_viewport_bind_group(&device, &screen_view, &viewport_bind_group_layout);
+        let viewport_bind_group = viewport_bind_groups.get(&device, screen_view, flush_count);
         Self {
             device: device.clone(),
             frame,
@@ -3064,7 +3487,8 @@ impl<'a> RenderPassBuilder<'a> {
             vertex_buffer,
             fan_indices,
             rendering_to_texture: false,
-            viewport_bind_group_layout,
+            viewport_bind_groups,
+            flush_count,
             rpass: None,
             pending_load: None,
             screen_stencil,
@@ -3124,34 +3548,7 @@ impl<'a> RenderPassBuilder<'a> {
             return;
         }
         self.viewport = viewport;
-        self.viewport_bind_group =
-            Self::create_viewport_bind_group(&self.device, &self.viewport, &self.viewport_bind_group_layout);
-    }
-
-    fn create_viewport_bind_group(
-        device: &wgpu::Device,
-        viewport: &[f32; 2],
-        viewport_bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> wgpu::BindGroup {
-        // WebGL requires 16 byte alignment for uniforms, so pad accordingly.
-        let viewport_padded: [f32; 4] = [viewport[0], viewport[1], 0.0, 0.0];
-
-        let view_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Uniform Buffer for Viewport"),
-            contents: bytemuck::cast_slice(&viewport_padded),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let viewport_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: viewport_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: view_buf.as_entire_binding(),
-            }],
-            label: None,
-        });
-
-        viewport_bind_group
+        self.viewport_bind_group = self.viewport_bind_groups.get(&self.device, viewport, self.flush_count);
     }
 
     fn create_binding_resource_and_sampler(

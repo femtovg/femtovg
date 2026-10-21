@@ -124,6 +124,21 @@ All notable changes to this project will be documented in this file.
   hit-tested still being drawn and hit-tested as the old path under the same
   transform: the flattened copy a `Path` keeps was not dropped when verbs were
   added.
+- Fixed WGPU drawing performance when a frame with the vertices, uniforms and
+  images of a later one when the later frame was flushed before the earlier
+  one was submitted. A frame's command buffer now carries its own uploads,
+  in the order they were made, through staging reused from frame to frame
+  (an image upload larger than a megabyte has a buffer of its own, and an
+  image or canvas element on the web a texture of its own); an image with
+  mipmaps, or one wrapping a texture of the caller's
+  (`create_image_from_native_texture`), is still uploaded at once. With
+  submission slicing on, whose frames are submitted during their flush,
+  uploads go through the queue ahead of the frame, as before.
+- The WGPU backend keeps the viewport uniform of each render target size
+  from one flush to the next instead of creating it again for every pass
+  on a target of another size, up to a thousand times a frame on pages
+  with many layers, which took a fifth of the time such a frame takes to
+  encode.
 - Fixed the WGPU backend rebuilding render pipelines every frame when a frame
   takes several flushes: each flush dropped every pipeline it did not use.
   Pipelines now stay cached across flushes, and past 512 the least recently
