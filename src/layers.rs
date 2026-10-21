@@ -146,6 +146,23 @@ impl LayerEffects {
         self.blend = Some(mode);
         self
     }
+
+    /// The colour-space conversion this layer's composite applies in place
+    /// of its filter chain: a chain that is one conversion and nothing else
+    /// converts each texel as the composite samples it, rounded to 8 bits as
+    /// the conversion's pass stores its result - the same pixels with no pass
+    /// and no image for the result. Not with a blend mode, whose pass reads
+    /// the chain's result.
+    pub(crate) fn composite_transfer(&self) -> Option<Transfer> {
+        if self.blend.is_some_and(|mode| mode != BlendMode::Normal) {
+            return None;
+        }
+        match *self.filters {
+            [ImageFilter::LinearRgbToSrgb] => Some(Transfer::ToSrgb),
+            [ImageFilter::SrgbToLinearRgb] => Some(Transfer::ToLinearRgb),
+            _ => None,
+        }
+    }
 }
 
 // Hand-written so the default is `new()`'s no-op effects: a derived Default
@@ -496,7 +513,9 @@ where
                 }
             }
 
-            if !record.discard && !effects.filters.is_empty() {
+            // A chain the composite runs (`composite_transfer`) needs no
+            // images and no filter work.
+            if !record.discard && !effects.filters.is_empty() && effects.composite_transfer().is_none() {
                 let replacing = effects
                     .filters
                     .iter()
@@ -682,7 +701,8 @@ where
             record.height as f32,
             0.0,
             tint,
-        );
+        )
+        .with_transfer(record.effects.composite_transfer());
         layer_paint.set_anti_alias(false);
 
         // Composite in plain device space at the captured origin; the state
@@ -769,15 +789,12 @@ where
             source_alpha: alpha,
             contribution: true,
         };
-        self.filter_image_with_scratch(
-            target,
-            blend,
-            source,
-            None,
-            Some((images.backdrop, pass)),
-            Fused::default(),
-        )
-        .then_some(target)
+        let draw = PassDraw {
+            backdrop: Some((images.backdrop, pass)),
+            ..PassDraw::default()
+        };
+        self.filter_image_with_scratch(target, blend, source, None, draw)
+            .then_some(target)
     }
 
     /// Puts the current state into the shape every offscreen pass draws
@@ -807,7 +824,7 @@ where
         self.state_mut().alpha = 1.0;
         let mut rect = Path::new();
         rect.rect(x, y, width, height);
-        self.fill_path_internal(&rect, paint, false, FillRule::NonZero);
+        self.fill_path_internal(&rect, None, paint, false, FillRule::NonZero);
         self.state_mut().transform = saved_transform;
         self.state_mut().alpha = saved_alpha;
     }
@@ -985,8 +1002,7 @@ where
                             ImageFilter::luminance_to_alpha(),
                             images.normalized,
                             None,
-                            None,
-                            Fused::default(),
+                            PassDraw::default(),
                         );
                         converted
                     }
@@ -1000,7 +1016,7 @@ where
                 let coverage_paint = Paint::image(coverage, 0.0, 0.0, width, height, 0.0, 1.0);
                 let mut store = Path::new();
                 store.rect(0.0, 0.0, width, height);
-                canvas.fill_path_internal(&store, &coverage_paint.flavor, false, FillRule::NonZero);
+                canvas.fill_path_internal(&store, None, &coverage_paint.flavor, false, FillRule::NonZero);
             },
         );
     }
@@ -1048,7 +1064,7 @@ fn a_rounded_scissor_clips_a_layer_once_at_its_composite() {
         canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 5.0); // centered on root (30, 20)
         assert!(canvas.begin_layer(effects));
         assert_eq!(canvas.layers.last().unwrap().origin, origin);
-        fill_rect_with_current_scissor(&mut canvas);
+        fill_across_current_scissor(&mut canvas);
         {
             let commands = recorded_commands.borrow();
             let params = first_draw_params(&commands);
@@ -1230,6 +1246,50 @@ fn a_layer_short_of_its_chain_scratch_budget_keeps_its_capture() {
         .expect("a composite was recorded");
     assert_eq!(composite.image, Some(target));
     assert_eq!(canvas.transients.free.len(), 3);
+}
+
+/// A layer whose chain is one colour-space conversion runs it in its
+/// composite: it holds its capture alone and no filter work, and the
+/// composite's image paint carries the conversion. With a blend mode the
+/// chain keeps its pass, whose result the blend reads.
+#[test]
+fn a_lone_conversion_runs_in_the_layer_composite() {
+    use crate::{BlendMode, ImageFilter};
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    for (filter, transfer) in [
+        (ImageFilter::LinearRgbToSrgb, Transfer::ToSrgb),
+        (ImageFilter::SrgbToLinearRgb, Transfer::ToLinearRgb),
+    ] {
+        assert!(canvas.begin_layer(&LayerEffects::new().with_filters(&[filter])));
+        let record = canvas.layers.last().unwrap();
+        assert!(record.filter_images.is_none(), "{filter:?}");
+        assert_eq!(record.reserved_filter_work, 0, "{filter:?}");
+        assert_eq!(canvas.transients.images.len(), 1, "{filter:?}: the capture only");
+        canvas.end_layer();
+        let params = canvas
+            .commands
+            .iter()
+            .rev()
+            .find_map(|c| match (&c.cmd_type, c.image) {
+                (CommandType::ConvexFill { params } | CommandType::Triangles { params }, Some(_)) => Some(*params),
+                _ => None,
+            })
+            .expect("a composite was recorded");
+        assert_eq!(params.image_transfer, Some(transfer), "{filter:?}");
+        canvas.flush_to_output(());
+    }
+
+    let blended = LayerEffects::new()
+        .with_filters(&[ImageFilter::LinearRgbToSrgb])
+        .with_blend(BlendMode::Multiply);
+    assert_eq!(blended.composite_transfer(), None);
+    assert!(canvas.begin_layer(&blended));
+    assert!(
+        canvas.layers.last().unwrap().filter_images.is_some(),
+        "the chain keeps its pass"
+    );
+    canvas.end_layer();
 }
 
 /// A filtered layer's reservation is sized by its pass plan: the result, one

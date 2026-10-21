@@ -1,7 +1,7 @@
 
 precision highp float;
 
-#define UNIFORMARRAY_SIZE 14
+#define UNIFORMARRAY_SIZE 16
 
 #define TAU 6.28318530717958647692528676655900577
 
@@ -26,9 +26,17 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 #define imageBlurFilterCoeff frag[12].xyz
 #define scissorRadius frag[12].w
 #define conicStartAngle frag[13].x
+#define clipInner frag[13].zw
+#define clipLinear frag[14]
+#define clipOffset frag[15].xy
+#define clipOuter frag[15].zw
+// An image paint's transfer (0 none, 1 to sRGB, 2 to linearRGB) in the paint
+// matrix's first column's w, which no image paint reads.
+#define imageTransfer int(frag[3].w)
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
+uniform sampler2D cliptex;
 uniform vec2 viewSize;
 
 varying vec2 ftcoord;
@@ -51,6 +59,7 @@ varying vec2 fpos;
  #define SHADER_TYPE_FilterImageBlend 15
  #define SHADER_TYPE_FilterImageMorphology 16
  #define SHADER_TYPE_FilterImageOffset 17
+ #define SHADER_TYPE_FillBlur 18
 
 float sdroundrect(vec2 pt, vec2 ext, float rad) {
     vec2 ext2 = ext - vec2(rad,rad);
@@ -70,6 +79,54 @@ float scissorMask(vec2 p) {
     sc = vec2(0.5,0.5) - sc * scissorScale;
     return clamp(sc.x,0.0,1.0) * clamp(sc.y,0.0,1.0);
 }
+
+#ifdef CLIP_MASK
+// The clip taken as a coverage mask, in the programs of the draws under one:
+// the texel under the fragment, of a mask that holds one for each pixel of
+// the clip's bounds and nothing along its border - what a fragment past the
+// mask reads. Where the mask's corner lies, the pixels it spans and what one
+// of them is of its image, which is no smaller, are the halves of the
+// scissor matrix's columns that the scissor does not read. An
+// operation that coverage cannot bound takes the pixels the clip covers by
+// half or more, whole.
+float clipMaskCoverage(vec2 p) {
+    vec2 at = clamp(p - frag[0].zw, vec2(0.5, 0.5), frag[1].zw - vec2(0.5, 0.5));
+    float coverage = texture2D(cliptex, at * frag[2].zw).r;
+    if (frag[13].y != 0.0) {
+        if (coverage < 0.5) {
+            discard;
+        }
+        return 1.0;
+    }
+    return coverage;
+}
+#endif
+
+#ifdef CLIP_SHAPE
+// The clip taken as a shape, in the programs of the draws under one:
+// coverage of a box with elliptical corners, in a frame where one unit is
+// one fringe width across each side. clipInner is where the corners'
+// ellipses are centered and clipOuter the half extents plus half a fringe.
+// Past a corner's center the distance is the first-order one to its ellipse,
+// exact for a circle: k1 is one on the ellipse, and its gradient in device
+// pixels is g along the frame's rows - unit vectors, at a right angle only
+// without a skew. A box with square corners has their centers out of reach.
+float clipMask(vec2 p) {
+    vec2 at = vec2(dot(clipLinear.xy, p), dot(clipLinear.zw, p)) + clipOffset;
+    vec2 reach = abs(at);
+    vec2 corner = reach - clipInner;
+    if (corner.x > 0.0 && corner.y > 0.0) {
+        vec2 radii = clipOuter - vec2(0.5, 0.5) - clipInner;
+        vec2 k = corner / radii;
+        float k1 = length(k);
+        vec2 g = k / radii;
+        float lean = dot(clipLinear.xy, clipLinear.zw) * sign(at.x) * sign(at.y);
+        return clamp(0.5 - (k1 - 1.0) * k1 / sqrt(dot(g, g) + 2.0 * g.x * g.y * lean), 0.0, 1.0);
+    }
+    vec2 cover = clamp(clipOuter - reach, 0.0, 1.0);
+    return cover.x * cover.y;
+}
+#endif
 
 #ifdef EDGE_AA
 // Stroke - from [0..1] to clipped pyramid, where the slope is 1px.
@@ -223,6 +280,36 @@ vec4 renderImageGradientTwoPointRadial() {
     return ditherGradient(texture2D(tex, vec2(d, 0.0)));
 }
 
+// The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
+// the unpremultiplied color, alpha untouched: to sRGB when toSrgb, else to
+// linearRGB.
+vec4 transferColor(vec4 c, bool toSrgb) {
+    if (c.a > 0.0) {
+        c.rgb /= c.a;
+    }
+    vec3 x = clamp(c.rgb, 0.0, 1.0);
+    vec3 y;
+    if (toSrgb) {
+        // mix evaluates both sides: keep pow off 0, where an exp2(log2) under fast math can give a NaN that
+        // mix carries even at weight 0. The clamp only touches the side step leaves out.
+        y = mix(x * 12.92, 1.055 * pow(max(x, vec3(0.0031308)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, x));
+    } else {
+        y = mix(x / 12.92, pow((x + 0.055) / 1.055, vec3(2.4)), step(0.04045, x));
+    }
+    return vec4(y * c.a, c.a);
+}
+
+// A sampled image texel as the paint uses it: premultiplied, converted by
+// the paint's transfer if it has one - rounded to 8 bits, as the transfer's
+// pass stores its result - then tinted.
+vec4 paintTexel(vec4 color) {
+    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
+    if (texType == 2) color = vec4(color.x);
+    if (imageTransfer != 0) color = floor(transferColor(color, imageTransfer == 1) * 255.0 + 0.5) / 255.0;
+    // Apply color tint and alpha.
+    return color * innerCol;
+}
+
 vec4 renderImage() {
     // Calculate color from texture
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy / extent;
@@ -230,23 +317,11 @@ vec4 renderImage() {
     // Half a level toward the larger mip: browsers minify sharper than plain
     // trilinear (Chromium samples the larger level, Firefox downsamples
     // directly); no effect without mipmaps or under magnification.
-    vec4 color = texture2D(tex, pt, -0.5);
-
-    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-    if (texType == 2) color = vec4(color.x);
-
-    // Apply color tint and alpha.
-    color *= innerCol;
-    return color;
+    return paintTexel(texture2D(tex, pt, -0.5));
 }
 
 vec4 renderPlainTextureCopy() {
-    vec4 color = texture2D(tex, ftcoord, -0.5);
-    if (texType == 1) color = vec4(color.xyz * color.w, color.w);
-    if (texType == 2) color = vec4(color.x);
-    // Apply color tint and alpha.
-    color *= innerCol;
-    return color;
+    return paintTexel(texture2D(tex, ftcoord, -0.5));
 }
 
 // A blur tap, premultiplied: a straight-alpha source is converted per tap,
@@ -254,12 +329,17 @@ vec4 renderPlainTextureCopy() {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades.
+// weight stays in the sum, so an edge fades. A blur's own draws clamp to the
+// edge instead: their reach and a fill's fringe pass the source's edges.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 vec4 blurTap(vec2 pos) {
     vec2 uv = pos / extent;
+#if SELECT_SHADER == SHADER_TYPE_FillBlur
+    vec2 inside = vec2(1.0);
+#else
     vec2 inside = step(vec2(0.0), uv) * step(uv, vec2(1.0));
+#endif
     vec4 color = texture2D(tex, uv);
     if (texType == 1) color = vec4(color.xyz * color.w, color.w);
     if (radius > 0.5) color = vec4(0.0, 0.0, 0.0, color.w);
@@ -270,12 +350,14 @@ vec4 blurTap(vec2 pos) {
 // to a premultiplied color.
 vec4 colorMatrixOn(vec4 premultiplied);
 
-vec4 renderFilteredImage() {
+// The Gaussian along imageBlurFilterDirection, centered on `center` in
+// source pixels.
+vec4 blurAt(vec2 center) {
     float sampleCount = ceil(3.0 * imageBlurFilterSigma);
 
     vec3 gaussian_coeff = imageBlurFilterCoeff;
 
-    vec4 color_sum = blurTap(fpos.xy) * gaussian_coeff.x;
+    vec4 color_sum = blurTap(center) * gaussian_coeff.x;
     float coefficient_sum = gaussian_coeff.x;
     gaussian_coeff.xy *= gaussian_coeff.yz;
 
@@ -287,8 +369,8 @@ vec4 renderFilteredImage() {
         if (i >= sampleCount) {
             break;
         }
-        color_sum += blurTap(fpos.xy - i * imageBlurFilterDirection) * gaussian_coeff.x;
-        color_sum += blurTap(fpos.xy + i * imageBlurFilterDirection) * gaussian_coeff.x;
+        color_sum += blurTap(center - i * imageBlurFilterDirection) * gaussian_coeff.x;
+        color_sum += blurTap(center + i * imageBlurFilterDirection) * gaussian_coeff.x;
         coefficient_sum += 2.0 * gaussian_coeff.x;
 
         // Compute the coefficients incrementally:
@@ -296,13 +378,24 @@ vec4 renderFilteredImage() {
         gaussian_coeff.xy *= gaussian_coeff.yz;
     }
 
-    vec4 color = color_sum / coefficient_sum;
+    return color_sum / coefficient_sum;
+}
+
+vec4 renderFilteredImage() {
+    // The quad's texture coordinates say where in the source it samples.
+    vec4 color = blurAt(ftcoord);
 
     // A color matrix fused into this second draw.
     if (feather > 0.5) color = colorMatrixOn(color);
     if (texType == 2) color = vec4(color.x);
 
     return color;
+}
+
+// A blur's draw as a fill: its texture coordinates carry the fill's fringe,
+// so paintMat maps the fragment to where it samples.
+vec4 renderFillBlur() {
+    return blurAt((paintMat * vec3(fpos, 1.0)).xy) * innerCol.a;
 }
 
 // The filter passes, defined in filters.glsl.
@@ -368,11 +461,19 @@ void main(void) {
     result = renderMorphology();
 #elif SELECT_SHADER == SHADER_TYPE_FilterImageOffset
     result = renderOffset();
+#elif SELECT_SHADER == SHADER_TYPE_FillBlur
+    result = renderFillBlur();
 #else
 #error A shader variant must be selected with the SELECT_SHADER pre-processor variable
 #endif
 
     float scissor = scissorMask(fpos);
+#ifdef CLIP_SHAPE
+    scissor *= clipMask(fpos);
+#endif
+#ifdef CLIP_MASK
+    scissor *= clipMaskCoverage(fpos);
+#endif
 
 #ifdef ENABLE_GLYPH_TEXTURE
 #if SELECT_SHADER != SHADER_TYPE_FilterImageBlend

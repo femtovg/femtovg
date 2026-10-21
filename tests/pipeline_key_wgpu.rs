@@ -1,8 +1,9 @@
-//! The WGPU backend builds a render pipeline only from fixed-function state:
-//! blend, topology, cull mode, stencil and render target. The shader type and
-//! the glyph texture reach the shader through the uniform and the bind group,
-//! so a pipeline cache keyed on them built identical pipelines once per shader
-//! type, and again for glyph quads.
+//! The WGPU backend builds a render pipeline only from fixed-function state -
+//! blend, topology, cull mode, stencil and render target - and from whether
+//! the draw is under a clip shape, which has a fragment entry point of its
+//! own. The shader type and the glyph texture reach the shader through the
+//! uniform and the bind group, so a pipeline cache keyed on them built
+//! identical pipelines once per shader type, and again for glyph quads.
 //!
 //! Live pipelines are read from wgpu's internal counters, enabled by the
 //! `counters` feature on the `wgpu` dev-dependency. Feature unification also
@@ -11,60 +12,13 @@
 #![cfg(feature = "wgpu")]
 
 use femtovg::{
-    renderer::WGPURenderer, Canvas, Color, DrawCommand, GlyphDrawCommands, ImageFlags, Paint, Path, PixelFormat, Quad,
+    renderer::WGPURenderer, Canvas, Color, DrawCommand, FillRule, GlyphDrawCommands, ImageFlags, Paint, Path,
+    PixelFormat, Quad,
 };
 
 mod common;
 use common::headless_device;
-
-/// Large enough to hold the 48 px square at (8, 8); the tests count pipelines, not pixels.
-const SIZE: u32 = 64;
-
-fn target(device: &wgpu::Device) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("pipeline key target"),
-        size: wgpu::Extent3d {
-            width: SIZE,
-            height: SIZE,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    })
-}
-
-fn rect() -> Path {
-    let mut path = Path::new();
-    path.rect(8.0, 8.0, 48.0, 48.0);
-    path
-}
-
-/// Flushes `canvas` into `target` and returns how many render pipelines are alive on `device`.
-fn live_pipelines_after_flush(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    canvas: &mut Canvas<WGPURenderer>,
-    target: &wgpu::Texture,
-) -> isize {
-    let commands = canvas
-        .flush_to_output(target)
-        .expect("flush_to_output produced no command buffer for a frame with draws");
-    queue.submit([commands]);
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .expect("device poll failed");
-    let live = device.get_internal_counters().hal.render_pipelines.read();
-    // Without the `counters` feature every counter reads zero, and the tests' comparisons would pass vacuously.
-    assert!(
-        live > 0,
-        "no live render pipelines counted; is wgpu's `counters` feature on?"
-    );
-    live
-}
+use common::pipelines::{live_pipelines_after_flush, rect, target, SIZE};
 
 /// Filling one rectangle with each kind of paint, eight shader types between
 /// them, needs no pipeline beyond those a solid fill of it needs.
@@ -107,6 +61,49 @@ fn fills_that_differ_only_in_paint_share_their_pipelines() {
     assert_eq!(
         every_paint, solid_only,
         "a solid fill needs {solid_only} pipelines, but the same fill in every kind of paint left {every_paint} alive"
+    );
+}
+
+/// A fill under a clip shape runs the fragment entry point that evaluates the
+/// shape, so it needs the pipelines of the fill once more; the fill outside
+/// the shape keeps its own, which evaluate none. The fill is a triangle
+/// across the shape's edge: a box that covers the shape would be drawn as
+/// a quad with no fringe, and a fill inside the shape with no clip at all.
+#[test]
+fn a_fill_under_a_clip_shape_has_pipelines_of_its_own() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let target = target(&device);
+    let mut canvas = Canvas::new(WGPURenderer::new(device.clone(), queue.clone())).expect("canvas");
+    canvas.set_size(SIZE, SIZE, 1.0);
+    let solid = Paint::color(Color::rgb(255, 0, 0));
+    let mut triangle = Path::new();
+    triangle.move_to(8.0, 8.0);
+    triangle.line_to(56.0, 8.0);
+    triangle.line_to(8.0, 56.0);
+    triangle.close();
+
+    canvas.fill_path(&triangle, &solid);
+    let fill_only = live_pipelines_after_flush(&device, &queue, &mut canvas, &target);
+
+    canvas.fill_path(&triangle, &solid);
+    canvas.save();
+    let mut clip = Path::new();
+    clip.circle(32.0, 32.0, 20.0);
+    canvas.clip_path(&clip, FillRule::NonZero);
+    canvas.fill_path(&triangle, &solid);
+    canvas.fill_path(
+        &triangle,
+        &Paint::linear_gradient(8.0, 0.0, 56.0, 0.0, Color::white(), Color::black()),
+    );
+    canvas.restore();
+    let with_shape = live_pipelines_after_flush(&device, &queue, &mut canvas, &target);
+
+    assert_eq!(
+        with_shape,
+        2 * fill_only,
+        "a fill needs {fill_only} pipelines, and the same fill under a clip shape as well left {with_shape} alive"
     );
 }
 

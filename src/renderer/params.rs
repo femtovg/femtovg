@@ -1,6 +1,7 @@
 use crate::{
+    clip::{ClipCoverage, MaskCoverage},
     geometry::Position,
-    paint::{GlyphTexture, GradientColors},
+    paint::{GlyphTexture, GradientColors, Transfer},
     ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
@@ -27,9 +28,56 @@ pub struct Params {
     pub(crate) image_blur_filter_sigma: f32,
     pub(crate) image_blur_filter_coeff: [f32; 3],
     pub(crate) conic_start_angle: f32,
+    /// The clip shape in force on the draw's target, if any.
+    pub(crate) clip: Option<ClipCoverage>,
+    /// The coverage mask in force on the draw's target, if any.
+    pub(crate) clip_mask: Option<MaskCoverage>,
+    /// The colour-space conversion an image paint applies to each texel, if
+    /// any.
+    pub(crate) image_transfer: Option<Transfer>,
 }
 
 impl Params {
+    /// A blur's Gaussian of `sigma` along `direction`, a unit axis, over a
+    /// premultiplied source of `extent` pixels, drawn as a fill with no clip:
+    /// it samples where `sample_transform` maps each fragment's position and
+    /// clamps its taps at the source's edges.
+    pub(crate) fn blur_axis(extent: [f32; 2], sigma: f32, direction: [f32; 2], sample_transform: &Transform2D) -> Self {
+        let (coeff, sigma) = super::gaussian_blur_coefficients(sigma);
+        Self {
+            paint_mat: sample_transform.to_mat3x4(),
+            inner_col: [1.0; 4],
+            scissor_ext: [1.0, 1.0],
+            scissor_scale: [1.0, 1.0],
+            extent,
+            stroke_mult: 1.0,
+            stroke_thr: -1.0,
+            shader_type: ShaderType::FillBlur,
+            image_blur_filter_direction: direction,
+            image_blur_filter_sigma: sigma,
+            image_blur_filter_coeff: coeff,
+            ..Self::default()
+        }
+    }
+
+    /// A blur's last draw: [`blur_axis`](Self::blur_axis) along y, scaled by
+    /// `alpha` and clipped by `clip` as a fill is.
+    pub(crate) fn blur_fill(
+        extent: [f32; 2],
+        sigma: f32,
+        sample_transform: &Transform2D,
+        alpha: f32,
+        clip: &crate::clip::DrawClip,
+        fringe_width: f32,
+    ) -> Self {
+        let mut params = Self {
+            inner_col: [alpha; 4],
+            ..Self::blur_axis(extent, sigma, [0.0, 1.0], sample_transform)
+        };
+        params.set_scissor(&clip.scissor, fringe_width);
+        params.with_clip(clip)
+    }
+
     /// The parameters of a stencil-only pass - winding accumulation, clip
     /// arm/resolve: the stencil shader, no paint, no stroke threshold.
     pub(crate) fn stencil() -> Self {
@@ -38,6 +86,24 @@ impl Params {
             shader_type: ShaderType::Stencil,
             ..Self::default()
         }
+    }
+
+    /// Gates the draw by the clip shape and the coverage mask in force on
+    /// its target, if any.
+    pub(crate) fn with_clip(mut self, clip: &crate::clip::DrawClip) -> Self {
+        self.clip = clip.shape;
+        self.clip_mask = clip.mask;
+        self
+    }
+
+    /// Gates a stencil pass by the coverage mask in force when it is hard.
+    /// The fill's cover then discards the pixels the mask takes less than
+    /// half of, which leaves the stencil there as it was: the winding pass
+    /// has to discard the same pixels, or the count it leaves there is never
+    /// zeroed and the next fill takes it for its own.
+    pub(crate) fn with_hard_clip_mask(mut self, clip: &crate::clip::DrawClip) -> Self {
+        self.clip_mask = clip.mask.filter(|mask| mask.hard);
+        self
     }
 
     pub(crate) fn new<T>(
@@ -51,26 +117,7 @@ impl Params {
         stroke_thr: f32,
     ) -> Self {
         let mut params = Self::default();
-
-        // Scissor
-        let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
-            if ext[0] < -0.5 || ext[1] < -0.5 {
-                ([1.0, 1.0], [1.0, 1.0])
-            } else {
-                params.scissor_mat = scissor.transform.inverse().to_mat3x4();
-
-                let Transform2D([a, b, c, d, ..]) = scissor.transform;
-                let scissor_scale = [a.hypot(c) / fringe_width, b.hypot(d) / fringe_width];
-
-                (ext, scissor_scale)
-            }
-        } else {
-            ([1.0, 1.0], [1.0, 1.0])
-        };
-
-        params.scissor_ext = scissor_ext;
-        params.scissor_scale = scissor_scale;
-        params.scissor_radius = scissor.radius;
+        params.set_scissor(scissor, fringe_width);
 
         params.stroke_mult = (stroke_width * 0.5 + fringe_width * 0.5) / fringe_width;
         params.stroke_thr = stroke_thr;
@@ -98,6 +145,7 @@ impl Params {
                 height,
                 angle,
                 tint,
+                transfer,
             } => {
                 let Some(image_info) = images.info(*id) else {
                     return params;
@@ -105,6 +153,7 @@ impl Params {
 
                 params.extent[0] = *width;
                 params.extent[1] = *height;
+                params.image_transfer = *transfer;
 
                 let color = tint;
 
@@ -337,6 +386,27 @@ impl Params {
         params.paint_mat = inv_transform.to_mat3x4();
 
         params
+    }
+
+    fn set_scissor(&mut self, scissor: &Scissor, fringe_width: f32) {
+        let (scissor_ext, scissor_scale) = if let Some(ext) = scissor.extent {
+            if ext[0] < -0.5 || ext[1] < -0.5 {
+                ([1.0, 1.0], [1.0, 1.0])
+            } else {
+                self.scissor_mat = scissor.transform.inverse().to_mat3x4();
+
+                let Transform2D([a, b, c, d, ..]) = scissor.transform;
+                let scissor_scale = [a.hypot(c) / fringe_width, b.hypot(d) / fringe_width];
+
+                (ext, scissor_scale)
+            }
+        } else {
+            ([1.0, 1.0], [1.0, 1.0])
+        };
+
+        self.scissor_ext = scissor_ext;
+        self.scissor_scale = scissor_scale;
+        self.scissor_radius = scissor.radius;
     }
 
     pub(crate) fn uses_glyph_texture(self) -> bool {

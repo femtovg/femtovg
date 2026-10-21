@@ -538,6 +538,25 @@ pub enum ImageFilter {
         /// Height of the backdrop's placement.
         height: f32,
     },
+    /// Clips the image to a rectangle, transparent outside it: the filter
+    /// primitive subregion of SVG - by default the filter region - that each
+    /// primitive's result is clipped to, and Skia's crop filter. The
+    /// rectangle is rounded out to whole pixels; it is in the pixels of the
+    /// image being filtered for
+    /// [`Canvas::filter_image_chain`](crate::Canvas::filter_image_chain), and
+    /// in root device space for a layer's filters, as a blend's backdrop
+    /// rect is. After another filter of the chain it costs nothing: that
+    /// filter's result is drawn inside the rectangle only.
+    Crop {
+        /// Left edge of the rectangle.
+        x: f32,
+        /// Top edge of the rectangle.
+        y: f32,
+        /// Width of the rectangle.
+        width: f32,
+        /// Height of the rectangle.
+        height: f32,
+    },
 }
 
 /// The noise function of [`ImageFilter::Turbulence`]: SVG `feTurbulence`'s
@@ -868,7 +887,8 @@ impl ImageFilter {
             | Self::LinearRgbToSrgb
             | Self::SrgbToLinearRgb
             | Self::Blend { .. }
-            | Self::Offset { .. } => !source_flipped,
+            | Self::Offset { .. }
+            | Self::Crop { .. } => !source_flipped,
             Self::GaussianBlur { .. } | Self::Morphology { .. } => source_flipped,
         }
     }
@@ -924,6 +944,8 @@ impl ImageFilter {
             )),
             Self::LinearRgbToSrgb => Some(transfer(1.0)),
             Self::SrgbToLinearRgb => Some(transfer(0.0)),
+            // A crop with no pass before it to ride is a copy, cropped.
+            Self::Crop { .. } => Self::identity().single_pass(width, height),
             Self::Blend { mode, .. } => {
                 // Slot 1, whether the backdrop is sampled upside down, is the
                 // pass's to set: it depends on where in a chain the blend runs.

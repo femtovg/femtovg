@@ -312,6 +312,29 @@ impl GradientColors {
     }
 }
 
+/// A colour-space conversion an image paint applies to each texel it
+/// samples: the sRGB transfer curve on the unpremultiplied colour, alpha
+/// untouched, rounded to 8 bits - what
+/// [`ImageFilter::LinearRgbToSrgb`](crate::ImageFilter::LinearRgbToSrgb) and
+/// its inverse store as a pass. A layer whose chain is one conversion
+/// composites through it instead (see `LayerEffects::composite_transfer`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    ToSrgb,
+    ToLinearRgb,
+}
+
+impl Transfer {
+    /// The value the shaders read for it: 1 to sRGB, 2 to linearRGB (0, no
+    /// transfer, is the uniform's default).
+    pub(crate) fn uniform(self) -> f32 {
+        match self {
+            Self::ToSrgb => 1.0,
+            Self::ToLinearRgb => 2.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PaintFlavor {
@@ -324,6 +347,7 @@ pub enum PaintFlavor {
         height: f32,
         angle: f32,
         tint: Color,
+        transfer: Option<Transfer>,
     },
     LinearGradient {
         start: Position,
@@ -457,7 +481,7 @@ impl PaintFlavor {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum GlyphTexture {
     #[default]
     None,
@@ -485,6 +509,20 @@ pub struct StrokeSettings {
     pub(crate) line_join: LineJoin,
     pub(crate) line_dash: Vec<f32>,
     pub(crate) line_dash_offset: f32,
+}
+
+impl StrokeSettings {
+    /// How far a stroke `line_width` wide reaches from its path: half the
+    /// width, further at a miter's tip or a square cap's corner.
+    pub(crate) fn reach(&self, line_width: f32) -> f32 {
+        let join = match self.line_join {
+            LineJoin::Miter => self.miter_limit.max(1.0),
+            LineJoin::Round | LineJoin::Bevel => 1.0,
+        };
+        let square = self.line_cap_start == LineCap::Square || self.line_cap_end == LineCap::Square;
+        let cap = if square { std::f32::consts::SQRT_2 } else { 1.0 };
+        line_width * 0.5 * join.max(cap)
+    }
 }
 
 impl Default for StrokeSettings {
@@ -667,6 +705,7 @@ impl Paint {
             height,
             angle,
             tint: Color::rgbaf(1.0, 1.0, 1.0, alpha),
+            transfer: None,
         })
     }
 
@@ -680,7 +719,16 @@ impl Paint {
             height,
             angle,
             tint,
+            transfer: None,
         })
+    }
+
+    /// This image paint converting each texel by `transfer` as it samples it.
+    pub(crate) fn with_transfer(mut self, transfer: Option<Transfer>) -> Self {
+        if let PaintFlavor::Image { transfer: t, .. } = &mut self.flavor {
+            *t = transfer;
+        }
+        self
     }
 
     /// Creates and returns a linear gradient paint.

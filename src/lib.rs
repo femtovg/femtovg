@@ -23,7 +23,7 @@ extern crate serde;
 #[cfg(feature = "textlayout")]
 use std::ops::Range;
 use std::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     collections::{HashMap, HashSet},
     path::Path as FilePath,
     rc::Rc,
@@ -84,11 +84,11 @@ use geometry::*;
 mod paint;
 pub use paint::Paint;
 pub use paint::TextDecoration;
-use paint::{GlyphTexture, PaintFlavor, StrokeSettings};
+use paint::{GlyphTexture, PaintFlavor, StrokeSettings, Transfer};
 use renderer::{BlendPass, Fused};
 
 mod path;
-use path::Convexity;
+use path::PathCache;
 pub use path::{Path, PathIter, Solidity, Verb};
 
 mod gradient_store;
@@ -111,7 +111,11 @@ pub enum FillRule {
 }
 
 /// Blend factors.
+///
+/// Non-exhaustive: this mirrors the blend factors the backends expose and is
+/// currently a subset of them, so matching on it must carry a wildcard arm.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[non_exhaustive]
 pub enum BlendFactor {
     /// Not all
     Zero,
@@ -138,7 +142,14 @@ pub enum BlendFactor {
 }
 
 /// Predefined composite oprations.
+///
+/// Non-exhaustive: the separable blend modes that Canvas 2D's
+/// `globalCompositeOperation` and CSS/SVG's `mix-blend-mode` also carry
+/// (`multiply`, `screen`, `overlay`, `color-burn` and the rest) belong in this
+/// enum and are not implemented yet, so matching on it must carry a wildcard
+/// arm.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[non_exhaustive]
 pub enum CompositeOperation {
     /// Displays the source over the destination.
     SourceOver,
@@ -209,13 +220,28 @@ impl CompositeOperationState {
     }
 }
 
+impl CompositeOperationState {
+    /// Whether a source scaled by a coverage of zero leaves the destination
+    /// as it was: the destination factor is then one. `Copy`, `SourceIn`,
+    /// `SourceOut`, `DestinationIn` and `DestinationAtop` change it instead.
+    pub(crate) fn takes_coverage(&self) -> bool {
+        let kept = |factor| {
+            matches!(
+                factor,
+                BlendFactor::One | BlendFactor::OneMinusSrcAlpha | BlendFactor::OneMinusSrcColor
+            )
+        };
+        kept(self.dst_rgb) && kept(self.dst_alpha)
+    }
+}
+
 impl Default for CompositeOperationState {
     fn default() -> Self {
         Self::new(CompositeOperation::SourceOver)
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 struct Scissor {
     transform: Transform2D,
     extent: Option<[f32; 2]>,
@@ -257,6 +283,23 @@ impl Scissor {
             half_width * 2.0,
             half_height * 2.0,
         ))
+    }
+
+    /// The device rect outside which the scissor's coverage is zero: its
+    /// corners under any transform, a fringe of `fringe_width` out. `None`
+    /// when it clips nothing, which [`Params`] takes an extent below -0.5 for.
+    fn reach(&self, fringe_width: f32) -> Option<Bounds> {
+        let extent = self.extent.filter(|&[x, y]| x >= -0.5 && y >= -0.5)?;
+        let [x, y] = extent.map(|v| v.max(0.0));
+        let corners = Bounds::from_points(
+            [[-x, -y], [x, -y], [x, y], [-x, y]].map(|[x, y]| self.transform.transform_point(x, y)),
+        );
+        Some(Bounds {
+            minx: corners.minx - fringe_width,
+            miny: corners.miny - fringe_width,
+            maxx: corners.maxx + fringe_width,
+            maxy: corners.maxy + fringe_width,
+        })
     }
 
     /// The scissor's device-space rect for sizing a layer's store: like
@@ -356,6 +399,15 @@ impl Default for State {
     }
 }
 
+// The most vertices a fill's fan is drawn with.
+const MAX_FAN: usize = 65_535;
+
+// At a dpi of 1: a cubic piece is flat once its control points' distances
+// from its chord sum to under the square root of TESS_TOL, in pixels, and
+// points nearer each other than DIST_TOL pixels may be taken as one.
+const TESS_TOL: f32 = 0.125;
+const DIST_TOL: f32 = 0.01;
+
 /// Main 2D drawing context.
 #[derive(Debug)]
 pub struct Canvas<T: Renderer> {
@@ -405,6 +457,15 @@ pub struct Canvas<T: Renderer> {
     // draws into that target.
     clip_stack: Vec<ClipEntry>,
     clip_planes: HashMap<RenderTarget, ClipPlaneState>,
+    // The coverage masks of the clips that are no box.
+    clip_masks: ClipMasks,
+    // The coverage masks of thin fills.
+    fill_masks: FillMasks,
+    // The scissor and clip shape the last draw met, as the boxes they make.
+    last_clip_boxes: Option<ClipBoxes>,
+    // Whether the last draw carried a clip shape: the shader variant the
+    // renderer has bound.
+    shape_carried: bool,
 }
 
 /// Returns the enabled text-decoration lines as `(offset, thickness)` pairs,
@@ -441,6 +502,18 @@ impl<T> Canvas<T>
 where
     T: Renderer,
 {
+    /// The renderer this canvas draws with, for backend-specific settings
+    /// and diagnostics such as `WGPURenderer::set_submission_slicing` and
+    /// `WGPURenderer::last_frame_slices`.
+    pub fn renderer(&self) -> &T {
+        &self.renderer
+    }
+
+    /// The renderer this canvas draws with, mutably; see [`Self::renderer`].
+    pub fn renderer_mut(&mut self) -> &mut T {
+        &mut self.renderer
+    }
+
     /// Creates a new canvas.
     pub fn new(renderer: T) -> Result<Self, ErrorKind> {
         let text_context = Rc::new(RefCell::new(TextContextImpl::default()));
@@ -463,8 +536,8 @@ where
             pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
-            tess_tol: 0.25,
-            dist_tol: 0.01,
+            tess_tol: TESS_TOL,
+            dist_tol: DIST_TOL,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             filter_work: 0,
@@ -474,6 +547,10 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
+            last_clip_boxes: None,
+            shape_carried: false,
         };
 
         canvas.save();
@@ -504,8 +581,8 @@ where
             pending_image_deletions: HashSet::new(),
             fringe_width: 1.0,
             device_px_ratio: 1.0,
-            tess_tol: 0.25,
-            dist_tol: 0.01,
+            tess_tol: TESS_TOL,
+            dist_tol: DIST_TOL,
             gradients: GradientStore::new(),
             transients: TransientPool::new(transient::DEFAULT_BUDGET),
             filter_work: 0,
@@ -515,6 +592,10 @@ where
             turbulence_lattices: Vec::new(),
             clip_stack: Vec::new(),
             clip_planes: HashMap::new(),
+            clip_masks: ClipMasks::default(),
+            fill_masks: FillMasks::default(),
+            last_clip_boxes: None,
+            shape_carried: false,
         };
 
         canvas.save();
@@ -528,8 +609,8 @@ where
         self.width = width;
         self.height = height;
         self.fringe_width = 1.0 / dpi;
-        self.tess_tol = 0.25 / dpi;
-        self.dist_tol = 0.01 / dpi;
+        self.tess_tol = TESS_TOL / dpi;
+        self.dist_tol = DIST_TOL / dpi;
         self.device_px_ratio = dpi;
 
         self.renderer.set_size(width, height, dpi);
@@ -550,6 +631,8 @@ where
             if let Some(plane) = self.clip_planes.get_mut(&RenderTarget::Screen) {
                 plane.dirty = true;
             }
+            // Worked out for the fringe width before.
+            self.last_clip_boxes = None;
         }
         if let Some(image) = self.layers.last().and_then(|layer| layer.image) {
             // Same size at a frame boundary: the open layer keeps capturing
@@ -633,6 +716,7 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush_to_output(&mut self, output: impl Into<T::RenderOutput>) -> T::CommandBuffer {
+        self.upload_fill_masks();
         let command_buffer = self.renderer.render(
             output,
             &mut self.images,
@@ -640,6 +724,12 @@ where
             std::mem::take(&mut self.commands),
         );
         self.verts.clear();
+        for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -807,8 +897,9 @@ where
         }
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
-        // to gate; clear_rect is a raw clear that neither backend clips; a
-        // filter pass draws into its own target image, not the clipped one.
+        // to gate; clear_rect is a raw write that neither backend clips; a
+        // filter pass or a blur's first draw writes its own target image,
+        // not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
@@ -816,6 +907,7 @@ where
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
+                | CommandType::StartBlur { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }
@@ -1205,13 +1297,25 @@ where
 
     /// Fills the provided Path with the specified Paint.
     pub fn fill_path(&mut self, path: &Path, paint: &Paint) {
-        self.fill_path_internal(path, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
+        self.fill_path_internal(path, None, &paint.flavor, paint.shape_anti_alias, paint.fill_rule);
     }
 
-    fn fill_path_internal(&mut self, path: &Path, paint_flavor: &PaintFlavor, anti_alias: bool, fill_rule: FillRule) {
+    /// Fills `path` with its points mapped through `path_transform` and then
+    /// through the current transform. The paint's coordinates are mapped
+    /// through the current transform only. `render_direct()` passes the
+    /// transform that places a glyph's outline in its run.
+    fn fill_path_internal(
+        &mut self,
+        path: &Path,
+        path_transform: Option<&Transform2D>,
+        paint_flavor: &PaintFlavor,
+        anti_alias: bool,
+        fill_rule: FillRule,
+    ) {
         self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
-        let transform = self.state().transform;
+        let paint_transform = self.state().transform;
+        let transform = path_transform.map_or(paint_transform, |t| *t * paint_transform);
 
         let canvas_width = self.width();
         let canvas_height = self.height();
@@ -1233,19 +1337,19 @@ where
                 let path = path.clone();
                 let shadow_flavor = paint_flavor.clone();
                 self.render_shadow(bounds, move |canvas| {
-                    canvas.fill_path_internal(&path, &shadow_flavor, anti_alias, fill_rule);
+                    canvas.fill_path_internal(&path, path_transform, &shadow_flavor, anti_alias, fill_rule);
                 });
             }
         }
 
         // The path cache saves a flattened and transformed version of the path.
-        let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+        let bounds = path.cache(&transform, self.tess_tol, self.dist_tol).bounds;
 
         // Early out if path is outside the canvas bounds
-        if path_cache.bounds.maxx < 0.0
-            || path_cache.bounds.minx > canvas_width as f32
-            || path_cache.bounds.maxy < 0.0
-            || path_cache.bounds.miny > canvas_height as f32
+        if bounds.maxx < 0.0
+            || bounds.minx > canvas_width as f32
+            || bounds.maxy < 0.0
+            || bounds.miny > canvas_height as f32
         {
             return;
         }
@@ -1253,61 +1357,78 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
-        let scissor = self.state().scissor;
+        // A thin fill, which the fringe would over-ink, is drawn through a
+        // coverage mask instead, unless its operation changes
+        // what coverage does not reach: it would change the whole quad.
+        if anti_alias && self.fill_masks.enabled() && self.state().composite_operation.takes_coverage() {
+            let mut path_cache = path.cache(&transform, self.tess_tol, self.dist_tol);
+            if (bounds.maxx - bounds.minx) * (bounds.maxy - bounds.miny) <= THIN_FILL_SPAN
+                && clip::is_thin(path_cache.mean_width(fill_rule))
+                && self.fill_through_mask(
+                    path,
+                    &mut path_cache,
+                    &transform,
+                    &paint_transform,
+                    &paint_flavor,
+                    fill_rule,
+                )
+            {
+                return;
+            }
+        }
 
-        // Calculate fill vertices.
-        // expand_fill will fill path_cache.contours[].{stroke, fill} with vertex data for the GPU
-        // fringe_with is the size of the strip of triangles generated at the path border used for AA
-        let fringe_width = if anti_alias { self.fringe_width } else { 0.0 };
-        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
+        let mut shared = None;
+        let (clip, path_cache, fringe_width) = self.fill_outline(path, &transform, anti_alias, fill_rule, &mut shared);
 
         // Detect if this path fill is in fact just an unclipped image copy
 
         if let (Some(path_rect), Some(scissor_rect), true, true) = (
             path_cache.path_fill_is_rect(),
-            scissor.as_rect(canvas_width as f32, canvas_height as f32),
+            clip.scissor.as_rect(canvas_width as f32, canvas_height as f32),
             paint_flavor.is_straight_tinted_image(anti_alias),
-            // The unclipped blit bypasses the stencil clip plane (the #292
-            // rounded-scissor precedent): route clipped blits through the
-            // normal masked path.
-            !self.clip_active(),
+            // The unclipped blit bypasses the stencil clip plane and the
+            // clip shape (the #292 rounded-scissor precedent): route clipped
+            // blits through the normal masked path.
+            !self.clip_active() && clip.shape.is_none() && clip.mask.is_none(),
         ) {
             if scissor_rect.contains_rect(&path_rect) {
-                self.render_unclipped_image_blit(&path_rect, &transform, &paint_flavor);
+                self.render_unclipped_image_blit(&path_rect, &paint_transform, &paint_flavor);
             } else if let Some(intersection) = path_rect.intersection(&scissor_rect) {
-                self.render_unclipped_image_blit(&intersection, &transform, &paint_flavor);
+                self.render_unclipped_image_blit(&intersection, &paint_transform, &paint_flavor);
             }
 
             return;
         }
 
         // GPU uniforms
-        let flavor = if path_cache.contours.len() == 1 && path_cache.contours[0].convexity == Convexity::Convex {
+        let flavor = if path_cache.is_convex() {
             let params = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
-            );
+            )
+            .with_clip(&clip);
 
             CommandType::ConvexFill { params }
         } else {
-            let stencil_params = Params::stencil();
+            let stencil_params = Params::stencil().with_hard_clip_mask(&clip);
 
             let fill_params = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 self.fringe_width,
                 self.fringe_width,
                 -1.0,
-            );
+            )
+            .with_clip(&clip);
 
             CommandType::ConcaveFill {
                 stencil_params,
@@ -1329,21 +1450,81 @@ where
                 .ok();
         }
 
+        self.push_fill(&mut cmd, &path_cache, fringe_width);
+        self.append_cmd(cmd);
+    }
+
+    /// Expands a fill of `path` under `transform` into its fans and fringes.
+    /// Returns what clips the fill, the expanded outline and the fringe's width.
+    /// The outline is the path, or the rect it shares with the clip, kept in `shared`.
+    fn fill_outline<'a>(
+        &mut self,
+        path: &'a Path,
+        transform: &Transform2D,
+        anti_alias: bool,
+        fill_rule: FillRule,
+        shared: &'a mut Option<Path>,
+    ) -> (DrawClip, RefMut<'a, PathCache>, f32) {
+        let mut path_cache = path.cache(transform, self.tess_tol, self.dist_tol);
+        let (clip, rect) = self.fill_clip(
+            || path_cache.bounds,
+            Some((&path_cache, 0.0)),
+            anti_alias.then_some((path, transform)),
+        );
+        // An upright rect under an upright clip shape is filled as the rect
+        // the two share, or as the shape it covers: an edge they have in
+        // common is antialiased once, by the rect's fringe or by the shape.
+        let (rect, fringed) = match rect {
+            Some(RectFill::Shared(rect)) => (Some(rect), anti_alias),
+            Some(RectFill::Covered(rect)) => (Some(rect), false),
+            None => (None, anti_alias),
+        };
+        if let Some(rect) = rect {
+            drop(path_cache);
+            path_cache = shared
+                .insert(rect.path())
+                .cache(&rect.frame, self.tess_tol, self.dist_tol);
+        }
+
+        let fringe_width = if fringed { self.fringe_width } else { 0.0 };
+        path_cache.expand_fill(fringe_width, LineJoin::Miter, 2.4, fill_rule);
+        (clip, path_cache, fringe_width)
+    }
+
+    /// Pushes the vertices of `path_cache`'s fill, expanded with a fringe of
+    /// `fringe_width`, as `cmd`'s drawables, and for a concave fill the
+    /// quad covering it.
+    fn push_fill(&mut self, cmd: &mut Command, path_cache: &PathCache, fringe_width: f32) {
         // All verts from all shapes are kept in a single buffer here in the canvas.
         // Drawable struct is used to describe the range of vertices each draw call will operate on
         let mut offset = self.verts.len();
 
-        cmd.drawables.reserve_exact(path_cache.contours.len());
+        cmd.drawables.reserve(path_cache.contours.len());
         for contour in &path_cache.contours {
             let mut drawable = Drawable::default();
 
             // Fill commands can have both fill and stroke vertices. Fill vertices are used to fill
             // the body of the shape while stroke vertices are used to prodice antialiased edges
 
-            if !contour.fill.is_empty() {
-                drawable.fill_verts = Some((offset, contour.fill.len()));
-                self.verts.extend_from_slice(&contour.fill);
-                offset += contour.fill.len();
+            if let Some((&hub, rim)) = contour.fill.split_first() {
+                // A driver may split a fan longer than MAX_FAN about the wrong vertex (Mesa's
+                // vc4 does), so a longer one goes as several about the same first vertex.
+                let mut rim = rim;
+                while rim.len() >= MAX_FAN {
+                    cmd.drawables.push(Drawable {
+                        fill_verts: Some((offset, MAX_FAN)),
+                        ..Drawable::default()
+                    });
+                    self.verts.push(hub);
+                    self.verts.extend_from_slice(&rim[..MAX_FAN - 1]);
+                    offset += MAX_FAN;
+                    // The next fan starts at this one's last vertex.
+                    rim = &rim[MAX_FAN - 2..];
+                }
+                drawable.fill_verts = Some((offset, 1 + rim.len()));
+                self.verts.push(hub);
+                self.verts.extend_from_slice(rim);
+                offset += 1 + rim.len();
             }
 
             if !contour.stroke.is_empty() {
@@ -1355,7 +1536,7 @@ where
             cmd.drawables.push(drawable);
         }
 
-        if let CommandType::ConcaveFill { .. } = cmd.cmd_type {
+        if !path_cache.is_convex() {
             // Concave shapes are first filled by writing to a stencil buffer and then drawing a quad
             // over the shape area with stencil test enabled to produce the final fill. These are
             // the verts needed for the covering quad
@@ -1386,25 +1567,31 @@ where
 
             cmd.triangles_verts = Some((offset, 4));
         }
-
-        self.append_cmd(cmd);
     }
 
     /// Strokes the provided Path with the specified Paint.
     pub fn stroke_path(&mut self, path: &Path, paint: &Paint) {
-        self.stroke_path_internal(path, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
+        self.stroke_path_internal(path, None, &paint.flavor, paint.shape_anti_alias, &paint.stroke);
     }
 
+    /// Strokes `path` with its points mapped through `path_transform` and then
+    /// through the current transform. The paint's coordinates are mapped
+    /// through the current transform only, as in
+    /// [`fill_path_internal`](Self::fill_path_internal). The line width
+    /// and the dash lengths of `stroke` are in the path's own coordinates, so
+    /// both transforms scale them.
     fn stroke_path_internal(
         &mut self,
         path: &Path,
+        path_transform: Option<&Transform2D>,
         paint_flavor: &PaintFlavor,
         anti_alias: bool,
         stroke: &StrokeSettings,
     ) {
         self.reconcile_current_clip_plane();
         let mut paint_flavor = paint_flavor.clone();
-        let transform = self.state().transform;
+        let paint_transform = self.state().transform;
+        let transform = path_transform.map_or(paint_transform, |t| *t * paint_transform);
 
         if !stroke.line_dash.is_empty() {
             let dashed_path = path.dashed_with_tolerance(&stroke.line_dash, stroke.line_dash_offset, self.tess_tol);
@@ -1415,7 +1602,7 @@ where
             let mut solid_stroke = stroke.clone();
             solid_stroke.line_dash.clear();
             solid_stroke.line_dash_offset = 0.0;
-            self.stroke_path_internal(&dashed_path, &paint_flavor, anti_alias, &solid_stroke);
+            self.stroke_path_internal(&dashed_path, path_transform, &paint_flavor, anti_alias, &solid_stroke);
             return;
         }
 
@@ -1445,7 +1632,7 @@ where
                 let stroke = stroke.clone();
                 let shadow_flavor = paint_flavor.clone();
                 self.render_shadow(bounds, move |canvas| {
-                    canvas.stroke_path_internal(&path, &shadow_flavor, anti_alias, &stroke);
+                    canvas.stroke_path_internal(&path, path_transform, &shadow_flavor, anti_alias, &stroke);
                 });
             }
         }
@@ -1461,8 +1648,6 @@ where
         {
             return;
         }
-
-        let scissor = self.state().scissor;
 
         // Scale stroke width by current transform scale.
         // Note: I don't know why the original author clamped the max stroke width to 200, but it didn't
@@ -1488,6 +1673,17 @@ where
         // Apply global alpha
         paint_flavor.mul_alpha(self.state().alpha);
 
+        let reach = stroke.reach(line_width);
+        let clip = self.draw_clip(
+            || Bounds {
+                minx: path_cache.bounds.minx - reach,
+                miny: path_cache.bounds.miny - reach,
+                maxx: path_cache.bounds.maxx + reach,
+                maxy: path_cache.bounds.maxy + reach,
+            },
+            Some((&path_cache, reach)),
+        );
+
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
         let fringe_with = if anti_alias { self.fringe_width } else { 0.0 };
@@ -1504,26 +1700,28 @@ where
         // GPU uniforms
         let params = Params::new(
             &self.images,
-            &transform,
+            &paint_transform,
             &paint_flavor,
             &GlyphTexture::default(),
-            &scissor,
+            &clip.scissor,
             line_width,
             self.fringe_width,
             -1.0,
-        );
+        )
+        .with_clip(&clip);
 
         let flavor = if stroke.stencil_strokes {
             let params2 = Params::new(
                 &self.images,
-                &transform,
+                &paint_transform,
                 &paint_flavor,
                 &GlyphTexture::default(),
-                &scissor,
+                &clip.scissor,
                 line_width,
                 self.fringe_width,
                 1.0 - 0.5 / 255.0,
-            );
+            )
+            .with_clip(&clip);
 
             CommandType::StencilStroke {
                 params1: params,
@@ -1992,8 +2190,8 @@ where
             if self.shadow_could_be_visible(device) {
                 let text = text.to_owned();
                 // Draw the text with its *real* paint so the shadow is built from
-                // the glyphs' true coverage/alpha; render_shadow recolors it by the
-                // shadow color while preserving that alpha.
+                // the glyphs' true coverage/alpha; render_shadow keeps that alpha
+                // and colours it by the shadow color after the blur.
                 let shadow_paint = paint.clone();
                 self.render_shadow(device, move |canvas| {
                     let _ = canvas.draw_text(x, y, &text, &shadow_paint, render_mode);
@@ -2181,10 +2379,7 @@ where
         let glyphs_it = glyphs.into_iter();
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
-                if font
-                    .glyph(&font_face, glyph.glyph_id, normalized_coords)
-                    .is_some_and(|glyph| glyph.path.is_none())
-                {
+                if font.is_bitmap_glyph(&font_face, glyph.glyph_id, normalized_coords) {
                     color_glyphs.push(glyph.clone());
 
                     false
@@ -2312,18 +2507,29 @@ where
         glyph_texture: GlyphTexture,
     ) {
         self.reconcile_current_clip_plane();
-        let scissor = self.state().scissor;
+        let clip = self.draw_clip(
+            || {
+                verts.iter().fold(Bounds::default(), |bounds, vertex| Bounds {
+                    minx: bounds.minx.min(vertex.x),
+                    miny: bounds.miny.min(vertex.y),
+                    maxx: bounds.maxx.max(vertex.x),
+                    maxy: bounds.maxy.max(vertex.y),
+                })
+            },
+            None,
+        );
 
         let params = Params::new(
             &self.images,
             transform,
             paint_flavor,
             &glyph_texture,
-            &scissor,
+            &clip.scissor,
             1.0,
             self.fringe_width,
             -1.0,
-        );
+        )
+        .with_clip(&clip);
 
         let mut cmd = Command::new(CommandType::Triangles { params });
         cmd.composite_operation = self.state().composite_operation;
@@ -2392,9 +2598,16 @@ where
     ///
     /// Call this at the end of each frame.
     pub fn flush(&mut self) {
+        self.upload_fill_masks();
         self.renderer
             .render_surfaceless(&mut self.images, &self.verts, std::mem::take(&mut self.commands));
         self.verts.clear();
+        for image in self.clip_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
+        for image in self.fill_masks.end_frame() {
+            self.images.remove(&mut self.renderer, image);
+        }
         self.release_pending_images();
         self.gradients
             .release_old_gradients(&mut self.images, &mut self.renderer);
@@ -2445,10 +2658,15 @@ pub struct RecordingRenderer {
     pub max_texture_size: usize,
     /// Makes image allocation fail for resource-pressure tests.
     pub fail_image_allocations: bool,
+    /// Makes image updates fail for upload-failure tests.
+    pub fail_image_updates: bool,
     /// Number of image allocation attempts.
     pub image_allocation_attempts: usize,
     /// Number of backend images released.
     pub image_deletion_count: usize,
+    /// When true, each image stores the pixels of every RGBA `update_image` call it
+    /// receives.
+    pub retain_image_updates: bool,
 }
 
 #[cfg(test)]
@@ -2477,7 +2695,10 @@ impl Renderer for RecordingRenderer {
         if self.fail_image_allocations {
             return Err(ErrorKind::UnknownError);
         }
-        Ok(Self::Image { info })
+        Ok(Self::Image {
+            info,
+            updates: Vec::new(),
+        })
     }
 
     fn create_image_from_native_texture(
@@ -2503,7 +2724,16 @@ impl Renderer for RecordingRenderer {
         x: usize,
         y: usize,
     ) -> Result<(), ErrorKind> {
-        data.check_update(&image.info, x, y)
+        data.check_update(&image.info, x, y)?;
+        if self.fail_image_updates {
+            return Err(ErrorKind::UnknownError);
+        }
+        if let (true, crate::ImageSource::Rgba(pixels)) = (self.retain_image_updates, data) {
+            let (pixels, width, height) = pixels.to_contiguous_buf();
+            let pixels = imgref::ImgVec::new(pixels.into_owned(), width, height);
+            image.updates.push((x, y, pixels));
+        }
+        Ok(())
     }
 
     fn delete_image(&mut self, _image: Self::Image, _image_id: crate::ImageId) {
@@ -2528,6 +2758,70 @@ impl Renderer for RecordingRenderer {
 #[derive(Debug)]
 pub struct DummyImage {
     info: ImageInfo,
+    /// The destination `(x, y)` and the pixels of each RGBA `update_image` call on this image,
+    /// in call order. Empty unless `RecordingRenderer::retain_image_updates` is set.
+    updates: Vec<(usize, usize, imgref::ImgVec<rgb::RGBA8>)>,
+}
+
+/// A contour longer than a fan may be goes as several fans about its first
+/// vertex, none longer than [`MAX_FAN`], each starting at the last rim vertex
+/// of the one before: together they make the contour's own fan's triangles.
+#[test]
+fn a_contour_longer_than_a_fan_goes_as_several() {
+    use renderer::CommandType;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1024, 1024, 1.0);
+    // Further apart than two points that count as one.
+    let points = 2 * MAX_FAN + 100;
+    let mut path = Path::new();
+    for i in 0..points {
+        let a = i as f32 / points as f32 * std::f32::consts::TAU;
+        let (x, y) = (512.0 + 450.0 * a.cos(), 512.0 + 450.0 * a.sin());
+        if i == 0 {
+            path.move_to(x, y);
+        } else {
+            path.line_to(x, y);
+        }
+    }
+    path.close();
+    canvas.fill_path(&path, &Paint::color(Color::white()));
+    let contour_fan = path
+        .cache(&Transform2D::identity(), canvas.tess_tol, canvas.dist_tol)
+        .contours[0]
+        .fill
+        .clone();
+    canvas.flush_to_output(());
+
+    let commands = recorded_commands.borrow();
+    let verts = recorded_verts.borrow();
+    let fill = commands
+        .iter()
+        .find(|command| {
+            matches!(
+                command.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            )
+        })
+        .unwrap();
+    let fans: Vec<&[Vertex]> = fill
+        .drawables
+        .iter()
+        .filter_map(|drawable| drawable.fill_verts)
+        .map(|(start, count)| &verts[start..start + count])
+        .collect();
+    assert_eq!(fans.len(), 3);
+    assert!(fans.iter().all(|fan| fan.len() <= MAX_FAN));
+    let mut joined = fans[0].to_vec();
+    for fan in &fans[1..] {
+        assert_eq!(fan[0], joined[0], "about the same first vertex");
+        assert_eq!(fan[1], *joined.last().unwrap(), "from where the last fan ended");
+        joined.extend_from_slice(&fan[2..]);
+    }
+    assert_eq!(joined, contour_fan);
 }
 
 #[test]
@@ -2608,10 +2902,11 @@ fn assert_approx_eq(actual: f32, expected: f32) {
     );
 }
 
+/// Fills across the canvas with a path that is no rect, so that whatever
+/// scissor is set cuts the fill and the draw carries it.
 #[cfg(test)]
-fn fill_rect_with_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
-    let mut path = Path::new();
-    path.rect(0.0, 0.0, 100.0, 100.0);
+fn fill_across_current_scissor(canvas: &mut Canvas<RecordingRenderer>) {
+    let path = clip::notched_rect(0.0, 0.0, 100.0, 100.0);
     canvas.fill_path(&path, &Paint::color(Color::white()));
     canvas.flush_to_output(());
 }
@@ -2640,7 +2935,7 @@ fn rounded_scissor_radius_is_clamped_into_render_params() {
     canvas.set_size(100, 100, 1.0);
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2688,7 +2983,7 @@ fn intersect_scissor_preserves_contained_rounded_clip() {
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 20.0, 8.0);
     canvas.intersect_scissor(0.0, 0.0, 100.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2705,7 +3000,7 @@ fn intersect_scissor_inside_rounded_clip_uses_rectangular_inner_clip() {
 
     canvas.rounded_scissor(10.0, 10.0, 80.0, 80.0, 20.0);
     canvas.intersect_scissor(35.0, 35.0, 20.0, 20.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2724,7 +3019,7 @@ fn intersect_rounded_scissor_partial_overlap_falls_back_to_rectangular_intersect
 
     canvas.rounded_scissor(10.0, 10.0, 40.0, 40.0, 12.0);
     canvas.intersect_rounded_scissor(35.0, 35.0, 40.0, 40.0, 12.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2744,7 +3039,7 @@ fn rounded_scissor_captures_transform_at_clip_time() {
     canvas.scale(2.0, 3.0);
     canvas.rounded_scissor(10.0, 10.0, 20.0, 10.0, 4.0);
     canvas.reset_transform();
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2765,7 +3060,7 @@ fn intersect_rounded_scissor_uses_inner_radius_when_contained() {
 
     canvas.scissor(0.0, 0.0, 100.0, 100.0);
     canvas.intersect_rounded_scissor(10.0, 10.0, 40.0, 20.0, 100.0);
-    fill_rect_with_current_scissor(&mut canvas);
+    fill_across_current_scissor(&mut canvas);
 
     let commands = recorded_commands.borrow();
     let params = first_draw_params(&commands);
@@ -2977,14 +3272,21 @@ fn fill_text_selects_atlas_or_path_rendering() {
         // Atlas rendering blits glyphs from a glyph texture; outline rendering only
         // ever emits plain path fills (note: atlas cache misses also emit path fills
         // while rasterizing into the atlas, so the glyph texture is the reliable
-        // discriminator, not the absence of fills).
-        let used_atlas = commands.iter().any(|c| !matches!(c.glyph_texture, GlyphTexture::None));
-        let filled_outlines = commands.iter().any(|c| {
-            matches!(c.glyph_texture, GlyphTexture::None)
-                && matches!(
-                    c.cmd_type,
-                    CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
-                )
+        // discriminator, not the absence of fills). A thin outline is filled through
+        // the atlas of fill masks, which is no glyph atlas.
+        let fill_masks = canvas.fill_masks.image;
+        let used_atlas = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => false,
+            GlyphTexture::AlphaMask(id) => Some(id) != fill_masks,
+            GlyphTexture::ColorTexture(_) => true,
+        });
+        let filled_outlines = commands.iter().any(|c| match c.glyph_texture {
+            GlyphTexture::None => matches!(
+                c.cmd_type,
+                CommandType::ConvexFill { .. } | CommandType::ConcaveFill { .. }
+            ),
+            GlyphTexture::AlphaMask(id) => Some(id) == fill_masks,
+            GlyphTexture::ColorTexture(_) => false,
         });
 
         match expect {
@@ -2993,6 +3295,246 @@ fn fill_text_selects_atlas_or_path_rendering() {
                 filled_outlines && !used_atlas,
                 "expected outline rendering for case: {description} (used_atlas={used_atlas}, filled_outlines={filled_outlines})"
             ),
+        }
+    }
+}
+
+/// A thin glyph drawn through a coverage mask gets the run's paint matrix too,
+/// not the glyph's own placement.
+#[cfg(feature = "textlayout")]
+#[test]
+fn thin_text_drawn_through_masks_uses_one_paint_matrix_for_the_run() {
+    use renderer::CommandType;
+
+    // At 3 px under a scale of 2, the glyphs' outlines are thin fills, each
+    // drawn as a quad over its mask; the circle is drawn as a convex fill.
+    let renderer = RecordingRenderer::default();
+    let recorded = renderer.last_commands.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let font = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    canvas.scale(2.0, 2.0);
+    let paint = Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white());
+    let mut path = Path::new();
+    path.circle(50.0, 50.0, 40.0);
+    canvas.fill_path(&path, &paint);
+    canvas
+        .fill_text(10.0, 40.0, "MI", &paint.with_font(&[font]).with_font_size(3.0))
+        .unwrap();
+    canvas.flush_to_output(());
+
+    let commands = recorded.borrow();
+    let on_a_path = commands
+        .iter()
+        .find_map(|command| match &command.cmd_type {
+            CommandType::ConvexFill { params } => Some(params.paint_mat),
+            _ => None,
+        })
+        .expect("the circle's fill");
+    let on_text: Vec<_> = commands
+        .iter()
+        .filter_map(|command| match &command.cmd_type {
+            CommandType::Triangles { params } if params.glyph_texture_type == 1 => Some(params.paint_mat),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(on_text.len(), 2, "one masked quad for each glyph");
+    assert!(
+        on_text.iter().all(|matrix| *matrix == on_a_path),
+        "expected {on_a_path:?} for every glyph, got {on_text:?}"
+    );
+}
+
+/// Every glyph of text drawn as outlines gets the paint matrix that a path
+/// drawn under the same transform gets, so a gradient or image paint continues
+/// across the text and does not start again in each glyph.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
+    use renderer::CommandType;
+
+    // The paint matrices of the fills and strokes that `draw` records under a
+    // scale of 2. With a gradient or image paint under a scale, `draw_glyph_run`
+    // draws each glyph's outline instead of using the glyph atlas.
+    fn paint_matrices(draw: impl FnOnce(&mut Canvas<RecordingRenderer>, FontId, ImageId)) -> Vec<[f32; 12]> {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        let image = canvas
+            .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        canvas.scale(2.0, 2.0);
+        draw(&mut canvas, font, image);
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        let mut matrices = Vec::new();
+        for command in commands.iter() {
+            match &command.cmd_type {
+                CommandType::ConvexFill { params } | CommandType::Stroke { params } => matrices.push(params.paint_mat),
+                CommandType::ConcaveFill { fill_params, .. } => matrices.push(fill_params.paint_mat),
+                CommandType::StencilStroke { params1, params2 } => {
+                    matrices.extend([params1.paint_mat, params2.paint_mat]);
+                }
+                _ => {}
+            }
+        }
+        matrices
+    }
+
+    let cases: [(&str, fn(ImageId) -> Paint); 2] = [
+        ("gradient", |_| {
+            Paint::linear_gradient(0.0, 0.0, 100.0, 0.0, Color::black(), Color::white())
+        }),
+        ("image", |image| Paint::image(image, 0.0, 0.0, 64.0, 64.0, 0.0, 1.0)),
+    ];
+
+    for (case, make_paint) in cases {
+        let on_a_path = paint_matrices(|canvas, _font, image| {
+            let mut path = Path::new();
+            path.circle(50.0, 50.0, 40.0);
+            canvas.fill_path(&path, &make_paint(image));
+        });
+
+        for stroke in [false, true] {
+            // "M" is a concave outline and "I" a convex one, which a fill draws
+            // with different commands.
+            let on_text = paint_matrices(|canvas, font, image| {
+                let paint = make_paint(image).with_font(&[font]);
+                if stroke {
+                    canvas.stroke_text(10.0, 40.0, "MI", &paint).unwrap();
+                } else {
+                    canvas.fill_text(10.0, 40.0, "MI", &paint).unwrap();
+                }
+            });
+
+            // A fill records one paint matrix for each glyph and a stroke two.
+            assert_eq!(on_text.len(), if stroke { 4 } else { 2 }, "{case}, stroke {stroke}");
+            assert!(
+                on_text.iter().all(|matrix| *matrix == on_a_path[0]),
+                "{case}, stroke {stroke}: expected {:?} for every glyph, got {on_text:?}",
+                on_a_path[0]
+            );
+        }
+    }
+}
+
+/// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` draw
+/// each outline glyph twice, once into the coverage image of the glyph's shadow
+/// and once on the canvas. Both draws sample an image paint at the vertex's
+/// position in user space, so the coverage image gets the alpha that the glyph
+/// has on the canvas.
+#[cfg(feature = "textlayout")]
+#[test]
+fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
+    use renderer::CommandType;
+
+    // The scale of the canvas transform. With an image paint under a scale,
+    // `draw_glyph_run` draws each glyph's outline instead of using the glyph
+    // atlas.
+    const SCALE: f32 = 2.0;
+    // How far, in image pixels, the position a draw samples may be from the
+    // vertex's position in user space. The two draws of a glyph go through
+    // different matrices, so they differ by rounding. A paint mapped through
+    // the glyph's own transform is sampled at the vertex's font-unit
+    // coordinates instead, which is far outside this tolerance.
+    const TOLERANCE: f32 = 0.01;
+
+    // The dash lengths are in font units, like the outline they are cut from.
+    let cases: [(&str, bool, &[f32]); 3] = [
+        ("fill", false, &[]),
+        ("stroke", true, &[]),
+        ("dashed stroke", true, &[300.0, 200.0]),
+    ];
+
+    for (case, stroke, dash) in cases {
+        let renderer = RecordingRenderer::default();
+        let recorded_commands = renderer.last_commands.clone();
+        let recorded_verts = renderer.last_verts.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let font = canvas
+            .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+            .expect("failed to load test font");
+        let image = canvas
+            .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        // The paint puts the image's origin at the origin of user space, so a
+        // point is sampled at its own user-space coordinates.
+        let paint = Paint::image(image, 0.0, 0.0, 64.0, 64.0, 0.0, 1.0)
+            .with_font(&[font])
+            .with_line_dash(dash);
+        let glyphs = canvas.measure_text(10.0, 40.0, "MI", &paint).unwrap().glyphs;
+        let glyphs: Vec<_> = glyphs
+            .iter()
+            .map(|glyph| PositionedGlyph {
+                x: glyph.x,
+                y: glyph.y,
+                glyph_id: glyph.glyph_id,
+            })
+            .collect();
+
+        canvas.scale(SCALE, SCALE);
+        canvas.set_shadow_color(Color::black());
+        canvas.set_shadow_offset(4.0, 4.0);
+        if stroke {
+            canvas
+                .stroke_glyph_run(font, &[], glyphs.iter().cloned(), &paint)
+                .unwrap();
+        } else {
+            canvas
+                .fill_glyph_run(font, &[], glyphs.iter().cloned(), &paint)
+                .unwrap();
+        }
+        canvas.flush_to_output(());
+
+        // The first vertex of every draw with `paint`, and the position in the
+        // image that the draw samples there.
+        let commands = recorded_commands.borrow();
+        let verts = recorded_verts.borrow();
+        let mut draws = Vec::new();
+        for command in commands.iter().filter(|command| command.image == Some(image)) {
+            let params = match &command.cmd_type {
+                CommandType::ConvexFill { params } | CommandType::StencilStroke { params1: params, .. } => params,
+                CommandType::ConcaveFill { fill_params, .. } => fill_params,
+                other => panic!("{case}: unexpected draw {other:?}"),
+            };
+            let drawable = &command.drawables[0];
+            let (first, _) = drawable.fill_verts.or(drawable.stroke_verts).unwrap();
+            let vertex = verts[first];
+            let [a, b, _, _, c, d, _, _, x, y, ..] = params.paint_mat;
+            let sampled = [a * vertex.x + c * vertex.y + x, b * vertex.x + d * vertex.y + y];
+            draws.push((vertex, sampled));
+        }
+
+        // Each glyph is drawn into the coverage image of its shadow and then
+        // on the canvas.
+        assert_eq!(draws.len(), 2 * glyphs.len(), "{case}");
+        for (glyph, glyph_draws) in glyphs.iter().zip(draws.chunks_exact(2)) {
+            let (on_canvas, _) = glyph_draws[1];
+            let in_user_space = [on_canvas.x / SCALE, on_canvas.y / SCALE];
+            // The outline is at the glyph's position. "M" and "I" are smaller
+            // than the font size, so the vertex is within that distance of the
+            // glyph's origin.
+            assert!(
+                (in_user_space[0] - glyph.x).abs() < paint.font_size()
+                    && (in_user_space[1] - glyph.y).abs() < paint.font_size(),
+                "{case}: the glyph at {:?} has a vertex at {in_user_space:?}",
+                (glyph.x, glyph.y)
+            );
+            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip(glyph_draws) {
+                assert!(
+                    (sampled[0] - in_user_space[0]).abs() < TOLERANCE
+                        && (sampled[1] - in_user_space[1]).abs() < TOLERANCE,
+                    "{case}, {draw}: a vertex at {in_user_space:?} samples the image at {sampled:?}"
+                );
+            }
         }
     }
 }
@@ -3167,6 +3709,34 @@ fn shared_arc_path_across_canvases_keeps_tessellation_isolated() {
     assert_eq!(a1, a2, "canvas A geometry changed after canvas B used the shared path");
     assert_eq!(b1, b2, "canvas B geometry changed after canvas A used the shared path");
     assert_ne!(a1, b1, "the two transforms must produce different geometry");
+}
+
+/// A path filled, then extended, then filled again under the same transform
+/// is filled as the extended path: the same vertices as a path built with
+/// every verb before its first fill.
+#[test]
+fn a_path_extended_after_a_fill_is_filled_as_the_extended_path() {
+    let renderer = RecordingRenderer::default();
+    let verts = renderer.last_verts.clone();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(100, 100, 1.0);
+
+    let mut path = Path::new();
+    path.rect(0.0, 0.0, 10.0, 10.0);
+    let before = record_fill_bytes(&mut canvas, &verts, &path);
+    path.rect(20.0, 0.0, 10.0, 10.0);
+    let after = record_fill_bytes(&mut canvas, &verts, &path);
+
+    let mut both = Path::new();
+    both.rect(0.0, 0.0, 10.0, 10.0);
+    both.rect(20.0, 0.0, 10.0, 10.0);
+    let fresh = record_fill_bytes(&mut canvas, &verts, &both);
+
+    assert_ne!(fresh, before, "one rect and two rects must not fill the same");
+    assert_eq!(
+        after, fresh,
+        "the extended path was not filled as a path built with both rects"
+    );
 }
 
 /// Switching the render target between an image and the screen must not
@@ -3944,6 +4514,132 @@ fn letter_spacing_does_not_collide_in_the_shaping_cache() {
         spaced > plain + 4.0 * 6.0 - 1.0,
         "letter spacing must widen the cached word: plain {plain}, spaced {spaced}"
     );
+
+    let tight = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_letter_spacing(-2.0))
+        .unwrap()
+        .width();
+    assert!(
+        tight < plain - 4.0 * 2.0 + 1.0,
+        "negative letter spacing must narrow the cached word: plain {plain}, tight {tight}"
+    );
+
+    let slight = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_letter_spacing(0.05))
+        .unwrap()
+        .width();
+    assert!(
+        slight > plain + 4.0 * 0.05,
+        "letter spacing under a tenth must widen the cached word: plain {plain}, slight {slight}"
+    );
+}
+
+/// The shaped-word cache keys on the exact font size: `shape_word` scales
+/// every advance by it, so the same word measured at two sizes must not
+/// share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn font_size_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let base = Paint::color(Color::black()).with_font(&[font_id]);
+
+    let at_30 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.clone().with_font_size(30.0))
+        .unwrap()
+        .width();
+    let at_30_09 = canvas
+        .measure_text(20.0, 100.0, "cache", &base.with_font_size(30.09))
+        .unwrap()
+        .width();
+    // Advances are linear in the font size, so the width must grow by the same ratio.
+    assert!(
+        (at_30_09 / at_30 - 30.09 / 30.0).abs() < 1e-4,
+        "a size in the same tenth as a cached one must get its own width: at 30 {at_30}, at 30.09 {at_30_09}"
+    );
+}
+
+/// The run cache keys on the exact `max_width`: `shape_run` breaks where the
+/// accumulated width reaches it, so the same text broken at two widths must
+/// not share an entry.
+#[cfg(feature = "textlayout")]
+#[test]
+fn max_width_does_not_collide_in_the_shaping_cache() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let font_id = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[font_id]).with_font_size(30.0);
+
+    let text = "cache key";
+    let width = canvas.measure_text(20.0, 100.0, text, &paint).unwrap().width();
+    // The two widths below must lie in the same whole unit, or the test
+    // passes without exercising the collision.
+    assert!(
+        width.fract() > 0.1 && width.fract() < 0.9,
+        "pick a text whose width is not within 0.1 of a whole number: {width}"
+    );
+
+    let broken = canvas.break_text(width - 0.1, text, &paint).unwrap();
+    let whole = canvas.break_text(width + 0.1, text, &paint).unwrap();
+    assert!(
+        broken < text.len(),
+        "the text must not fit in {}: broke at {broken}",
+        width - 0.1
+    );
+    assert_eq!(
+        whole,
+        text.len(),
+        "the whole text fits in {} and must not get the break position cached for {}",
+        width + 0.1,
+        width - 0.1
+    );
+}
+
+/// Adding a font clears the run shaping cache. A paint falls back to every
+/// registered font for characters its own fonts lack, so text measured before
+/// the font was added is shaped again and takes its glyphs from that font.
+#[cfg(feature = "textlayout")]
+#[test]
+fn text_measured_before_a_font_is_added_takes_its_glyphs_from_that_font() {
+    let renderer = RecordingRenderer::default();
+    let mut canvas = Canvas::new(renderer).unwrap();
+    canvas.set_size(1000, 300, 1.0);
+    let roboto = canvas
+        .add_font_mem(include_bytes!("../examples/assets/RobotoFlex-VariableFont.ttf"))
+        .expect("failed to load test font");
+    let paint = Paint::color(Color::black()).with_font(&[roboto]).with_font_size(30.0);
+    let arabic = "\u{0633}\u{0644}\u{0627}\u{0645}";
+    let font_ids = |canvas: &Canvas<RecordingRenderer>| {
+        canvas
+            .measure_text(20.0, 100.0, arabic, &paint)
+            .unwrap()
+            .glyphs
+            .iter()
+            .map(|glyph| glyph.font_id)
+            .collect::<Vec<_>>()
+    };
+
+    let before = font_ids(&canvas);
+    assert!(
+        !before.is_empty() && before.iter().all(|&font_id| font_id == roboto),
+        "with only Roboto Flex registered, the Arabic text must be shaped with it: {before:?}"
+    );
+
+    let amiri = canvas
+        .add_font_mem(include_bytes!("../examples/assets/amiri-regular.ttf"))
+        .expect("failed to load test font");
+    let after = font_ids(&canvas);
+    assert!(
+        !after.is_empty() && after.iter().all(|&font_id| font_id == amiri),
+        "after Amiri is added, the Arabic text must take its glyphs from it: {after:?}"
+    );
 }
 
 /// Bidi control characters are default-ignorable: isolate marks (U+2066..
@@ -4480,7 +5176,7 @@ fn decoration_metrics_fall_back_without_os2_and_post() {
 /// large to cache, or when a gradient or image paint is scaled. PNG glyphs
 /// have no outline to draw, so they go through an atlas that lives from the
 /// first such draw of a frame until the flush.
-#[cfg(feature = "textlayout")]
+#[cfg(any(feature = "textlayout", feature = "swash"))]
 #[test]
 fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     use crate::paint::GlyphTexture;
@@ -4504,9 +5200,10 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
         let paint = paint.clone().with_font_size(font_size);
         let renderer = RecordingRenderer::default();
         let recorded_commands = renderer.last_commands.clone();
-        let mut canvas = Canvas::new(renderer).unwrap();
+        let text_context = TextContext::default();
+        let font = text_context.add_font_mem(&font_data).unwrap();
+        let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
         canvas.set_size(400, 400, 1.0);
-        let font = canvas.add_font_mem(&font_data).unwrap();
         canvas.set_transform(&transform);
         let glyph = PositionedGlyph {
             x: 50.0,
@@ -4523,9 +5220,9 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
             canvas.flush_to_output(());
             assert!(canvas.ephemeral_glyph_atlas.is_none(), "{case}");
 
-            // Every fill and stroke draws the bitmap, which takes
+            // Every fill and stroke draws the bitmap, which takes `swash` or
             // `image-loading` to decode.
-            if cfg!(feature = "image-loading") {
+            if cfg!(any(feature = "swash", feature = "image-loading")) {
                 let commands = recorded_commands.borrow();
                 let color_draws = commands
                     .iter()
@@ -4535,6 +5232,62 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
             }
         }
     }
+}
+
+/// Without `image-loading`, drawing a PNG glyph directly at a font size too large
+/// for the atlas doesn't return an error. The draw skips the glyph instead.
+#[cfg(all(feature = "swash", not(feature = "image-loading")))]
+#[test]
+fn png_glyphs_too_large_for_the_atlas_are_skipped() {
+    use crate::text::test_fonts::png_glyph_font;
+
+    let text_context = TextContext::default();
+    let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
+    let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    // The bitmap is one em square, and an atlas texture is 512 by 512 pixels.
+    let paint = Paint::color(Color::black()).with_font_size(700.0);
+    let glyph = PositionedGlyph {
+        x: 50.0,
+        y: 100.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
+    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+}
+
+/// With `textlayout`, `Font::glyph` finds a PNG glyph without decoding it. When
+/// swash then cannot decode it, a stroke skips the glyph instead of drawing
+/// swash's fallback outline as a fill.
+#[cfg(all(feature = "textlayout", feature = "swash"))]
+#[test]
+fn stroked_png_glyphs_that_do_not_decode_are_skipped() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::outline_glyph_with_broken_png_font;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let text_context = TextContext::default();
+    let font = text_context
+        .add_font_mem(&outline_glyph_with_broken_png_font())
+        .unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(400, 400, 1.0);
+    let paint = Paint::color(Color::black()).with_font_size(24.0).with_line_width(6.0);
+    let glyph = PositionedGlyph {
+        x: 50.0,
+        y: 100.0,
+        glyph_id: 0,
+    };
+    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let glyph_draws = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| !matches!(command.glyph_texture, GlyphTexture::None))
+        .count();
+    assert_eq!(glyph_draws, 0);
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /
@@ -4563,6 +5316,9 @@ fn random_api_sequences_keep_one_consistent_stack() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
         canvas.set_size(128, 128, 1.0);
+        if seed % 2 == 1 {
+            canvas.set_clip_mask_budget(0);
+        }
         let image = canvas
             .create_image_empty(64, 64, PixelFormat::Rgba8, ImageFlags::empty())
             .unwrap();
@@ -4621,10 +5377,20 @@ fn random_api_sequences_keep_one_consistent_stack() {
                     }
                 }
                 4 => {
-                    let mut clip = Path::new();
-                    clip.rect(rng.random_range(0.0..40.0), rng.random_range(0.0..40.0), 60.0, 60.0);
+                    // A box is taken as a shape - stacked, or dropped when it
+                    // contains the one in force - and a notched rect as a
+                    // mask, or on the stencil when the masks have no budget.
+                    let (x, y) = (rng.random_range(0.0..40.0), rng.random_range(0.0..40.0));
+                    let clip = if rng.random_bool(0.5) {
+                        let mut clip = Path::new();
+                        clip.rect(x, y, 60.0, 60.0);
+                        clip
+                    } else {
+                        notched_rect(x, y, 60.0, 60.0)
+                    };
+                    let before = canvas.clip_stack.len();
                     canvas.clip_path(&clip, FillRule::NonZero);
-                    model.last_mut().unwrap().clips += 1;
+                    model.last_mut().unwrap().clips += canvas.clip_stack.len() - before;
                 }
                 5 => canvas.fill_path(&rect, &Paint::color(Color::black())),
                 6 => canvas.flush_to_output(()),
@@ -4662,13 +5428,14 @@ fn random_api_sequences_keep_one_consistent_stack() {
                 let entries = canvas
                     .clip_stack
                     .iter()
-                    .filter(|entry| entry.target == *plane_target)
+                    .filter(|entry| entry.target == *plane_target && matches!(entry.kind, ClipKind::Stencil { .. }))
                     .count();
                 assert_eq!(plane.count, entries, "{at}: plane count for {plane_target:?}");
             }
             for entry in &canvas.clip_stack {
                 assert!(
-                    canvas.clip_planes.contains_key(&entry.target),
+                    matches!(entry.kind, ClipKind::Shape { .. } | ClipKind::Mask { .. })
+                        || canvas.clip_planes.contains_key(&entry.target),
                     "{at}: plane for {:?}",
                     entry.target
                 );

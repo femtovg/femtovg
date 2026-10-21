@@ -77,7 +77,11 @@ fn finish_and_read(
 
     let commands = canvas.flush_to_output(target);
     queue.submit(commands);
+    read_back(device, queue, target)
+}
 
+/// The output texture's pixels, as tightly packed RGBA rows.
+fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::Texture) -> Vec<u8> {
     let unpadded = W * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let padded = unpadded.div_ceil(align) * align;
@@ -474,4 +478,182 @@ fn degenerate_blur_parameters_stay_bounded() {
         center[0] >= 200 && center[1] >= 60 && center[0] >= center[1],
         "a huge sigma must leave a bounded, faint tint of the solid, got {center:?}"
     );
+}
+
+/// A crop clips a pass's result to its rectangle whichever way the image is
+/// stored at that point of the chain: after one draw from an upload, after
+/// one draw from a render target, and on a blur's second draw. Inside the
+/// rect the source shows; outside it nothing does.
+#[test]
+fn a_crop_clips_a_pass_whichever_way_its_image_is_stored() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    // No two rows and no two columns alike: a crop at the wrong rows shows.
+    let src: Vec<femtovg::rgb::RGBA8> = (0..W * H)
+        .map(|i| femtovg::rgb::RGBA8::new((i % W * 8) as u8, (i / W * 8) as u8, 0, 255))
+        .collect();
+    let crop = ImageFilter::Crop {
+        x: 3.0,
+        y: 5.0,
+        width: 10.0,
+        height: 6.0,
+    };
+    let copy = ImageFilter::brightness(1.0);
+    let expect = |out: &[u8], what: &str| {
+        for y in 0..H {
+            for x in 0..W {
+                let inside = (3..13).contains(&x) && (5..11).contains(&y);
+                let want = if inside {
+                    [(x * 8) as u8, (y * 8) as u8, 0]
+                } else {
+                    [255, 255, 255]
+                };
+                assert_eq!(px(out, x, y), want, "{what}: ({x}, {y})");
+            }
+        }
+    };
+    expect(
+        &run_chain(&device, &queue, &src, &[copy, crop]),
+        "a draw from an upload",
+    );
+    expect(
+        &run_chain(&device, &queue, &src, &[ImageFilter::gaussian_blur(0.0), crop]),
+        "a blur's second draw",
+    );
+    expect(&run_chain(&device, &queue, &src, &[crop]), "a crop alone");
+    expect(
+        &run_chain(&device, &queue, &src, &[copy, copy, crop, copy]),
+        "passes on both sides",
+    );
+
+    // From a render target: the upload copied into one first.
+    let (mut canvas, source, target) = setup(&device, &queue, &src);
+    let stored = filter_target(&mut canvas);
+    canvas.filter_image_chain(stored, &[], source).unwrap();
+    let filtered = filter_target(&mut canvas);
+    canvas.filter_image_chain(filtered, &[copy, crop], stored).unwrap();
+    expect(
+        &finish_and_read(&device, &queue, canvas, filtered, &target),
+        "a draw from a render target",
+    );
+}
+
+/// What a crop clips away does not come back: content shifted out of the
+/// rect and back loses the part that left, as a filter primitive's result
+/// clipped to its subregion does in a browser. Without the crop the two
+/// shifts cancel.
+#[test]
+fn what_a_crop_clips_away_does_not_come_back() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let mut src = solid(femtovg::rgb::RGBA8::new(0, 0, 0, 0));
+    for y in 8..16 {
+        for x in 8..16 {
+            src[(y * W + x) as usize] = femtovg::rgb::RGBA8::new(255, 0, 0, 255);
+        }
+    }
+    let (out, back) = (
+        ImageFilter::Offset { dx: 12.0, dy: 0.0 },
+        ImageFilter::Offset { dx: -12.0, dy: 0.0 },
+    );
+    let region = ImageFilter::Crop {
+        x: 0.0,
+        y: 0.0,
+        width: 24.0,
+        height: H as f32,
+    };
+    let cancelled = run_chain(&device, &queue, &src, &[out, back]);
+    let clipped = run_chain(&device, &queue, &src, &[out, region, back]);
+    for y in 0..H {
+        for x in 0..W {
+            let square = (8..16).contains(&x) && (8..16).contains(&y);
+            let red_or_white = |red: bool| if red { [255, 0, 0] } else { [255, 255, 255] };
+            assert_eq!(
+                px(&cancelled, x, y),
+                red_or_white(square),
+                "without the crop: ({x}, {y})"
+            );
+            // Shifted out, the square spans x 20..28: the crop keeps 20..24, which comes back as 8..12.
+            assert_eq!(px(&clipped, x, y), red_or_white(square && x < 12), "({x}, {y})");
+        }
+    }
+}
+
+/// A crop ahead of a blur wide enough to run down the pyramid is taken at
+/// full size, before the first halving: the chain renders what the crop and
+/// the blur render as two chains, one after the other.
+#[test]
+fn a_crop_before_a_wide_blur_is_taken_at_full_size() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let src: Vec<femtovg::rgb::RGBA8> = (0..W * H)
+        .map(|i| femtovg::rgb::RGBA8::new((i % W * 8) as u8, (i / W * 8) as u8, 0, 255))
+        .collect();
+    let crop = ImageFilter::Crop {
+        x: 14.0,
+        y: 6.0,
+        width: 12.0,
+        height: 20.0,
+    };
+    let (copy, blur) = (ImageFilter::brightness(1.0), ImageFilter::gaussian_blur(12.0));
+    let one_chain = run_chain(&device, &queue, &src, &[copy, crop, blur]);
+
+    let (mut canvas, source, target) = setup(&device, &queue, &src);
+    let cropped = filter_target(&mut canvas);
+    canvas.filter_image_chain(cropped, &[copy, crop], source).unwrap();
+    let blurred = filter_target(&mut canvas);
+    canvas.filter_image_chain(blurred, &[blur], cropped).unwrap();
+    let two_chains = finish_and_read(&device, &queue, canvas, blurred, &target);
+
+    let uncropped = run_chain(&device, &queue, &src, &[copy, blur]);
+    let differs = |a: &[u8], b: &[u8]| a.iter().zip(b).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+    assert!(differs(&one_chain, &uncropped) > 40, "the crop shows through the blur");
+    assert!(
+        differs(&one_chain, &two_chains) <= 2,
+        "one chain is {} of 255 from the two",
+        differs(&one_chain, &two_chains)
+    );
+}
+
+/// A layer's crop is given in root device space, as a blend's backdrop rect
+/// is: it lands where it was set whatever the origin of the layer's store,
+/// which the scissor and the chain's reach move.
+#[test]
+fn a_layer_crops_its_chain_in_root_space() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let (mut canvas, _source, target) = setup(&device, &queue, &solid(femtovg::rgb::RGBA8::new(0, 0, 0, 0)));
+    canvas.clear_rect(0, 0, W, H, Color::white());
+    canvas.scissor(6.0, 9.0, 20.0, 18.0);
+    let effects = femtovg::LayerEffects::new().with_filters(&[
+        ImageFilter::Offset { dx: 3.0, dy: 0.0 },
+        ImageFilter::Crop {
+            x: 10.0,
+            y: 12.0,
+            width: 7.0,
+            height: 5.0,
+        },
+    ]);
+    assert!(canvas.begin_layer(&effects));
+    let mut everything = Path::new();
+    everything.rect(0.0, 0.0, W as f32, H as f32);
+    canvas.fill_path(&everything, &Paint::color(Color::rgb(255, 0, 0)));
+    canvas.end_layer();
+    queue.submit(canvas.flush_to_output(&target));
+    let out = read_back(&device, &queue, &target);
+    for y in 0..H {
+        for x in 0..W {
+            let inside = (10..17).contains(&x) && (12..17).contains(&y);
+            let want = if inside { [255, 0, 0] } else { [255, 255, 255] };
+            assert_eq!(px(&out, x, y), want, "({x}, {y})");
+        }
+    }
 }

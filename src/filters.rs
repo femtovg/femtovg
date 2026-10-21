@@ -59,6 +59,17 @@ impl FilterScratchImages {
     }
 }
 
+/// What a filter pass's command carries besides its filter and images.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PassDraw {
+    /// A blend's placed backdrop and the pass's inputs beyond its mode.
+    pub(crate) backdrop: Option<(ImageId, BlendPass)>,
+    /// The matrices a two-draw filter carries in its draws.
+    pub(crate) fused: Fused,
+    /// The rect the result is drawn inside, in the target's texel rows.
+    pub(crate) crop: Option<[u32; 4]>,
+}
+
 /// One pass of a filter plan: `filter`, rendered into an image at pyramid
 /// `level` - [`FULL`] the chain's own size, `[m, n]` the chain halved m
 /// times along x and n times along y.
@@ -68,6 +79,9 @@ pub(crate) struct Pass {
     pub(crate) level: Level,
     /// The matrices a two-draw filter carries in its draws.
     pub(crate) fused: Fused,
+    /// The rect the pass's result is clipped to ([`ImageFilter::Crop`]), as
+    /// given: x, y, width, height.
+    pub(crate) crop: Option<[f32; 4]>,
 }
 
 impl Pass {
@@ -76,6 +90,7 @@ impl Pass {
             filter,
             level,
             fused: Fused::default(),
+            crop: None,
         }
     }
 
@@ -312,6 +327,15 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         }
         folded.push(filter);
     }
+    // A crop rides the pass before it: that pass draws inside the rect only.
+    // With no pass before it, it is a copy of its own.
+    let crop_onto = |passes: &mut Vec<Pass>, rect: [f32; 4]| match passes.last_mut() {
+        Some(last) if last.level == FULL => last.crop = Some(last.crop.map_or(rect, |first| crop_both(first, rect))),
+        _ => passes.push(Pass {
+            crop: Some(rect),
+            ..Pass::at(ImageFilter::identity(), FULL)
+        }),
+    };
     let mut passes: Vec<Pass> = Vec::with_capacity(folded.len() + MAX_LEVELS + 2);
     for filter in folded {
         match filter {
@@ -321,6 +345,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
                 radius_y,
                 operator,
             } => passes.extend(morphology_passes(radius_x, radius_y, operator)),
+            ImageFilter::Crop { x, y, width, height } => crop_onto(&mut passes, [x, y, width, height]),
             other => passes.push(Pass::at(other, FULL)),
         }
         if passes.len() > MAX_FILTER_PASSES {
@@ -339,8 +364,12 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         if let Some(prev) = folded_passes.last_mut() {
             let one_size = previous_in == prev.level || prev.level == pass.level;
             if one_size {
-                if let Some(merged) = prev.filter.fold_with(pass.filter) {
-                    *prev = Pass::at(merged, pass.level);
+                let merged = prev.filter.fold_with(pass.filter);
+                if let (Some(merged), Some(crop)) = (merged, folded_crop(prev.crop, &pass)) {
+                    *prev = Pass {
+                        crop,
+                        ..Pass::at(merged, pass.level)
+                    };
                     continue;
                 }
             }
@@ -359,8 +388,11 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         if let Some(prev) = fused.last_mut() {
             if let ImageFilter::ColorMatrix { matrix } = pass.filter {
                 if prev.filter.two_pass() && prev.level == pass.level && prev.fused.post_matrix.is_none() {
-                    prev.fused.post_matrix = Some(matrix);
-                    continue;
+                    if let Some(crop) = folded_crop(prev.crop, &pass) {
+                        prev.fused.post_matrix = Some(matrix);
+                        prev.crop = crop;
+                        continue;
+                    }
                 }
             }
             if let ImageFilter::ColorMatrix { matrix } = prev.filter {
@@ -369,6 +401,7 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
                     && previous_in == prev.level
                     && alpha_only(&matrix)
                     && !pass.fused.source_alpha
+                    && prev.crop.is_none()
                 {
                     *prev = Pass {
                         fused: Fused {
@@ -385,6 +418,47 @@ pub(crate) fn filter_passes(filters: &[ImageFilter]) -> Option<Vec<Pass>> {
         fused.push(pass);
     }
     Some(fused)
+}
+
+/// What two crops, one after the other, leave: the rect both hold.
+fn crop_both([ax, ay, aw, ah]: [f32; 4], [bx, by, bw, bh]: [f32; 4]) -> [f32; 4] {
+    let (x, y) = (ax.max(bx), ay.max(by));
+    let (right, bottom) = ((ax + aw).min(bx + bw), (ay + ah).min(by + bh));
+    [x, y, (right - x).max(0.0), (bottom - y).max(0.0)]
+}
+
+/// The crop of the one pass that a pass cropped to `first` and `then`, a
+/// pass after it that maps each pixel by itself, make together - or `None`
+/// when no one crop leaves what the two do. Where `then`'s own crop lies
+/// inside `first` the first crop took nothing that is left. Anywhere else
+/// it left transparent black, which `then` must leave as it is for the
+/// crop to come after it instead: a color matrix does unless it adds to
+/// alpha, a transfer always. A crop is a rect of full-size pixels, so the
+/// pass that takes it over must draw at full size: a pyramid's first
+/// halving does not.
+fn folded_crop(first: Option<[f32; 4]>, then: &Pass) -> Option<Option<[f32; 4]>> {
+    let Some(first) = first else {
+        return Some(then.crop);
+    };
+    if then.level != FULL {
+        return None;
+    }
+    let [ax, ay, aw, ah] = first;
+    let inside = then
+        .crop
+        .is_some_and(|[bx, by, bw, bh]| ax <= bx && ay <= by && bx + bw <= ax + aw && by + bh <= ay + ah);
+    let keeps_clear = match then.filter {
+        ImageFilter::ColorMatrix { matrix } => matrix[19] <= 0.0,
+        ImageFilter::LinearRgbToSrgb | ImageFilter::SrgbToLinearRgb => true,
+        _ => false,
+    };
+    if inside {
+        Some(then.crop)
+    } else if keeps_clear {
+        Some(Some(then.crop.map_or(first, |then| crop_both(first, then))))
+    } else {
+        None
+    }
 }
 
 /// Whether a matrix keeps alpha and nothing else - `SourceAlpha` as a
@@ -429,9 +503,10 @@ where
     /// Unsafe in-place sampling filters, over-budget work and a blur that
     /// cannot reserve its transient scratch leave the target unchanged.
     pub fn filter_image(&mut self, target_image: ImageId, filter: ImageFilter, source_image: ImageId) {
-        if let ImageFilter::Blend { .. } = filter {
-            // A blend places its backdrop in a scratch first: the chain owns
-            // that, and a one-blend chain is the one pass.
+        if matches!(filter, ImageFilter::Blend { .. } | ImageFilter::Crop { .. }) {
+            // A blend places its backdrop in a scratch first, and a crop is
+            // the rect a pass of the plan draws inside: the chain owns both,
+            // and a chain of the one filter is the one pass.
             let _ = self.filter_image_chain(target_image, std::slice::from_ref(&filter), source_image);
             return;
         }
@@ -481,7 +556,7 @@ where
             None
         };
         let recorded =
-            self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, None, Fused::default());
+            self.filter_image_with_scratch(target_image, filter, source_image, blur_scratch, PassDraw::default());
         if let Some(image) = blur_scratch {
             self.release_transient_image(image);
         }
@@ -496,13 +571,10 @@ where
         filter: ImageFilter,
         source_image: ImageId,
         blur_scratch: Option<ImageId>,
-        // A blend's placed backdrop and the pass's inputs beyond its mode.
-        backdrop: Option<(ImageId, BlendPass)>,
-        // The matrices a two-draw filter carries in its draws.
-        fused: Fused,
+        draw: PassDraw,
     ) -> bool {
         debug_assert_eq!(filter.two_pass(), blur_scratch.is_some());
-        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), backdrop.is_some());
+        debug_assert_eq!(matches!(filter, ImageFilter::Blend { .. }), draw.backdrop.is_some());
         debug_assert!(
             target_image != source_image || filter.two_pass() || matches!(filter, ImageFilter::Turbulence { .. })
         );
@@ -527,12 +599,13 @@ where
             },
             _ => source_image,
         };
-        debug_assert!(filter.two_pass() || (!fused.source_alpha && fused.post_matrix.is_none()));
+        debug_assert!(filter.two_pass() || (!draw.fused.source_alpha && draw.fused.post_matrix.is_none()));
         let mut cmd = Command::new(CommandType::RenderFilteredImage { target_image, filter });
         cmd.image = Some(sampled);
         cmd.filter_scratch = blur_scratch;
-        cmd.fused = fused;
-        if let Some((placed, pass)) = backdrop {
+        cmd.fused = draw.fused;
+        cmd.crop = draw.crop;
+        if let Some((placed, pass)) = draw.backdrop {
             cmd.glyph_texture = GlyphTexture::ColorTexture(placed);
             cmd.blend_pass = pass;
         }
@@ -547,17 +620,13 @@ where
         let quad_x1 = image_width;
         let quad_y1 = image_height;
 
-        let texture_x0 = -(image_width / 2.);
-        let texture_y0 = -(image_height / 2.);
-        let texture_x1 = (image_width) / 2.;
-        let texture_y1 = (image_height) / 2.;
-
-        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
-        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
-        self.verts.push(Vertex::new(quad_x1, quad_y0, texture_x1, texture_y0));
-        self.verts.push(Vertex::new(quad_x0, quad_y0, texture_x0, texture_y0));
-        self.verts.push(Vertex::new(quad_x0, quad_y1, texture_x0, texture_y1));
-        self.verts.push(Vertex::new(quad_x1, quad_y1, texture_x1, texture_y1));
+        // The blur samples where it draws.
+        self.verts.push(Vertex::new(quad_x0, quad_y0, quad_x0, quad_y0));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, quad_x1, quad_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y0, quad_x1, quad_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y0, quad_x0, quad_y0));
+        self.verts.push(Vertex::new(quad_x0, quad_y1, quad_x0, quad_y1));
+        self.verts.push(Vertex::new(quad_x1, quad_y1, quad_x1, quad_y1));
 
         cmd.triangles_verts = Some((vertex_offset, 6));
 
@@ -711,6 +780,264 @@ where
         Ok(())
     }
 
+    /// Blurs the `width` x `height` rect at (`x`, `y`) of the current render
+    /// target, in device pixels, in place: a Gaussian blur of standard
+    /// deviation `sigma`, such as the backdrop of a frosted panel drawn over
+    /// it.
+    ///
+    /// The rect is in device pixels, so the transform doesn't apply, nor do
+    /// global alpha and the composite operation; the scissor and
+    /// [`clip_path`](Self::clip_path) clip it as they clip a fill. Only the
+    /// pixels of the rect the clips leave change, and the part of it beyond
+    /// the render target is skipped. A `sigma` that is zero, negative or NaN
+    /// leaves the target alone.
+    ///
+    /// The blur reads the target up to three sigma beyond what it changes,
+    /// so the rect's edges blend with what surrounds it rather than fading
+    /// out; where that reach passes the target's edge, the edge pixels
+    /// repeat outward, unlike the transparent surround of
+    /// [`filter_image`](Self::filter_image).
+    ///
+    /// The rect and its reach are blurred along x into a transient image,
+    /// then along y back onto the target. A `sigma` above the 8 device
+    /// pixels one shader pass covers instead runs them down the pyramid
+    /// [`filter_image_chain`](Self::filter_image_chain) uses, and is drawn
+    /// back up onto the target from there. Sigma is capped at 512.
+    ///
+    /// The screen can't be read while drawn to, so it's copied first, which needs:
+    /// - WGPU: `wgpu::TextureUsages::COPY_SRC` on the output texture, and the
+    ///   output must be mip 0 of a single-layer texture.
+    /// - OpenGL: a single-sampled framebuffer.
+    ///
+    /// An image target is read in place; on WGPU it needs `TEXTURE_BINDING`.
+    /// The blur is skipped with a warning when a requirement isn't met.
+    ///
+    /// Returns [`ErrorKind::UnsupportedOperation`] while a
+    /// [`begin_layer`](Self::begin_layer) capture is open,
+    /// [`ErrorKind::FilterWorkBudgetExceeded`] when the blur exceeds the
+    /// command stream's work budget and
+    /// [`ErrorKind::TransientImageBudgetExceeded`] when its images don't fit;
+    /// on an error the target is left as it was.
+    pub fn blur_rect(&mut self, x: u32, y: u32, width: u32, height: u32, sigma: f32) -> Result<(), ErrorKind> {
+        let mut rect = Path::new();
+        rect.rect(x as f32, y as f32, width as f32, height as f32);
+        self.blur_fill(&rect, &Transform2D::identity(), false, FillRule::NonZero, sigma, 1.0)
+    }
+
+    /// Blurs the current render target in place inside `path`, filled with
+    /// `fill_rule`: a backdrop blur behind a shape, such as a frosted panel
+    /// with rounded corners. Unlike [`blur_rect`](Self::blur_rect), the
+    /// current transform maps the path and scales `sigma` (by the square
+    /// root of its determinant's magnitude), the edge is antialiased and
+    /// global alpha scales the blur.
+    /// No shadow is drawn.
+    ///
+    /// Like `blur_rect`, it ignores the composite operation: each pixel is
+    /// mixed from its own value toward the blur by the fill's coverage, so a
+    /// pixel the path covers whole becomes the blur, translucent or not.
+    /// A part of the path thinner than about two pixels is covered twice,
+    /// as a translucent fill of it is, and comes out too bright.
+    ///
+    /// Requirements, the blur's reach and its errors are those of
+    /// [`blur_rect`](Self::blur_rect).
+    pub fn blur_path(&mut self, path: &Path, fill_rule: FillRule, sigma: f32) -> Result<(), ErrorKind> {
+        let transform = self.state().transform;
+        let Transform2D([a, b, c, d, ..]) = transform;
+        let sigma = sigma * (a * d - b * c).abs().sqrt();
+        self.blur_fill(path, &transform, true, fill_rule, sigma, self.state().alpha)
+    }
+
+    /// Blurs the current render target by `sigma` in place inside `path`
+    /// under `transform`, filled with `fill_rule` and clipped as a fill,
+    /// antialiased with `anti_alias` and scaled by `alpha`.
+    fn blur_fill(
+        &mut self,
+        path: &Path,
+        transform: &Transform2D,
+        anti_alias: bool,
+        fill_rule: FillRule,
+        sigma: f32,
+        alpha: f32,
+    ) -> Result<(), ErrorKind> {
+        // An open capture draws into its store, not onto the render target.
+        if self.layers.iter().any(|layer| layer.image.is_some()) {
+            return Err(ErrorKind::UnsupportedOperation);
+        }
+        let Some(sigma) = chain_blur_sigma(sigma) else {
+            return Ok(());
+        };
+        if alpha <= 0.0 || self.commands_suppressed() {
+            return Ok(());
+        }
+        self.reconcile_current_clip_plane();
+        let mut shared = None;
+        let (clip, path_cache, fringe_width) = self.fill_outline(path, transform, anti_alias, fill_rule, &mut shared);
+        let Some([x, y, width, height]) = self.fill_region(path_cache.expanded_bounds(), &clip) else {
+            return Ok(());
+        };
+        let (target_width, target_height) = self.render_target_size();
+        let (target_width, target_height) = (target_width as u32, target_height as u32);
+        let (right, bottom) = (x + width, y + height);
+        let reach = (3.0 * sigma).ceil() as u32;
+        let (left, top) = (x.saturating_sub(reach), y.saturating_sub(reach));
+        let src = [
+            left,
+            top,
+            right.saturating_add(reach).min(target_width) - left,
+            bottom.saturating_add(reach).min(target_height) - top,
+        ];
+        let mut passes = blur_passes(sigma, sigma);
+        // The first draw clamps the footprint to the target's edges, so later
+        // draws need no clamp. Within one pass the y draw reads only the
+        // region's columns, so the x scratch needs no reach beside them.
+        let reach_x = if passes.len() == 1 { 0 } else { reach };
+        let footprint_width = (width + 2 * reach_x) as usize;
+        let footprint_height = (height + 2 * reach) as usize;
+        let work = filter_work(&passes, footprint_width, footprint_height);
+        if !self.reserve_filter_work(work) {
+            return Err(ErrorKind::FilterWorkBudgetExceeded);
+        }
+        // What runs at the footprint's size draws onto the target instead:
+        // the blur's y draw, or the pyramid's scale back up.
+        passes.pop();
+        let scratch = if passes.is_empty() {
+            self.acquire_transient_image(footprint_width, footprint_height, ImageFlags::PREMULTIPLIED)
+                .map(|image| (Some(image), FilterScratchImages::default()))
+        } else {
+            self.acquire_filter_scratches(footprint_width, footprint_height, &passes, 0, 0)
+                .map(|scratch| (None, scratch))
+        };
+        let (x_scratch, pyramid) = match scratch {
+            Ok(scratch) => scratch,
+            Err(err) => {
+                self.refund_filter_work(work);
+                return Err(err);
+            }
+        };
+
+        // The first draw reads the target: the blur's x draw, or the
+        // pyramid's first halving. What it writes is stored as a draw into
+        // an image stores it.
+        let (first, first_sigma) = match x_scratch {
+            Some(x_scratch) => (x_scratch, sigma),
+            None => (
+                pyramid
+                    .level(passes[0].level)
+                    .down
+                    .expect("an image was reserved at every level in use"),
+                0.0,
+            ),
+        };
+        let (first_width, first_height) = self.image_size(first).expect("a transient image has a size");
+        let (footprint_x, footprint_y) = (x as f32 - reach_x as f32, y as f32 - reach as f32);
+        let mut cmd = Command::new(CommandType::StartBlur {
+            target_image: first,
+            src,
+            sigma: first_sigma,
+            // `first` stretches over the footprint.
+            sample_transform: Transform2D([
+                footprint_width as f32 / first_width as f32,
+                0.0,
+                0.0,
+                footprint_height as f32 / first_height as f32,
+                footprint_x,
+                footprint_y,
+            ]),
+        });
+        cmd.triangles_verts = Some(self.push_device_quad([0, 0, first_width as u32, first_height as u32]));
+        self.append_cmd(cmd);
+
+        let (source, y_sigma, flip_y) = match x_scratch {
+            Some(x_scratch) => (x_scratch, sigma, true),
+            None => {
+                let (level, flipped) =
+                    self.record_filter_passes(first, &passes[1..], (first, true), &pyramid, false, (0.0, 0.0));
+                // A degenerate sigma makes the y draw the pyramid's scale back up.
+                (level, 0.0, flipped)
+            }
+        };
+        // `source` stretches over the footprint, stored the other way up when
+        // `flip_y`.
+        let sample_transform = if flip_y {
+            Transform2D([1.0, 0.0, 0.0, -1.0, -footprint_x, footprint_height as f32 + footprint_y])
+        } else {
+            Transform2D([1.0, 0.0, 0.0, 1.0, -footprint_x, -footprint_y])
+        };
+        let fill_params = Params::blur_fill(
+            [footprint_width as f32, footprint_height as f32],
+            y_sigma,
+            &sample_transform,
+            alpha,
+            &clip,
+            self.fringe_width,
+        );
+        // Without a fringe, alpha or a clip that ramps, the fill covers every
+        // pixel it draws whole, and the blur replaces it.
+        let erase = fringe_width > 0.0
+            || alpha < 1.0
+            || clip.shape.and_then(|shape| shape.reach()).is_some()
+            || clip.mask.is_some()
+            || clip.scissor.reach(0.0).is_some();
+        let stencil_params = (!path_cache.is_convex()).then(|| Params::stencil().with_hard_clip_mask(&clip));
+        let mut cmd = Command::new(CommandType::FinishBlur {
+            stencil_params,
+            fill_params,
+            erase,
+        });
+        cmd.image = Some(source);
+        cmd.fill_rule = fill_rule;
+        self.push_fill(&mut cmd, &path_cache, fringe_width);
+        self.append_cmd(cmd);
+
+        for id in x_scratch.into_iter().chain(pyramid.images()) {
+            self.release_transient_image(id);
+        }
+        Ok(())
+    }
+
+    /// The pixels of the render target a fill over `bounds`, in device
+    /// pixels and its fringe included, clipped by `clip`, can change,
+    /// rounded out to whole pixels; `None` for no pixel.
+    fn fill_region(&self, bounds: Bounds, clip: &DrawClip) -> Option<[u32; 4]> {
+        let reach = [
+            clip.scissor.reach(self.fringe_width),
+            clip.shape.and_then(|shape| shape.reach()),
+            clip.mask.map(|mask| mask.reach()),
+            self.stencil_clip_reach(),
+        ]
+        .into_iter()
+        .flatten()
+        .fold(bounds, Bounds::intersect);
+        if [reach.minx, reach.miny, reach.maxx, reach.maxy]
+            .iter()
+            .any(|v| v.is_nan())
+        {
+            return None;
+        }
+        let (target_width, target_height) = self.render_target_size();
+        let left = reach.minx.floor().max(0.0);
+        let top = reach.miny.floor().max(0.0);
+        let right = reach.maxx.ceil().min(target_width);
+        let bottom = reach.maxy.ceil().min(target_height);
+        if right <= left || bottom <= top {
+            return None;
+        }
+        Some([left, top, right - left, bottom - top].map(|v| v as u32))
+    }
+
+    /// Pushes two triangles covering `rect`, `[x, y, width, height]` in
+    /// device pixels, as a fill without a fringe, and returns their vertex
+    /// range.
+    fn push_device_quad(&mut self, [x, y, width, height]: [u32; 4]) -> (usize, usize) {
+        let (x0, y0) = (x as f32, y as f32);
+        let (x1, y1) = (x0 + width as f32, y0 + height as f32);
+        let start = self.verts.len();
+        self.verts.extend(
+            [(x0, y0), (x1, y1), (x1, y0), (x0, y0), (x0, y1), (x1, y1)].map(|(x, y)| Vertex::new(x, y, 0.5, 1.0)),
+        );
+        (start, 6)
+    }
+
     /// Acquires the scratches a plan's `passes` run through: the full-size
     /// images its full-size passes ping-pong between - none for one such
     /// pass, which writes its target directly, one for two, two beyond, up
@@ -804,15 +1131,44 @@ where
         target_as_scratch: bool,
         origin: (f32, f32),
     ) {
-        debug_assert!(!target_as_scratch || target_image != source_image);
-        let mut src = source_image;
-        // Storage orientation of `src` at each pass: a render target (FLIP_Y)
-        // holds its rows the other way up from an upload, and each pass
-        // leaves it as `ImageFilter::stores_flipped` says.
-        let mut src_flipped = self
+        // A render target (FLIP_Y) holds its rows the other way up from an upload.
+        let source_flipped = self
             .images
             .info(source_image)
             .is_some_and(|info| info.flags().contains(ImageFlags::FLIP_Y));
+        let (last, _) = self.record_filter_passes(
+            target_image,
+            passes,
+            (source_image, source_flipped),
+            &scratch,
+            target_as_scratch,
+            origin,
+        );
+        debug_assert_eq!(last, target_image, "the plan's last pass lands in the target");
+        for id in scratch.images() {
+            self.release_transient_image(id);
+        }
+    }
+
+    /// Records `passes` as [`run_filter_passes`](Self::run_filter_passes)
+    /// does, from a source stored flipped or not, holding on to the
+    /// scratches, and returns the image the last pass wrote - `target_image`
+    /// when a pass runs at the chain's size, else a pyramid level's - and
+    /// whether it is stored flipped.
+    pub(crate) fn record_filter_passes(
+        &mut self,
+        target_image: ImageId,
+        passes: &[Pass],
+        (source_image, source_flipped): (ImageId, bool),
+        scratch: &FilterScratchImages,
+        target_as_scratch: bool,
+        origin: (f32, f32),
+    ) -> (ImageId, bool) {
+        debug_assert!(!target_as_scratch || target_image != source_image);
+        let mut src = source_image;
+        // Storage orientation of `src` at each pass, as each pass leaves it
+        // per `ImageFilter::stores_flipped`.
+        let mut src_flipped = source_flipped;
         // The full-size passes alternate between the target (or the two
         // scratches) so that the last of them lands in the target; a pyramid
         // level's passes write that level's own images.
@@ -869,14 +1225,39 @@ where
                 }
                 _ => None,
             };
-            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, backdrop, pass.fused);
+            // The crop in the rows the pass's result is stored in, rounded
+            // out to whole pixels and cut to the image.
+            let crop = pass.crop.map(|[x, y, width, height]| {
+                let (image_width, image_height) = self.image_size(dst).unwrap_or((0, 0));
+                let (image_width, image_height) = (image_width as f32, image_height as f32);
+                // `max` and `min` pass over an edge that is no number, so a
+                // rect with one holds no pixel.
+                let left = (x - origin.0).floor().max(0.0).min(image_width);
+                let top = (y - origin.1).floor().max(0.0).min(image_height);
+                let right = (x + width - origin.0).ceil().max(left).min(image_width);
+                let bottom = (y + height - origin.1).ceil().max(top).min(image_height);
+                let first_row = if filter.stores_flipped(src_flipped) {
+                    image_height - bottom
+                } else {
+                    top
+                };
+                [
+                    left as u32,
+                    first_row as u32,
+                    (right - left) as u32,
+                    (bottom - top) as u32,
+                ]
+            });
+            let draw = PassDraw {
+                backdrop,
+                fused: pass.fused,
+                crop,
+            };
+            let _ = self.filter_image_with_scratch(dst, *filter, src, two_pass_scratch, draw);
             src_flipped = filter.stores_flipped(src_flipped);
             src = dst;
         }
-        debug_assert_eq!(src, target_image, "the plan's last pass lands in the target");
-        for id in scratch.images() {
-            self.release_transient_image(id);
-        }
+        (src, src_flipped)
     }
 }
 
@@ -1528,4 +1909,557 @@ fn filter_work_matches_shader_sampling_and_resets_at_flush() {
     canvas.flush_to_output(());
     assert_eq!(canvas.filter_work, 0);
     canvas.filter_image_chain(target, &[color], source).unwrap();
+}
+
+/// A crop rides the pass before it - a blur's second draw, the scale back
+/// up of a blur run down the pyramid - and with no pass before it is a copy
+/// of its own; two in a row leave what both hold. What a pass clipped away
+/// stays away: a pass after a crop folds into the cropped one only where
+/// one crop leaves what the two would ([`folded_crop`]).
+#[test]
+fn a_crop_rides_the_pass_before_it_and_passes_fold_across_it_where_one_crop_does() {
+    use crate::ImageFilter;
+    let crop = |x: f32, width: f32| ImageFilter::Crop {
+        x,
+        y: 2.0,
+        width,
+        height: 10.0,
+    };
+    let (bright, gray) = (ImageFilter::brightness(0.5), ImageFilter::grayscale(1.0));
+    let blur = ImageFilter::gaussian_blur(2.0);
+    // Each pass: whether it is two draws, its crop, whether a matrix rides its second draw.
+    let plan = |filters: &[ImageFilter]| -> Vec<(bool, Option<[f32; 4]>, bool)> {
+        filter_passes(filters)
+            .unwrap()
+            .iter()
+            .map(|pass| (pass.filter.two_pass(), pass.crop, pass.fused.post_matrix.is_some()))
+            .collect()
+    };
+    let rect = Some([4.0, 2.0, 20.0, 10.0]);
+    assert_eq!(plan(&[bright, crop(4.0, 20.0)]), [(false, rect, false)]);
+    assert_eq!(plan(&[blur, crop(4.0, 20.0)]), [(true, rect, false)]);
+    assert_eq!(plan(&[crop(4.0, 20.0)]), [(false, rect, false)], "alone: a copy");
+    assert_eq!(plan(&[crop(4.0, 20.0), bright]), [(false, rect, false)]);
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), crop(10.0, 30.0)]),
+        [(false, Some([10.0, 2.0, 14.0, 10.0]), false)],
+        "what both hold"
+    );
+
+    // A matrix after a crop folds into the cropped pass, or into a blur's
+    // second draw, when one crop leaves what the two passes would: its own
+    // crop lies inside the first, or it leaves transparent black as it is,
+    // as a matrix that adds nothing to alpha does.
+    let mut opaque = [0.0; 20];
+    (opaque[0], opaque[6], opaque[12], opaque[19]) = (1.0, 1.0, 1.0, 1.0);
+    let opaque = ImageFilter::ColorMatrix { matrix: opaque };
+    let narrow = Some([10.0, 2.0, 14.0, 10.0]);
+    assert_eq!(plan(&[bright, gray]).len(), 1);
+    assert_eq!(plan(&[bright, gray, crop(4.0, 20.0)]), [(false, rect, false)]);
+    assert_eq!(plan(&[bright, crop(4.0, 20.0), gray]), [(false, rect, false)]);
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), gray, crop(10.0, 30.0)]),
+        [(false, narrow, false)],
+        "a matrix that keeps transparent black: what both crops hold"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque]),
+        [(false, rect, false), (false, None, false)],
+        "outside the crop the second matrix draws"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(10.0, 30.0)]),
+        [(false, rect, false), (false, Some([10.0, 2.0, 30.0, 10.0]), false)],
+        "and inside its own crop, past the first one's edge"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(4.0, 20.0)]),
+        [(false, rect, false)],
+        "the same crop twice is one crop"
+    );
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), opaque, crop(10.0, 14.0)]),
+        [(false, narrow, false)]
+    );
+    assert_eq!(plan(&[blur, gray]), [(true, None, true)]);
+    assert_eq!(plan(&[blur, gray, crop(4.0, 20.0)]), [(true, rect, true)]);
+    assert_eq!(plan(&[blur, crop(4.0, 20.0), gray]), [(true, rect, true)]);
+    assert_eq!(
+        plan(&[blur, crop(4.0, 20.0), gray, crop(4.0, 20.0)]),
+        [(true, rect, true)]
+    );
+    assert_eq!(
+        plan(&[blur, crop(4.0, 20.0), opaque]),
+        [(true, rect, false), (false, None, false)]
+    );
+    // A blur reads past its own pixels, so nothing before it gives up its crop.
+    assert_eq!(
+        plan(&[bright, crop(4.0, 20.0), blur, crop(4.0, 20.0)]),
+        [(false, rect, false), (true, rect, false)]
+    );
+
+    let wide = filter_passes(&[ImageFilter::gaussian_blur(40.0), crop(4.0, 20.0)]).unwrap();
+    assert!(wide.len() > 2, "run down the pyramid");
+    assert_eq!(wide.iter().filter(|pass| pass.crop.is_some()).count(), 1);
+    let last = wide.last().unwrap();
+    assert_eq!((last.level, last.crop), (FULL, rect));
+
+    // A matrix rides a pyramid's first halving, but not with its crop: the
+    // rect is of full-size pixels, and the halving draws at half size.
+    let uncropped = filter_passes(&[bright, ImageFilter::gaussian_blur(40.0)]).unwrap();
+    let cropped = filter_passes(&[bright, crop(4.0, 20.0), ImageFilter::gaussian_blur(40.0)]).unwrap();
+    assert_eq!(cropped.len(), uncropped.len() + 1);
+    assert_eq!((cropped[0].level, cropped[0].crop), (FULL, rect));
+    assert!(cropped[1..].iter().all(|pass| pass.crop.is_none()));
+}
+
+/// A pass draws inside its crop only: the command carries the rect, rounded
+/// out to whole pixels and cut to the image, in the rows the pass's result
+/// is stored in - counted from the bottom when a single draw from an upload
+/// stores it the way a render target is, from the top when a blur's two
+/// draws leave it as the source was.
+#[test]
+fn a_cropped_pass_carries_the_rect_in_the_rows_it_stores() {
+    use crate::ImageFilter;
+    let crops = |filters: &[ImageFilter]| -> Vec<Option<[u32; 4]>> {
+        let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+        canvas.set_size(64, 64, 1.0);
+        let source = canvas
+            .create_image_empty(64, 32, PixelFormat::Rgba8, ImageFlags::empty())
+            .unwrap();
+        let target = canvas
+            .create_image_empty(
+                64,
+                32,
+                PixelFormat::Rgba8,
+                ImageFlags::PREMULTIPLIED | ImageFlags::FLIP_Y,
+            )
+            .unwrap();
+        canvas.filter_image_chain(target, filters, source).unwrap();
+        canvas
+            .commands
+            .iter()
+            .filter(|command| matches!(command.cmd_type, CommandType::RenderFilteredImage { .. }))
+            .map(|command| command.crop)
+            .collect()
+    };
+    let crop = |x: f32, y: f32, width: f32, height: f32| ImageFilter::Crop { x, y, width, height };
+    let bright = ImageFilter::brightness(0.5);
+    let blur = ImageFilter::gaussian_blur(2.0);
+    assert_eq!(
+        crops(&[bright, crop(4.0, 2.0, 20.0, 10.0)]),
+        [Some([4, 20, 20, 10])],
+        "one draw from an upload: rows from the bottom"
+    );
+    assert_eq!(
+        crops(&[blur, crop(4.0, 2.0, 20.0, 10.0)]),
+        [Some([4, 2, 20, 10]), None],
+        "two draws, then the copy that turns the result over for its target"
+    );
+    assert_eq!(
+        crops(&[blur, crop(4.3, 2.6, 20.5, 10.25)]),
+        [Some([4, 2, 21, 11]), None],
+        "rounded out"
+    );
+    assert_eq!(
+        crops(&[blur, crop(-5.0, -5.0, 1000.0, 1000.0)])[0],
+        Some([0, 0, 64, 32])
+    );
+    assert_eq!(crops(&[blur, crop(100.0, 2.0, 20.0, 10.0)])[0], Some([64, 2, 0, 10]));
+    assert_eq!(
+        crops(&[blur, crop(f32::NAN, 2.0, 20.0, 10.0)])[0].map(|rect| rect[2]),
+        Some(0)
+    );
+    assert_eq!(crops(&[bright]), [None]);
+}
+
+/// What a blur records: the kinds of its commands, in order, its first
+/// draw's read rect, sigma and sample transform, and its last draw.
+#[cfg(test)]
+struct BlurCommands {
+    kinds: Vec<&'static str>,
+    src: Option<[u32; 4]>,
+    start: Option<(f32, Transform2D)>,
+    fill: Option<FinishBlur>,
+}
+
+#[cfg(test)]
+struct FinishBlur {
+    stencil: bool,
+    clip_active: bool,
+    params: Params,
+    draws: Vec<(CompositeOperationState, Params)>,
+}
+
+#[cfg(test)]
+fn blur_commands(
+    setup: impl FnOnce(&mut Canvas<RecordingRenderer>),
+    blur: impl FnOnce(&mut Canvas<RecordingRenderer>),
+) -> BlurCommands {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(256, 192, 1.0);
+    setup(&mut canvas);
+    let before = canvas.commands.len();
+    blur(&mut canvas);
+    let mut src = None;
+    let mut start = None;
+    let mut fill = None;
+    let kinds = canvas.commands[before..]
+        .iter()
+        .map(|command| match &command.cmd_type {
+            CommandType::StartBlur {
+                src: read,
+                sigma,
+                sample_transform,
+                ..
+            } => {
+                src = Some(*read);
+                start = Some((*sigma, *sample_transform));
+                "sample"
+            }
+            CommandType::RenderFilteredImage { .. } => "filter",
+            CommandType::FinishBlur {
+                stencil_params,
+                fill_params,
+                ..
+            } => {
+                assert!(!command.drawables.is_empty(), "a blur fills its outline");
+                fill = Some(FinishBlur {
+                    stencil: stencil_params.is_some(),
+                    clip_active: command.clip_active,
+                    params: *fill_params,
+                    draws: command.finish_blur_draws().collect(),
+                });
+                "finish"
+            }
+            _ => "other",
+        })
+        .collect();
+    // Everything it took goes back to the pool.
+    assert_eq!(canvas.transients.free.len(), canvas.transients.images.len());
+    BlurCommands {
+        kinds,
+        src,
+        start,
+        fill,
+    }
+}
+
+#[cfg(test)]
+fn rect_blur_commands(region: [u32; 4], sigma: f32) -> BlurCommands {
+    let [x, y, width, height] = region;
+    blur_commands(|_| {}, |canvas| canvas.blur_rect(x, y, width, height, sigma).unwrap())
+}
+
+/// Where `params` samples for the fragment at (`x`, `y`).
+#[cfg(test)]
+fn sampled_at(params: &Params, x: f32, y: f32) -> (f32, f32) {
+    let m = params.paint_mat;
+    (m[0] * x + m[4] * y + m[8], m[1] * x + m[5] * y + m[9])
+}
+
+/// A blur within one shader pass blurs the rect's columns along x into a
+/// scratch, with three sigma above and below.
+/// It reads the target only where that reach is within it.
+/// The y draw writes back onto the target, reading the scratch the other
+/// way up, in one draw.
+#[test]
+fn a_rect_blur_within_one_pass_reads_its_reach_and_draws_back() {
+    let commands = rect_blur_commands([4, 100, 64, 300], 3.0);
+    assert_eq!(commands.kinds, ["sample", "finish"]);
+    assert_eq!(commands.src, Some([0, 91, 77, 101]));
+    let (first_sigma, read) = commands.start.unwrap();
+    assert_eq!(read.transform_point(0.0, 0.0), (4.0, 91.0));
+    assert_eq!(
+        read.transform_point(64.0, 110.0),
+        (68.0, 201.0),
+        "the reach passes the bottom"
+    );
+    let fill = commands.fill.unwrap();
+    let params = fill.params;
+    assert_eq!(params.extent, [64.0, 110.0]);
+    assert_eq!(
+        sampled_at(&params, 4.0, 100.0),
+        (0.0, 101.0),
+        "the scratch is read the other way up"
+    );
+    assert_eq!(sampled_at(&params, 68.0, 192.0), (64.0, 9.0));
+    assert_eq!((first_sigma, params.image_blur_filter_sigma), (3.0, 3.0));
+    assert!(!fill.stencil && !fill.clip_active);
+    assert_eq!(fill.draws.len(), 1, "a whole coverage takes no erase");
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Copy)
+    );
+}
+
+/// A blur above one pass reads the rect halved, as the pyramid's first
+/// level, runs it down the rest of the pyramid and draws the level back up
+/// as a resample, reading it the other way up when an odd number of
+/// halvings left it stored as the first draw did.
+#[test]
+fn a_rect_blur_above_one_pass_draws_back_from_the_pyramid() {
+    for (sigma, halvings, flip_y) in [(12.0, 1, true), (20.0, 2, false)] {
+        let commands = rect_blur_commands([96, 72, 64, 48], sigma);
+        let mut expected = vec!["sample"];
+        expected.extend(std::iter::repeat_n("filter", halvings));
+        expected.push("finish");
+        assert_eq!(commands.kinds, expected, "sigma {sigma}");
+        assert_eq!(
+            commands.start.unwrap().0,
+            0.0,
+            "sigma {sigma}: the first halving is a resample"
+        );
+        let params = commands.fill.unwrap().params;
+        assert!(
+            params.image_blur_filter_sigma < 0.5,
+            "sigma {sigma}: the scale back up is a resample"
+        );
+        let (_, v0) = sampled_at(&params, 96.0, 72.0);
+        let (_, v1) = sampled_at(&params, 96.0, 120.0);
+        assert_eq!(v0 > v1, flip_y, "sigma {sigma}");
+    }
+}
+
+/// A rect blur is clipped as a fill: the scissor cuts what it reads and
+/// ramps its coverage, so it mixes toward the blur through an erase; the
+/// stencil clip gates it.
+#[test]
+fn a_rect_blur_is_clipped_as_a_fill() {
+    let scissored = blur_commands(
+        |canvas| canvas.scissor(100.0, 50.0, 20.0, 20.0),
+        |canvas| canvas.blur_rect(0, 0, 256, 192, 3.0).unwrap(),
+    );
+    assert_eq!(scissored.src, Some([90, 40, 40, 40]));
+    let fill = scissored.fill.unwrap();
+    assert_eq!(fill.draws.len(), 2);
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Lighter)
+    );
+
+    let mut triangle = Path::new();
+    triangle.move_to(40.0, 40.0);
+    triangle.line_to(150.0, 60.0);
+    triangle.line_to(60.0, 120.0);
+    triangle.close();
+    let stencil = blur_commands(
+        |canvas| {
+            canvas.set_clip_mask_budget(0);
+            canvas.clip_path(&triangle, FillRule::NonZero);
+        },
+        |canvas| canvas.blur_rect(0, 0, 256, 192, 3.0).unwrap(),
+    );
+    let fill = stencil.fill.unwrap();
+    assert!(fill.clip_active);
+    assert_eq!(fill.draws.len(), 1, "the stencil takes a pixel whole or not at all");
+}
+
+#[cfg(test)]
+fn path_blur_commands(setup: impl FnOnce(&mut Canvas<RecordingRenderer>), path: &Path, sigma: f32) -> BlurCommands {
+    blur_commands(setup, |canvas| {
+        canvas.blur_path(path, FillRule::NonZero, sigma).unwrap()
+    })
+}
+
+#[cfg(test)]
+fn rect_path(x: f32, y: f32, width: f32, height: f32) -> Path {
+    let mut path = Path::new();
+    path.rect(x, y, width, height);
+    path
+}
+
+/// A convex path is filled back in one draw; a concave one, or one with a
+/// hole, through the stencil.
+#[test]
+fn a_path_blur_fills_back_through_the_stencil_only_when_concave() {
+    let commands = path_blur_commands(|_| {}, &rect_path(32.0, 32.0, 64.0, 48.0), 3.0);
+    assert_eq!(commands.kinds, ["sample", "finish"]);
+    let fill = commands.fill.unwrap();
+    assert!(!fill.stencil);
+    assert_eq!(fill.params.shader_type, ShaderType::FillBlur);
+
+    let mut star = Path::new();
+    star.move_to(96.0, 16.0);
+    star.line_to(112.0, 80.0);
+    star.line_to(160.0, 48.0);
+    star.line_to(96.0, 64.0);
+    star.line_to(32.0, 48.0);
+    star.close();
+    let mut ring = rect_path(32.0, 32.0, 64.0, 64.0);
+    ring.rect(48.0, 48.0, 32.0, 32.0);
+    ring.solidity(Solidity::Hole);
+    for path in [star, ring] {
+        let commands = path_blur_commands(|_| {}, &path, 3.0);
+        assert_eq!(commands.kinds, ["sample", "finish"]);
+        assert!(commands.fill.unwrap().stencil);
+    }
+}
+
+/// The erase is clipped as the fill is, so the two mix the target toward the
+/// blur by the same coverage, whatever the composite operation.
+#[test]
+fn a_path_blur_erases_what_it_fills() {
+    let mut rounded = Path::new();
+    rounded.rounded_rect(48.0, 48.0, 64.0, 48.0, 12.0);
+    let fill = path_blur_commands(
+        |canvas| {
+            canvas.set_global_alpha(0.25);
+            canvas.global_composite_operation(CompositeOperation::Xor);
+            canvas.scissor(40.0, 40.0, 100.0, 80.0);
+            canvas.clip_path(&rounded, FillRule::NonZero);
+        },
+        &rect_path(32.0, 32.0, 128.0, 96.0),
+        3.0,
+    )
+    .fill
+    .unwrap();
+    assert_eq!(
+        fill.draws.last().unwrap().0,
+        CompositeOperationState::new(CompositeOperation::Lighter)
+    );
+    let params = fill.params;
+    let [(erase_operation, erase), _] = fill.draws[..] else {
+        panic!("a partial coverage takes an erase");
+    };
+    assert_eq!(
+        erase_operation,
+        CompositeOperationState::new(CompositeOperation::DestinationOut)
+    );
+    assert_eq!(params.inner_col[3], 0.25);
+    assert_eq!(erase.clip, params.clip);
+    assert_eq!(erase.shader_type, ShaderType::FillColor);
+    assert_eq!(erase.inner_col, [0.0, 0.0, 0.0, 0.25]);
+}
+
+/// The last draw is gated by the stencil clip as a fill is, and carries a
+/// clip shape or mask in its parameters.
+#[test]
+fn a_path_blur_is_clipped_as_a_fill() {
+    let path = rect_path(32.0, 32.0, 128.0, 96.0);
+    let mut triangle = Path::new();
+    triangle.move_to(40.0, 40.0);
+    triangle.line_to(150.0, 60.0);
+    triangle.line_to(60.0, 120.0);
+    triangle.close();
+
+    let unclipped = path_blur_commands(|_| {}, &path, 3.0).fill.unwrap();
+    assert!(!unclipped.clip_active);
+    assert!(unclipped.params.clip.is_none() && unclipped.params.clip_mask.is_none());
+
+    let stencil = path_blur_commands(
+        |canvas| {
+            canvas.set_clip_mask_budget(0);
+            canvas.clip_path(&triangle, FillRule::NonZero);
+        },
+        &path,
+        3.0,
+    );
+    assert!(stencil.fill.unwrap().clip_active);
+    // Cut to the clip's bounds, a pixel out, and read three sigma around.
+    assert_eq!(stencil.src, Some([30, 30, 130, 100]));
+
+    let masked = path_blur_commands(|canvas| canvas.clip_path(&triangle, FillRule::NonZero), &path, 3.0);
+    let masked = masked.fill.unwrap();
+    assert!(!masked.clip_active);
+    assert!(masked.params.clip_mask.is_some());
+
+    let mut rounded = Path::new();
+    rounded.rounded_rect(48.0, 48.0, 64.0, 48.0, 12.0);
+    let shaped = path_blur_commands(|canvas| canvas.clip_path(&rounded, FillRule::NonZero), &path, 3.0);
+    // The rect cut to the shape is filled where the shape covers it.
+    assert_eq!(shaped.kinds, ["sample", "finish"]);
+    let [x, y, width, height] = shaped.src.unwrap();
+    assert!(x >= 48 - 10 && y >= 48 - 10 && x + width <= 112 + 10 && y + height <= 96 + 10);
+}
+
+/// The region is the bounds of the transformed path's fill and fringe, and
+/// a transform's scale scales sigma.
+#[test]
+fn a_path_blur_reads_around_the_transformed_path() {
+    let square = rect_path(-20.0, -20.0, 40.0, 40.0);
+    let rotated = path_blur_commands(
+        |canvas| {
+            canvas.translate(128.0, 96.0);
+            canvas.rotate(std::f32::consts::FRAC_PI_4);
+        },
+        &square,
+        3.0,
+    );
+    // 128 and 96 ± 20√2 and the fringe's miter at a right corner, √2 half
+    // pixels, rounded out, plus 9 of reach.
+    assert_eq!(rotated.src, Some([90, 58, 76, 76]));
+    assert_eq!(rotated.fill.unwrap().params.extent, [58.0, 76.0]);
+
+    let scaled = path_blur_commands(
+        |canvas| {
+            canvas.translate(128.0, 96.0);
+            canvas.scale(2.0, 2.0);
+        },
+        &rect_path(-10.0, -10.0, 20.0, 20.0),
+        2.0,
+    );
+    // Sigma 4 reaches 12.
+    assert_eq!(scaled.src, Some([95, 63, 66, 66]));
+    assert_eq!(scaled.fill.unwrap().params.image_blur_filter_sigma, 4.0);
+}
+
+/// The region stops at the scissor.
+#[test]
+fn a_path_blur_reads_only_within_the_scissor() {
+    let commands = path_blur_commands(
+        |canvas| canvas.scissor(100.0, 50.0, 20.0, 20.0),
+        &rect_path(0.0, 0.0, 256.0, 192.0),
+        3.0,
+    );
+    assert_eq!(commands.src, Some([90, 40, 40, 40]));
+}
+
+/// Within one pass, the draw back samples the x scratch the other way up
+/// through the paint matrix.
+#[test]
+fn a_path_blur_samples_its_source_where_it_draws() {
+    let path = rect_path(96.0, 72.0, 64.0, 48.0);
+    let one_pass = path_blur_commands(|_| {}, &path, 3.0);
+    let params = one_pass.fill.unwrap().params;
+    // The region is [95, 71, 66, 50], its footprint 9 rows taller each way.
+    assert_eq!(params.extent, [66.0, 68.0]);
+    assert_eq!(sampled_at(&params, 95.0, 71.0), (0.0, 59.0));
+    assert_eq!(sampled_at(&params, 161.0, 121.0), (66.0, 9.0));
+}
+
+/// Nothing to blur records nothing: a degenerate sigma, an empty path, a
+/// rect with no width or a path off the target.
+#[test]
+fn a_path_blur_of_nothing_records_nothing() {
+    let on = rect_path(0.0, 0.0, 16.0, 16.0);
+    for (path, sigma) in [
+        (&on, 0.0),
+        (&on, -1.0),
+        (&on, f32::NAN),
+        (&Path::new(), 4.0),
+        (&rect_path(0.0, 0.0, 0.0, 16.0), 4.0),
+        (&rect_path(300.0, 0.0, 16.0, 16.0), 4.0),
+    ] {
+        let commands = path_blur_commands(|_| {}, path, sigma);
+        assert!(commands.kinds.is_empty(), "sigma {sigma}: {:?}", commands.kinds);
+    }
+    let commands = path_blur_commands(|canvas| canvas.scissor(200.0, 0.0, 16.0, 16.0), &on, 4.0);
+    assert!(commands.kinds.is_empty(), "outside the scissor: {:?}", commands.kinds);
+}
+
+/// An open capture draws into its store, so there is no render target to
+/// blur.
+#[test]
+fn a_path_blur_is_unsupported_inside_a_layer() {
+    let mut canvas = Canvas::new(RecordingRenderer::default()).unwrap();
+    canvas.set_size(64, 64, 1.0);
+    let path = rect_path(0.0, 0.0, 16.0, 16.0);
+    assert!(canvas.begin_layer(&LayerEffects::new().with_opacity(0.5)));
+    assert!(matches!(
+        canvas.blur_path(&path, FillRule::NonZero, 4.0),
+        Err(ErrorKind::UnsupportedOperation)
+    ));
+    canvas.end_layer();
+    assert!(canvas.blur_path(&path, FillRule::NonZero, 4.0).is_ok());
 }
