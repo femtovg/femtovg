@@ -33,7 +33,9 @@ image = { version = "0.25.0", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive", "rc"] }
 glow = { version = "0.18.0", default-features = false }
 log = "0.4"
-wgpu = { version = "30.0.0", optional = true, default-features = false, features = ["wgsl"] }
+# std for wgpu::util::StagingBelt, which the web build has no other way to get (its objects are not
+# Send, and the target panics by aborting).
+wgpu = { version = "30.0.0", optional = true, default-features = false, features = ["wgsl", "std"] }
 itertools = "0.15"
 ttf-parser = { version = "0.25.1", optional = true }
 swash = { version = "0.2.6", optional = true }
