@@ -7,13 +7,18 @@
 //! 12). A slice must hold at most the configured passes wherever the passes
 //! come from, every slice's uniforms and draws must land in it, in order,
 //! and the picture must not depend on where the frame was cut. A pass is
-//! only begun by a draw, so the counts here are of passes that draw.
+//! only begun by a draw, so the counts here are of passes that draw. The
+//! frame's uploads are staged in a belt the first slice copies from, so the
+//! belt is finished before each slice is submitted.
 
 use femtovg::{
     renderer::{SubmissionSlicing, WGPURenderer},
     BlendMode, Canvas, Color, FillRule, ImageFilter, ImageFlags, LayerEffects, MaskKind, Paint, Path, PixelFormat,
     RenderTarget,
 };
+
+use imgref::Img;
+use rgb::RGBA8;
 
 mod common;
 use common::{headless_device, render_rgba_on};
@@ -576,4 +581,36 @@ fn slices_hold_no_more_driver_memory_than_one_submission_on_metal() {
         sliced <= whole + whole / 20 + 16,
         "{sliced} MiB held in slices, {whole} MiB in one submission"
     );
+}
+
+/// An image uploaded before a frame of one-pass slices, drawn in the first
+/// slice and in the last: the upload lands before every slice that draws it.
+#[test]
+fn an_image_uploaded_before_a_sliced_frame_lands_in_its_slices() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let blue = vec![RGBA8::new(0, 0, 255, 255); 16];
+    let (pixels, slices) = render(&device, &queue, 8, 8, slices_of(1), |c| {
+        let image = c
+            .create_image_empty(4, 4, PixelFormat::Rgba8, ImageFlags::empty())
+            .expect("image");
+        c.update_image(image, Img::new(blue.as_slice(), 4, 4), 0, 0)
+            .expect("upload");
+        let draw_image = |c: &mut C, x: f32, y: f32| {
+            let mut path = Path::new();
+            path.rect(x, y, 4.0, 4.0);
+            let mut paint = Paint::image(image, x, y, 4.0, 4.0, 0.0, 1.0);
+            paint.set_anti_alias(false);
+            c.fill_path(&path, &paint);
+        };
+        draw_image(c, 0.0, 4.0);
+        one_layer_per_pixel(c, 4, 8);
+        draw_image(c, 4.0, 4.0);
+    });
+    assert!(slices.len() > 2, "slices: {slices:?}");
+    for x in [2, 6] {
+        let i = (6 * 8 + x) * 4;
+        assert_eq!(&pixels[i..i + 3], [0, 0, 255], "the image at x = {x}");
+    }
 }
