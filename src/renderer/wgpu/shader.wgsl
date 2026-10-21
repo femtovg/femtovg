@@ -53,6 +53,7 @@ const SHADER_TYPE_FilterImageTransfer: i32 = 14;
 const SHADER_TYPE_FilterImageBlend: i32 = 15;
 const SHADER_TYPE_FilterImageMorphology: i32 = 16;
 const SHADER_TYPE_FilterImageOffset: i32 = 17;
+const SHADER_TYPE_FillBlur: i32 = 18;
 
 const TAU: f32 = 6.28318530717958647692528676655900577;
 
@@ -229,6 +230,9 @@ fn shade(vertex: VertexOutput, clip: f32) -> vec4<f32> {
         }
         case SHADER_TYPE_FilterImageOffset: {
             return renderOffset(vertex, params);
+        }
+        case SHADER_TYPE_FillBlur: {
+            result = renderFillBlur(vertex, params);
         }
         default: {
             result = vec4<f32>(0.0, 0.0, 1.0, 1.0);
@@ -521,24 +525,22 @@ fn renderPlainTextureCopy(vertex: VertexOutput, params: Params) -> vec4<f32> {
 // wants (converting the sum afterwards squared any alpha the taps lost). A
 // tap beyond the image reads transparent, as a filter's input is beyond its
 // edge in SVG and Canvas 2D, instead of the edge texel clamped outward; its
-// weight stays in the sum, so an edge fades. With `clip_inner.x` set, which
-// no filter draw reads otherwise, the sampler's clamp to edge applies
-// instead.
+// weight stays in the sum, so an edge fades. A blur's own draws clamp to the
+// edge instead: their reach and a fill's fringe pass the source's edges.
 // With `radius` set, the tap reads the source's alpha alone, (0, 0, 0, a):
 // an alpha-only color matrix fused into the filter's first draw.
 fn blurTap(pos: vec2<f32>, params: Params) -> vec4<f32> {
     let uv = pos / params.extent;
-    let inside = (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) || params.clip_inner.x > 0.5;
+    let inside = (all(uv >= vec2<f32>(0.0)) && all(uv <= vec2<f32>(1.0))) || i32(params.shader_type) == SHADER_TYPE_FillBlur;
     var color: vec4<f32> = textureSample(image_texture, image_sampler, uv);
     if (params.tex_type == 1) { color = vec4<f32>(color.xyz * color.w, color.w); }
     if (params.radius > 0.5) { color = vec4<f32>(0.0, 0.0, 0.0, color.w); }
     return color * select(0.0, 1.0, inside);
 }
 
-fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
-    // The quad's texture coordinates say where in the source it samples;
-    // `clip_inner.y`, which no filter draw reads otherwise, mirrors them.
-    let center = select(vertex.ftcoord, vec2<f32>(vertex.ftcoord.x, params.extent.y - vertex.ftcoord.y), params.clip_inner.y > 0.5);
+// The Gaussian along image_blur_filter_direction, centered on `center` in
+// source pixels.
+fn blurAt(center: vec2<f32>, params: Params) -> vec4<f32> {
     let sampleCount: f32 = ceil(3.0 * params.image_blur_filter_sigma);
 
     var gaussian_coeff: vec3<f32> = params.image_blur_filter_coeff;
@@ -566,11 +568,22 @@ fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
         gaussian_coeff.y *= gaussian_coeff.z;
     }
 
-    var color: vec4<f32> = color_sum / coefficient_sum;
+    return color_sum / coefficient_sum;
+}
+
+fn renderFilteredImage(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    // The quad's texture coordinates say where in the source it samples.
+    var color: vec4<f32> = blurAt(vertex.ftcoord, params);
 
     // A color matrix fused into this second draw.
     if (params.feather > 0.5) { color = colorMatrixOn(color, params); }
     if (params.tex_type == 2) { color = vec4<f32>(color.x); }
 
     return color;
+}
+
+// A blur's draw as a fill: its texture coordinates carry the fill's fringe,
+// so paint_mat maps the fragment to where it samples.
+fn renderFillBlur(vertex: VertexOutput, params: Params) -> vec4<f32> {
+    return blurAt((params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy, params) * params.inner_col.a;
 }

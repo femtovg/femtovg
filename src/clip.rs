@@ -1045,6 +1045,20 @@ where
         (shape, mask)
     }
 
+    /// The device rect outside which the clip on the current render target's
+    /// stencil leaves nothing, or `None` when the stencil doesn't clip.
+    pub(crate) fn stencil_clip_reach(&self) -> Option<Bounds> {
+        self.clip_planes
+            .get(&self.current_render_target)
+            .filter(|plane| plane.count != 0)
+            .map(|plane| Bounds {
+                minx: plane.armed.x,
+                miny: plane.armed.y,
+                maxx: plane.armed.x + plane.armed.w,
+                maxy: plane.armed.y + plane.armed.h,
+            })
+    }
+
     /// The shape clip in force on the current render target, and its coverage.
     pub(crate) fn clip_shape(&self) -> Option<(RoundedBox, ClipCoverage)> {
         let target = self.current_render_target;

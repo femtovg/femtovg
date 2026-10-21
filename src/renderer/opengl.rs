@@ -42,9 +42,9 @@ pub struct OpenGl {
     view: [f32; 2],
     screen_view: [f32; 2],
     // All types of the vertex/fragment shader, indexed by shader_type when has_glyph_texture is true
-    main_programs_with_glyph_texture: [Option<MainProgram>; 18],
+    main_programs_with_glyph_texture: [Option<MainProgram>; 19],
     // Same shader programs but with has_glyph_texture being false
-    main_programs_without_glyph_texture: [Option<MainProgram>; 18],
+    main_programs_without_glyph_texture: [Option<MainProgram>; 19],
     // The programs of draws under a clip shape, by shader type and glyph texture use, each built when first drawn
     // with (None if that failed): no other program evaluates a shape, and few of them are ever drawn under one.
     clip_programs: FnvHashMap<(u8, bool, (bool, bool)), Option<MainProgram>>,
@@ -66,7 +66,7 @@ pub struct OpenGl {
     screen_target: Option<Framebuffer>,
     current_render_target: RenderTarget,
     max_texture_size: usize,
-    // The screen's pixels a rect blur reads, at their place on the screen:
+    // The screen's pixels a blur reads, at their place on the screen:
     // the screen can't be sampled. Kept at the screen's size, since a blur
     // drawn every frame copies every frame.
     screen_copy: Option<GlTexture>,
@@ -74,7 +74,7 @@ pub struct OpenGl {
     warned_blur_skipped: bool,
 }
 
-/// The texture parameters a rect blur's first draw reads an image target
+/// The texture parameters a blur's first draw reads an image target
 /// with.
 const RECT_BLUR_SAMPLING: [(u32, u32); 4] = [
     (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
@@ -290,6 +290,11 @@ impl OpenGl {
                         ShaderType::FilterImageOffset,
                         false,
                     )?)
+                },
+                if with_glyph_texture {
+                    None
+                } else {
+                    Some(MainProgram::new(&context, antialias, ShaderType::FillBlur, false)?)
                 },
             ])
         };
@@ -807,7 +812,7 @@ impl OpenGl {
 
     fn warn_skipped(&mut self, reason: &str) {
         if !std::mem::replace(&mut self.warned_blur_skipped, true) {
-            log::warn!("rect blur skipped: {reason}");
+            log::warn!("blur skipped: {reason}");
         }
     }
 
@@ -1173,6 +1178,7 @@ impl OpenGl {
         target_image: ImageId,
         src: [u32; 4],
         sigma: f32,
+        sample_transform: Transform2D,
     ) -> bool {
         let Some(target_info) = images.get(target_image).map(GlTexture::info) else {
             return false;
@@ -1195,7 +1201,8 @@ impl OpenGl {
         };
         let (target_width, target_height) = (target_info.width(), target_info.height());
         // Every OpenGL target holds its rows bottom-up.
-        let params = Params::rect_blur(size, sigma, 0, true);
+        let flip_y = Transform2D([1.0, 0.0, 0.0, -1.0, 0.0, size[1]]);
+        let params = Params::blur_axis(size, sigma, [1.0, 0.0], &(sample_transform * flip_y));
 
         let original_render_target = self.current_render_target;
         self.set_target(images, RenderTarget::Image(target_image));
@@ -1235,21 +1242,6 @@ impl OpenGl {
         self.set_target(images, original_render_target);
         self.main_program().set_view(self.view);
         true
-    }
-
-    /// Blurs `cmd.image` along y back onto the current render target: see
-    /// `CommandType::FinishBlur`.
-    fn finish_blur(
-        &mut self,
-        images: &ImageStore<GlTexture>,
-        cmd: &Command,
-        sigma: f32,
-        extent: [u32; 2],
-        region: [u32; 4],
-    ) {
-        let params = Params::rect_blur(extent.map(|v| v as f32), sigma, 1, false);
-        self.set_clip_bounds(Some(region));
-        self.triangles(images, cmd, &params);
     }
 
     /// Two-pass Gaussian blur of `cmd.image` into `target_image`: horizontal
@@ -1510,13 +1502,22 @@ impl Renderer for OpenGl {
                     target_image,
                     src,
                     sigma,
-                } => sampled = self.start_blur(images, &cmd, target_image, src, sigma),
-                CommandType::FinishBlur { sigma, extent, region } => {
+                    sample_transform,
+                } => sampled = self.start_blur(images, &cmd, target_image, src, sigma, sample_transform),
+                CommandType::FinishBlur { ref stencil_params, .. } => {
                     // Its source is the first draw's image, or that image run
                     // down a pyramid: without that draw it would write back
                     // whatever the image held before.
                     if sampled {
-                        self.finish_blur(images, &cmd, sigma, extent, region);
+                        for (composite_operation, params) in cmd.finish_blur_draws() {
+                            self.set_composite_operation(composite_operation);
+                            match stencil_params {
+                                Some(stencil_params) => {
+                                    self.concave_fill(images, &cmd, fans, stencil_params, &params);
+                                }
+                                None => self.convex_fill(images, &cmd, fans, &params),
+                            }
+                        }
                     }
                 }
                 CommandType::ClipFill => {
