@@ -70,7 +70,7 @@ pub use layers::{LayerEffects, MaskKind};
 mod turbulence;
 
 mod color;
-pub use color::Color;
+pub use color::{Color, ColorSpace};
 
 pub mod renderer;
 pub use renderer::{RenderTarget, Renderer};

@@ -3,6 +3,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Breaking:** Gradient stops with a non-finite offset or color are now 
+- ignored. This matches the SVG specification, but can change what is drawn.
+- Added `Paint::with_interpolation_space`/`set_interpolation_space` and
+  `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
+  gradient's stop colors be interpolated in a space other than plain sRGB.
 - Measured and drawn text no longer keeps missing glyphs after a font that
   covers them is added. Its cached shaping was used until the text dropped out
   of the shaping cache.

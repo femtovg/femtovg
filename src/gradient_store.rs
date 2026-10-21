@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    color::{from_space_components, resolve_hue_arc, to_space_components},
     image::ImageStore,
     paint::{GradientStop, MultiStopGradient},
-    Color, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
+    Color, ColorSpace, ErrorKind, ImageFlags, ImageId, ImageInfo, ImageSource, Renderer,
 };
 
 /// `GradientStore` holds image ids for multi-stop gradients. The actual image/textures
@@ -70,27 +71,40 @@ impl GradientStore {
 
 #[allow(clippy::many_single_char_names)]
 // Gradient filling, adapted from https://github.com/lieff/lvg/blob/master/render/common.c#L147
-fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, offset0: f32, offset1: f32) {
+fn gradient_span(
+    dest: &mut [rgb::RGBA8; 256],
+    color0: Color,
+    color1: Color,
+    offset0: f32,
+    offset1: f32,
+    space: ColorSpace,
+) {
     let s0o = offset0.clamp(0.0, 1.0);
     let s1o = offset1.clamp(0.0, 1.0);
 
-    if s1o < s0o {
+    // Empty, reversed and NaN spans all take this exit.
+    if s1o.partial_cmp(&s0o) != Some(std::cmp::Ordering::Greater) {
         return;
     }
 
     let s = (s0o * 256.0) as usize;
     let e = (s1o * 256.0) as usize;
 
-    let mut r = color0.r;
-    let mut g = color0.g;
-    let mut b = color0.b;
+    let (c0, c1) = resolve_hue_arc(
+        to_space_components(color0, space),
+        to_space_components(color1, space),
+        space,
+    );
+
+    let mut c = c0;
     let mut a = color0.a;
 
     let steps = (e - s) as f32;
-
-    let dr = (color1.r - r) / steps;
-    let dg = (color1.g - g) / steps;
-    let db = (color1.b - b) / steps;
+    let dc = [
+        (c1[0] - c0[0]) / steps,
+        (c1[1] - c0[1]) / steps,
+        (c1[2] - c0[2]) / steps,
+    ];
     let da = (color1.a - a) / steps;
 
     #[allow(clippy::needless_range_loop)]
@@ -101,19 +115,21 @@ fn gradient_span(dest: &mut [rgb::RGBA8; 256], color0: Color, color1: Color, off
         // blue, we should see some red in the gradient. If we premultiply the stops
         // then we won't see any red, because we will have already multiplied it to zero.
         // This way we'll get the red contribution.
+        let [cr, cg, cb] = from_space_components(c, space);
         dest[i] = rgb::RGBA8::new(
-            (r * a * 255.0) as u8,
-            (g * a * 255.0) as u8,
-            (b * a * 255.0) as u8,
+            (cr * a * 255.0) as u8,
+            (cg * a * 255.0) as u8,
+            (cb * a * 255.0) as u8,
             (a * 255.0) as u8,
         );
-        r += dr;
-        g += dg;
-        b += db;
+        c[0] += dc[0];
+        c[1] += dc[1];
+        c[2] += dc[2];
         a += da;
     }
 }
 fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::RGBA8>> {
+    let space = gradient.space();
     let mut dest = [rgb::RGBA8::new(0, 0, 0, 0); 256];
 
     // Fill the gradient up to the first stop.
@@ -121,7 +137,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
     if first_stop.0 > 0.0 {
         let s0 = first_stop.0;
         let color0 = first_stop.1;
-        gradient_span(&mut dest, color0, color0, 0.0, s0);
+        gradient_span(&mut dest, color0, color0, 0.0, s0, space);
     }
 
     // Iterate over the stops in overlapping pairs and fill out the rest of the
@@ -132,9 +148,9 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
         // Catch the case where the last stop doesn't go all the way to 1.0 and
         // pad it.
         if s0 < 1.0 && s1 > 1.0 {
-            gradient_span(&mut dest, color0, color0, s0, 1.0);
+            gradient_span(&mut dest, color0, color0, s0, 1.0, space);
         } else {
-            gradient_span(&mut dest, color0, color1, s0, s1);
+            gradient_span(&mut dest, color0, color1, s0, s1, space);
         }
 
         // If the first stop is >1.0 then we're done.
@@ -149,7 +165,7 @@ fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::R
     // never written - transparent on a fresh texture, stale on a recycled one.
     let last_stop = gradient.get(gradient.len() - 1);
     if last_stop.0 < 1.0 {
-        gradient_span(&mut dest, last_stop.1, last_stop.1, last_stop.0, 1.0);
+        gradient_span(&mut dest, last_stop.1, last_stop.1, last_stop.0, 1.0, space);
     }
     imgref::Img::new(dest.to_vec(), 256, 1)
 }
@@ -160,10 +176,55 @@ mod tests {
     use crate::paint::GradientColors;
 
     fn lut(stops: Vec<(f32, Color)>) -> Vec<rgb::RGBA8> {
+        lut_in_space(stops, ColorSpace::Srgb)
+    }
+
+    fn lut_in_space(stops: Vec<(f32, Color)>, space: ColorSpace) -> Vec<rgb::RGBA8> {
         match GradientColors::from_stops(stops) {
-            GradientColors::MultiStop { stops } => linear_gradient_stops(&stops).buf().to_vec(),
+            GradientColors::MultiStop { mut stops } => {
+                stops.set_interpolation_space(space);
+                linear_gradient_stops(&stops).buf().to_vec()
+            }
             GradientColors::TwoStop { .. } => panic!("expected a multi-stop gradient"),
         }
+    }
+
+    fn assert_rgb_close(got: rgb::RGBA8, want: (u8, u8, u8), tol: i16) {
+        let close = |g: u8, w: u8| (g as i16 - w as i16).abs() <= tol;
+        assert!(
+            close(got.r, want.0) && close(got.g, want.1) && close(got.b, want.2),
+            "{got:?} not within {tol} of {want:?}"
+        );
+    }
+
+    /// An Oklab red-to-green ramp keeps its endpoints but avoids the muddy sRGB midpoint.
+    #[test]
+    fn oklab_interpolation_round_trips_endpoints_and_differs_from_srgb() {
+        // The duplicate first stop forces the `MultiStop` path.
+        let stops = || {
+            vec![
+                (0.0, Color::rgb(255, 0, 0)),
+                (0.0, Color::rgb(255, 0, 0)),
+                (1.0, Color::rgb(0, 255, 0)),
+            ]
+        };
+
+        let srgb = lut_in_space(stops(), ColorSpace::Srgb);
+        let oklab = lut_in_space(stops(), ColorSpace::Oklab);
+
+        for texels in [&srgb, &oklab] {
+            // Texel 255 is one step short of color1, hence the slack.
+            let (start, end) = (texels[0], texels[255]);
+            assert!(start.r > 250 && start.g < 5 && start.b < 5, "{start:?}");
+            assert!(end.r < 25 && end.g > 250 && end.b < 5, "{end:?}");
+        }
+
+        // Independently computed Oklab midpoint; sRGB gives (127, 127, 0).
+        assert_rgb_close(oklab[128], (208, 168, 0), 3);
+        assert_ne!(
+            srgb[128], oklab[128],
+            "sRGB and Oklab must interpolate the midpoint differently"
+        );
     }
 
     /// SVG `spreadMethod="pad"` / Canvas semantics: past the last stop the
@@ -192,6 +253,54 @@ mod tests {
         assert_eq!((head.r, head.g, head.b, head.a), (255, 244, 79, 255));
     }
 
+    /// Black to white in linear light is brighter at the midpoint than the sRGB lerp.
+    #[test]
+    fn linear_rgb_midpoint_is_the_linear_light_average() {
+        // The duplicate first stop forces the `MultiStop` path.
+        let texels = lut_in_space(
+            vec![(0.0, Color::black()), (0.0, Color::black()), (1.0, Color::white())],
+            ColorSpace::LinearRgb,
+        );
+        // Linear 0.5 encodes to sRGB 0.735; sRGB interpolation gives 128.
+        assert_rgb_close(texels[128], (187, 187, 187), 2);
+    }
+
+    /// Red to cyan is exactly half a turn; the tie must keep increasing hue.
+    #[test]
+    fn hsl_antipodal_gradient_goes_forward_through_green_not_backward_through_blue() {
+        // The duplicate first stop forces the `MultiStop` path.
+        let texels = lut_in_space(
+            vec![
+                (0.0, Color::rgb(255, 0, 0)),
+                (0.0, Color::rgb(255, 0, 0)),
+                (1.0, Color::rgb(0, 255, 255)),
+            ],
+            ColorSpace::Hsl,
+        );
+        // h=0.25, s=1, l=0.5 is chartreuse.
+        assert_rgb_close(texels[128], (128, 255, 0), 3);
+    }
+
+    /// `GradientStore` caches textures by `Ord`, so `space` must be part of it.
+    #[test]
+    fn multi_stop_gradients_differing_only_in_space_are_not_equal() {
+        let stops = || {
+            vec![
+                (0.0, Color::rgb(255, 0, 0)),
+                (0.0, Color::rgb(255, 0, 0)),
+                (1.0, Color::rgb(0, 255, 0)),
+            ]
+        };
+        let srgb = match GradientColors::from_stops(stops()) {
+            GradientColors::MultiStop { stops } => stops,
+            GradientColors::TwoStop { .. } => panic!("expected a multi-stop gradient"),
+        };
+        let mut oklab = srgb.clone();
+        oklab.set_interpolation_space(ColorSpace::Oklab);
+
+        assert_ne!(srgb.cmp(&oklab), std::cmp::Ordering::Equal);
+    }
+
     /// A transparent last stop pads transparent (premultiplied zero), not
     /// black.
     #[test]
@@ -203,5 +312,57 @@ mod tests {
         ]);
         let t = texels[255];
         assert_eq!((t.r, t.g, t.b, t.a), (0, 0, 0, 0));
+    }
+
+    /// Empty, reversed and NaN spans write nothing.
+    #[test]
+    fn degenerate_spans_leave_the_ramp_untouched() {
+        let untouched = rgb::RGBA8::new(1, 2, 3, 4);
+        let (red, blue) = (Color::rgb(255, 0, 0), Color::rgb(0, 0, 255));
+        for (offset0, offset1) in [
+            (0.5, 0.5),
+            (0.6, 0.4),
+            (f32::NAN, 0.5),
+            (0.5, f32::NAN),
+            (f32::NAN, f32::NAN),
+        ] {
+            let mut dest = [untouched; 256];
+            gradient_span(&mut dest, red, blue, offset0, offset1, ColorSpace::Srgb);
+            assert!(
+                dest.iter().all(|&t| t == untouched),
+                "span {offset0}..{offset1} wrote texels"
+            );
+        }
+    }
+
+    #[test]
+    fn three_stop_ramp_is_unchanged() {
+        let texels = lut(vec![
+            (0.0, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(0, 255, 0)),
+            (1.0, Color::rgb(0, 0, 255)),
+        ]);
+        let rgba = |i: usize| {
+            let t = texels[i];
+            (t.r, t.g, t.b, t.a)
+        };
+        assert_eq!(rgba(0), (255, 0, 0, 255));
+        assert_eq!(rgba(64), (127, 127, 0, 255));
+        assert_eq!(rgba(128), (0, 255, 0, 255));
+        assert_eq!(rgba(192), (0, 127, 127, 255));
+        assert_eq!(rgba(255), (0, 1, 253, 255));
+    }
+
+    /// Coincident stops make a hard edge: each side keeps its own span.
+    #[test]
+    fn coincident_stops_make_a_hard_edge() {
+        let texels = lut(vec![
+            (0.0, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(255, 0, 0)),
+            (0.5, Color::rgb(0, 0, 255)),
+            (1.0, Color::rgb(0, 0, 255)),
+        ]);
+        assert_eq!((texels[127].r, texels[127].b), (255, 0));
+        assert_eq!((texels[128].r, texels[128].b), (0, 255));
     }
 }
