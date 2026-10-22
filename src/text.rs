@@ -805,6 +805,7 @@ impl GlyphAtlas {
                 Source::ColorOutline(0),
                 Source::ColorBitmap(StrikeWith::BestFit),
                 Source::Outline,
+                Source::Bitmap(StrikeWith::BestFit),
             ])
             .format(Format::Alpha)
             .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
