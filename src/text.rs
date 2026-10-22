@@ -804,6 +804,7 @@ impl GlyphAtlas {
             Render::new(&[
                 Source::ColorOutline(0),
                 Source::ColorBitmap(StrikeWith::BestFit),
+                Source::Bitmap(StrikeWith::BestFit),
                 Source::Outline,
             ])
             .format(Format::Alpha)
