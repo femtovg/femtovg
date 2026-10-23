@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
   clip mask a concave fill's winding pass and its cover bind different
   resources, so every such fill made two bind groups: 400 concave fills under
   a star mask took twice the render thread's time of the same fills unclipped.
+- Fixed a concave fill leaving winding counts in the stencil where its fill
+  reached past the quad that covers it - a feature thinner than the
+  antialiasing fringe, whose fill vertices move outward - so the next
+  concave fill whose cover reached them painted them, outside its own shape.
+  Such a fill now draws its fans again after the cover to zero them.
 - WGPU: a render pass attaches the stencil only when something it draws
   tests or writes it, and clears it on load and discards it on store unless
   a clip plane armed on the target outlives the pass. On a tiled GPU the
