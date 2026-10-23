@@ -122,11 +122,16 @@ impl FontVariations {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GradientStop(pub f32, pub Color);
 
+// `total_cmp` orders -0.0 before 0.0; they draw the same, so must share a ramp.
+fn key_cmp(a: f32, b: f32) -> Ordering {
+    (a + 0.0).total_cmp(&(b + 0.0))
+}
+
 fn color_total_cmp(a: &Color, b: &Color) -> Ordering {
-    a.r.total_cmp(&b.r)
-        .then_with(|| a.g.total_cmp(&b.g))
-        .then_with(|| a.b.total_cmp(&b.b))
-        .then_with(|| a.a.total_cmp(&b.a))
+    key_cmp(a.r, b.r)
+        .then_with(|| key_cmp(a.g, b.g))
+        .then_with(|| key_cmp(a.b, b.b))
+        .then_with(|| key_cmp(a.a, b.a))
 }
 
 fn is_finite_color(color: &Color) -> bool {
@@ -144,9 +149,7 @@ impl PartialEq for GradientStop {
 impl Eq for GradientStop {}
 impl Ord for GradientStop {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0
-            .total_cmp(&other.0)
-            .then_with(|| color_total_cmp(&self.1, &other.1))
+        key_cmp(self.0, other.0).then_with(|| color_total_cmp(&self.1, &other.1))
     }
 }
 
@@ -216,7 +219,7 @@ impl Ord for MultiStopGradient {
     fn cmp(&self, other: &Self) -> Ordering {
         self.shared_stops
             .cmp(&other.shared_stops)
-            .then_with(|| self.tint.total_cmp(&other.tint))
+            .then_with(|| key_cmp(self.tint, other.tint))
             .then_with(|| self.space.cmp(&other.space))
     }
 }
@@ -305,6 +308,20 @@ impl GradientColors {
                         tint: 1.0,
                         space,
                     },
+                };
+            }
+            // Only promotion makes a two-stop `MultiStop` spanning the extents
+            // (`from_stops` gives those `TwoStop`), so this undoes it.
+            Self::MultiStop { stops }
+                if space == ColorSpace::Srgb
+                    && stops.len() == 2
+                    && stops.shared_stops[0].0 <= 0.0
+                    && stops.shared_stops[1].0 >= 1.0 =>
+            {
+                // `get` folds the tint into alpha, as `mul_alpha` does for `TwoStop`.
+                *self = Self::TwoStop {
+                    start_color: stops.get(0).1,
+                    end_color: stops.get(1).1,
                 };
             }
             Self::MultiStop { stops } => stops.set_interpolation_space(space),
@@ -1791,6 +1808,26 @@ mod tests {
     }
 
     #[test]
+    fn with_interpolation_space_srgb_restores_promoted_two_stop_gradient() {
+        let (start, end) = (Color::rgbf(1.0, 0.0, 0.0), Color::rgbf(0.0, 1.0, 0.0));
+        let mut paint =
+            Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, start, end).with_interpolation_space(ColorSpace::Oklab);
+        paint.flavor.mul_alpha(0.5);
+        paint.set_interpolation_space(ColorSpace::Srgb);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        assert_eq!(
+            colors,
+            GradientColors::TwoStop {
+                start_color: Color::rgbaf(1.0, 0.0, 0.0, 0.5),
+                end_color: Color::rgbaf(0.0, 1.0, 0.0, 0.5),
+            }
+        );
+    }
+
+    #[test]
     fn with_interpolation_space_sets_multi_stop_gradient_interpolation_space() {
         let paint = Paint::linear_gradient_stops(
             0.0,
@@ -1915,6 +1952,25 @@ mod tests {
 
         let channel_nan = GradientStop(0.5, Color::rgbaf(f32::NAN, 1.0, 1.0, 1.0));
         assert_ne!(channel_nan.cmp(&GradientStop(0.5, Color::white())), Ordering::Equal);
+    }
+
+    /// -0.0 and 0.0 draw the same ramp, so `GradientStore` must not make two textures.
+    #[test]
+    fn multi_stop_gradient_ordering_equates_signed_zeros() {
+        let gradient = |offset: f32, channel: f32, tint: f32| MultiStopGradient {
+            shared_stops: [
+                GradientStop(offset, Color::rgbaf(channel, 0.0, 0.0, 1.0)),
+                GradientStop(0.5, Color::white()),
+                GradientStop(1.0, Color::black()),
+            ]
+            .into(),
+            tint,
+            space: ColorSpace::Srgb,
+        };
+
+        assert_eq!(gradient(-0.0, 0.0, 1.0), gradient(0.0, 0.0, 1.0));
+        assert_eq!(gradient(0.0, -0.0, 1.0), gradient(0.0, 0.0, 1.0));
+        assert_eq!(gradient(0.0, 0.0, -0.0), gradient(0.0, 0.0, 0.0));
     }
 
     #[test]

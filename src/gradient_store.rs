@@ -96,19 +96,15 @@ fn gradient_span(
         space,
     );
 
-    let mut c = c0;
-    let mut a = color0.a;
-
-    let steps = (e - s) as f32;
-    let dc = [
-        (c1[0] - c0[0]) / steps,
-        (c1[1] - c0[1]) / steps,
-        (c1[2] - c0[2]) / steps,
-    ];
-    let da = (color1.a - a) / steps;
-
+    let len = s1o - s0o;
     #[allow(clippy::needless_range_loop)]
     for i in s..e {
+        // The shaders sample at `d` with linear filtering, so texel `i` must hold
+        // the color at its centre, not its left edge.
+        let t = (((i as f32 + 0.5) / 256.0 - s0o) / len).clamp(0.0, 1.0);
+        let c = [0, 1, 2].map(|k| c0[k] + (c1[k] - c0[k]) * t);
+        let a = color0.a + (color1.a - color0.a) * t;
+
         // The output must be premultiplied, but we don't premultiply until this point
         // so that we can do gradients from transparent colors correctly -- for example
         // if we have a stop that is fully transparent red and it transitions to opaque
@@ -122,10 +118,6 @@ fn gradient_span(
             (cb * a * 255.0) as u8,
             (a * 255.0) as u8,
         );
-        c[0] += dc[0];
-        c[1] += dc[1];
-        c[2] += dc[2];
-        a += da;
     }
 }
 fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::RGBA8>> {
@@ -265,6 +257,21 @@ mod tests {
         assert_rgb_close(texels[128], (187, 187, 187), 2);
     }
 
+    /// Texels are baked at their centres. LinearRGB rises steeply from zero, so
+    /// baking at the left edge was off by up to 12 levels near black.
+    #[test]
+    fn ramp_texels_hold_the_color_at_their_centre() {
+        // The duplicate first stop forces the `MultiStop` path.
+        let texels = lut_in_space(
+            vec![(0.0, Color::black()), (0.0, Color::black()), (1.0, Color::white())],
+            ColorSpace::LinearRgb,
+        );
+        for (i, texel) in texels.iter().enumerate() {
+            let want = from_space_components([(i as f32 + 0.5) / 256.0; 3], ColorSpace::LinearRgb)[0] * 255.0;
+            assert!((texel.r as f32 - want).abs() <= 1.0, "texel {i}: {} vs {want}", texel.r);
+        }
+    }
+
     /// Red to cyan is exactly half a turn; the tie must keep increasing hue.
     #[test]
     fn hsl_antipodal_gradient_goes_forward_through_green_not_backward_through_blue() {
@@ -346,11 +353,12 @@ mod tests {
             let t = texels[i];
             (t.r, t.g, t.b, t.a)
         };
-        assert_eq!(rgba(0), (255, 0, 0, 255));
-        assert_eq!(rgba(64), (127, 127, 0, 255));
-        assert_eq!(rgba(128), (0, 255, 0, 255));
-        assert_eq!(rgba(192), (0, 127, 127, 255));
-        assert_eq!(rgba(255), (0, 1, 253, 255));
+        // Each texel holds the color at its centre, half a texel past its edge.
+        assert_eq!(rgba(0), (254, 0, 0, 255));
+        assert_eq!(rgba(64), (126, 128, 0, 255));
+        assert_eq!(rgba(128), (0, 254, 0, 255));
+        assert_eq!(rgba(192), (0, 126, 128, 255));
+        assert_eq!(rgba(255), (0, 0, 254, 255));
     }
 
     /// Coincident stops make a hard edge: each side keeps its own span.
