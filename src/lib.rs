@@ -941,6 +941,9 @@ where
     /// It is necessary to call `[Self::delete_image`] to free femtovg specific
     /// book-keeping data structures, the underlying backend-specific texture memory
     /// will not be freed. It is the caller's responsible to delete it.
+    ///
+    /// With the OpenGL renderer, the texture must belong to the same OpenGL context,
+    /// or in the browser, the same WebGL context as the canvas that the renderer draws into.
     pub fn create_image_from_native_texture(
         &mut self,
         texture: T::NativeTexture,

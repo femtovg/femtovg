@@ -307,6 +307,11 @@ impl GlTexture {
                 context.delete_texture(self.id);
             }
         }
+        // See `OpenGl::create_image_from_native_texture`.
+        #[cfg(wasm_unknown)]
+        if !self.owned && !self.external {
+            context.unregister_external_texture(self.id);
+        }
     }
 
     pub fn info(&self) -> ImageInfo {

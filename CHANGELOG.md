@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Breaking:** On wasm32 in the browser, the OpenGL renderer's
+  `NativeTexture` is now a `web_sys::WebGlTexture` instead of a glow texture
+  key. Use `Canvas::create_image_from_native_texture` to draw a texture
+  that another `glow::Context` or JavaScript rendered with the canvas's WebGL
+  context, and `Canvas::get_native_texture` to use one of femtovg's images
+  there.
 - **Breaking:** Gradient stops with a non-finite offset or color are now 
 - ignored. This matches the SVG specification, but can change what is drawn.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
