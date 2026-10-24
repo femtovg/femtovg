@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
   there.
 - **Breaking:** Gradient stops with a non-finite offset or color are now 
 - ignored. This matches the SVG specification, but can change what is drawn.
+- **Breaking:** Added `BlendMode::PlusLighter`, Compositing 2's `plus-lighter`
+  (`mix-blend-mode`, `feBlend`): premultiplied color and alpha add, clamped.
+  A layer with it composites like `CompositeOperation::Lighter` and needs no
+  backdrop copy, so it also blends on the screen. `BlendMode` is not
+  `#[non_exhaustive]`, so a `match` over it needs the new arm.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.

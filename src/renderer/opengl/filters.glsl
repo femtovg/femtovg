@@ -233,6 +233,12 @@ vec4 renderBlend() {
     vec2 buv = frag[0].y > 0.5 ? vec2(uv.x, 1.0 - uv.y) : uv;
     vec4 src = texture2D(tex, uv) * frag[0].z;
     vec4 bd = texture2D(glyphtex, buv);
+    // Mode 16, plus-lighter, adds premultiplied color and alpha; it has no
+    // blend function. Layers composite it with CompositeOperation::Lighter
+    // instead of this pass, so it never asks for a contribution.
+    if (int(frag[0].x) == 16) {
+        return min(src + bd, vec4(1.0));
+    }
     vec3 cs = src.rgb;
     if (src.a > 0.0) {
         cs = src.rgb / src.a;
