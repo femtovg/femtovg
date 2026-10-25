@@ -198,9 +198,8 @@ fn shade(vertex: VertexOutput, clip: f32) -> vec4<f32> {
             // below (like the other gradient cases); returning here would skip
             // the clip and antialiasing, so conic fills would ignore scissors.
             let d = conicAngleFraction(vertex, params);
-            // Straight endpoints, premultiplied post-mix (see renderGradient).
             let mixed = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
-            result = vec4<f32>(mixed.rgb * mixed.a, mixed.a);
+            result = premultiplyGradient(mixed, params);
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
@@ -354,9 +353,8 @@ fn renderGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f3
     if (!r.covered) {
         return vec4<f32>(0.0);
     }
-    // Straight endpoints, premultiplied post-mix (see renderGradient).
     let color = ditherGradient(mix(params.inner_col, params.outer_col, r.t), vertex.position.xy);
-    return vec4<f32>(color.rgb * color.a, color.a);
+    return premultiplyGradient(color, params);
 }
 
 fn renderImageGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> vec4<f32> {
@@ -448,16 +446,22 @@ fn ditherGradient(color: vec4<f32>, fragcoord: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(color.rgb + d, color.a);
 }
 
+// Premultiplies a two-stop gradient's mixed color, unless its endpoints arrive
+// premultiplied (see GRADIENT_PREMULTIPLIED_INDEX), and clamps the color channels
+// to [0, alpha], which the dither can step outside.
+fn premultiplyGradient(color: vec4<f32>, params: Params) -> vec4<f32> {
+    let premultiplied = params.paint_mat[1].w;
+    let rgb = clamp(color.rgb * max(color.a, premultiplied), vec3<f32>(0.0), vec3<f32>(color.a));
+    return vec4<f32>(rgb, color.a);
+}
+
 fn renderGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate gradient color using box gradient
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    // Endpoints arrive straight (unpremultiplied) so transparent stops keep
-    // their hue through the mix - the interpolation Canvas and SVG gradients
-    // apply; premultiply here for the compositing pipeline.
     let color: vec4<f32> = ditherGradient(mix(params.inner_col,params.outer_col,d), vertex.position.xy);
-    return vec4<f32>(color.rgb * color.a, color.a);
+    return premultiplyGradient(color, params);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.

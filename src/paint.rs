@@ -156,13 +156,25 @@ impl PartialOrd for GradientStop {
     }
 }
 
+/// How a gradient interpolates between its stops.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Interpolation {
+    /// The color space the stop colors are interpolated in.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) space: ColorSpace,
+    /// Whether the stop colors are interpolated premultiplied by their alpha.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub(crate) premultiplied: bool,
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MultiStopGradient {
     shared_stops: Rc<[GradientStop]>,
     tint: f32,
     #[cfg_attr(feature = "serde", serde(default))]
-    space: ColorSpace,
+    interpolation: Interpolation,
 }
 
 impl MultiStopGradient {
@@ -191,11 +203,16 @@ impl MultiStopGradient {
     }
 
     pub(crate) fn space(&self) -> ColorSpace {
-        self.space
+        self.interpolation.space
     }
 
+    #[cfg(test)]
     pub(crate) fn set_interpolation_space(&mut self, space: ColorSpace) {
-        self.space = space;
+        self.interpolation.space = space;
+    }
+
+    pub(crate) fn premultiplied(&self) -> bool {
+        self.interpolation.premultiplied
     }
 }
 
@@ -217,7 +234,7 @@ impl Ord for MultiStopGradient {
         self.shared_stops
             .cmp(&other.shared_stops)
             .then_with(|| self.tint.total_cmp(&other.tint))
-            .then_with(|| self.space.cmp(&other.space))
+            .then_with(|| self.interpolation.cmp(&other.interpolation))
     }
 }
 
@@ -225,13 +242,39 @@ impl Ord for MultiStopGradient {
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GradientColors {
-    TwoStop { start_color: Color, end_color: Color },
-    MultiStop { stops: MultiStopGradient },
+    TwoStop {
+        start_color: Color,
+        end_color: Color,
+        /// Its space is always sRGB: other spaces turn it into a multi-stop gradient.
+        #[cfg_attr(feature = "serde", serde(default))]
+        interpolation: Interpolation,
+    },
+    MultiStop {
+        stops: MultiStopGradient,
+    },
 }
 impl GradientColors {
+    /// A two-stop gradient with the default interpolation.
+    pub(crate) fn two_stop(start_color: Color, end_color: Color) -> Self {
+        Self::TwoStop {
+            start_color,
+            end_color,
+            interpolation: Interpolation::default(),
+        }
+    }
+
+    fn interpolation_mut(&mut self) -> &mut Interpolation {
+        match self {
+            Self::TwoStop { interpolation, .. } => interpolation,
+            Self::MultiStop { stops } => &mut stops.interpolation,
+        }
+    }
+
     fn mul_alpha(&mut self, a: f32) {
         match self {
-            Self::TwoStop { start_color, end_color } => {
+            Self::TwoStop {
+                start_color, end_color, ..
+            } => {
                 start_color.a *= a;
                 end_color.a *= a;
             }
@@ -251,17 +294,11 @@ impl GradientColors {
             .filter(|(offset, color)| offset.is_finite() && is_finite_color(color));
         let Some(first_stop) = stops.next() else {
             // No stops, we use black.
-            return Self::TwoStop {
-                start_color: Color::black(),
-                end_color: Color::black(),
-            };
+            return Self::two_stop(Color::black(), Color::black());
         };
         let Some(second_stop) = stops.next() else {
             // One stop devolves to a solid color fill (but using the gradient shader variation).
-            return Self::TwoStop {
-                start_color: first_stop.1,
-                end_color: first_stop.1,
-            };
+            return Self::two_stop(first_stop.1, first_stop.1);
         };
 
         let maybe_third_stop = stops.next();
@@ -269,10 +306,7 @@ impl GradientColors {
         if maybe_third_stop.is_none() && first_stop.0 <= 0.0 && second_stop.0 >= 1.0 {
             // Two stops takes the classic gradient path, so long as the stop positions are at
             // the extents (if the stop positions are inset then we'll fill to them).
-            return Self::TwoStop {
-                start_color: first_stop.1,
-                end_color: second_stop.1,
-            };
+            return Self::two_stop(first_stop.1, second_stop.1);
         }
 
         // Actual multistop gradient. We copy out the stops and then use a stop with a
@@ -288,27 +322,36 @@ impl GradientColors {
             stops: MultiStopGradient {
                 shared_stops: out_stops,
                 tint: 1.0,
-                space: ColorSpace::Srgb,
+                interpolation: Interpolation::default(),
             },
         }
     }
 
     /// Sets the color space the stop colors are interpolated in.
     pub(crate) fn set_interpolation_space(&mut self, space: ColorSpace) {
-        match self {
-            // The two-stop shader path only interpolates in sRGB; other spaces go through the LUT.
-            Self::TwoStop { .. } if space == ColorSpace::Srgb => {}
-            Self::TwoStop { start_color, end_color } => {
+        self.interpolation_mut().space = space;
+        // The two-stop shader path only interpolates in sRGB; other spaces go through the LUT.
+        if let Self::TwoStop {
+            start_color,
+            end_color,
+            interpolation,
+        } = self
+        {
+            if space != ColorSpace::Srgb {
                 *self = Self::MultiStop {
                     stops: MultiStopGradient {
                         shared_stops: [GradientStop(0.0, *start_color), GradientStop(1.0, *end_color)].into(),
                         tint: 1.0,
-                        space,
+                        interpolation: *interpolation,
                     },
                 };
             }
-            Self::MultiStop { stops } => stops.set_interpolation_space(space),
         }
+    }
+
+    /// Sets whether the stop colors are interpolated premultiplied by their alpha.
+    pub(crate) fn set_premultiplied_interpolation(&mut self, premultiplied: bool) {
+        self.interpolation_mut().premultiplied = premultiplied;
     }
 }
 
@@ -757,7 +800,7 @@ impl Paint {
         Self::with_flavor(PaintFlavor::LinearGradient {
             start: Position { x: start_x, y: start_y },
             end: Position { x: end_x, y: end_y },
-            colors: GradientColors::TwoStop { start_color, end_color },
+            colors: GradientColors::two_stop(start_color, end_color),
             transform: Transform2D::identity(),
         })
     }
@@ -845,10 +888,7 @@ impl Paint {
             height,
             radius,
             feather,
-            colors: GradientColors::TwoStop {
-                start_color: inner_color,
-                end_color: outer_color,
-            },
+            colors: GradientColors::two_stop(inner_color, outer_color),
             transform: Transform2D::identity(),
         })
     }
@@ -890,10 +930,7 @@ impl Paint {
             center: Position { x: cx, y: cy },
             in_radius: (in_radius, in_radius),
             out_radius: (out_radius, out_radius),
-            colors: GradientColors::TwoStop {
-                start_color: inner_color,
-                end_color: outer_color,
-            },
+            colors: GradientColors::two_stop(inner_color, outer_color),
             transform: Transform2D::identity(),
         })
     }
@@ -942,10 +979,7 @@ impl Paint {
             center: Position { x: cx, y: cy },
             in_radius: (in_rx, in_ry),
             out_radius: (out_rx, out_ry),
-            colors: GradientColors::TwoStop {
-                start_color: inner_color,
-                end_color: outer_color,
-            },
+            colors: GradientColors::two_stop(inner_color, outer_color),
             transform: Transform2D::identity(),
         })
     }
@@ -1074,10 +1108,7 @@ impl Paint {
             start_radius,
             end_center: Position { x: end_x, y: end_y },
             end_radius,
-            colors: GradientColors::TwoStop {
-                start_color: inner_color,
-                end_color: outer_color,
-            },
+            colors: GradientColors::two_stop(inner_color, outer_color),
             transform: Transform2D::identity(),
         })
     }
@@ -1134,7 +1165,7 @@ impl Paint {
         Self::with_flavor(PaintFlavor::ConicGradient {
             center: Position { x: cx, y: cy },
             start_angle: Self::finite_start_angle_or_zero(start_angle),
-            colors: GradientColors::TwoStop { start_color, end_color },
+            colors: GradientColors::two_stop(start_color, end_color),
             transform: Transform2D::identity(),
         })
     }
@@ -1739,6 +1770,30 @@ impl Paint {
         self
     }
 
+    /// Sets whether gradient stops are interpolated premultiplied by their alpha.
+    /// Ignored on non-gradient paints.
+    ///
+    /// By default, stops are interpolated straight (unpremultiplied), as Canvas 2D and SVG
+    /// gradients are, so a stop's color shows even where it fades out:
+    /// `transparent` (transparent black) to white passes through gray.
+    /// CSS gradients interpolate premultiplied, so a transparent stop adds no color:
+    /// `transparent` to white stays white and only fades in.
+    pub fn set_premultiplied_interpolation(&mut self, premultiplied: bool) {
+        if let Some(colors) = self.flavor.gradient_colors_mut() {
+            colors.set_premultiplied_interpolation(premultiplied);
+        }
+    }
+
+    /// Returns the paint with premultiplied interpolation set to the specified value.
+    ///
+    /// See [`set_premultiplied_interpolation`](Self::set_premultiplied_interpolation) for details.
+    #[inline]
+    #[must_use]
+    pub fn with_premultiplied_interpolation(mut self, premultiplied: bool) -> Self {
+        self.set_premultiplied_interpolation(premultiplied);
+        self
+    }
+
     /// Sets the fill rule for filling paths.
     #[inline]
     pub fn set_fill_rule(&mut self, rule: FillRule) {
@@ -1757,7 +1812,7 @@ impl Paint {
 mod tests {
     use std::cmp::Ordering;
 
-    use super::{GradientColors, GradientStop, MultiStopGradient, Paint, PaintFlavor};
+    use super::{GradientColors, GradientStop, Interpolation, MultiStopGradient, Paint, PaintFlavor};
     #[cfg(feature = "serde")]
     use super::{Position, Transform2D};
     use crate::{Color, ColorSpace};
@@ -1811,6 +1866,43 @@ mod tests {
         let GradientColors::MultiStop { stops } = colors else {
             panic!("expected MultiStop");
         };
+        assert_eq!(stops.space(), ColorSpace::Oklab);
+    }
+
+    #[test]
+    fn with_premultiplied_interpolation_keeps_a_fading_two_stop_gradient_on_the_two_stop_path() {
+        let (start, end) = (Color::rgba(0, 0, 0, 0), Color::white());
+        let paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, start, end).with_premultiplied_interpolation(true);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        assert_eq!(
+            colors,
+            GradientColors::TwoStop {
+                start_color: start,
+                end_color: end,
+                interpolation: Interpolation {
+                    space: ColorSpace::Srgb,
+                    premultiplied: true,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn with_premultiplied_interpolation_survives_a_later_interpolation_space() {
+        let paint = Paint::linear_gradient(0.0, 0.0, 1.0, 1.0, Color::rgba(0, 0, 0, 0), Color::white())
+            .with_premultiplied_interpolation(true)
+            .with_interpolation_space(ColorSpace::Oklab);
+
+        let PaintFlavor::LinearGradient { colors, .. } = paint.flavor else {
+            panic!("expected LinearGradient");
+        };
+        let GradientColors::MultiStop { stops } = colors else {
+            panic!("expected MultiStop");
+        };
+        assert!(stops.premultiplied());
         assert_eq!(stops.space(), ColorSpace::Oklab);
     }
 
@@ -1880,13 +1972,7 @@ mod tests {
     fn gradient_with_only_a_nan_middle_stop_becomes_two_stop() {
         let (red, blue) = (Color::rgb(255, 0, 0), Color::rgb(0, 0, 255));
         for colors in every_stops_constructor(&[(0.0, red), (f32::NAN, Color::white()), (1.0, blue)]) {
-            assert_eq!(
-                colors,
-                GradientColors::TwoStop {
-                    start_color: red,
-                    end_color: blue
-                }
-            );
+            assert_eq!(colors, GradientColors::two_stop(red, blue));
         }
     }
 
@@ -1902,7 +1988,7 @@ mod tests {
             ]
             .into(),
             tint,
-            space: ColorSpace::Srgb,
+            interpolation: Interpolation::default(),
         };
 
         let half = gradient(0.5, 1.0);
@@ -1960,10 +2046,7 @@ mod tests {
         let flavor = PaintFlavor::ConicGradient {
             center: Position { x: 1.0, y: 2.0 },
             start_angle: 1.5,
-            colors: GradientColors::TwoStop {
-                start_color: Color::black(),
-                end_color: Color::white(),
-            },
+            colors: GradientColors::two_stop(Color::black(), Color::white()),
             transform: Transform2D::identity(),
         };
 
@@ -1997,10 +2080,7 @@ mod tests {
         let flavor = PaintFlavor::ConicGradient {
             center: Position { x: 3.0, y: 4.0 },
             start_angle: 2.75,
-            colors: GradientColors::TwoStop {
-                start_color: Color::black(),
-                end_color: Color::white(),
-            },
+            colors: GradientColors::two_stop(Color::black(), Color::white()),
             transform: Transform2D::identity(),
         };
 
