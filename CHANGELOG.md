@@ -11,11 +11,6 @@ All notable changes to this project will be documented in this file.
   there.
 - **Breaking:** Gradient stops with a non-finite offset or color are now 
 - ignored. This matches the SVG specification, but can change what is drawn.
-- **Breaking:** Added `BlendMode::PlusLighter`, Compositing 2's `plus-lighter`
-  (`mix-blend-mode`, `feBlend`): premultiplied color and alpha add, clamped.
-  A layer with it composites like `CompositeOperation::Lighter` and needs no
-  backdrop copy, so it also blends on the screen. `BlendMode` is not
-  `#[non_exhaustive]`, so a `match` over it needs the new arm.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.
@@ -236,6 +231,9 @@ All notable changes to this project will be documented in this file.
   is blended with what lies under it on the target it was opened on, which
   must be an image or an enclosing layer; on the screen, or when the two
   transients it needs do not fit the budget, the layer composites normally.
+  A `BlendMode::PlusLighter` layer (Compositing 2's `plus-lighter`) composites
+  like `CompositeOperation::Lighter` instead, so it needs no backdrop and also
+  blends on the screen.
   Fixes the solidJS banner's color-burn overlay. Also fixed the multiply, screen
   and hard-light groups in Firefox, BuseyBench, and WPT reference examples.
 - Fixed the WGPU backend building the same render pipelines again for each
@@ -246,7 +244,8 @@ All notable changes to this project will be documented in this file.
   back to the one that was current, an open layer's store included.
 - Added `ImageFilter::Blend`: blends the filtered image over a second image
   with any of the sixteen `BlendMode`s of the Compositing and Blending
-  specification (multiply, screen, overlay, ..., luminosity), the SVG
+  specification (multiply, screen, overlay, ..., luminosity) or Compositing 2's
+  `plus-lighter`, the SVG
   `feBlend` primitive. The backdrop is placed at a rect, in root device space
   for a layer's filters, so a chain can blend a group with an image rendered
   elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
