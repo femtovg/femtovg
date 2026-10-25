@@ -5237,26 +5237,164 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     }
 }
 
-/// Without `image-loading`, drawing a PNG glyph directly at a font size too large
-/// for the atlas doesn't return an error. The draw skips the glyph instead.
-#[cfg(all(feature = "swash", not(feature = "image-loading")))]
+/// The atlas draws an oversized PNG glyph from a smaller copy, at its position
+/// and size at the font size.
+#[cfg(any(feature = "swash", all(feature = "textlayout", feature = "image-loading")))]
 #[test]
-fn png_glyphs_too_large_for_the_atlas_are_skipped() {
-    use crate::text::test_fonts::png_glyph_font;
+fn png_glyphs_too_large_for_the_atlas_are_drawn_at_the_font_size() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::{offset_png_glyph_font, png_glyph_font};
+    use crate::text::{GLYPH_PADDING, MAX_GLYPH_SIDE, TEXTURE_SIZE};
 
+    // (font, [width, height, x offset, y offset]) in pixels of the 24 ppem strike. The
+    // offsets place the bitmap's bottom left corner relative to the glyph origin, y up.
+    let square: (Vec<u8>, [f32; 4]) = (png_glyph_font(), [24.0, 24.0, 0.0, 0.0]);
+    let wide: (Vec<u8>, [f32; 4]) = (offset_png_glyph_font(), [36.0, 24.0, 3.0, -5.0]);
+    // The atlas shrinks a bitmap if its longer side is more than 507 pixels (MAX_GLYPH_SIDE),
+    // so the square bitmap keeps its size at 507 and is shrunk from 508 on. At 517.0958, f32
+    // rounding puts the copy's side just above 506 texels, and the atlas rounds it up to 507.
+    // The last number in each case is the allowed error per edge, in pixels. A glyph drawn at
+    // the font size has its bearing rounded to a whole pixel. A copy is placed exactly.
+    let cases = [
+        (&square, 507.0, 0.0),
+        (&square, 508.0, 0.0),
+        (&square, 1000.0, 0.0),
+        (&square, 517.0958, 0.0),
+        (&wide, 300.0, 0.5),
+        (&wide, 700.0, 0.0),
+        (&wide, 1000.0, 0.0),
+    ];
+    let (x, y) = (800.0, 1100.0);
+
+    for (bitmap, font_size, tolerance) in cases {
+        let [width, height, offset_x, offset_y] = bitmap.1;
+        let pixel = font_size / 24.0;
+        let shrunk = width.max(height) * pixel > MAX_GLYPH_SIDE as f32;
+        for stroke in [false, true] {
+            let case = format!("{width} by {height} bitmap at size {font_size}, stroke: {stroke}");
+            let renderer = RecordingRenderer::default();
+            let recorded_commands = renderer.last_commands.clone();
+            let recorded_verts = renderer.last_verts.clone();
+            let text_context = TextContext::default();
+            let font = text_context.add_font_mem(&bitmap.0).unwrap();
+            let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+            canvas.set_size(2000, 2000, 1.0);
+            let paint = Paint::color(Color::black()).with_font_size(font_size);
+            let glyph = [PositionedGlyph { x, y, glyph_id: 0 }];
+
+            let result = if stroke {
+                canvas.stroke_glyph_run(font, &[], glyph, &paint)
+            } else {
+                canvas.fill_glyph_run(font, &[], glyph, &paint)
+            };
+            assert!(result.is_ok(), "{case}: {result:?}");
+            canvas.flush_to_output(());
+
+            let color_quads: Vec<_> = recorded_commands
+                .borrow()
+                .iter()
+                .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)))
+                .filter_map(|command| command.triangles_verts)
+                .collect();
+            assert_eq!(color_quads.len(), 1, "{case}");
+
+            let (offset, count) = color_quads[0];
+            assert_eq!(count, 6, "{case}");
+            let verts = &recorded_verts.borrow()[offset..offset + count];
+            // The first two vertices are the quad's top left and bottom right corners.
+            let (left, top, right, bottom) = (verts[0].x, verts[0].y, verts[1].x, verts[1].y);
+            let texels = [
+                (verts[1].u - verts[0].u) * TEXTURE_SIZE as f32,
+                (verts[1].v - verts[0].v) * TEXTURE_SIZE as f32,
+            ];
+            let texel_size = [(right - left) / texels[0], (bottom - top) / texels[1]];
+            if shrunk {
+                // The copy without its padding.
+                let longest_side = texels[0].max(texels[1]) - 2.0 * GLYPH_PADDING as f32;
+                assert!(
+                    longest_side >= (MAX_GLYPH_SIDE - 1) as f32,
+                    "{case}: the copy is {texels:?}"
+                );
+            } else {
+                assert!(
+                    texel_size.iter().all(|side| (side - 1.0).abs() < 1e-4),
+                    "{case}: {texel_size:?}"
+                );
+            }
+
+            // Inset the quad by its one texel of padding to get the bitmap's rectangle.
+            let drawn = [
+                left + texel_size[0],
+                top + texel_size[1],
+                right - texel_size[0],
+                bottom - texel_size[1],
+            ];
+            let bitmap_left = x + offset_x * pixel;
+            let bitmap_bottom = y - offset_y * pixel;
+            let expected = [
+                bitmap_left,
+                bitmap_bottom - height * pixel,
+                bitmap_left + width * pixel,
+                bitmap_bottom,
+            ];
+            for (actual, wanted) in drawn.into_iter().zip(expected) {
+                assert!(
+                    (actual - wanted).abs() <= tolerance + 0.01,
+                    "{case}: the bitmap is drawn at {drawn:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The atlas makes a smaller copy of a PNG glyph from its largest strike, the
+/// one its size is estimated from, even when a strike nearer the copy's size
+/// covers more of the em and would not fit.
+#[cfg(feature = "swash")]
+#[test]
+fn png_glyphs_are_shrunk_from_their_largest_strike() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::two_strike_png_glyph_font;
+    use crate::text::TEXTURE_SIZE;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
     let text_context = TextContext::default();
-    let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
-    let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
-    canvas.set_size(400, 400, 1.0);
-    // The bitmap is one em square, and an atlas texture is 512 by 512 pixels.
-    let paint = Paint::color(Color::black()).with_font_size(700.0);
+    let font = text_context.add_font_mem(&two_strike_png_glyph_font()).unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(2000, 2000, 1.0);
+    // At 1000 pixels the 1024 ppem strike's bitmap is 1000 pixels wide, so the copy is made at
+    // about 506 pixels. The 512 ppem strike's bitmap would be 593 texels wide there.
+    let font_size = 1000.0;
+    let paint = Paint::color(Color::black()).with_font_size(font_size);
     let glyph = PositionedGlyph {
-        x: 50.0,
-        y: 100.0,
+        x: 100.0,
+        y: 1500.0,
         glyph_id: 0,
     };
-    canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
-    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let color_quads: Vec<_> = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)))
+        .filter_map(|command| command.triangles_verts)
+        .collect();
+    assert_eq!(color_quads.len(), 1);
+    let (offset, count) = color_quads[0];
+    let verts = &recorded_verts.borrow()[offset..offset + count];
+    // The first two vertices are the quad's top left and bottom right corners. Inset by the
+    // copy's one texel of padding, the quad is the 1024 ppem strike's bitmap at the font size.
+    let texels = (verts[1].u - verts[0].u) * TEXTURE_SIZE as f32;
+    let texel_width = (verts[1].x - verts[0].x) / texels;
+    let drawn_width = verts[1].x - verts[0].x - 2.0 * texel_width;
+    let expected_width = 1024.0 * font_size / 1024.0;
+    assert!(
+        (drawn_width - expected_width).abs() < 0.01,
+        "{drawn_width} {expected_width}"
+    );
 }
 
 /// With `textlayout`, `Font::glyph` finds a PNG glyph without decoding it. When
@@ -5291,6 +5429,49 @@ fn stroked_png_glyphs_that_do_not_decode_are_skipped() {
         .filter(|command| !matches!(command.glyph_texture, GlyphTexture::None))
         .count();
     assert_eq!(glyph_draws, 0);
+}
+
+/// When swash cannot decode a PNG glyph and draws its outline instead, the atlas
+/// rasterizes the outline at the font size and does not shrink it like a bitmap.
+#[cfg(all(feature = "textlayout", feature = "swash"))]
+#[test]
+fn png_glyphs_that_do_not_decode_are_not_shrunk() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::outline_glyph_with_broken_png_font;
+    use crate::text::TEXTURE_SIZE;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
+    let text_context = TextContext::default();
+    let font = text_context
+        .add_font_mem(&outline_glyph_with_broken_png_font())
+        .unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(2000, 2000, 1.0);
+    // The PNG's header gives a bitmap one em square, 1000 pixels here, which is too large for
+    // the atlas. The outline is a 500-unit square, which fits.
+    let paint = Paint::color(Color::black()).with_font_size(1000.0);
+    let glyph = PositionedGlyph {
+        x: 100.0,
+        y: 1100.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let mask_quads: Vec<_> = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(_)))
+        .filter_map(|command| command.triangles_verts)
+        .collect();
+    assert_eq!(mask_quads.len(), 1);
+    let (offset, count) = mask_quads[0];
+    let verts = &recorded_verts.borrow()[offset..offset + count];
+    // The first two vertices are the quad's top left and bottom right corners.
+    let texel_width = (verts[1].x - verts[0].x) / ((verts[1].u - verts[0].u) * TEXTURE_SIZE as f32);
+    assert!((texel_width - 1.0).abs() < 1e-4, "{texel_width}");
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /
