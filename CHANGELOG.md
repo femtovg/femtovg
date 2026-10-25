@@ -3,6 +3,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- `Canvas` now draws PNG bitmap glyphs (color emoji) larger than about 507
+  pixels by scaling up a smaller copy in the glyph atlas. The draw returned
+  `FontSizeTooLargeForAtlas` instead with the default `textlayout` and
+  `image-loading` features, after drawing only the run's outline glyphs.
 - Fixed PNG glyphs (color emoji) drawn one pixel too large on each side with
   the default features.
 - **Breaking:** On wasm32 in the browser, the OpenGL renderer's

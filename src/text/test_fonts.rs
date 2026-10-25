@@ -111,13 +111,29 @@ pub(crate) fn minimal_font_without_optional_tables() -> Vec<u8> {
 
 /// Builds a font whose only glyph is a PNG bitmap in an `sbix` strike.
 pub(crate) fn png_glyph_font() -> Vec<u8> {
-    font_with_png_glyph(&png(), Vec::new())
+    font_with_png_glyph(&[(24, &png(24, 24))], (0, 0), Vec::new())
 }
 
-/// Encodes a 24 by 24 PNG of one color.
-fn png() -> Vec<u8> {
+/// Builds a font whose only glyph is a 36 by 24 PNG bitmap in an `sbix`
+/// strike, with its bottom left corner 3 pixels right of and 5 pixels below
+/// the glyph origin.
+#[cfg(any(feature = "swash", all(feature = "textlayout", feature = "image-loading")))]
+pub(crate) fn offset_png_glyph_font() -> Vec<u8> {
+    font_with_png_glyph(&[(24, &png(36, 24))], (3, -5), Vec::new())
+}
+
+/// Builds a font whose only glyph has a PNG in two `sbix` strikes that cover
+/// different fractions of the em: 600 pixels square at 512 ppem, and 1024
+/// pixels square at 1024 ppem.
+#[cfg(feature = "swash")]
+pub(crate) fn two_strike_png_glyph_font() -> Vec<u8> {
+    font_with_png_glyph(&[(512, &png(600, 600)), (1024, &png(1024, 1024))], (0, 0), Vec::new())
+}
+
+/// Encodes a `width` by `height` PNG of one color.
+fn png(width: u32, height: u32) -> Vec<u8> {
     let mut png = std::io::Cursor::new(Vec::new());
-    ::image::RgbaImage::from_pixel(24, 24, ::image::Rgba([255, 0, 64, 255]))
+    ::image::RgbaImage::from_pixel(width, height, ::image::Rgba([255, 0, 64, 255]))
         .write_to(&mut png, ::image::ImageFormat::Png)
         .unwrap();
     png.into_inner()
@@ -128,7 +144,7 @@ fn png() -> Vec<u8> {
 /// cannot decode it.
 #[cfg(all(feature = "textlayout", feature = "swash"))]
 pub(crate) fn outline_glyph_with_broken_png_font() -> Vec<u8> {
-    let png = png();
+    let png = png(24, 24);
 
     // One contour through four on-curve points, a 500-unit square. Each
     // flag byte is 1 (on curve), so each coordinate is a 16-bit delta.
@@ -154,29 +170,41 @@ pub(crate) fn outline_glyph_with_broken_png_font() -> Vec<u8> {
 
     // The 8-byte signature and the 25-byte IHDR chunk.
     let header = &png[..33];
-    font_with_png_glyph(header, vec![(*b"glyf", glyf), (*b"hmtx", hmtx), (*b"loca", loca)])
+    font_with_png_glyph(
+        &[(24, header)],
+        (0, 0),
+        vec![(*b"glyf", glyf), (*b"hmtx", hmtx), (*b"loca", loca)],
+    )
 }
 
-/// Builds a font whose only glyph is `png` in an `sbix` strike, with the
-/// required tables and `extra_tables`.
-fn font_with_png_glyph(png: &[u8], extra_tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
+/// Builds a font whose only glyph has one PNG in each of the `sbix` strikes in
+/// `strikes`, given as (ppem, PNG data), with the required tables and `extra_tables`.
+/// `origin` is the PNG's bottom left corner relative to the glyph origin, in pixels, y up.
+fn font_with_png_glyph(strikes: &[(u16, &[u8])], origin: (i16, i16), extra_tables: Vec<([u8; 4], Vec<u8>)>) -> Vec<u8> {
     let mut sbix = Vec::new();
     push_u16(&mut sbix, 1); // version
     push_u16(&mut sbix, 1); // flags
-    push_u32(&mut sbix, 1); // numStrikes
-    push_u32(&mut sbix, 12); // strikeOffsets[0]: the strike starts after these 12 bytes
+    push_u32(&mut sbix, strikes.len() as u32); // numStrikes
+                                               // strikeOffsets: the strikes follow these offsets, one after another.
+    let mut strike_offset = 8 + 4 * strikes.len() as u32;
+    for (_, png) in strikes {
+        push_u32(&mut sbix, strike_offset);
+        strike_offset += 12 + 8 + png.len() as u32;
+    }
 
-    // The strike. glyphDataOffsets[0] and [1] are the start and end of the
-    // glyph's data, measured from the start of the strike. The strike's own
-    // fields take 12 bytes, and a glyph has 8 bytes before its PNG data.
-    push_u16(&mut sbix, 24); // ppem
-    push_u16(&mut sbix, 72); // ppi
-    push_u32(&mut sbix, 12); // glyphDataOffsets[0]
-    push_u32(&mut sbix, 12 + 8 + png.len() as u32); // glyphDataOffsets[1]
-    push_i16(&mut sbix, 0); // originOffsetX
-    push_i16(&mut sbix, 0); // originOffsetY
-    sbix.extend_from_slice(b"png "); // graphicType
-    sbix.extend_from_slice(&png);
+    for (ppem, png) in strikes {
+        // The strike. glyphDataOffsets[0] and [1] are the start and end of the
+        // glyph's data, measured from the start of the strike. The strike's own
+        // fields take 12 bytes, and a glyph has 8 bytes before its PNG data.
+        push_u16(&mut sbix, *ppem); // ppem
+        push_u16(&mut sbix, 72); // ppi
+        push_u32(&mut sbix, 12); // glyphDataOffsets[0]
+        push_u32(&mut sbix, 12 + 8 + png.len() as u32); // glyphDataOffsets[1]
+        push_i16(&mut sbix, origin.0); // originOffsetX
+        push_i16(&mut sbix, origin.1); // originOffsetY
+        sbix.extend_from_slice(b"png "); // graphicType
+        sbix.extend_from_slice(png);
+    }
 
     let mut tables = [required_tables(), extra_tables].concat();
     tables.push((*b"sbix", sbix));
