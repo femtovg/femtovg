@@ -5,7 +5,8 @@
 //! mix, and SVG 1.1/2 define stop interpolation per channel on the straight
 //! color plus stop-opacity. The multi-stop LUT already bakes texels this way
 //! (interpolate straight, premultiply the texel); these tests pin the two-stop
-//! shader path to the same space, endpoint hue included.
+//! shader path to the same space, endpoint hue included. With premultiplied
+//! interpolation, as CSS gradients apply, both paths mix premultiplied colors.
 #![cfg(feature = "wgpu")]
 
 use femtovg::{renderer::WGPURenderer, Canvas, Color, Paint, Path};
@@ -234,4 +235,150 @@ fn conic_two_stop_interpolates_straight() {
         close(got, want, 3),
         "conic midpoint: got {got:?}, straight-space expects {want:?}"
     );
+}
+
+/// The premultiplied expectation at gradient fraction `t` under global alpha
+/// `alpha`, composited over white: the transparent stop's premultiplied
+/// channels are zero, so only the blue fades in.
+fn premultiplied_over_white(t: f32, alpha: f32) -> [i32; 3] {
+    let coverage = t * alpha;
+    let mix = |c1: u8| (f32::from(c1) * coverage + 255.0 * (1.0 - coverage)).round() as i32;
+    [mix(BLUE.0), mix(BLUE.1), mix(BLUE.2)]
+}
+
+fn fill_with(paint: Paint) -> impl FnOnce(&mut Canvas<WGPURenderer>) {
+    move |canvas| {
+        let mut p = Path::new();
+        p.rect(0.0, 0.0, W as f32, H as f32);
+        canvas.fill_path(&p, &paint);
+    }
+}
+
+/// With premultiplied interpolation, as CSS gradients apply, the transparent
+/// stop adds none of its red while the blue fades in. Every two-stop gradient
+/// kind takes it.
+#[test]
+fn premultiplied_two_stop_fades_without_the_transparent_stops_hue() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let (cx, cy) = (W as f32 / 2.0, H as f32 / 2.0);
+    let radius = W as f32 / 2.0;
+    // Each case's fraction t lies at x = start + t * span along the middle row.
+    let cases = [
+        (
+            "linear",
+            Paint::linear_gradient(0.0, 0.0, W as f32, 0.0, transparent_red(), blue()),
+            0.0,
+            W as f32,
+        ),
+        // A box taller than the target, so along the middle row the fraction
+        // is the distance from its centre over the feather.
+        (
+            "box",
+            Paint::box_gradient(
+                cx - radius / 2.0,
+                -1000.0,
+                radius,
+                2000.0,
+                0.0,
+                radius,
+                transparent_red(),
+                blue(),
+            ),
+            cx,
+            radius,
+        ),
+        (
+            "radial",
+            Paint::radial_gradient(cx, cy, 0.0, radius, transparent_red(), blue()),
+            cx,
+            radius,
+        ),
+        (
+            "two-point radial",
+            Paint::two_point_radial_gradient(cx, cy, 0.0, cx, cy, radius, transparent_red(), blue()),
+            cx,
+            radius,
+        ),
+    ];
+    for (kind, paint, start, span) in cases {
+        let out = render(&device, &queue, fill_with(paint.with_premultiplied_interpolation(true)));
+        for t in [0.25f32, 0.5, 0.75] {
+            let got = px(&out, (start + t * span) as u32, H / 2);
+            let want = premultiplied_over_white(t, 1.0);
+            assert!(
+                close(got, want, 3),
+                "{kind} at t={t}: got {got:?}, premultiplied expects {want:?}"
+            );
+        }
+    }
+
+    // Left of centre = angle PI = fraction 0.5 along the ramp.
+    let conic = Paint::conic_gradient(cx, cy, transparent_red(), blue());
+    let out = render(&device, &queue, fill_with(conic.with_premultiplied_interpolation(true)));
+    let got = px(&out, W / 2 - 20, H / 2);
+    let want = premultiplied_over_white(0.5, 1.0);
+    assert!(
+        close(got, want, 3),
+        "conic midpoint: got {got:?}, premultiplied expects {want:?}"
+    );
+}
+
+/// The global alpha scales the stops before they are premultiplied.
+#[test]
+fn premultiplied_two_stop_under_global_alpha() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let paint = Paint::linear_gradient(0.0, 0.0, W as f32, 0.0, transparent_red(), blue())
+        .with_premultiplied_interpolation(true);
+    let out = render(&device, &queue, |canvas| {
+        canvas.set_global_alpha(0.5);
+        fill_with(paint)(canvas);
+    });
+    for t in [0.25f32, 0.5, 0.75] {
+        let got = px(&out, (t * W as f32) as u32, H / 2);
+        let want = premultiplied_over_white(t, 0.5);
+        assert!(
+            close(got, want, 3),
+            "at t={t}: got {got:?}, premultiplied under global alpha 0.5 expects {want:?}"
+        );
+    }
+}
+
+/// The premultiplied two-stop shader path and the premultiplied multi-stop LUT
+/// draw the same gradient, like `two_stop_matches_multi_stop_lut` for straight
+/// interpolation.
+#[test]
+fn premultiplied_two_stop_matches_multi_stop_lut() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("skipping: no wgpu adapter available");
+        return;
+    };
+    let two = render(
+        &device,
+        &queue,
+        fill_with(
+            Paint::linear_gradient(0.0, 0.0, W as f32, 0.0, transparent_red(), blue())
+                .with_premultiplied_interpolation(true),
+        ),
+    );
+    // The duplicate trailing stop forces the multi-stop LUT path.
+    let stops = vec![(0.0, transparent_red()), (1.0, blue()), (1.0, blue())];
+    let lut = render(
+        &device,
+        &queue,
+        fill_with(Paint::linear_gradient_stops(0.0, 0.0, W as f32, 0.0, stops).with_premultiplied_interpolation(true)),
+    );
+    for x in (8..W - 8).step_by(16) {
+        let a = px(&two, x, H / 2);
+        let b = px(&lut, x, H / 2);
+        assert!(
+            close(a, b, 3),
+            "two-stop and LUT paths diverge at x={x}: {a:?} vs {b:?}"
+        );
+    }
 }

@@ -2,7 +2,8 @@
 /// Set with [`Paint::with_interpolation_space`](crate::Paint::with_interpolation_space).
 ///
 /// Differences from CSS Color 4:
-/// - Alpha is interpolated straight, not premultiplied.
+/// - Alpha is interpolated straight unless
+///   [`Paint::with_premultiplied_interpolation`](crate::Paint::with_premultiplied_interpolation) asks for premultiplied.
 /// - Out-of-gamut `Oklab`/`Oklch` results are clamped per channel, not gamut-mapped,
 ///   so very saturated ramps can shift hue slightly.
 /// - In `Oklch`/`Hsl`, an achromatic stop (grey, white, black) takes the other stop's hue.
@@ -26,7 +27,7 @@ pub enum ColorSpace {
 impl ColorSpace {
     /// Indices of hue and chroma/saturation in the component triple,
     /// or `None` for spaces without hue.
-    fn hue_layout(self) -> Option<(usize, usize)> {
+    pub(crate) fn hue_layout(self) -> Option<(usize, usize)> {
         match self {
             Self::Oklch => Some((2, 1)),
             Self::Hsl => Some((0, 1)),

@@ -9,8 +9,11 @@ All notable changes to this project will be documented in this file.
   that another `glow::Context` or JavaScript rendered with the canvas's WebGL
   context, and `Canvas::get_native_texture` to use one of femtovg's images
   there.
-- **Breaking:** Gradient stops with a non-finite offset or color are now 
-- ignored. This matches the SVG specification, but can change what is drawn.
+- **Breaking:** Gradient stops with a non-finite offset or color are now
+  ignored. This matches the SVG specification, but can change what is drawn.
+- Added `Paint::with_premultiplied_interpolation`/`set_premultiplied_interpolation`
+  to interpolate gradient stops premultiplied by their alpha, as CSS gradients
+  do. A stop fading to `transparent` then adds no black to the colors it fades.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.

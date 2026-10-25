@@ -2,7 +2,7 @@ use crate::{
     clip::{ClipCoverage, MaskCoverage},
     geometry::Position,
     paint::{GlyphTexture, GradientColors, Transfer},
-    ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
+    Color, ImageFlags, ImageStore, PaintFlavor, PixelFormat, Scissor, Transform2D,
 };
 
 use super::ShaderType;
@@ -35,9 +35,35 @@ pub struct Params {
     /// The colour-space conversion an image paint applies to each texel, if
     /// any.
     pub(crate) image_transfer: Option<Transfer>,
+    /// Whether a two-stop gradient's endpoints are premultiplied (see
+    /// [`set_two_stop_colors`](Self::set_two_stop_colors)).
+    pub(crate) gradient_premultiplied: bool,
 }
 
+/// Where both backends' uniform arrays keep [`Params::gradient_premultiplied`]:
+/// the paint matrix's second column's w (`frag[4].w` in GLSL, `paint_mat[1].w`
+/// in WGSL), which no gradient paint reads. A color-matrix filter keeps its
+/// own values there, so the flag is written only when set.
+pub(crate) const GRADIENT_PREMULTIPLIED_INDEX: usize = 19;
+
 impl Params {
+    /// Uploads a two-stop gradient's endpoints for the shader to mix.
+    ///
+    /// Straight endpoints are premultiplied after the mix, so a transparent
+    /// stop keeps its hue: the interpolation Canvas and SVG gradients apply,
+    /// and the one the multi-stop LUT bakes by default. Premultiplied
+    /// endpoints are mixed as they are: the interpolation CSS gradients apply.
+    fn set_two_stop_colors(&mut self, start_color: Color, end_color: Color, premultiplied: bool) {
+        let (start_color, end_color) = if premultiplied {
+            (start_color.premultiplied(), end_color.premultiplied())
+        } else {
+            (start_color, end_color)
+        };
+        self.inner_col = start_color.to_array();
+        self.outer_col = end_color.to_array();
+        self.gradient_premultiplied = premultiplied;
+    }
+
     /// A blur's Gaussian of `sigma` along `direction`, a unit axis, over a
     /// premultiplied source of `extent` pixels, drawn as a fill with no clip:
     /// it samples where `sample_transform` maps each fragment's position and
@@ -234,14 +260,12 @@ impl Params {
                 params.feather = 1.0f32.max(d);
 
                 match colors {
-                    GradientColors::TwoStop { start_color, end_color } => {
-                        // Two-stop endpoints upload straight (unpremultiplied):
-                        // the shader mixes them per fragment and premultiplies
-                        // the result, so transparent stops keep their hue - the
-                        // interpolation Canvas and SVG gradients apply, and the
-                        // same one the multi-stop LUT bakes texel by texel.
-                        params.inner_col = start_color.to_array();
-                        params.outer_col = end_color.to_array();
+                    GradientColors::TwoStop {
+                        start_color,
+                        end_color,
+                        interpolation,
+                    } => {
+                        params.set_two_stop_colors(*start_color, *end_color, interpolation.premultiplied);
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -268,11 +292,12 @@ impl Params {
                 params.radius = *radius;
                 params.feather = *feather;
                 match colors {
-                    GradientColors::TwoStop { start_color, end_color } => {
-                        // Straight endpoints; the shader premultiplies post-mix
-                        // (see the linear-gradient arm).
-                        params.inner_col = start_color.to_array();
-                        params.outer_col = end_color.to_array();
+                    GradientColors::TwoStop {
+                        start_color,
+                        end_color,
+                        interpolation,
+                    } => {
+                        params.set_two_stop_colors(*start_color, *end_color, interpolation.premultiplied);
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -307,11 +332,12 @@ impl Params {
                 params.radius = effective_r;
                 params.feather = 1.0f32.max(f);
                 match colors {
-                    GradientColors::TwoStop { start_color, end_color } => {
-                        // Straight endpoints; the shader premultiplies post-mix
-                        // (see the linear-gradient arm).
-                        params.inner_col = start_color.to_array();
-                        params.outer_col = end_color.to_array();
+                    GradientColors::TwoStop {
+                        start_color,
+                        end_color,
+                        interpolation,
+                    } => {
+                        params.set_two_stop_colors(*start_color, *end_color, interpolation.premultiplied);
                         params.shader_type = ShaderType::FillGradient;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -333,11 +359,12 @@ impl Params {
                 params.conic_start_angle = *start_angle;
 
                 match colors {
-                    GradientColors::TwoStop { start_color, end_color } => {
-                        // Straight endpoints; the shader premultiplies post-mix
-                        // (see the linear-gradient arm).
-                        params.inner_col = start_color.to_array();
-                        params.outer_col = end_color.to_array();
+                    GradientColors::TwoStop {
+                        start_color,
+                        end_color,
+                        interpolation,
+                    } => {
+                        params.set_two_stop_colors(*start_color, *end_color, interpolation.premultiplied);
                         params.shader_type = ShaderType::FillGradientConic;
                     }
                     GradientColors::MultiStop { .. } => {
@@ -369,11 +396,12 @@ impl Params {
                 params.radius = *r0;
                 params.feather = *r1 - *r0;
                 match colors {
-                    GradientColors::TwoStop { start_color, end_color } => {
-                        // Straight endpoints; the shader premultiplies post-mix
-                        // (see the linear-gradient arm).
-                        params.inner_col = start_color.to_array();
-                        params.outer_col = end_color.to_array();
+                    GradientColors::TwoStop {
+                        start_color,
+                        end_color,
+                        interpolation,
+                    } => {
+                        params.set_two_stop_colors(*start_color, *end_color, interpolation.premultiplied);
                         params.shader_type = ShaderType::FillGradientTwoPointRadial;
                     }
                     GradientColors::MultiStop { .. } => {

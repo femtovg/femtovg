@@ -295,6 +295,13 @@ impl UniformArray {
             self.0[15] = transfer.uniform();
         }
     }
+
+    /// See [`GRADIENT_PREMULTIPLIED_INDEX`](crate::renderer::params::GRADIENT_PREMULTIPLIED_INDEX).
+    pub fn set_gradient_premultiplied(&mut self, premultiplied: bool) {
+        if premultiplied {
+            self.0[crate::renderer::params::GRADIENT_PREMULTIPLIED_INDEX] = 1.0;
+        }
+    }
 }
 
 impl From<&Params> for UniformArray {
@@ -323,6 +330,7 @@ impl From<&Params> for UniformArray {
         arr.set_clip(params.clip.as_ref());
         arr.set_clip_mask(params.clip_mask.as_ref());
         arr.set_image_transfer(params.image_transfer);
+        arr.set_gradient_premultiplied(params.gradient_premultiplied);
 
         arr
     }
