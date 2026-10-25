@@ -2438,6 +2438,11 @@ where
                     self.glyph_atlas.clone()
                 };
 
+                // A bitmap glyph is drawn at a whole pixel: neither rasterizer shifts it by the
+                // fraction of x. Truncating x, as render_atlas() does to place the quad, gives the
+                // glyph one atlas entry instead of one for each subpixel offset.
+                let whole_pixel = |g: PositionedGlyph| PositionedGlyph { x: g.x.trunc(), ..g };
+
                 // Color glyphs on the atlas path follow the same scale baking.
                 // On the direct path we leave them at the original font_size —
                 // that already matches today's behavior.
@@ -2447,7 +2452,7 @@ where
                         font_id,
                         font,
                         &font_face,
-                        color_glyphs.into_iter(),
+                        color_glyphs.into_iter().map(whole_pixel),
                         paint.text.font_size,
                         stroke.line_width,
                         render_mode,
@@ -2459,7 +2464,7 @@ where
                         font_id,
                         font,
                         &font_face,
-                        color_glyphs.iter().map(scaled),
+                        color_glyphs.iter().map(scaled).map(whole_pixel),
                         effective_font_size,
                         stroke.line_width,
                         render_mode,
@@ -5234,6 +5239,33 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
                 assert_eq!(color_draws.count(), fills_and_strokes, "{case}");
             }
         }
+    }
+}
+
+/// A PNG glyph is drawn at a whole pixel, so drawing it at two subpixel offsets
+/// places it in the atlas once, at 24 px (glyph atlas) and at 96 px (ephemeral atlas).
+#[cfg(any(feature = "textlayout", feature = "swash"))]
+#[test]
+fn png_glyphs_at_different_subpixel_offsets_share_one_atlas_entry() {
+    use crate::text::test_fonts::png_glyph_font;
+
+    for font_size in [24.0, 96.0] {
+        let text_context = TextContext::default();
+        let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
+        let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let paint = Paint::color(Color::black()).with_font_size(font_size);
+        let glyphs = [10.0, 10.5].map(|x| PositionedGlyph {
+            x,
+            y: 100.0,
+            glyph_id: 0,
+        });
+        canvas.fill_glyph_run(font, &[], glyphs, &paint).unwrap();
+
+        // `draw_glyph_run` draws a run directly when its font size is above 92.
+        assert_eq!(canvas.ephemeral_glyph_atlas.is_some(), font_size > 92.0);
+        let atlas = canvas.ephemeral_glyph_atlas.as_ref().unwrap_or(&canvas.glyph_atlas);
+        assert_eq!(atlas.rendered_glyphs.borrow().len(), 1, "font size {font_size}");
     }
 }
 
