@@ -3,6 +3,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed PNG glyphs (color emoji) drawn one pixel too large on each side with
+  the default features.
 - **Breaking:** On wasm32 in the browser, the OpenGL renderer's
   `NativeTexture` is now a `web_sys::WebGlTexture` instead of a glow texture
   key. Use `Canvas::create_image_from_native_texture` to draw a texture
