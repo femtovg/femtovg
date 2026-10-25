@@ -458,6 +458,52 @@ fn a_failed_png_glyph_upload_fails_the_draw_and_keeps_the_callers_state() {
     }
 }
 
+/// Without swash, a PNG glyph drawn at its strike's size is uploaded inside the 1-texel padding
+/// of the cell its quad samples, so the padding stays blank and the glyph is drawn at the size
+/// of its bitmap.
+#[cfg(all(feature = "textlayout", feature = "image-loading", not(feature = "swash")))]
+#[test]
+fn png_glyphs_are_uploaded_inside_the_padding_of_their_cell() {
+    let (mut canvas, _) = canvas();
+    canvas.renderer.retain_image_updates = true;
+    let png_font = canvas
+        .text_context
+        .borrow_mut()
+        .add_font_mem(&test_fonts::png_glyph_font())
+        .unwrap();
+    // The font's only strike is 24 ppem, and its PNG is 24 by 24 pixels of one opaque color.
+    let paint = Paint::color(Color::black()).with_font_size(24.0);
+    let glyph = PositionedGlyph {
+        x: 40.0,
+        y: 70.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(png_font, &[], [glyph], &paint).unwrap();
+
+    let rendered = *canvas
+        .glyph_atlas
+        .rendered_glyphs
+        .borrow()
+        .values()
+        .flatten()
+        .next()
+        .unwrap();
+    let image_id = canvas.glyph_atlas.glyph_textures.borrow()[rendered.texture_index].image_id;
+    let padding = GLYPH_PADDING as usize;
+    let inside_padding = (rendered.atlas_x as usize + padding, rendered.atlas_y as usize + padding);
+    let uploads = &canvas.images.get(image_id).unwrap().updates;
+    let (_, _, upload) = uploads
+        .iter()
+        .find(|(x, y, _)| (*x, *y) == inside_padding)
+        .expect("the PNG should be uploaded inside the padding of its cell");
+    assert_eq!(
+        (rendered.width, rendered.height),
+        (24 + 2 * GLYPH_PADDING, 24 + 2 * GLYPH_PADDING)
+    );
+    assert_eq!((upload.width(), upload.height()), (24, 24));
+    assert!(upload.pixels().all(|pixel| pixel.a == 255));
+}
+
 /// Renders a glyph of `FONT` with Swash at `font_size` and subpixel offset `subpixel_x`,
 /// with the hinting and format that `render_glyph_swash` uses.
 #[cfg(feature = "swash")]

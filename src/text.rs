@@ -756,13 +756,14 @@ impl GlyphAtlas {
             }),
             #[cfg(feature = "image-loading")]
             GlyphRendering::RenderAsImage(image_buffer) => {
-                let target_x = rendered_glyph.atlas_x as usize;
-                let target_y = rendered_glyph.atlas_y as usize;
-                let target_width = rendered_glyph.width;
-                let target_height = rendered_glyph.height;
+                // The image fills the cell inside its padding, which stays blank.
+                let target_x = (rendered_glyph.atlas_x + GLYPH_PADDING) as usize;
+                let target_y = (rendered_glyph.atlas_y + GLYPH_PADDING) as usize;
+                let target_width = rendered_glyph.width - 2 * GLYPH_PADDING;
+                let target_height = rendered_glyph.height - 2 * GLYPH_PADDING;
 
                 let image_buffer =
-                    image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
+                    image_buffer.resize_exact(target_width, target_height, image::imageops::FilterType::Nearest);
                 if let Ok(image) = crate::image::ImageSource::try_from(&image_buffer) {
                     canvas.update_image(dst_image_id, image, target_x, target_y)?;
                 }
