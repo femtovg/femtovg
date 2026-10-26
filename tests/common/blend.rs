@@ -106,6 +106,10 @@ pub fn blend(mode: BlendMode, cb: [f64; 3], cs: [f64; 3]) -> [f64; 3] {
 /// The specification's composite of premultiplied `s` over premultiplied
 /// `b` under `mode`, in RGBA8.
 pub fn expected(mode: BlendMode, s: [u8; 4], b: [u8; 4]) -> [u8; 4] {
+    if mode == BlendMode::PlusLighter {
+        // Compositing 2: `min(1, Cs + Cb)` on premultiplied color and alpha.
+        return [0, 1, 2, 3].map(|i| s[i].saturating_add(b[i]));
+    }
     let f = |v: u8| v as f64 / 255.0;
     let (sa, ba) = (f(s[3]), f(b[3]));
     let unpremul = |c: [u8; 4], a: f64| {
@@ -122,7 +126,7 @@ pub fn expected(mode: BlendMode, s: [u8; 4], b: [u8; 4]) -> [u8; 4] {
     [co[0], co[1], co[2], ao].map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8)
 }
 
-pub const ALL_MODES: [BlendMode; 16] = [
+pub const ALL_MODES: [BlendMode; 17] = [
     BlendMode::Normal,
     BlendMode::Multiply,
     BlendMode::Screen,
@@ -139,6 +143,7 @@ pub const ALL_MODES: [BlendMode; 16] = [
     BlendMode::Saturation,
     BlendMode::Color,
     BlendMode::Luminosity,
+    BlendMode::PlusLighter,
 ];
 
 /// Premultiplied source pixel: color and alpha vary across the image so

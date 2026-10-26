@@ -343,7 +343,9 @@ impl<T> ImageStore<T> {
 /// backdrop under it: the blend modes of the W3C Compositing and Blending
 /// specification, which SVG `feBlend`, CSS `mix-blend-mode` and Canvas 2D
 /// `globalCompositeOperation` share. The first twelve apply per color
-/// channel; the last four work on hue, saturation and luminosity as a whole.
+/// channel; the next four work on hue, saturation and luminosity as a whole.
+/// [`PlusLighter`](Self::PlusLighter) is the Compositing 2 operator CSS
+/// `mix-blend-mode` and Canvas 2D also accept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlendMode {
     /// The source color: `feBlend`'s default.
@@ -379,12 +381,23 @@ pub enum BlendMode {
     Color,
     /// The source's luminosity with the backdrop's hue and saturation.
     Luminosity,
+    /// `min(1, Cs + Cb)` on premultiplied color and alpha: Compositing 2's
+    /// `plus-lighter`, the same addition as [`CompositeOperation::Lighter`](crate::CompositeOperation::Lighter).
+    /// A layer with it composites with that operation and reads no backdrop.
+    PlusLighter,
 }
 
 impl BlendMode {
     /// The mode's index in the shaders' blend function, in declaration order.
     pub(crate) fn shader_index(self) -> f32 {
         self as u8 as f32
+    }
+
+    /// Whether a layer with this mode needs the blend pass, which reads the
+    /// backdrop under it. `Normal` is plain source-over and `PlusLighter`
+    /// the `Lighter` composite operation, so neither does.
+    pub(crate) fn reads_backdrop(self) -> bool {
+        !matches!(self, Self::Normal | Self::PlusLighter)
     }
 }
 

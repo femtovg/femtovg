@@ -224,6 +224,12 @@ fn renderBlend(vertex: VertexOutput, params: Params) -> vec4<f32> {
     let buv = select(uv, vec2<f32>(uv.x, 1.0 - uv.y), params.scissor_mat[0].y > 0.5);
     let src = textureSample(image_texture, image_sampler, uv) * params.scissor_mat[0].z;
     let bd = textureSample(glyph_texture, glyph_sampler, buv);
+    // Mode 16, plus-lighter, adds premultiplied color and alpha; it has no
+    // blend function. Layers composite it with CompositeOperation::Lighter
+    // instead of this pass, so it never asks for a contribution.
+    if (i32(params.scissor_mat[0].x) == 16) {
+        return min(src + bd, vec4<f32>(1.0));
+    }
     var cs = src.rgb;
     if (src.a > 0.0) {
         cs = src.rgb / src.a;
