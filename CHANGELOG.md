@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed `fill_glyph_run()` and `stroke_glyph_run()` casting a shadow for each
+  glyph drawn as an outline, and none for glyphs drawn from the glyph atlas. A
+  glyph run now casts one shadow, as `fill_text()` does.
 - `Canvas` now draws PNG bitmap glyphs (color emoji) larger than about 507
   pixels by scaling up a smaller copy in the glyph atlas. The draw returned
   `FontSizeTooLargeForAtlas` instead with the default `textlayout` and

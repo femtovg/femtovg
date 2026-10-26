@@ -2203,9 +2203,8 @@ where
         }
 
         // The run-level shadow above is the only shadow this text should cast.
-        // Glyph runs that fall back to outline rendering are drawn through
-        // fill/stroke_path_internal, whose own shadow hooks would otherwise add a
-        // second shadow per glyph on top of it — so suppress shadows while the
+        // draw_glyph_run casts its own shadow for each glyph run, which would
+        // otherwise add a second shadow on top of it — so suppress shadows while the
         // actual glyphs are drawn, restoring afterwards (also on error).
         let saved_shadow_color = self.state().shadow_color;
         self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
@@ -2392,6 +2391,43 @@ where
             })
             .collect::<Vec<_>>();
 
+        // Cast one shadow for the whole run, as draw_text() does. Its bounds are the union of the
+        // glyphs' boxes in user space, for atlas and outline glyphs alike. render_shadow() turns
+        // shadows off while it draws the run again into the shadow's coverage image.
+        if self.shadow_enabled() {
+            let scale = font.scale(paint.text.font_size);
+            // The same slack for antialiased edges as draw_text(), and half the stroke width.
+            let mut margin = paint.text.font_size * 0.2;
+            if render_mode == RenderMode::Stroke {
+                margin += paint.stroke.line_width / 2.0;
+            }
+            let transform = self.state().transform;
+            let device = Bounds::from_points(
+                non_color_glyphs
+                    .iter()
+                    .chain(&color_glyphs)
+                    .filter_map(|glyph| {
+                        let glyph_data = font.glyph(&font_face, glyph.glyph_id, normalized_coords)?;
+                        let metrics = &glyph_data.metrics;
+                        let x0 = glyph.x + metrics.bearing_x * scale - margin;
+                        let y0 = glyph.y - metrics.bearing_y * scale - margin;
+                        let x1 = glyph.x + (metrics.bearing_x + metrics.width) * scale + margin;
+                        let y1 = glyph.y + (metrics.height - metrics.bearing_y) * scale + margin;
+                        Some([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+                    })
+                    .flatten()
+                    .map(|(x, y)| transform.transform_point(x, y)),
+            );
+
+            // Bounds without a glyph are empty and cannot be visible.
+            if self.shadow_could_be_visible(device) {
+                self.render_shadow(device, |canvas| {
+                    let glyphs = non_color_glyphs.iter().chain(&color_glyphs).cloned();
+                    let _ = canvas.draw_glyph_run(glyphs, paint, font_id, normalized_coords, render_mode);
+                });
+            }
+        }
+
         // When baking scale into the rasterization, pre-multiply glyph positions
         // by `effective_scale` so that under a translation-only canvas transform
         // they still land at the original screen position.
@@ -2402,7 +2438,12 @@ where
         };
 
         let mut draw_commands = if need_direct_rendering {
-            text::render_direct(
+            // render_direct() draws each glyph with fill_path_internal() or stroke_path_internal(),
+            // which would cast a shadow for each glyph on top of the run's shadow. The atlas path
+            // casts none.
+            let saved_shadow_color = self.state().shadow_color;
+            self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+            let result = text::render_direct(
                 self,
                 font,
                 non_color_glyphs.into_iter(),
@@ -2412,7 +2453,9 @@ where
                 paint.text.font_size,
                 render_mode,
                 normalized_coords,
-            )?;
+            );
+            self.state_mut().shadow_color = saved_shadow_color;
+            result?;
             GlyphDrawCommands::default()
         } else {
             self.glyph_atlas.clone().render_atlas(
@@ -3434,7 +3477,7 @@ fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
 }
 
 /// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` draw
-/// each outline glyph twice, once into the coverage image of the glyph's shadow
+/// each outline glyph twice, once into the coverage image of the run's shadow
 /// and once on the canvas. Both draws sample an image paint at the vertex's
 /// position in user space, so the coverage image gets the alpha that the glyph
 /// has on the canvas.
@@ -3521,11 +3564,12 @@ fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
             draws.push((vertex, sampled));
         }
 
-        // Each glyph is drawn into the coverage image of its shadow and then
-        // on the canvas.
+        // Every glyph is drawn into the coverage image of the run's shadow, and
+        // then every glyph on the canvas.
         assert_eq!(draws.len(), 2 * glyphs.len(), "{case}");
-        for (glyph, glyph_draws) in glyphs.iter().zip(draws.chunks_exact(2)) {
-            let (on_canvas, _) = glyph_draws[1];
+        let (shadow_draws, canvas_draws) = draws.split_at(glyphs.len());
+        for ((glyph, shadow_draw), canvas_draw) in glyphs.iter().zip(shadow_draws).zip(canvas_draws) {
+            let (on_canvas, _) = canvas_draw;
             let in_user_space = [on_canvas.x / SCALE, on_canvas.y / SCALE];
             // The outline is at the glyph's position. "M" and "I" are smaller
             // than the font size, so the vertex is within that distance of the
@@ -3536,7 +3580,7 @@ fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
                 "{case}: the glyph at {:?} has a vertex at {in_user_space:?}",
                 (glyph.x, glyph.y)
             );
-            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip(glyph_draws) {
+            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip([shadow_draw, canvas_draw]) {
                 assert!(
                     (sampled[0] - in_user_space[0]).abs() < TOLERANCE
                         && (sampled[1] - in_user_space[1]).abs() < TOLERANCE,
@@ -3668,6 +3712,76 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
         "shadow passes must not scale with glyph count: outline glyphs would each cast \
          their own shadow on top of the run-level one"
     );
+}
+
+/// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` cast
+/// one shadow for the run, as `fill_text()` does, whether the glyphs are drawn
+/// from the glyph atlas or as outlines.
+#[cfg(feature = "textlayout")]
+#[test]
+fn glyph_run_casts_one_shadow() {
+    use renderer::CommandType;
+
+    let target_switches = |text: &str, font_size: f32, stroke: bool, shadow: bool| -> usize {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(600, 300, 1.0);
+
+        let font = canvas
+            .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+            .expect("Font not found");
+        let paint = Paint::color(Color::white())
+            .with_font(&[font])
+            .with_font_size(font_size);
+        let glyphs: Vec<_> = canvas
+            .measure_text(20.0, 150.0, text, &paint)
+            .unwrap()
+            .glyphs
+            .iter()
+            .map(|glyph| PositionedGlyph {
+                x: glyph.x,
+                y: glyph.y,
+                glyph_id: glyph.glyph_id,
+            })
+            .collect();
+
+        if shadow {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_offset(10.0, 10.0);
+        }
+        if stroke {
+            canvas.stroke_glyph_run(font, &[], glyphs, &paint).unwrap();
+        } else {
+            canvas.fill_glyph_run(font, &[], glyphs, &paint).unwrap();
+        }
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        commands
+            .iter()
+            .filter(|c| matches!(c.cmd_type, CommandType::SetRenderTarget(RenderTarget::Image(_))))
+            .count()
+    };
+    // Drawing glyph masks into the atlas also switches the render target, so
+    // count the switches the shadow adds.
+    let shadow_target_switches = |text: &str, font_size: f32, stroke: bool| {
+        target_switches(text, font_size, stroke, true) - target_switches(text, font_size, stroke, false)
+    };
+
+    // At 20 px the glyphs are drawn from the atlas, and at 100 px, above the
+    // atlas cap, as outlines.
+    for font_size in [20.0, 100.0] {
+        for stroke in [false, true] {
+            let single = shadow_target_switches("I", font_size, stroke);
+            let many = shadow_target_switches("Illuminate", font_size, stroke);
+            assert!(single > 0, "{font_size} px, stroke {stroke}: no shadow pass");
+            assert_eq!(
+                single, many,
+                "{font_size} px, stroke {stroke}: one shadow pass per glyph"
+            );
+        }
+    }
 }
 
 /// Fills `path` once on `canvas`, flushes, and returns the raw bytes of the
