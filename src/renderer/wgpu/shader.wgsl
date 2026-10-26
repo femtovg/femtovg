@@ -203,7 +203,7 @@ fn shade(vertex: VertexOutput, clip: f32) -> vec4<f32> {
         }
         case SHADER_TYPE_FillImageGradientConic: {
             let d = conicAngleFraction(vertex, params);
-            result = ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
+            result = ditherGradient(textureSample(image_texture, image_sampler, lutCoord(d)), vertex.position.xy);
         }
         case SHADER_TYPE_FilterImageColorMatrix: {
             return renderColorMatrix(vertex, params);
@@ -362,7 +362,7 @@ fn renderImageGradientTwoPointRadial(vertex: VertexOutput, params: Params) -> ve
     // textureSample() has to come before the early return: WGSL allows it
     // only in uniform control flow, and r.covered differs between fragments.
     // Chrome rejects the shader module otherwise; naga accepts it either way.
-    let color: vec4<f32> = textureSample(image_texture, image_sampler, vec2<f32>(r.t, 0.0));
+    let color: vec4<f32> = textureSample(image_texture, image_sampler, lutCoord(r.t));
     if (!r.covered) {
         return vec4<f32>(0.0);
     }
@@ -464,13 +464,20 @@ fn renderGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     return premultiplyGradient(color, params);
 }
 
+// Where a gradient LUT is sampled for position `d`. Texel i holds the color
+// at i / 255, so map d = 0 and d = 1 onto the end texels' centres: the pads
+// then get the exact stop colors instead of a blend with the next texel.
+fn lutCoord(d: f32) -> vec2<f32> {
+    return vec2<f32>(d * (255.0 / 256.0) + 0.5 / 256.0, 0.0);
+}
+
 // Image-based Gradient; sample a texture using the gradient position.
 fn renderImageGradient(vertex: VertexOutput, params: Params) -> vec4<f32> {
     // Calculate gradient color using box gradient
     let pt: vec2<f32> = (params.paint_mat * vec3<f32>(vertex.fpos, 1.0)).xy;
 
     let d: f32 = clamp((sdroundrect(pt, params.extent, params.radius) + params.feather*0.5) / params.feather, 0.0, 1.0);
-    return ditherGradient(textureSample(image_texture, image_sampler, vec2<f32>(d, 0.0)), vertex.position.xy);
+    return ditherGradient(textureSample(image_texture, image_sampler, lutCoord(d)), vertex.position.xy);
 }
 
 // The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on

@@ -88,8 +88,12 @@ fn gradient_span(
         return;
     }
 
-    let s = (s0o * 256.0) as usize;
-    let e = (s1o * 256.0) as usize;
+    // Texel `i` holds the color at `i / 255`, so the shaders' `d = 0` and
+    // `d = 1` land on the centres of the end texels and the pads come out
+    // exact. A span takes the texels in [offset0, offset1); the last one
+    // also takes texel 255.
+    let s = (s0o * 255.0).ceil() as usize;
+    let e = if s1o >= 1.0 { 256 } else { (s1o * 255.0).ceil() as usize };
 
     let (c0, c1) = resolve_hue_arc(
         to_space_components(color0, space),
@@ -116,9 +120,7 @@ fn gradient_span(
     let len = s1o - s0o;
     #[allow(clippy::needless_range_loop)]
     for i in s..e {
-        // The shaders sample at `d` with linear filtering, so texel `i` must hold
-        // the color at its centre, not its left edge.
-        let t = (((i as f32 + 0.5) / 256.0 - s0o) / len).clamp(0.0, 1.0);
+        let t = ((i as f32 / 255.0 - s0o) / len).clamp(0.0, 1.0);
         let c = [0, 1, 2].map(|k| c0[k] + (c1[k] - c0[k]) * t);
         let a = color0.a + (color1.a - color0.a) * t;
 
@@ -128,12 +130,8 @@ fn gradient_span(
         // has already multiplied the red to zero, so the same gradient only fades in blue.
         let straight = if premultiplied && a > 0.0 { scale(c, 1.0 / a) } else { c };
         let [cr, cg, cb] = from_space_components(straight, space);
-        dest[i] = rgb::RGBA8::new(
-            (cr * a * 255.0) as u8,
-            (cg * a * 255.0) as u8,
-            (cb * a * 255.0) as u8,
-            (a * 255.0) as u8,
-        );
+        let to_u8 = |x: f32| (x * 255.0).round() as u8;
+        dest[i] = rgb::RGBA8::new(to_u8(cr * a), to_u8(cg * a), to_u8(cb * a), to_u8(a));
     }
 }
 fn linear_gradient_stops(gradient: &MultiStopGradient) -> imgref::Img<Vec<rgb::RGBA8>> {
@@ -226,11 +224,11 @@ mod tests {
         let middle = 64;
 
         let straight = lut(stops.clone())[middle];
-        assert_eq!(straight.a, 126);
+        assert_eq!(straight.a, 127);
         assert_rgb_close(straight, (63, 63, 63), 1);
 
         let premultiplied = premultiplied_lut(stops, ColorSpace::Srgb)[middle];
-        assert_eq!(premultiplied.a, 126);
+        assert_eq!(premultiplied.a, 127);
         assert_rgb_close(premultiplied, (127, 127, 127), 1);
     }
 
@@ -276,10 +274,9 @@ mod tests {
         let oklab = lut_in_space(stops(), ColorSpace::Oklab);
 
         for texels in [&srgb, &oklab] {
-            // Texel 255 is one step short of color1, hence the slack.
-            let (start, end) = (texels[0], texels[255]);
-            assert!(start.r > 250 && start.g < 5 && start.b < 5, "{start:?}");
-            assert!(end.r < 25 && end.g > 250 && end.b < 5, "{end:?}");
+            // The end texels hold the stops, up to the Oklab round trip.
+            assert_rgb_close(texels[0], (255, 0, 0), 1);
+            assert_rgb_close(texels[255], (0, 255, 0), 1);
         }
 
         // Independently computed Oklab midpoint; sRGB gives (127, 127, 0).
@@ -328,18 +325,22 @@ mod tests {
         assert_rgb_close(texels[128], (187, 187, 187), 2);
     }
 
-    /// Texels are baked at their centres. LinearRGB rises steeply from zero, so
-    /// baking at the left edge was off by up to 12 levels near black.
+    /// Texel `i` holds the color at `i / 255`, where the shaders sample it.
+    /// LinearRGB rises steeply from zero, so any offset shows up near black.
     #[test]
-    fn ramp_texels_hold_the_color_at_their_centre() {
+    fn ramp_texels_hold_the_color_where_they_are_sampled() {
         // The duplicate first stop forces the `MultiStop` path.
         let texels = lut_in_space(
             vec![(0.0, Color::black()), (0.0, Color::black()), (1.0, Color::white())],
             ColorSpace::LinearRgb,
         );
         for (i, texel) in texels.iter().enumerate() {
-            let want = from_space_components([(i as f32 + 0.5) / 256.0; 3], ColorSpace::LinearRgb)[0] * 255.0;
-            assert!((texel.r as f32 - want).abs() <= 1.0, "texel {i}: {} vs {want}", texel.r);
+            let want = from_space_components([i as f32 / 255.0; 3], ColorSpace::LinearRgb)[0] * 255.0;
+            assert!(
+                (texel.r as f32 - want).abs() <= 0.5 + 1e-3,
+                "texel {i}: {} vs {want}",
+                texel.r
+            );
         }
     }
 
@@ -424,12 +425,12 @@ mod tests {
             let t = texels[i];
             (t.r, t.g, t.b, t.a)
         };
-        // Each texel holds the color at its centre, half a texel past its edge.
-        assert_eq!(rgba(0), (254, 0, 0, 255));
-        assert_eq!(rgba(64), (126, 128, 0, 255));
-        assert_eq!(rgba(128), (0, 254, 0, 255));
-        assert_eq!(rgba(192), (0, 126, 128, 255));
-        assert_eq!(rgba(255), (0, 0, 254, 255));
+        // Texel `i` holds the color at `i / 255`, so the ends are the stops.
+        assert_eq!(rgba(0), (255, 0, 0, 255));
+        assert_eq!(rgba(64), (127, 128, 0, 255));
+        assert_eq!(rgba(128), (0, 254, 1, 255));
+        assert_eq!(rgba(192), (0, 126, 129, 255));
+        assert_eq!(rgba(255), (0, 0, 255, 255));
     }
 
     /// Coincident stops make a hard edge: each side keeps its own span.

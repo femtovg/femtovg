@@ -172,13 +172,20 @@ vec4 renderGradient() {
     return premultiplyGradient(color);
 }
 
+// Where a gradient LUT is sampled for position `d`. Texel i holds the color
+// at i / 255, so map d = 0 and d = 1 onto the end texels' centres: the pads
+// then get the exact stop colors instead of a blend with the next texel.
+vec2 lutCoord(float d) {
+    return vec2(d * (255.0 / 256.0) + 0.5 / 256.0, 0.0);
+}
+
 // Image-based Gradient; sample a texture using the gradient position.
 vec4 renderImageGradient() {
     // Calculate gradient color using box gradient
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 float conicAngleFraction() {
@@ -199,7 +206,7 @@ vec4 renderGradientConic() {
 
 vec4 renderImageGradientConic() {
     float d = conicAngleFraction();
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 // Two-point (independently centered) radial gradient: the general Canvas
@@ -283,7 +290,7 @@ vec4 renderImageGradientTwoPointRadial() {
     bool covered;
     float d = radialTwoPointT(covered);
     if (!covered) return vec4(0.0);
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 // The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
