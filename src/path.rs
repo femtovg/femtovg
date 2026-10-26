@@ -91,6 +91,9 @@ impl Verb {
     }
 }
 
+/// The transform's cache key and the bits of the tolerances a [`PathCache`] was flattened with.
+type CacheKey = (u64, u32, u32);
+
 /// A collection of verbs (`move_to()`, `line_to()`, `bezier_to()`, etc.)
 /// describing one or more contours.
 ///
@@ -113,7 +116,7 @@ pub struct Path {
     last_pos: Position,
     dist_tol: f32,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub(crate) cache: RefCell<Option<(u64, PathCache)>>,
+    pub(crate) cache: RefCell<Option<(CacheKey, PathCache)>>,
 }
 
 impl Path {
@@ -167,11 +170,13 @@ impl Path {
         // retrieved from cache. I'm not sure if transform.cache_key() is actually good enough for this
         // and if it will produce the correct cache keys under different float edge cases.
 
-        let key = transform.cache_key();
+        // Canvas::set_size() sets the tolerances from the device pixel ratio, so a path drawn again after the ratio
+        // changes is flattened again, even under the same transform.
+        let key = (transform.cache_key(), tess_tol.to_bits(), dist_tol.to_bits());
 
         // this shouldn't need a bool once non lexic lifetimes are stable
-        let needs_rebuild = if let Some((transform_cache_key, _cache)) = &*self.cache.borrow() {
-            key != *transform_cache_key
+        let needs_rebuild = if let Some((cache_key, _cache)) = &*self.cache.borrow() {
+            key != *cache_key
         } else {
             true
         };
@@ -1145,7 +1150,8 @@ impl ttf_parser::OutlineBuilder for Path {
 
 #[cfg(test)]
 mod tests {
-    use super::{svg_arc_angle, Path, Verb, PI};
+    use super::{svg_arc_angle, Path, Transform2D, Verb, PI};
+    use crate::{DIST_TOL, TESS_TOL};
     use std::cell::Cell;
 
     thread_local! {
@@ -1168,6 +1174,21 @@ mod tests {
         let mut rounded = Path::new();
         rounded.rounded_rect(0.0, 0.0, 60.0, 24.0, 6.0);
         assert_eq!(2 * pieces_dashing(&tab), pieces_dashing(&rounded));
+    }
+
+    /// `Path::cache()` flattens the path again when `tess_tol` or `dist_tol`
+    /// changes under the same transform.
+    #[test]
+    fn a_path_is_flattened_again_when_the_tolerances_change() {
+        let mut path = Path::new();
+        path.circle(50.0, 50.0, 25.0);
+        let points = |tess_tol, dist_tol| {
+            path.cache(&Transform2D::identity(), tess_tol, dist_tol)
+                .positions()
+                .count()
+        };
+        // The canvas's tolerances at device pixel ratio 1 and 2.
+        assert_ne!(points(TESS_TOL, DIST_TOL), points(TESS_TOL / 2.0, DIST_TOL / 2.0));
     }
 
     fn line_path(length: f32) -> Path {
