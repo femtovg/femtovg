@@ -3,399 +3,102 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- Measured and drawn text no longer keeps missing glyphs after a font that
-  covers them is added. Its cached shaping was used until the text dropped out
-  of the shaping cache.
-- The WGPU backend now saves a lot of memory by making each bind group a flush
-  instead once instead of at everyvchange of what a draw binds. Under a soft
-  clip mask a concave fill's winding pass and its cover bind different
-  resources, so every such fill made two bind groups: 400 concave fills under
-  a star mask took twice the render thread's time of the same fills unclipped.
 - Fixed a concave fill leaving winding counts in the stencil where its fill
   reached past the quad that covers it - a feature thinner than the
   antialiasing fringe, whose fill vertices move outward - so the next
   concave fill whose cover reached them painted them, outside its own shape.
   Such a fill now draws its fans again after the cover to zero them.
-- WGPU: a render pass attaches the stencil only when something it draws
-  tests or writes it, and clears it on load and discards it on store unless
-  a clip plane armed on the target outlives the pass. On a tiled GPU the
-  stencil stays in tile memory instead of being read and written back at
-  every pass, and an image whose passes draw no fill that needs it gets no
-  stencil texture.
-- The WGPU backend begins a render pass only when a draw needs it. A
-  target that was set and left again undrawn - the one every image filter
-  hands back, the screen ahead of a frame's first target switch - used to
-  get a pass that loaded and stored it for nothing, and on Metal a command
-  buffer of its own: a quarter of the passes of a filter-heavy frame (849
-  to 632 for a 178-layer BuseyBench portrait). No pixel changes.
-- Added `WGPURenderer::set_submission_slicing`: with a `SubmissionSlicing`,
-  a frame is submitted in slices of at most that many render passes (64 by
-  default) instead of one submission holding every pass. wgpu opens a Metal
-  command buffer for every render pass and the driver keeps about 2.3 MiB
-  for each until it completes (gfx-rs/wgpu#5738), so one submission per
-  frame held gigabytes for a frame of hundreds of layers or a long blur
-  chain: 1,600 opacity layers failed buffer creation on an M4 Max, and a
-  176-layer BuseyBench portrait at 460x260 was jetsammed on an iPhone 12.
-  Sliced, the driver recycles the command buffers that complete while the
-  rest of the frame is encoded, which lowers the peak without bounding it:
-  the renderer never polls the device. The
-  slices before the returned command buffer are submitted during the
-  flush, so work that must run before the frame is submitted before it;
-  off by default, which keeps the one-command-buffer contract of
-  `flush_to_surface`. `Canvas::renderer` and
-  `renderer_mut` reach the renderer, and `WGPURenderer::last_frame_slices`
-  reports the passes per command buffer of the last frame.
-- Fixed text getting the glyph advances it had at an earlier font size when
-  both sizes were in the same tenth of a device pixel (e.g., 12 and 12.09):
-  `measure_text` returned the earlier width, `break_text` broke the text by
-  it, and `fill_text` placed its glyphs by it.
-- Fixed `break_text` and `break_text_vec` breaking the text where an earlier
-  `max_width` broke it when both widths were in the same whole device pixel
-  (e.g., 100.2 and 100.9), even when the text fit at one width and not at the
-  other.
-- With the `swash` feature, `Canvas` now draws filled text at a negative x
-  with the mask for each glyph's own subpixel offset. It used a mask
-  rasterized for another offset, which put each glyph up to a pixel from its
-  position and spaced the letters unevenly (e.g., in text centred or
-  right-aligned by translating the canvas to an anchor point).
-- Fixed: Thin shapes are drawn with the coverage browsers give them: hairlines,
-  slivers and the fine details of icons, logos and illustrations came out too
-  dark, a sliver a tenth of a pixel wide nearly eight times its area and a
-  logo 20 pixels tall twice as dark.
-- On a test corpus of real-world SVGs, images with thin shapes have 37% fewer
-  mismatched pixels against Firefox, 27% against Chromium and 26% against WebKit;
-  by collection, against the exact-area reference, Mozilla's Firefox illustrations
-  improved 65%, the GooglePay mark 60% and the SolidJS banner 99%, and the New
-  York Times marks now match all three browsers' ink within 2%. The WPT reftests
-  `fill-path-subpixel-sliver-control` and `hard-mask-figure-eight` now match
-  Chromium and WebKit within 2 pixels (Firefox draws the figure-eight differently:
-  52 pixels off, from 142). Still frames render as fast as before, within 2% on a
-  desktop; thin shapes that move every frame are rasterized again each frame,
-  about 5 to 6% more render-thread CPU on an iPhone (3% more frame time) and up to
-  29% on the heaviest file. `Canvas::set_thin_fill_masks(false)` turns this off.
-- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` now return the
-  ids of the fonts they load from subdirectories, not only of those directly
-  in the given directory.
-- Fixed stray paint under a clip to a path other than a rectangle, rounded
-  rectangle or ellipse when drawing with `copy`, `source-in`, `source-out`,
-  `destination-in` or `destination-atop`: a shape with a notch or a hole left
-  an invisible count where the clip cut it off, and the next such shape
-  painted those pixels outside its own outline. On the reftest suite's canvas
-  scenes of these operations, pixels off Chromium, Firefox and WebKit fall by
-  90% at 1x and 97% at 4x zoom (`hard-mask-source-in-triangle-l-arch`: 186 to
-  none), leaving only the clip's edge, and on WGPU a frame of 400 such shapes
-  takes half the CPU it used to. SVG content is unaffected: SVG puts no
-  compositing operator on a shape.
-- Reduce CPU encode time by 4x or more on some SVG content: 
-  A cubic whose four points coincide is no longer halved ten times over
-  before it adds no point. Its chord is zero, so it never passed the
-  flatness test: each square corner of a `rounded_rect_varying` and every
-  curve under a transform that scales to nothing took 2,047 pieces, and
-  4,095 more when `Path::dashed` flattened it. A page of 300 tabs rounded
-  on top encoded in 3.4 ms a frame on an M4 Max, and now in 0.7 ms.
-- Fixed a point repeated in a path, or added within 0.01 device pixels of
-  the one before, being kept as a zero-length edge. A line to the current
-  point, the zero-length sides of a pill from `rounded_rect` (or of an SVG
-  `rect` whose radius is half its height) and segments that shrink below the
-  tolerance at small sizes all made one: a mitred join there lost its outer
-  corner, a square or round cap its extension, the fill's antialiased fringe
-  slanted along both neighbouring edges, and a convex shape was filled
-  through the stencil. Improves visual accuracy versus multiple browsers in
-  organic SVG content sources from SVGenius, SolidJS, New York Times, etc.
-- Fixed even-odd clips letting paint through a hole that comes within a pixel
-  of the shape around it and is wound the same way: a clip to a ring thinner
-  than a pixel painted nearly a third more than the ring's area. At half size,
-  the `evenodd-clip-thin-ring` probe of the SVG test corpus now matches WebKit
-  and the exact-area reference pixel for pixel, and comes nearer Firefox and
-  Chromium.
-- `Canvas` now draws PNG bitmap glyphs (color emoji) in stroked text and
-  outside the glyph atlas with the `swash` feature and without `textlayout`.
-  It draws text outside the atlas under a rotated, skewed, flipped or
-  non-uniformly scaled transform, above 92 pixels, or under a scale with a
-  gradient or image paint. With both `swash` and `textlayout`, `Canvas` now
-  draws a stroked PNG glyph with swash, like a filled one and at the same size.
-- Fixed text getting the width it had at an earlier letter spacing when both
-  letter spacings were below a tenth of a device pixel (every negative one
-  included) or in the same tenth above that (e.g., 2 and 2.05):
-  `measure_text` returned the earlier width, `break_text` broke the text by
-  it, and centered or right-aligned text started in the wrong place.
-- Curves are flattened closer to their shape: each point between two chords
-  is moved outward, so the chords cross the curve instead of cutting inside
-  every bend, and the flattening tolerance is halved. Round joins and caps
-  take a few more segments with it, 1.25 times as many for a 20 px stroke.
-- Filling a path costs less CPU and vertex memory, with identical output:
-  curves are flattened in a loop rather than by recursion, a contour turned
-  round for a fill keeps the directions it had, and a fill's vertices are
-  its fan - one a point, where they were three a triangle - drawn as fans on
-  OpenGL and as one index list a frame on WGPU and WebGL.
-- **Breaking:** `CompositeOperation` and `BlendFactor` are now
-  `#[non_exhaustive]`: a `match` on either needs a wildcard arm.
-- Fixed a `Path` extended (`line_to`, `rect`, ...) after it had been drawn or
-  hit-tested still being drawn and hit-tested as the old path under the same
-  transform: the flattened copy a `Path` keeps was not dropped when verbs were
-  added.
-- Fixed WGPU drawing performance when a frame with the vertices, uniforms and
-  images of a later one when the later frame was flushed before the earlier
-  one was submitted. A frame's command buffer now carries its own uploads,
-  in the order they were made, through staging reused from frame to frame
-  (an image upload larger than a megabyte has a buffer of its own, and an
-  image or canvas element on the web a texture of its own); an image with
-  mipmaps, or one wrapping a texture of the caller's
-  (`create_image_from_native_texture`), is still uploaded at once. With
-  submission slicing on, whose frames are submitted during their flush,
-  uploads go through the queue ahead of the frame, as before.
-- The WGPU backend keeps the viewport uniform of each render target size
-  from one flush to the next instead of creating it again for every pass
-  on a target of another size, up to a thousand times a frame on pages
-  with many layers, which took a fifth of the time such a frame takes to
-  encode.
-- Fixed the WGPU backend rebuilding render pipelines every frame when a frame
-  takes several flushes: each flush dropped every pipeline it did not use.
-  Pipelines now stay cached across flushes, and past 512 the least recently
-  used are dropped first.
-- Added `Canvas::blur_rect`: blurs a rect of the current render target,
-  the screen included, in place, reading up to three sigma around it and
-  repeating the target's edge pixels where that passes the edge. A sigma
-  above 8 runs down the blur pyramid. An image target is read in place; the
-  screen is copied first, so on WGPU it needs `COPY_SRC` usage on the output
-  texture, which must be mip 0 of a single-layer texture, and an image
-  target needs `TEXTURE_BINDING`. The scissor and the clip apply as they do
-  to a fill; the transform, global alpha and the composite operation don't.
-  It returns `ErrorKind::UnsupportedOperation` while a `begin_layer` capture
-  is open.
-- Added `Canvas::blur_path`: blurs the current render target in place inside
-  a path, drawn back as a fill, for a backdrop blur with rounded corners or
-  under a rotation. Unlike `blur_rect`, the transform maps the path and
-  scales sigma, global alpha applies and the edge is antialiased. Like
-  `blur_rect`, it ignores the composite operation: it mixes each pixel
-  toward the blur by the fill's coverage, over a translucent target too. Its requirements and errors are those of `blur_rect`.
-- **Breaking:** `renderer::CommandType` has two new variants, `StartBlur`
-  and `FinishBlur`, and `renderer::ShaderType` one, `FillBlur`: a `Renderer`
-  implemented outside the crate must handle them.
-- Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
-  created with it now gets its mip levels, filled after every upload the way
-  the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
-  mipmap filtering, so a raster drawn smaller than its size is box-filtered
-  instead of point-sampled from the base level. Both backends now sample an
-  image half a level toward the larger mip, where the browsers' minification
-  sits (Chromium samples the larger level, Firefox downsamples directly).
-  The levels cost a third more texture memory for those images only; the
-  downsample pipeline is built on the first such upload.
-- Fixed a panic with the `swash` and `textlayout` features when text with PNG
-  bitmap glyphs (color emoji) is drawn outside the glyph atlas: under a
-  rotated, skewed, flipped or non-uniformly scaled transform, larger than 92
-  pixels, or scaled with a gradient or image paint.
-- Added `ImageFilter::Morphology`, `ImageFilter::Offset` and
-  `ImageFilter::Crop`, the SVG `feMorphology` and `feOffset` primitives and
-  the subregion a primitive's result is clipped to: a dilation grows the opaque
-  regions of an image by a whole-pixel radius per axis and an erosion
-  shrinks them (the per-channel maximum or minimum within the radius, as
-  two draws like the blur, a radius above the 24 pixels one draw covers
-  running as passes whose radii sum to it), and an offset shifts the image
-  by a device-pixel vector, transparent beyond its edge. A layer pads its
-  store by a morphology's radius - a dilation reaches that far out, an
-  erosion reads that far beyond the store - and by an offset's shift, as it
-  does by a blur's reach. Together with `SourceAlpha` as a color matrix they run the spread
-  shadow chain Sketch exports (`feMorphology`, `feOffset`, `feGaussianBlur`,
-  `feColorMatrix`) as one layer filter. A crop leaves an image transparent
-  outside a rectangle; after another filter of a chain it is that filter's
-  pass drawn inside the rectangle, at no pass of its own.
-- A Gaussian blur whose standard deviation on an axis is above the 8 device
-  pixels one shader pass covers now runs at a downsampled size, the way
-  Skia's GPU blur does: a filter chain, a layer filter or a shadow halves
-  its image along that axis until the sigma fits one pass, blurs there and
-  scales the result back up bilinearly,
-  instead of running `(sigma / 8)^2` full-size passes. A sigma-77 blur of a
-  1080p layer is four halvings, a blur over a sixteenth of the pixels
-  where it was 93 full-size blurs, so it no longer exceeds the
-  filter work budget, which had left the layer unblurred; the sigma ceiling
-  rises from 128 to 512; blurs within the bound render as before. The blur
-  shader also reads transparent beyond the image it samples instead of
-  extending its edge texels, so a blurred image fades at its border as it
-  does in a browser.
-- `ImageFilter::GaussianBlur` now takes a standard deviation per axis
-  (`sigma_x`, `sigma_y`), SVG's two-valued `feGaussianBlur stdDeviation`: a
-  blur along one axis renders as a streak or a glow instead of spreading the
-  larger value both ways. Each axis splits into its own passes above the
-  per-pass bound, an unblurred axis copies through, and a layer pads each axis
-  by its own reach. `ImageFilter::gaussian_blur(sigma)` builds the isotropic
-  blur the single `sigma` field used to.
-- Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
-  `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
-  is blended with what lies under it on the target it was opened on, which
-  must be an image or an enclosing layer; on the screen, or when the two
-  transients it needs do not fit the budget, the layer composites normally.
-  Fixes the solidJS banner's color-burn overlay. Also fixed the multiply, screen
-  and hard-light groups in Firefox, BuseyBench, and WPT reference examples.
-- Fixed the WGPU backend building the same render pipelines again for each
-  paint type (color, gradient, image) and for text.
-- Sped up glyph rasterization with the `swash` feature by letting swash reuse
-  its scaler and hinting caches across glyphs.
-- Added `Canvas::with_render_target`: a side pass on another target that goes
-  back to the one that was current, an open layer's store included.
-- Added `ImageFilter::Blend`: blends the filtered image over a second image
-  with any of the sixteen `BlendMode`s of the Compositing and Blending
-  specification (multiply, screen, overlay, ..., luminosity), the SVG
-  `feBlend` primitive. The backdrop is placed at a rect, in root device space
-  for a layer's filters, so a chain can blend a group with an image rendered
-  elsewhere. Fixes the multiply grain and tint layers of seven BuseyBench
-- Fixed a fill of a path whose points all lie on one line - a bare `<line>`
-  or an open path under SVG's default black fill - drawing a two-pixel line
-  where browsers draw nothing; such a contour no longer counts when the
-  path's other contours are told apart as holes or solids. Fixes #341.
-- Fixed a layer's shadow missing the shadow of content outside the scissor
-  (or the canvas): the capture now takes in whatever reaches into view once
-  shifted by the shadow offset and spread by its blur, so an SVG
-  `feDropShadow` cast from beyond a clip or the viewport lands inside it as
-  browsers draw it. A capture the reach would push past the texture limit or
-  the transient budget keeps the store it had and gives the reach the room
-  that is left, instead of passing through. Fixed multiple instances of wrong
-  pixels in BuseyBench and WPT reference tests.
-- Added support for the `wasm32-unknown-emscripten` target.
-- Fixed a two-stop two-point radial gradient (`Paint::two_point_radial_gradient`)
-  interpolating in premultiplied space, which lost a semi-transparent stop's hue
-  instead of fading it in like every other gradient variant.
-- `save()` no longer grows the state stack past 16,384 nested levels: deeper
-  saves still pair with their restores, but nothing draws there and the state
-  changes made there are discarded.
-- Fixed Gaussian blurs wider than one blur pass can render (a standard deviation
-  above 8 device pixels) coming out narrower than requested. A layer filter, a
-  filter chain or a shadow blurred past that limit now runs as several passes
-  that compose to the requested width, and its offscreen padding follows the
-  true reach; blurs within the limit render exactly as before. The wgpu backend
-  also reuses one blur buffer across passes instead of allocating one per pass.
-  Fixes the Google Workspace SVG icon, amongst several others.
-- Fixed strokes thinner than a pixel drawing too faint: their alpha was scaled
-  by the square of the device width (a nanovg heuristic), so a 0.2 px line
-  carried 4% of its coverage and a 0.5 px line 25%. The scale is now linear -
-  a 0.5 px line is 50% - which is the coverage Skia's hairline path puts down
-  and what both browsers render. Fine detail drawn with sub-pixel strokes
-  (hatching, iris lines, thin outlines at small zoom) was visibly lighter than
-  in a browser before.
-- Fixed filled paths landing a pixel too wide when the contour runs clockwise.
-  The antialiasing fringe is extruded along each point's miter vector, whose
-  direction follows the order the points are in, so a clockwise contour pushed
-  it outward instead of inward - `Path::rect()` and `Path::circle()` emit
-  counter-clockwise and were exact, while an SVG arc with `sweep = 1`, or any
-  imported path wound the other way, was a pixel fat all round. Fills now cover
-  the same pixels either way, and the authored winding still selects holes for
-  `FillRule::NonZero`. This also takes most of the over-inking out of thin
-  filled shapes, which were paying the same pixel on both edges.
-- Added `ImageFilter::Turbulence`, the SVG `feTurbulence` primitive, generated on
-  the GPU from the SVG 1.1 reference algorithm - the same Park-Miller generator
-  and Perlin lattice Chromium and Firefox run, so a seed gives a browser's noise.
-  The lattice is uploaded once per seed as a 512 KB texture with the spec's two
-  dependent permutation lookups pre-composed, so every fetch is addressed
-  straight from the pixel (the shape tile-based mobile GPUs pipeline) at eight
-  fetches per octave for all four channels; the last four seeds stay cached. A
-  `transform` maps noise space onto the output so the pattern scales with the
-  content, and `stitchTiles` is supported. Added `ImageFilter::LinearRgbToSrgb`
-  and `SrgbToLinearRgb`, the sRGB transfer curve as a pass, so a chain can run
-  in linearRGB the way SVG filters do by default and hand back what a browser
-  displays; an adjacent pair folds away.
-- Added `Canvas::filter_image_chain()`, which applies a list of image filters in
-  one call the way a Canvas `ctx.filter` list (`"blur(5px) brightness(1.2)"`) or
-  an SVG filter chain does. Consecutive color-matrix filters fold into a single
-  GPU pass (`ImageFilter::fold_with()`) when doing so is exact - a matrix that
-  can push a channel outside [0, 1] keeps its own pass so its clamp still
-  happens, matching per-filter clamping in browsers and Skia. Non-folding passes
-  share two source-sized scratch images (a blur pass adds one internal buffer of
-  its own), so peak transient memory is bounded regardless of chain length.
-  `ImageFilter::identity()` is the explicit no-op filter.
-- Fixed `ImageFilter::GaussianBlur` with a zero, negative or non-finite
-  standard deviation blanking the image instead of leaving it unchanged, and
-  with a very large one using inconsistent coefficients. Both backends now
-  clamp the value the same way.
-- Fixed multi-stop gradients whose last stop ends before 1.0: the rest of the
-  ramp was left transparent (or holding stale texture data) instead of the last
-  stop's color, as SVG's default `spreadMethod="pad"` and Canvas gradients
-  render it. Showed as a wedge cut out of the Firefox logo's flame.
-- Added `Canvas::clip_path(path, fill_rule)`, which clips later drawing to any
-  path under the current transform - Canvas 2D `clip()` and SVG `clip-path` with
-  `clip-rule` - and is scoped by `save()`/`restore()`, and
-  `Canvas::clip_paths()`, which clips to the union of several paths, each under
-  its own rule, as an SVG `clipPath` with several children does. A clip's edge
-  is antialiased like a fill's and costs no render pass: a clip whose path
-  outlines a rectangle (under any transform), a rounded rectangle - rounded at
-  all four corners or at the two of one side - or an ellipse is evaluated by the
-  fragment shader of each draw under it, a rectangle that cuts such a shape
-  clips with it in the scissor's place, and any other clip is rasterized on the
-  CPU into a coverage mask of one byte a pixel that those shaders read - kept
-  while the clip does not change or moves by whole pixels, within a budget
-  (`Canvas::set_clip_mask_budget()`, 32 MiB by default). A clip the budget has
-  no room for uses a bit of the stencil buffer both backends already have, where
-  its edge is not antialiased. A clip taken while drawing into a layer lives on
-  the layer's store and gates its content, while the clips underneath gate the
-  composite. `clear_rect()` stays a raw clear the clip does not affect; it
-  clears the stencil with the color so a winding count a cover pass missed
-  cannot reach the next frame - the whole stencil, or only the winding bits
-  while a clip is armed on the target.
-- Added layer masks: `LayerEffects::with_mask()` multiplies a layer's alpha by
-  a mask image placed in device space, using either its luminance times alpha
-  (SVG `mask`'s default `mask-type`, via the new
-  `ImageFilter::luminance_to_alpha()`) or its alpha. Masks apply after the
-  layer's filters, as in SVG, and reserve their coverage images with the
-  layer's store, so a masked layer the transient budget cannot fit passes
-  through as a whole (`begin_layer()` returns `false`) rather than composite
-  unmasked.
-- Added layers: `Canvas::begin_layer()` and `end_layer()` draw a group into an
-  offscreen image and composite it back with `LayerEffects` - group opacity, so
-  overlapping shapes fade as one like an SVG group, and/or an image-filter
-  chain. The offscreen image is sized to the current scissor rect (under any
-  axis-aligned scale, so a device-pixel-ratio scale still bounds it) plus the
-  blur reach of the whole chain (successive blurs compound in quadrature),
-  not the whole canvas or render target. A rounded or rotated scissor clips
-  the layer's composite once, after its filters, where it was set - a blur
-  samples content past the clip edge, as SVG's `clip-path` over a filtered
-  group does - instead of also clipping the draws inside the layer (which
-  squared the edge coverage and, in a blur-padded store, landed in the wrong
-  place). `begin_layer()` returns whether the
-  layer captured: `false` means it passed through with its effects dropped -
-  over the transient budget, past the backend's texture limit
-  (`Renderer::max_texture_size()`, 2048 on a VideoCore IV), or degenerate
-  bounds. Layers stay open across a flush of the same size; a `set_size()`
-  that changes the size, and `reset()`, discard open layers as a Canvas 2D
-  reset does. A layer opened under a non-invertible transform draws nothing,
-  as in Canvas 2D. The web-platform-tests layer suite is ported where the API
-  can express it (`tests/wpt_layers_wgpu.rs`). The shadow state in effect at 
-  `begin_layer()` is cast once by the layer's result (the Canvas 2D `beginLayer()` 
-  rule, and what SVG `feDropShadow` on a group means) and resets inside the layer,
-  so children are not each shadowed on their own.
-- A layer's backing images return to a pool at `end_layer()` and the next
-  layer of the same size takes them (commands run in order, so this needs no
-  synchronization; store sizes round up to 64 px so siblings with different
-  blur reaches share one), as do filter-chain scratches and shadow coverage; a
-  frame's transient memory is therefore its deepest nesting, not its layer
-  count - at 1080p a viewport-sized layer is 4.7 MB and thirteen blurred ones
-  would fill 256 MiB, while real artwork opens hundreds per frame.
-  `Canvas::set_transient_image_budget()` caps what is held at once (default
-  256 MiB) and `transient_image_bytes()` reports it; past the cap, layers pass
-  through (`begin_layer()` returns `false` - a layer reserves every image its
-  effects draw through, a filter chain's result and scratches included, with
-  its store, so it is admitted whole or not at all; each open filtered level
-  holds its result and scratches for its whole life, so nesting filtered
-  layers costs their sum), `filter_image_chain()`
-  returns `ErrorKind::TransientImageBudgetExceeded`, and shadows are skipped
-  rather than allocate. Shadow coverage rounds to 8 px, not the layers' 64,
-  since shadows are many and small.
-- Fixed two-stop gradients fading a transparent stop through the wrong colors:
-  the stop's own color was discarded, so `transparent` to blue turned a plain
-  light blue instead of darkening, and transparent red to blue lost its red.
-  Two-stop and multi-stop gradients now interpolate the same way, fixing flame
-  gradient accuracy in Firefox's kit.svg embedded art, and now matching
-  Canvas and SVG gradient behaviors in multiple web browsers.
-- Added two-point radial gradients, the general Canvas
-  `createRadialGradient(x0, y0, r0, x1, y1, r1)` form where the start and end
-  circles can have different centres. New `Paint` constructors
-  `two_point_radial_gradient()` and `two_point_radial_gradient_stops()`;
-  concentric gradients keep using the existing cheaper path.
-- Added gradient transforms, the role of SVG's `gradientTransform`: new `Paint`
-  methods `set_gradient_transform()` and `with_gradient_transform()` transform
-  the gradient without affecting the shape it fills, which is how SVG tools
-  express skewed or unevenly scaled gradients.
-- Fixed the WGPU backend painting a nonzero fill's whole bounding box after an
-  even-odd fill, because the even-odd fill left winding counts in the stencil
-  buffer. Showed as a block above the bow tie of the DuckDuckGo logo.
+
+## [0.28.0] - 2026-10-26
+
+### Breaking changes
+
+- `ImageFilter::GaussianBlur` takes a standard deviation per axis (`sigma_x`,
+  `sigma_y`) instead of `sigma`. `ImageFilter::gaussian_blur(sigma)` builds the
+  isotropic blur.
+- `CompositeOperation` and `BlendFactor` are now `#[non_exhaustive]`.
+- `renderer::CommandType` has new `StartBlur` and `FinishBlur` variants and
+  `renderer::ShaderType` a new `FillBlur` variant, which a `Renderer`
+  implemented outside the crate must handle.
+- On wasm32 in the browser, the OpenGL renderer's `NativeTexture` is now a
+  `web_sys::WebGlTexture` instead of a glow texture key.
+- Gradient stops with a non-finite offset or color are now ignored, as SVG
+  specifies.
+
+### Added
+
+- Layers: `Canvas::begin_layer()` and `end_layer()` draw a group offscreen and
+  composite it with `LayerEffects`: group opacity, an image filter chain, a
+  shadow, a mask (`with_mask()`) and a blend mode (`with_blend()`). Offscreen
+  images are pooled and capped by `Canvas::set_transient_image_budget()`
+  (256 MiB by default).
+- `Canvas::clip_path()` and `clip_paths()` clip to arbitrary paths with a fill
+  rule and an antialiased edge, scoped by `save()`/`restore()`. Their CPU masks
+  are capped by `Canvas::set_clip_mask_budget()`.
+- `Canvas::filter_image_chain()` applies a list of image filters, folding
+  consecutive color matrices into one pass.
+- New image filters: `Morphology`, `Offset`, `Crop`, `Blend`, `Turbulence`,
+  `LinearRgbToSrgb` and `SrgbToLinearRgb`, plus `ImageFilter::identity()` and
+  `luminance_to_alpha()`.
+- `Canvas::blur_rect()` and `blur_path()` blur the current render target in
+  place, for backdrop blur.
+- `Canvas::with_render_target()` runs a side pass on another target and
+  returns to the current one.
+- Gradients: two-point radial gradients (`Paint::two_point_radial_gradient()`),
+  gradient transforms (`Paint::with_gradient_transform()`), interpolation in
+  other color spaces (`Paint::with_interpolation_space()` and `ColorSpace`) and
+  premultiplied interpolation (`Paint::with_premultiplied_interpolation()`).
+- `WGPURenderer::set_submission_slicing()` splits a frame into several
+  submissions to lower peak driver memory on Metal with many layers.
+  `Canvas::renderer()` and `renderer_mut()` give access to the renderer.
+- Support for the `wasm32-unknown-emscripten` target.
+
+### Changed
+
+- Rendering matches browsers more closely: thin fills are no longer too dark
+  (`Canvas::set_thin_fill_masks(false)` restores the old behavior), sub-pixel
+  strokes are no longer too faint, clockwise contours are no longer a pixel too
+  wide, and curves are flattened more accurately.
+- Gaussian blurs above 8 device pixels of sigma run at a downsampled size,
+  which is much faster for large blurs. The maximum sigma rises from 128 to
+  512, and blurs now fade to transparent at the image edge.
+- The WGPU backend honors `ImageFlags::GENERATE_MIPMAPS`.
+- `Canvas::add_font_dir()` and `TextContext::add_font_dir()` also return the
+  ids of fonts loaded from subdirectories.
+- `save()` stops growing the state stack past 16,384 levels.
+
+### Performance
+
+- WGPU: fewer render passes, bind groups and pipeline rebuilds; uniforms and
+  upload staging are reused across frames.
+- Fills use less CPU and vertex memory, and degenerate curves are no longer
+  over-subdivided (up to 5x faster encoding on some SVG content).
+- Faster glyph rasterization with the `swash` feature.
+
+### Fixed
+
+- Text: stale glyph advances, widths and line breaks after small changes of
+  font size, letter spacing or `max_width`; missing glyphs kept after adding a
+  font that covers them; misplaced glyphs at negative x with `swash`.
+- Color emoji (PNG glyphs): now drawn when stroked, above about 507 pixels and
+  outside the glyph atlas; no longer a pixel too large or re-uploaded for each
+  subpixel offset; a panic with `swash` and `textlayout` is fixed.
+- `fill_glyph_run()` and `stroke_glyph_run()` now cast one shadow per run.
+- Gradients: transparent stops fading through the wrong colors, the ramp after
+  a last stop below 1.0, two-point radial gradients losing a stop's hue, and
+  multi-stop gradients sampled half a texel off their colors.
+- Paths: zero-length edges from repeated points, a `Path` extended after being
+  drawn still drawing as the old path, a `Path` drawn again after the device
+  pixel ratio changed keeping its old flattening, and collinear fills drawing a
+  line (#341).
+- Clipping and compositing: stray paint with `copy`, `source-in` and similar
+  operations under a path clip, thin even-odd clip holes, and WGPU filling a
+  bounding box after an even-odd fill.
+- Blur: wide blurs coming out too narrow, and zero, negative or non-finite
+  sigma blanking the image.
+- Layer shadows now include content from outside the scissor.
+- WGPU: a frame no longer draws with uploads of a later frame flushed before it
+  was submitted.
 
 ## [0.27.0] - 2026-08-31
 
@@ -892,3 +595,4 @@ All notable changes to this project will be documented in this file.
 [0.25.1]: https://github.com/femtovg/femtovg/releases/tag/v0.25.1
 [0.26.0]: https://github.com/femtovg/femtovg/releases/tag/v0.26.0
 [0.27.0]: https://github.com/femtovg/femtovg/releases/tag/v0.27.0
+[0.28.0]: https://github.com/femtovg/femtovg/releases/tag/v0.28.0

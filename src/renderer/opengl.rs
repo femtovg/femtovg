@@ -1403,7 +1403,11 @@ impl OpenGl {
 
 impl Renderer for OpenGl {
     type Image = GlTexture;
+    #[cfg(not(wasm_unknown))]
     type NativeTexture = <glow::Context as glow::HasContext>::Texture;
+    /// The `WebGlTexture` must belong to the WebGL context of the canvas this renderer draws into.
+    #[cfg(wasm_unknown)]
+    type NativeTexture = web_sys::WebGlTexture;
     type ExternalTexture = <glow::Context as glow::HasContext>::Texture;
     type RenderOutput = ();
     type CommandBuffer = ();
@@ -1420,7 +1424,13 @@ impl Renderer for OpenGl {
     }
 
     fn get_native_texture(&self, image: &Self::Image) -> Result<Self::NativeTexture, ErrorKind> {
-        Ok(image.id())
+        #[cfg(not(wasm_unknown))]
+        return Ok(image.id());
+        #[cfg(wasm_unknown)]
+        return self
+            .context
+            .as_web_gl_texture(image.id())
+            .ok_or(ErrorKind::ImageIdNotFound);
     }
 
     fn render(
@@ -1583,6 +1593,10 @@ impl Renderer for OpenGl {
         native_texture: Self::NativeTexture,
         info: ImageInfo,
     ) -> Result<Self::Image, ErrorKind> {
+        // glow's web backend refers to textures by keys into a table of the `glow::Context`,
+        // so a texture created by another `glow::Context` or by JavaScript needs a key in ours.
+        #[cfg(wasm_unknown)]
+        let native_texture = unsafe { self.context.register_external_texture(native_texture) };
         Ok(Self::Image::new_from_native_texture(native_texture, info, false))
     }
 

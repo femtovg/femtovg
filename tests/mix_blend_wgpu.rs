@@ -436,3 +436,62 @@ fn a_blend_request_composites_source_over_in_every_path() {
     });
     assert_close(px(&control, W, 8, 8), [255, 0, 0, 255], "an ordinary layer lands under");
 }
+
+/// Two 0.6-alpha fills overlapping, the right one in a plus-lighter layer:
+/// where they overlap the two add. The same scene with the right fill drawn
+/// under `CompositeOperation::Lighter` instead of a layer is the reference.
+fn plus_lighter_case(background: Color, layered: bool) -> Vec<u8> {
+    let (device, queue) = headless_device().expect("gpu");
+    render_rgba(&device, &queue, W, H, background, |c| {
+        assert!(c.begin_layer(&LayerEffects::new()));
+        fill(c, 0.0, 0.0, 10.0, H as f32, Color::rgbaf(1.0, 0.0, 0.0, 0.6));
+        if layered {
+            assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::PlusLighter)));
+            fill(c, 6.0, 0.0, 10.0, H as f32, Color::rgbaf(0.0, 0.0, 1.0, 0.6));
+            c.end_layer();
+        } else {
+            c.global_composite_operation(CompositeOperation::Lighter);
+            fill(c, 6.0, 0.0, 10.0, H as f32, Color::rgbaf(0.0, 0.0, 1.0, 0.6));
+        }
+        c.end_layer();
+    })
+}
+
+/// A plus-lighter layer and a plain draw under `Lighter` agree, over white
+/// and over transparent, and the overlap adds premultiplied color and alpha.
+#[test]
+fn plus_lighter_matches_the_lighter_composite_operation() {
+    if headless_device().is_none() {
+        return;
+    }
+    for background in [Color::rgba(0, 0, 0, 0), Color::white()] {
+        let (layer, plain) = (
+            plus_lighter_case(background, true),
+            plus_lighter_case(background, false),
+        );
+        let worst = worst_delta(&layer, |x, y| px(&plain, W, x, y));
+        assert!(worst <= 1, "over {background:?}: worst channel delta {worst}/255");
+    }
+    // Over transparent: red 0.6 and blue 0.6 sum to (153, 0, 153, 255), alpha clamped.
+    assert_close(
+        px(&plus_lighter_case(Color::rgba(0, 0, 0, 0), true), W, 8, 8),
+        [153, 0, 153, 255],
+        "the overlap adds",
+    );
+}
+
+/// plus-lighter reads no backdrop, so unlike the other modes it also
+/// composites on the screen, opacity applied first.
+#[test]
+fn on_the_screen_plus_lighter_still_adds() {
+    let Some((device, queue)) = headless_device() else {
+        return;
+    };
+    let out = render_rgba(&device, &queue, W, H, Color::rgba(0, 0, 0, 0), |c| {
+        fill(c, 0.0, 0.0, W as f32, H as f32, Color::rgb(100, 0, 0));
+        assert!(c.begin_layer(&LayerEffects::new().with_blend(BlendMode::PlusLighter).with_opacity(0.5)));
+        fill(c, 0.0, 0.0, W as f32, H as f32, Color::rgb(200, 100, 0));
+        c.end_layer();
+    });
+    assert_close(px(&out, W, 8, 8), [200, 50, 0, 255], "red plus half of orange");
+}

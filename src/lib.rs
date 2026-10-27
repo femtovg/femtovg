@@ -70,7 +70,7 @@ pub use layers::{LayerEffects, MaskKind};
 mod turbulence;
 
 mod color;
-pub use color::Color;
+pub use color::{Color, ColorSpace};
 
 pub mod renderer;
 pub use renderer::{RenderTarget, Renderer};
@@ -941,6 +941,9 @@ where
     /// It is necessary to call `[Self::delete_image`] to free femtovg specific
     /// book-keeping data structures, the underlying backend-specific texture memory
     /// will not be freed. It is the caller's responsible to delete it.
+    ///
+    /// With the OpenGL renderer, the texture must belong to the same OpenGL context,
+    /// or in the browser, the same WebGL context as the canvas that the renderer draws into.
     pub fn create_image_from_native_texture(
         &mut self,
         texture: T::NativeTexture,
@@ -2212,9 +2215,8 @@ where
         }
 
         // The run-level shadow above is the only shadow this text should cast.
-        // Glyph runs that fall back to outline rendering are drawn through
-        // fill/stroke_path_internal, whose own shadow hooks would otherwise add a
-        // second shadow per glyph on top of it — so suppress shadows while the
+        // draw_glyph_run casts its own shadow for each glyph run, which would
+        // otherwise add a second shadow on top of it — so suppress shadows while the
         // actual glyphs are drawn, restoring afterwards (also on error).
         let saved_shadow_color = self.state().shadow_color;
         self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
@@ -2401,6 +2403,43 @@ where
             })
             .collect::<Vec<_>>();
 
+        // Cast one shadow for the whole run, as draw_text() does. Its bounds are the union of the
+        // glyphs' boxes in user space, for atlas and outline glyphs alike. render_shadow() turns
+        // shadows off while it draws the run again into the shadow's coverage image.
+        if self.shadow_enabled() {
+            let scale = font.scale(paint.text.font_size);
+            // The same slack for antialiased edges as draw_text(), and half the stroke width.
+            let mut margin = paint.text.font_size * 0.2;
+            if render_mode == RenderMode::Stroke {
+                margin += paint.stroke.line_width / 2.0;
+            }
+            let transform = self.state().transform;
+            let device = Bounds::from_points(
+                non_color_glyphs
+                    .iter()
+                    .chain(&color_glyphs)
+                    .filter_map(|glyph| {
+                        let glyph_data = font.glyph(&font_face, glyph.glyph_id, normalized_coords)?;
+                        let metrics = &glyph_data.metrics;
+                        let x0 = glyph.x + metrics.bearing_x * scale - margin;
+                        let y0 = glyph.y - metrics.bearing_y * scale - margin;
+                        let x1 = glyph.x + (metrics.bearing_x + metrics.width) * scale + margin;
+                        let y1 = glyph.y + (metrics.height - metrics.bearing_y) * scale + margin;
+                        Some([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+                    })
+                    .flatten()
+                    .map(|(x, y)| transform.transform_point(x, y)),
+            );
+
+            // Bounds without a glyph are empty and cannot be visible.
+            if self.shadow_could_be_visible(device) {
+                self.render_shadow(device, |canvas| {
+                    let glyphs = non_color_glyphs.iter().chain(&color_glyphs).cloned();
+                    let _ = canvas.draw_glyph_run(glyphs, paint, font_id, normalized_coords, render_mode);
+                });
+            }
+        }
+
         // When baking scale into the rasterization, pre-multiply glyph positions
         // by `effective_scale` so that under a translation-only canvas transform
         // they still land at the original screen position.
@@ -2411,7 +2450,12 @@ where
         };
 
         let mut draw_commands = if need_direct_rendering {
-            text::render_direct(
+            // render_direct() draws each glyph with fill_path_internal() or stroke_path_internal(),
+            // which would cast a shadow for each glyph on top of the run's shadow. The atlas path
+            // casts none.
+            let saved_shadow_color = self.state().shadow_color;
+            self.state_mut().shadow_color = Color::rgbaf(0.0, 0.0, 0.0, 0.0);
+            let result = text::render_direct(
                 self,
                 font,
                 non_color_glyphs.into_iter(),
@@ -2421,7 +2465,9 @@ where
                 paint.text.font_size,
                 render_mode,
                 normalized_coords,
-            )?;
+            );
+            self.state_mut().shadow_color = saved_shadow_color;
+            result?;
             GlyphDrawCommands::default()
         } else {
             self.glyph_atlas.clone().render_atlas(
@@ -2447,6 +2493,11 @@ where
                     self.glyph_atlas.clone()
                 };
 
+                // A bitmap glyph is drawn at a whole pixel: neither rasterizer shifts it by the
+                // fraction of x. Truncating x, as render_atlas() does to place the quad, gives the
+                // glyph one atlas entry instead of one for each subpixel offset.
+                let whole_pixel = |g: PositionedGlyph| PositionedGlyph { x: g.x.trunc(), ..g };
+
                 // Color glyphs on the atlas path follow the same scale baking.
                 // On the direct path we leave them at the original font_size —
                 // that already matches today's behavior.
@@ -2456,7 +2507,7 @@ where
                         font_id,
                         font,
                         &font_face,
-                        color_glyphs.into_iter(),
+                        color_glyphs.into_iter().map(whole_pixel),
                         paint.text.font_size,
                         stroke.line_width,
                         render_mode,
@@ -2468,7 +2519,7 @@ where
                         font_id,
                         font,
                         &font_face,
-                        color_glyphs.iter().map(scaled),
+                        color_glyphs.iter().map(scaled).map(whole_pixel),
                         effective_font_size,
                         stroke.line_width,
                         render_mode,
@@ -3551,7 +3602,7 @@ fn text_drawn_as_outlines_uses_one_paint_matrix_for_the_run() {
 }
 
 /// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` draw
-/// each outline glyph twice, once into the coverage image of the glyph's shadow
+/// each outline glyph twice, once into the coverage image of the run's shadow
 /// and once on the canvas. Both draws sample an image paint at the vertex's
 /// position in user space, so the coverage image gets the alpha that the glyph
 /// has on the canvas.
@@ -3638,11 +3689,12 @@ fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
             draws.push((vertex, sampled));
         }
 
-        // Each glyph is drawn into the coverage image of its shadow and then
-        // on the canvas.
+        // Every glyph is drawn into the coverage image of the run's shadow, and
+        // then every glyph on the canvas.
         assert_eq!(draws.len(), 2 * glyphs.len(), "{case}");
-        for (glyph, glyph_draws) in glyphs.iter().zip(draws.chunks_exact(2)) {
-            let (on_canvas, _) = glyph_draws[1];
+        let (shadow_draws, canvas_draws) = draws.split_at(glyphs.len());
+        for ((glyph, shadow_draw), canvas_draw) in glyphs.iter().zip(shadow_draws).zip(canvas_draws) {
+            let (on_canvas, _) = canvas_draw;
             let in_user_space = [on_canvas.x / SCALE, on_canvas.y / SCALE];
             // The outline is at the glyph's position. "M" and "I" are smaller
             // than the font size, so the vertex is within that distance of the
@@ -3653,7 +3705,7 @@ fn shadow_of_a_glyph_drawn_as_an_outline_uses_the_paint_of_the_run() {
                 "{case}: the glyph at {:?} has a vertex at {in_user_space:?}",
                 (glyph.x, glyph.y)
             );
-            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip(glyph_draws) {
+            for (draw, (_, sampled)) in ["shadow coverage", "canvas"].iter().zip([shadow_draw, canvas_draw]) {
                 assert!(
                     (sampled[0] - in_user_space[0]).abs() < TOLERANCE
                         && (sampled[1] - in_user_space[1]).abs() < TOLERANCE,
@@ -3785,6 +3837,76 @@ fn outline_text_shadow_pass_count_is_glyph_count_invariant() {
         "shadow passes must not scale with glyph count: outline glyphs would each cast \
          their own shadow on top of the run-level one"
     );
+}
+
+/// With a canvas shadow set, `fill_glyph_run()` and `stroke_glyph_run()` cast
+/// one shadow for the run, as `fill_text()` does, whether the glyphs are drawn
+/// from the glyph atlas or as outlines.
+#[cfg(feature = "textlayout")]
+#[test]
+fn glyph_run_casts_one_shadow() {
+    use renderer::CommandType;
+
+    let target_switches = |text: &str, font_size: f32, stroke: bool, shadow: bool| -> usize {
+        let renderer = RecordingRenderer::default();
+        let recorded = renderer.last_commands.clone();
+        let mut canvas = Canvas::new(renderer).unwrap();
+        canvas.set_size(600, 300, 1.0);
+
+        let font = canvas
+            .add_font("examples/assets/RobotoFlex-VariableFont.ttf")
+            .expect("Font not found");
+        let paint = Paint::color(Color::white())
+            .with_font(&[font])
+            .with_font_size(font_size);
+        let glyphs: Vec<_> = canvas
+            .measure_text(20.0, 150.0, text, &paint)
+            .unwrap()
+            .glyphs
+            .iter()
+            .map(|glyph| PositionedGlyph {
+                x: glyph.x,
+                y: glyph.y,
+                glyph_id: glyph.glyph_id,
+            })
+            .collect();
+
+        if shadow {
+            canvas.set_shadow_color(Color::rgba(0, 0, 0, 255));
+            canvas.set_shadow_offset(10.0, 10.0);
+        }
+        if stroke {
+            canvas.stroke_glyph_run(font, &[], glyphs, &paint).unwrap();
+        } else {
+            canvas.fill_glyph_run(font, &[], glyphs, &paint).unwrap();
+        }
+        canvas.flush_to_output(());
+
+        let commands = recorded.borrow();
+        commands
+            .iter()
+            .filter(|c| matches!(c.cmd_type, CommandType::SetRenderTarget(RenderTarget::Image(_))))
+            .count()
+    };
+    // Drawing glyph masks into the atlas also switches the render target, so
+    // count the switches the shadow adds.
+    let shadow_target_switches = |text: &str, font_size: f32, stroke: bool| {
+        target_switches(text, font_size, stroke, true) - target_switches(text, font_size, stroke, false)
+    };
+
+    // At 20 px the glyphs are drawn from the atlas, and at 100 px, above the
+    // atlas cap, as outlines.
+    for font_size in [20.0, 100.0] {
+        for stroke in [false, true] {
+            let single = shadow_target_switches("I", font_size, stroke);
+            let many = shadow_target_switches("Illuminate", font_size, stroke);
+            assert!(single > 0, "{font_size} px, stroke {stroke}: no shadow pass");
+            assert_eq!(
+                single, many,
+                "{font_size} px, stroke {stroke}: one shadow pass per glyph"
+            );
+        }
+    }
 }
 
 /// Fills `path` once on `canvas`, flushes, and returns the raw bytes of the
@@ -5359,26 +5481,191 @@ fn png_glyphs_drawn_directly_use_an_ephemeral_atlas() {
     }
 }
 
-/// Without `image-loading`, drawing a PNG glyph directly at a font size too large
-/// for the atlas doesn't return an error. The draw skips the glyph instead.
-#[cfg(all(feature = "swash", not(feature = "image-loading")))]
+/// A PNG glyph is drawn at a whole pixel, so drawing it at two subpixel offsets
+/// places it in the atlas once, at 24 px (glyph atlas) and at 96 px (ephemeral atlas).
+#[cfg(any(feature = "textlayout", feature = "swash"))]
 #[test]
-fn png_glyphs_too_large_for_the_atlas_are_skipped() {
+fn png_glyphs_at_different_subpixel_offsets_share_one_atlas_entry() {
     use crate::text::test_fonts::png_glyph_font;
 
+    for font_size in [24.0, 96.0] {
+        let text_context = TextContext::default();
+        let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
+        let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
+        canvas.set_size(400, 400, 1.0);
+        let paint = Paint::color(Color::black()).with_font_size(font_size);
+        let glyphs = [10.0, 10.5].map(|x| PositionedGlyph {
+            x,
+            y: 100.0,
+            glyph_id: 0,
+        });
+        canvas.fill_glyph_run(font, &[], glyphs, &paint).unwrap();
+
+        // `draw_glyph_run` draws a run directly when its font size is above 92.
+        assert_eq!(canvas.ephemeral_glyph_atlas.is_some(), font_size > 92.0);
+        let atlas = canvas.ephemeral_glyph_atlas.as_ref().unwrap_or(&canvas.glyph_atlas);
+        assert_eq!(atlas.rendered_glyphs.borrow().len(), 1, "font size {font_size}");
+    }
+}
+
+/// The atlas draws an oversized PNG glyph from a smaller copy, at its position
+/// and size at the font size.
+#[cfg(any(feature = "swash", all(feature = "textlayout", feature = "image-loading")))]
+#[test]
+fn png_glyphs_too_large_for_the_atlas_are_drawn_at_the_font_size() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::{offset_png_glyph_font, png_glyph_font};
+    use crate::text::{GLYPH_PADDING, MAX_GLYPH_SIDE, TEXTURE_SIZE};
+
+    // (font, [width, height, x offset, y offset]) in pixels of the 24 ppem strike. The
+    // offsets place the bitmap's bottom left corner relative to the glyph origin, y up.
+    let square: (Vec<u8>, [f32; 4]) = (png_glyph_font(), [24.0, 24.0, 0.0, 0.0]);
+    let wide: (Vec<u8>, [f32; 4]) = (offset_png_glyph_font(), [36.0, 24.0, 3.0, -5.0]);
+    // The atlas shrinks a bitmap if its longer side is more than 507 pixels (MAX_GLYPH_SIDE),
+    // so the square bitmap keeps its size at 507 and is shrunk from 508 on. At 517.0958, f32
+    // rounding puts the copy's side just above 506 texels, and the atlas rounds it up to 507.
+    // The last number in each case is the allowed error per edge, in pixels. A glyph drawn at
+    // the font size has its bearing rounded to a whole pixel. A copy is placed exactly.
+    let cases = [
+        (&square, 507.0, 0.0),
+        (&square, 508.0, 0.0),
+        (&square, 1000.0, 0.0),
+        (&square, 517.0958, 0.0),
+        (&wide, 300.0, 0.5),
+        (&wide, 700.0, 0.0),
+        (&wide, 1000.0, 0.0),
+    ];
+    let (x, y) = (800.0, 1100.0);
+
+    for (bitmap, font_size, tolerance) in cases {
+        let [width, height, offset_x, offset_y] = bitmap.1;
+        let pixel = font_size / 24.0;
+        let shrunk = width.max(height) * pixel > MAX_GLYPH_SIDE as f32;
+        for stroke in [false, true] {
+            let case = format!("{width} by {height} bitmap at size {font_size}, stroke: {stroke}");
+            let renderer = RecordingRenderer::default();
+            let recorded_commands = renderer.last_commands.clone();
+            let recorded_verts = renderer.last_verts.clone();
+            let text_context = TextContext::default();
+            let font = text_context.add_font_mem(&bitmap.0).unwrap();
+            let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+            canvas.set_size(2000, 2000, 1.0);
+            let paint = Paint::color(Color::black()).with_font_size(font_size);
+            let glyph = [PositionedGlyph { x, y, glyph_id: 0 }];
+
+            let result = if stroke {
+                canvas.stroke_glyph_run(font, &[], glyph, &paint)
+            } else {
+                canvas.fill_glyph_run(font, &[], glyph, &paint)
+            };
+            assert!(result.is_ok(), "{case}: {result:?}");
+            canvas.flush_to_output(());
+
+            let color_quads: Vec<_> = recorded_commands
+                .borrow()
+                .iter()
+                .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)))
+                .filter_map(|command| command.triangles_verts)
+                .collect();
+            assert_eq!(color_quads.len(), 1, "{case}");
+
+            let (offset, count) = color_quads[0];
+            assert_eq!(count, 6, "{case}");
+            let verts = &recorded_verts.borrow()[offset..offset + count];
+            // The first two vertices are the quad's top left and bottom right corners.
+            let (left, top, right, bottom) = (verts[0].x, verts[0].y, verts[1].x, verts[1].y);
+            let texels = [
+                (verts[1].u - verts[0].u) * TEXTURE_SIZE as f32,
+                (verts[1].v - verts[0].v) * TEXTURE_SIZE as f32,
+            ];
+            let texel_size = [(right - left) / texels[0], (bottom - top) / texels[1]];
+            if shrunk {
+                // The copy without its padding.
+                let longest_side = texels[0].max(texels[1]) - 2.0 * GLYPH_PADDING as f32;
+                assert!(
+                    longest_side >= (MAX_GLYPH_SIDE - 1) as f32,
+                    "{case}: the copy is {texels:?}"
+                );
+            } else {
+                assert!(
+                    texel_size.iter().all(|side| (side - 1.0).abs() < 1e-4),
+                    "{case}: {texel_size:?}"
+                );
+            }
+
+            // Inset the quad by its one texel of padding to get the bitmap's rectangle.
+            let drawn = [
+                left + texel_size[0],
+                top + texel_size[1],
+                right - texel_size[0],
+                bottom - texel_size[1],
+            ];
+            let bitmap_left = x + offset_x * pixel;
+            let bitmap_bottom = y - offset_y * pixel;
+            let expected = [
+                bitmap_left,
+                bitmap_bottom - height * pixel,
+                bitmap_left + width * pixel,
+                bitmap_bottom,
+            ];
+            for (actual, wanted) in drawn.into_iter().zip(expected) {
+                assert!(
+                    (actual - wanted).abs() <= tolerance + 0.01,
+                    "{case}: the bitmap is drawn at {drawn:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The atlas makes a smaller copy of a PNG glyph from its largest strike, the
+/// one its size is estimated from, even when a strike nearer the copy's size
+/// covers more of the em and would not fit.
+#[cfg(feature = "swash")]
+#[test]
+fn png_glyphs_are_shrunk_from_their_largest_strike() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::two_strike_png_glyph_font;
+    use crate::text::TEXTURE_SIZE;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
     let text_context = TextContext::default();
-    let font = text_context.add_font_mem(&png_glyph_font()).unwrap();
-    let mut canvas = Canvas::new_with_text_context(RecordingRenderer::default(), text_context).unwrap();
-    canvas.set_size(400, 400, 1.0);
-    // The bitmap is one em square, and an atlas texture is 512 by 512 pixels.
-    let paint = Paint::color(Color::black()).with_font_size(700.0);
+    let font = text_context.add_font_mem(&two_strike_png_glyph_font()).unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(2000, 2000, 1.0);
+    // At 1000 pixels the 1024 ppem strike's bitmap is 1000 pixels wide, so the copy is made at
+    // about 506 pixels. The 512 ppem strike's bitmap would be 593 texels wide there.
+    let font_size = 1000.0;
+    let paint = Paint::color(Color::black()).with_font_size(font_size);
     let glyph = PositionedGlyph {
-        x: 50.0,
-        y: 100.0,
+        x: 100.0,
+        y: 1500.0,
         glyph_id: 0,
     };
-    canvas.fill_glyph_run(font, &[], [glyph.clone()], &paint).unwrap();
-    canvas.stroke_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let color_quads: Vec<_> = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| matches!(command.glyph_texture, GlyphTexture::ColorTexture(_)))
+        .filter_map(|command| command.triangles_verts)
+        .collect();
+    assert_eq!(color_quads.len(), 1);
+    let (offset, count) = color_quads[0];
+    let verts = &recorded_verts.borrow()[offset..offset + count];
+    // The first two vertices are the quad's top left and bottom right corners. Inset by the
+    // copy's one texel of padding, the quad is the 1024 ppem strike's bitmap at the font size.
+    let texels = (verts[1].u - verts[0].u) * TEXTURE_SIZE as f32;
+    let texel_width = (verts[1].x - verts[0].x) / texels;
+    let drawn_width = verts[1].x - verts[0].x - 2.0 * texel_width;
+    let expected_width = 1024.0 * font_size / 1024.0;
+    assert!(
+        (drawn_width - expected_width).abs() < 0.01,
+        "{drawn_width} {expected_width}"
+    );
 }
 
 /// With `textlayout`, `Font::glyph` finds a PNG glyph without decoding it. When
@@ -5413,6 +5700,49 @@ fn stroked_png_glyphs_that_do_not_decode_are_skipped() {
         .filter(|command| !matches!(command.glyph_texture, GlyphTexture::None))
         .count();
     assert_eq!(glyph_draws, 0);
+}
+
+/// When swash cannot decode a PNG glyph and draws its outline instead, the atlas
+/// rasterizes the outline at the font size and does not shrink it like a bitmap.
+#[cfg(all(feature = "textlayout", feature = "swash"))]
+#[test]
+fn png_glyphs_that_do_not_decode_are_not_shrunk() {
+    use crate::paint::GlyphTexture;
+    use crate::text::test_fonts::outline_glyph_with_broken_png_font;
+    use crate::text::TEXTURE_SIZE;
+
+    let renderer = RecordingRenderer::default();
+    let recorded_commands = renderer.last_commands.clone();
+    let recorded_verts = renderer.last_verts.clone();
+    let text_context = TextContext::default();
+    let font = text_context
+        .add_font_mem(&outline_glyph_with_broken_png_font())
+        .unwrap();
+    let mut canvas = Canvas::new_with_text_context(renderer, text_context).unwrap();
+    canvas.set_size(2000, 2000, 1.0);
+    // The PNG's header gives a bitmap one em square, 1000 pixels here, which is too large for
+    // the atlas. The outline is a 500-unit square, which fits.
+    let paint = Paint::color(Color::black()).with_font_size(1000.0);
+    let glyph = PositionedGlyph {
+        x: 100.0,
+        y: 1100.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+    canvas.flush_to_output(());
+
+    let mask_quads: Vec<_> = recorded_commands
+        .borrow()
+        .iter()
+        .filter(|command| matches!(command.glyph_texture, GlyphTexture::AlphaMask(_)))
+        .filter_map(|command| command.triangles_verts)
+        .collect();
+    assert_eq!(mask_quads.len(), 1);
+    let (offset, count) = mask_quads[0];
+    let verts = &recorded_verts.borrow()[offset..offset + count];
+    // The first two vertices are the quad's top left and bottom right corners.
+    let texel_width = (verts[1].x - verts[0].x) / ((verts[1].u - verts[0].u) * TEXTURE_SIZE as f32);
+    assert!((texel_width - 1.0).abs() < 1e-4, "{texel_width}");
 }
 
 /// Random interleavings of save / restore / begin_layer / end_layer /

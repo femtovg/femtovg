@@ -1,7 +1,7 @@
 [package]
 name = "femtovg"
 description = "Antialiased 2D vector drawing library"
-version = "0.27.0"
+version = "0.28.0"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 authors = [
@@ -28,7 +28,7 @@ rustybuzz = { version = "0.20.0", optional = true }
 unicode-bidi = { version = "0.3.17", optional = true }
 unicode-segmentation = { version = "1.12.0", optional = true }
 slotmap = "1.0.7"
-lru = { version = "0.18.0", optional = true, default-features = false }
+lru = { version = "0.19.0", optional = true, default-features = false }
 image = { version = "0.25.0", optional = true, default-features = false }
 serde = { version = "1.0", optional = true, features = ["derive", "rc"] }
 glow = { version = "0.18.0", default-features = false }
@@ -50,6 +50,7 @@ web_sys = { version = "0.3", package = "web-sys", features = [
     "HtmlImageElement",
     "CanvasRenderingContext2d",
     "WebGl2RenderingContext",
+    "WebGlTexture",
 ] }
 wasm-bindgen = "0.2"
 wgpu = { version = "30.0.0", optional = true, default-features = false, features = ["web"] }
@@ -70,7 +71,7 @@ serde_json = "1.0"
 winit = { version = "0.30.12" }
 euclid = "0.22.3"
 rand = "0.10"
-usvg = { version = "0.48.1" }
+usvg = { version = "0.49.0" }
 instant = { version = "0.1", features = ["now"] }
 resource = "0.6.1"
 image = { version = "0.25.0", default-features = false, features = [
@@ -87,7 +88,7 @@ wgpu = { version = "30.0.0", features = ["counters"] }
 glutin = "0.32.3"
 glutin-winit = "0.5.0"
 raw-window-handle = "0.6.2"
-parley = "0.11.0"
+parley = "0.12.0"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 web_sys = { version = "0.3", package = "web-sys", features = [

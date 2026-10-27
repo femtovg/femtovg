@@ -32,7 +32,7 @@ pub(crate) mod test_fonts;
 
 // This padding is an empty border around the glyph’s pixels but inside the
 // sampled area (texture coordinates) for the quad in render_atlas().
-const GLYPH_PADDING: u32 = 1;
+pub(crate) const GLYPH_PADDING: u32 = 1;
 // We add an additional margin of 1 texel outside of the sampled area.
 // The atlas is NEAREST-sampled (since 62e5be6), so no filter tap blends
 // across the boundary; the margin is a guard band for GPUs whose
@@ -41,7 +41,10 @@ const GLYPH_PADDING: u32 = 1;
 // zero-initialized on both backends, so margin texels are blank.
 const GLYPH_MARGIN: u32 = 1;
 
-const TEXTURE_SIZE: usize = 512;
+pub(crate) const TEXTURE_SIZE: usize = 512;
+// The longest glyph side that fits in a new atlas texture. Atlas::add_rect() refuses
+// a cell as tall as the texture, hence the - 1.
+pub(crate) const MAX_GLYPH_SIDE: u32 = TEXTURE_SIZE as u32 - 1 - 2 * (GLYPH_PADDING + GLYPH_MARGIN);
 #[cfg(feature = "textlayout")]
 const DEFAULT_LRU_CACHE_CAPACITY: usize = 1000;
 
@@ -134,11 +137,14 @@ pub struct RenderedGlyph {
     texture_index: usize,
     width: u32,
     height: u32,
-    bearing_x: i32,
-    bearing_y: i32,
+    bearing_x: f32,
+    bearing_y: f32,
     atlas_x: u32,
     atlas_y: u32,
     color_glyph: bool,
+    // The width and height of one atlas texel when the glyph is drawn, in pixels at the font
+    // size. Both are 1, except for a bitmap glyph that is drawn from a smaller copy.
+    texel_size: [f32; 2],
 }
 
 #[derive(Debug)]
@@ -635,10 +641,11 @@ impl GlyphAtlas {
 
                 let line_width_offset = if rendered.color_glyph { 0. } else { line_width_offset };
 
-                q.x0 = glyph.x.trunc() + rendered.bearing_x as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.y0 = glyph.y.round() - rendered.bearing_y as f32 - line_width_offset - GLYPH_PADDING as f32;
-                q.x1 = q.x0 + rendered.width as f32;
-                q.y1 = q.y0 + rendered.height as f32;
+                let [texel_width, texel_height] = rendered.texel_size;
+                q.x0 = glyph.x.trunc() + rendered.bearing_x - (line_width_offset + GLYPH_PADDING as f32) * texel_width;
+                q.y0 = glyph.y.round() - rendered.bearing_y - (line_width_offset + GLYPH_PADDING as f32) * texel_height;
+                q.x1 = q.x0 + rendered.width as f32 * texel_width;
+                q.y1 = q.y0 + rendered.height as f32 * texel_height;
 
                 q.s0 = rendered.atlas_x as f32 * itw;
                 q.t0 = rendered.atlas_y as f32 * ith;
@@ -683,11 +690,35 @@ impl GlyphAtlas {
         _subpixel_x: f32,
         normalized_coords: &[i16],
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
+        let (bitmap_glyph, maybe_glyph_metrics) = font
+            .glyph(font_face, glyph_id, normalized_coords)
+            .map_or((false, None), |g| (g.path.is_none(), Some(g.metrics.clone())));
+
+        // If a bitmap glyph doesn't fit the atlas at font_size, rasterize a smaller copy of it,
+        // which render_atlas() scales up by its texel_size. Aim one texel below MAX_GLYPH_SIDE
+        // because f32 rounding can land just above the aim and the cell size below rounds up.
+        let longest_bitmap_side = maybe_glyph_metrics
+            .as_ref()
+            .filter(|_| bitmap_glyph)
+            .map_or(0.0, |metrics| metrics.width.max(metrics.height) * font.scale(font_size));
+        let raster_size = if longest_bitmap_side > MAX_GLYPH_SIDE as f32 {
+            font_size * (MAX_GLYPH_SIDE - 1) as f32 / longest_bitmap_side
+        } else {
+            font_size
+        };
+
         #[cfg(feature = "swash")]
-        if mode == RenderMode::Fill || font.is_bitmap_glyph(font_face, glyph_id, normalized_coords) {
-            if let Some(result) =
-                self.render_glyph_swash(canvas, font, font_size, mode, glyph_id, _subpixel_x, normalized_coords)?
-            {
+        if mode == RenderMode::Fill || bitmap_glyph {
+            if let Some(result) = self.render_glyph_swash(
+                canvas,
+                font,
+                font_size,
+                raster_size,
+                mode,
+                glyph_id,
+                _subpixel_x,
+                normalized_coords,
+            )? {
                 return Ok(Some((result, None)));
             }
         }
@@ -695,13 +726,16 @@ impl GlyphAtlas {
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
 
         let (glyph_representation, glyph_metrics, scale) = {
-            let scale = font.scale(font_size);
-            let maybe_glyph_metrics = font
-                .glyph(font_face, glyph_id, normalized_coords)
-                .map(|g| g.metrics.clone());
+            let scale = font.scale(raster_size);
+            // A smaller copy is made from the largest strike, which the cell below is sized from.
+            let pixels_per_em = if raster_size == font_size {
+                raster_size as u16
+            } else {
+                u16::MAX
+            };
 
             if let (Some(glyph_representation), Some(glyph_metrics)) = (
-                font.glyph_rendering_representation(font_face, glyph_id, font_size as u16, normalized_coords),
+                font.glyph_rendering_representation(font_face, glyph_id, pixels_per_em, normalized_coords),
                 maybe_glyph_metrics,
             ) {
                 (glyph_representation, glyph_metrics, scale)
@@ -723,8 +757,10 @@ impl GlyphAtlas {
 
         let line_width_offset = (line_width / 2.0).ceil();
 
-        let width = (glyph_metrics.width * scale).ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
-        let height = (glyph_metrics.height * scale).ceil() as u32 + (line_width_offset * 2.0) as u32 + padding * 2;
+        let glyph_width = (glyph_metrics.width * scale).ceil() as u32;
+        let glyph_height = (glyph_metrics.height * scale).ceil() as u32;
+        let width = glyph_width + (line_width_offset * 2.0) as u32 + padding * 2;
+        let height = glyph_height + (line_width_offset * 2.0) as u32 + padding * 2;
 
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
             self.find_texture_or_alloc(canvas, width as usize, height as usize)?;
@@ -734,15 +770,32 @@ impl GlyphAtlas {
         let x = dst_x as f32 - rendered_bearing_x + line_width_offset + padding as f32;
         let y = TEXTURE_SIZE as f32 - dst_y as f32 - rendered_bearing_y - line_width_offset - padding as f32;
 
+        // A smaller copy is drawn where the bitmap is at font_size, and its glyph_width by
+        // glyph_height texels are scaled to the bitmap's size there.
+        let (bearing_x, bearing_y, texel_size) = if raster_size == font_size {
+            (rendered_bearing_x, rendered_bearing_y, [1.0, 1.0])
+        } else {
+            let font_scale = font.scale(font_size);
+            (
+                glyph_metrics.bearing_x * font_scale,
+                glyph_metrics.bearing_y * font_scale,
+                [
+                    glyph_metrics.width * font_scale / glyph_width as f32,
+                    glyph_metrics.height * font_scale / glyph_height as f32,
+                ],
+            )
+        };
+
         let rendered_glyph = RenderedGlyph {
             width: width - 2 * GLYPH_MARGIN,
             height: height - 2 * GLYPH_MARGIN,
-            bearing_x: rendered_bearing_x as i32,
-            bearing_y: rendered_bearing_y as i32,
+            bearing_x,
+            bearing_y,
             atlas_x: dst_x as u32 + GLYPH_MARGIN,
             atlas_y: dst_y as u32 + GLYPH_MARGIN,
             texture_index: dst_index,
             color_glyph,
+            texel_size,
         };
 
         let pending_mask = match glyph_representation {
@@ -756,13 +809,20 @@ impl GlyphAtlas {
             }),
             #[cfg(feature = "image-loading")]
             GlyphRendering::RenderAsImage(image_buffer) => {
-                let target_x = rendered_glyph.atlas_x as usize;
-                let target_y = rendered_glyph.atlas_y as usize;
-                let target_width = rendered_glyph.width;
-                let target_height = rendered_glyph.height;
+                // The image fills the cell inside its padding, which stays blank.
+                let target_x = (rendered_glyph.atlas_x + GLYPH_PADDING) as usize;
+                let target_y = (rendered_glyph.atlas_y + GLYPH_PADDING) as usize;
+                let target_width = rendered_glyph.width - 2 * GLYPH_PADDING;
+                let target_height = rendered_glyph.height - 2 * GLYPH_PADDING;
 
-                let image_buffer =
-                    image_buffer.resize(target_width, target_height, image::imageops::FilterType::Nearest);
+                // A smaller copy is magnified when it is drawn, so it is resized with a filter,
+                // as swash resizes it with a Mitchell filter.
+                let filter = if raster_size == font_size {
+                    image::imageops::FilterType::Nearest
+                } else {
+                    image::imageops::FilterType::Triangle
+                };
+                let image_buffer = image_buffer.resize_exact(target_width, target_height, filter);
                 if let Ok(image) = crate::image::ImageSource::try_from(&image_buffer) {
                     canvas.update_image(dst_image_id, image, target_x, target_y)?;
                 }
@@ -779,6 +839,7 @@ impl GlyphAtlas {
         canvas: &mut Canvas<T>,
         font: &Font,
         font_size: f32,
+        raster_size: f32,
         mode: RenderMode,
         glyph_id: u16,
         subpixel_x: f32,
@@ -792,23 +853,27 @@ impl GlyphAtlas {
             None => return Ok(None),
         };
 
+        // A smaller copy is made from the largest strike, which raster_size is estimated from. The
+        // strike nearest raster_size can cover more of the em, and then its copy would not fit.
+        let strike = if raster_size == font_size {
+            StrikeWith::BestFit
+        } else {
+            StrikeWith::LargestSize
+        };
+
         let image = {
             let mut scale_context = self.swash_scale_context.borrow_mut();
             let scaler_builder = scale_context
                 .builder(font_ref)
-                .size(font_size)
+                .size(raster_size)
                 .hint(true)
                 .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
-            Render::new(&[
-                Source::ColorOutline(0),
-                Source::ColorBitmap(StrikeWith::BestFit),
-                Source::Outline,
-            ])
-            .format(Format::Alpha)
-            .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
-            .render(&mut scaler, glyph_id)
+            Render::new(&[Source::ColorOutline(0), Source::ColorBitmap(strike), Source::Outline])
+                .format(Format::Alpha)
+                .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
+                .render(&mut scaler, glyph_id)
         };
 
         let image = match image {
@@ -823,21 +888,72 @@ impl GlyphAtlas {
             return Ok(None);
         }
 
+        let is_color = image.content == swash::scale::image::Content::Color;
+
+        // Only a color bitmap is drawn from a smaller copy. Anything else that swash draws for a
+        // bitmap glyph (e.g., the outline of a glyph whose bitmap does not decode) is rasterized
+        // at font_size.
+        if raster_size != font_size && !is_color {
+            return self.render_glyph_swash(
+                canvas,
+                font,
+                font_size,
+                font_size,
+                mode,
+                glyph_id,
+                subpixel_x,
+                normalized_coords,
+            );
+        }
+
+        let (bearing_x, bearing_y, texel_size) = if raster_size == font_size {
+            (image.placement.left as f32, image.placement.top as f32, [1.0, 1.0])
+        } else {
+            // swash rounds the copy's placement and size down to whole texels, and drawing the copy
+            // scaled up would scale that error up too. So the copy is placed where the largest
+            // strike puts the bitmap at font_size. Without a size, swash gives that strike's
+            // bitmap as it is, at whole pixels of the strike.
+            let Some(ppem) = font_ref
+                .color_strikes()
+                .find_by_largest_ppem(glyph_id)
+                .map(|strike| strike.ppem())
+            else {
+                return Ok(None);
+            };
+            let strike_bitmap = self
+                .swash_scale_context
+                .borrow_mut()
+                .builder(font_ref)
+                .build()
+                .scale_color_bitmap(glyph_id, StrikeWith::LargestSize);
+            let Some(strike_bitmap) = strike_bitmap else {
+                return Ok(None);
+            };
+            let scale = font_size / f32::from(ppem);
+            let placement = strike_bitmap.placement;
+            (
+                placement.left as f32 * scale,
+                placement.top as f32 * scale,
+                [
+                    placement.width as f32 * scale / image.placement.width as f32,
+                    placement.height as f32 * scale / image.placement.height as f32,
+                ],
+            )
+        };
+
         let padding = GLYPH_PADDING + GLYPH_MARGIN;
         let glyph_width = image.placement.width;
         let glyph_height = image.placement.height;
         let alloc_width = glyph_width + 2 * padding;
         let alloc_height = glyph_height + 2 * padding;
 
-        // Return None for a glyph too large for the atlas (e.g., an emoji drawn directly at a
-        // large font size). Without image-loading, place_glyph then skips it instead of failing.
+        // Return None for a glyph too large for the atlas. Without image-loading, place_glyph
+        // then skips it instead of failing.
         let (dst_index, dst_image_id, (dst_x, dst_y)) =
             match self.find_texture_or_alloc(canvas, alloc_width as usize, alloc_height as usize) {
                 Err(ErrorKind::FontSizeTooLargeForAtlas) => return Ok(None),
                 result => result?,
             };
-
-        let is_color = image.content == swash::scale::image::Content::Color;
 
         // Create a padded image with zeroed borders so the sampled rect's edge
         // texels are blank (the texture itself starts zero-initialized).
@@ -878,11 +994,12 @@ impl GlyphAtlas {
             texture_index: dst_index,
             width: alloc_width - 2 * GLYPH_MARGIN,
             height: alloc_height - 2 * GLYPH_MARGIN,
-            bearing_x: image.placement.left,
-            bearing_y: image.placement.top,
+            bearing_x,
+            bearing_y,
             atlas_x: dst_x as u32 + GLYPH_MARGIN,
             atlas_y: dst_y as u32 + GLYPH_MARGIN,
             color_glyph: is_color,
+            texel_size,
         }))
     }
 

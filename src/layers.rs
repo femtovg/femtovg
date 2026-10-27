@@ -154,7 +154,7 @@ impl LayerEffects {
     /// and no image for the result. Not with a blend mode, whose pass reads
     /// the chain's result.
     pub(crate) fn composite_transfer(&self) -> Option<Transfer> {
-        if self.blend.is_some_and(|mode| mode != BlendMode::Normal) {
+        if self.blend.is_some_and(BlendMode::reads_backdrop) {
             return None;
         }
         match *self.filters {
@@ -549,7 +549,7 @@ where
             // The backdrop under the store is readable from an image target
             // only; without it, or the room, the layer composites source-over.
             if !record.discard
-                && effects.blend.is_some_and(|mode| mode != BlendMode::Normal)
+                && effects.blend.is_some_and(BlendMode::reads_backdrop)
                 && matches!(record.previous_target, RenderTarget::Image(_))
             {
                 let work = blend_work(width, height);
@@ -715,8 +715,15 @@ where
         // feDropShadow applies to a filtered group. Inside the layer the
         // shadow state was reset, so nothing has been shadowed twice.
         let composite_operation = self.state().composite_operation;
-        if record.effects.blend.is_some() {
-            self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceOver);
+        match record.effects.blend {
+            // plus-lighter is the GPU's saturating addition: no backdrop pass.
+            Some(BlendMode::PlusLighter) => {
+                self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::Lighter);
+            }
+            Some(_) => {
+                self.state_mut().composite_operation = CompositeOperationState::new(CompositeOperation::SourceOver);
+            }
+            None => {}
         }
         self.fill_device_rect(
             minx,
@@ -754,6 +761,7 @@ where
         parent: ImageId,
         alpha: f32,
     ) -> Option<ImageId> {
+        debug_assert!(mode.reads_backdrop(), "{mode:?} composites without a backdrop pass");
         let (parent_width, parent_height) = self.image_size(parent).ok()?;
         let (minx, miny) = record.origin;
         let (width, height) = (record.width as f32, record.height as f32);

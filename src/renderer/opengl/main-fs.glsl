@@ -33,6 +33,9 @@ uniform vec4 frag[UNIFORMARRAY_SIZE];
 // An image paint's transfer (0 none, 1 to sRGB, 2 to linearRGB) in the paint
 // matrix's first column's w, which no image paint reads.
 #define imageTransfer int(frag[3].w)
+// Whether a two-stop gradient's endpoints arrive premultiplied (1) or straight (0),
+// see GRADIENT_PREMULTIPLIED_INDEX.
+#define gradientPremultiplied frag[4].w
 
 uniform sampler2D tex;
 uniform sampler2D glyphtex;
@@ -152,16 +155,28 @@ vec4 ditherGradient(vec4 color) {
     return vec4(color.rgb + d, color.a);
 }
 
+// Premultiplies a two-stop gradient's mixed color, unless its endpoints arrive
+// premultiplied, and clamps the color channels to [0, alpha], which the dither
+// can step outside.
+vec4 premultiplyGradient(vec4 color) {
+    vec3 rgb = clamp(color.rgb * max(color.a, gradientPremultiplied), vec3(0.0), vec3(color.a));
+    return vec4(rgb, color.a);
+}
+
 vec4 renderGradient() {
     // Calculate gradient color using box gradient
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    // Endpoints arrive straight (unpremultiplied) so transparent stops keep
-    // their hue through the mix - the interpolation Canvas and SVG gradients
-    // apply; premultiply here for the compositing pipeline.
     vec4 color = ditherGradient(mix(innerCol,outerCol,d));
-    return vec4(color.rgb * color.a, color.a);
+    return premultiplyGradient(color);
+}
+
+// Where a gradient LUT is sampled for position `d`. Texel i holds the color
+// at i / 255, so map d = 0 and d = 1 onto the end texels' centres: the pads
+// then get the exact stop colors instead of a blend with the next texel.
+vec2 lutCoord(float d) {
+    return vec2(d * (255.0 / 256.0) + 0.5 / 256.0, 0.0);
 }
 
 // Image-based Gradient; sample a texture using the gradient position.
@@ -170,7 +185,7 @@ vec4 renderImageGradient() {
     vec2 pt = (paintMat * vec3(fpos, 1.0)).xy;
 
     float d = clamp((sdroundrect(pt, extent, radius) + feather*0.5) / feather, 0.0, 1.0);
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 float conicAngleFraction() {
@@ -185,14 +200,13 @@ float conicAngleFraction() {
 
 vec4 renderGradientConic() {
     float d = conicAngleFraction();
-    // Straight endpoints, premultiplied post-mix (see renderGradient).
     vec4 color = ditherGradient(mix(innerCol,outerCol,d));
-    return vec4(color.rgb * color.a, color.a);
+    return premultiplyGradient(color);
 }
 
 vec4 renderImageGradientConic() {
     float d = conicAngleFraction();
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 // Two-point (independently centered) radial gradient: the general Canvas
@@ -268,16 +282,15 @@ vec4 renderGradientTwoPointRadial() {
     bool covered;
     float d = radialTwoPointT(covered);
     if (!covered) return vec4(0.0);
-    // Straight endpoints, premultiplied post-mix (see renderGradient).
     vec4 color = ditherGradient(mix(innerCol, outerCol, d));
-    return vec4(color.rgb * color.a, color.a);
+    return premultiplyGradient(color);
 }
 
 vec4 renderImageGradientTwoPointRadial() {
     bool covered;
     float d = radialTwoPointT(covered);
     if (!covered) return vec4(0.0);
-    return ditherGradient(texture2D(tex, vec2(d, 0.0)));
+    return ditherGradient(texture2D(tex, lutCoord(d)));
 }
 
 // The sRGB transfer curve (IEC 61966-2-1) on a premultiplied color, run on
