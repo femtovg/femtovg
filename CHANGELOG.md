@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Fixed a concave fill leaving winding counts in the stencil where its fill
+  reached past the quad that covers it - a feature thinner than the
+  antialiasing fringe, whose fill vertices move outward - so the next
+  concave fill whose cover reached them painted them, outside its own shape.
+  Such a fill now draws its fans again after the cover to zero them.
+
 ## [0.28.0] - 2026-10-26
 
 ### Breaking changes
