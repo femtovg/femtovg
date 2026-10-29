@@ -2374,6 +2374,15 @@ where
 
         let font_face = font.face_ref_with_normalized_coords(normalized_coords);
 
+        // The color that color glyph layers marked "use the text's color" are drawn in. Only a
+        // plain color paint has one.
+        let foreground = match paint.flavor {
+            PaintFlavor::Color(color) => {
+                Some([color.r, color.g, color.b].map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8))
+            }
+            _ => None,
+        };
+
         // TODO: create on demand
 
         let mut color_glyphs = Vec::new();
@@ -2381,7 +2390,11 @@ where
         let glyphs_it = glyphs.into_iter();
         let non_color_glyphs = glyphs_it
             .filter(|glyph| {
-                if font.is_bitmap_glyph(&font_face, glyph.glyph_id, normalized_coords) {
+                // Drawn as outlines, a glyph of color layers would show only its own outline, which
+                // is usually empty. So it is drawn as an image like a bitmap glyph.
+                if font.is_bitmap_glyph(&font_face, glyph.glyph_id, normalized_coords)
+                    || (need_direct_rendering && font.has_color_layers(glyph.glyph_id))
+                {
                     color_glyphs.push(glyph.clone());
 
                     false
@@ -2468,6 +2481,7 @@ where
                 stroke.line_width,
                 render_mode,
                 normalized_coords,
+                foreground,
             )?
         };
 
@@ -2500,6 +2514,7 @@ where
                         stroke.line_width,
                         render_mode,
                         normalized_coords,
+                        foreground,
                     )?
                 } else {
                     atlas.render_atlas(
@@ -2512,6 +2527,7 @@ where
                         stroke.line_width,
                         render_mode,
                         normalized_coords,
+                        foreground,
                     )?
                 }
             };
