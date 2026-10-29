@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Color emoji: now drawn with the paint's opacity and global alpha instead of
+  fully opaque; COLR glyphs no longer have dark edges, take the paint's color
+  for layers that use the text's color (palette index 0xFFFF) instead of grey,
+  and are drawn under a skew, rotation or size that draws text as outlines.
+
 ## [0.28.0] - 2026-10-26
 
 ### Breaking changes
