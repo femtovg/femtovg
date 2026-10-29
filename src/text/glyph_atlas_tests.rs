@@ -559,6 +559,7 @@ fn swash_fill_at_negative_x_uses_the_mask_for_its_subpixel_offset() {
                 0.0,
                 RenderMode::Fill,
                 &[],
+                None,
             )
             .unwrap();
         let command = &commands.alpha_glyphs[0];
@@ -592,4 +593,131 @@ fn swash_fill_at_negative_x_uses_the_mask_for_its_subpixel_offset() {
             "left edge of the quad of the glyph at x = {x}"
         );
     }
+}
+
+/// The pixel at the center of the image that `fill_glyph_run` uploaded for the only glyph in the
+/// atlas: it is uploaded with its padding at the glyph's cell.
+#[cfg(feature = "swash")]
+fn uploaded_center_pixel(canvas: &TestCanvas) -> rgb::RGBA8 {
+    let rendered = *canvas
+        .glyph_atlas
+        .rendered_glyphs
+        .borrow()
+        .values()
+        .flatten()
+        .last()
+        .unwrap();
+    let image_id = canvas.glyph_atlas.glyph_textures.borrow()[rendered.texture_index].image_id;
+    let cell = (rendered.atlas_x as usize, rendered.atlas_y as usize);
+    let uploads = &canvas.images.get(image_id).unwrap().updates;
+    let (_, _, upload) = uploads
+        .iter()
+        .rev()
+        .find(|(x, y, _)| (*x, *y) == cell)
+        .expect("the glyph should be uploaded at its cell");
+    upload.buf()[upload.height() / 2 * upload.stride() + upload.width() / 2]
+}
+
+/// A color bitmap is decoded with straight alpha and uploaded premultiplied, as the shader expects
+/// for every color glyph.
+#[cfg(feature = "swash")]
+#[test]
+fn a_translucent_bitmap_glyph_is_uploaded_premultiplied() {
+    let (mut canvas, _) = canvas();
+    canvas.renderer.retain_image_updates = true;
+    let font = canvas
+        .text_context
+        .borrow_mut()
+        .add_font_mem(&test_fonts::translucent_png_glyph_font())
+        .unwrap();
+    let paint = Paint::color(Color::black()).with_font_size(24.0);
+    let glyph = PositionedGlyph {
+        x: 40.0,
+        y: 70.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+
+    // (255, 0, 64) at alpha 128.
+    assert_eq!(uploaded_center_pixel(&canvas), rgb::RGBA8::new(128, 0, 32, 128));
+}
+
+/// Asserts that `pixel` is a premultiplied color whose channels are 0 or full where `channels`
+/// are 0 or 1, and nearly opaque (swash's antialiasing leaves the center a little below 255).
+#[cfg(feature = "swash")]
+fn assert_layer_color(pixel: rgb::RGBA8, channels: [u8; 3]) {
+    assert!(pixel.a > 240, "{pixel:?} is nearly opaque");
+    assert_eq!([pixel.r, pixel.g, pixel.b], channels.map(|c| c * pixel.a), "{pixel:?}");
+}
+
+/// A color layer that uses the text's color (palette index 0xFFFF) is drawn in the paint's color,
+/// opaque, and each color gets its own atlas entry.
+#[cfg(feature = "swash")]
+#[test]
+fn a_color_layer_takes_the_paints_color() {
+    let (mut canvas, _) = canvas();
+    canvas.renderer.retain_image_updates = true;
+    let font = canvas
+        .text_context
+        .borrow_mut()
+        .add_font_mem(&test_fonts::color_layer_font())
+        .unwrap();
+    let glyph = PositionedGlyph {
+        x: 40.0,
+        y: 70.0,
+        glyph_id: 0,
+    };
+
+    // The paint's alpha is left to the shader, so the layer is uploaded opaque.
+    let blue = Paint::color(Color::rgba(0, 0, 255, 128)).with_font_size(24.0);
+    canvas.fill_glyph_run(font, &[], [glyph.clone()], &blue).unwrap();
+    assert_layer_color(uploaded_center_pixel(&canvas), [0, 0, 1]);
+
+    let green = Paint::color(Color::rgb(0, 255, 0)).with_font_size(24.0);
+    canvas.fill_glyph_run(font, &[], [glyph], &green).unwrap();
+    assert_layer_color(uploaded_center_pixel(&canvas), [0, 1, 0]);
+
+    let cached: Vec<bool> = canvas
+        .glyph_atlas
+        .rendered_glyphs
+        .borrow()
+        .values()
+        .flatten()
+        .map(|glyph| glyph.color_glyph)
+        .collect();
+    assert_eq!(cached, [true, true], "one color glyph for each text color");
+}
+
+/// A skew draws text as outlines. A glyph of color layers has no outline of its own, so it is
+/// drawn as an image like a bitmap glyph instead of not at all.
+#[cfg(feature = "swash")]
+#[test]
+fn a_skewed_color_layer_glyph_is_drawn_as_an_image() {
+    let (mut canvas, _) = canvas();
+    let font = canvas
+        .text_context
+        .borrow_mut()
+        .add_font_mem(&test_fonts::color_layer_font())
+        .unwrap();
+    canvas.skew_x(-0.2);
+    let paint = Paint::color(Color::black()).with_font_size(24.0);
+    let glyph = PositionedGlyph {
+        x: 40.0,
+        y: 70.0,
+        glyph_id: 0,
+    };
+    canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
+
+    let atlas = canvas
+        .ephemeral_glyph_atlas
+        .as_ref()
+        .expect("the glyph goes to the atlas for images");
+    let cached: Vec<bool> = atlas
+        .rendered_glyphs
+        .borrow()
+        .values()
+        .flatten()
+        .map(|glyph| glyph.color_glyph)
+        .collect();
+    assert_eq!(cached, [true]);
 }

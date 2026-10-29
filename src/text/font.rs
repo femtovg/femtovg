@@ -934,6 +934,42 @@ impl Font {
         Ref::filter_map(self.glyphs.borrow(), |glyphs| glyphs.get(&cache_key)).ok()
     }
 
+    /// Returns true if the glyph is drawn from color layers (COLR version 0). Its own outline is
+    /// usually empty, so only swash, which draws the layers, can draw it.
+    pub(crate) fn has_color_layers(&self, glyph_id: u16) -> bool {
+        #[cfg(feature = "swash")]
+        {
+            let Some(colr) = self
+                .swash_font_ref()
+                .and_then(|font| font.table(swash::tag_from_bytes(b"COLR")))
+            else {
+                return false;
+            };
+            let read_u16 = |at: usize| colr.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+            let Some((count, offset)) =
+                read_u16(2).zip(colr.get(4..8).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]])))
+            else {
+                return false;
+            };
+            // The base glyph records (glyph id, first layer, layer count) are sorted by glyph id.
+            let (mut low, mut high) = (0, usize::from(count));
+            while low < high {
+                let middle = (low + high) / 2;
+                match read_u16(offset as usize + middle * 6) {
+                    Some(id) if id < glyph_id => low = middle + 1,
+                    Some(id) if id > glyph_id => high = middle,
+                    found => return found.is_some(),
+                }
+            }
+            false
+        }
+        #[cfg(not(feature = "swash"))]
+        {
+            let _ = glyph_id;
+            false
+        }
+    }
+
     /// Returns true if the glyph has no path, so that the atlas draws it as an image (e.g., a PNG color emoji).
     pub(crate) fn is_bitmap_glyph(&self, face: &FontFaceRef<'_>, codepoint: u16, normalized_coords: &[i16]) -> bool {
         self.glyph(face, codepoint, normalized_coords)
