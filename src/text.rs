@@ -105,9 +105,12 @@ pub struct RenderedGlyphId {
     render_mode: RenderMode,
     subpixel_location: i8,
     variation_hash: u64,
+    // The text's color, for a glyph with a color layer that takes it (COLR palette index 0xFFFF).
+    foreground: Option<[u8; 3]>,
 }
 
 impl RenderedGlyphId {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         glyph_index: u16,
         font_id: FontId,
@@ -116,6 +119,7 @@ impl RenderedGlyphId {
         mode: RenderMode,
         subpixel_location: i8,
         normalized_coords: &[i16],
+        foreground: Option<[u8; 3]>,
     ) -> Self {
         use std::hash::Hasher;
         let mut hasher = fnv::FnvHasher::default();
@@ -128,8 +132,16 @@ impl RenderedGlyphId {
             render_mode: mode,
             subpixel_location,
             variation_hash: hasher.finish(),
+            foreground,
         }
     }
+}
+
+/// A straight-alpha color as the premultiplied color the glyph atlas holds.
+#[cfg(any(feature = "swash", feature = "image-loading"))]
+fn premultiply(r: u8, g: u8, b: u8, a: u8) -> rgb::RGBA8 {
+    let scale = |c: u8| ((u16::from(c) * u16::from(a) + 127) / 255) as u8;
+    rgb::RGBA8::new(scale(r), scale(g), scale(b), a)
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -441,7 +453,8 @@ pub struct Quad {
 pub struct GlyphDrawCommands {
     /// Drawing commands for alpha (opacity) glyphs.
     pub alpha_glyphs: Vec<DrawCommand>,
-    /// Drawing commands for color glyphs.
+    /// Drawing commands for color glyphs. Their images hold premultiplied alpha, and are drawn
+    /// with the paint's opacity.
     pub color_glyphs: Vec<DrawCommand>,
 }
 
@@ -563,6 +576,7 @@ impl GlyphAtlas {
         line_width: f32,
         mode: RenderMode,
         normalized_coords: &[i16],
+        foreground: Option<[u8; 3]>,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
@@ -581,6 +595,10 @@ impl GlyphAtlas {
             let fract = glyph.x.fract();
             let subpixel_location = (crate::geometry::quantize(fract.abs(), 0.1) * 10.0).copysign(fract) as i8;
 
+            // The glyph atlas never evicts, so only a glyph drawn in the text's color gets one
+            // entry for each color.
+            let foreground = foreground.filter(|_| font.uses_text_color(glyph.glyph_id));
+
             let id = RenderedGlyphId::new(
                 glyph.glyph_id,
                 font_id,
@@ -589,6 +607,7 @@ impl GlyphAtlas {
                 mode,
                 subpixel_location,
                 normalized_coords,
+                foreground,
             );
 
             let mut rendered_glyphs = self.rendered_glyphs.borrow_mut();
@@ -606,6 +625,7 @@ impl GlyphAtlas {
                         glyph.glyph_id,
                         f32::from(subpixel_location) / 10.0,
                         normalized_coords,
+                        foreground,
                     )?;
                     if let Some((_, Some(mask))) = &placed {
                         // The masks of one run can be in different atlas textures.
@@ -689,6 +709,7 @@ impl GlyphAtlas {
         glyph_id: u16,
         _subpixel_x: f32,
         normalized_coords: &[i16],
+        _foreground: Option<[u8; 3]>,
     ) -> Result<Option<(RenderedGlyph, Option<PendingMask<'a>>)>, ErrorKind> {
         let (bitmap_glyph, maybe_glyph_metrics) = font
             .glyph(font_face, glyph_id, normalized_coords)
@@ -718,6 +739,7 @@ impl GlyphAtlas {
                 glyph_id,
                 _subpixel_x,
                 normalized_coords,
+                _foreground,
             )? {
                 return Ok(Some((result, None)));
             }
@@ -823,9 +845,17 @@ impl GlyphAtlas {
                     image::imageops::FilterType::Triangle
                 };
                 let image_buffer = image_buffer.resize_exact(target_width, target_height, filter);
-                if let Ok(image) = crate::image::ImageSource::try_from(&image_buffer) {
-                    canvas.update_image(dst_image_id, image, target_x, target_y)?;
-                }
+                // The atlas holds premultiplied colors; a decoded image is not premultiplied.
+                let pixels: Vec<_> = image_buffer
+                    .to_rgba8()
+                    .pixels()
+                    .map(|pixel| {
+                        let [r, g, b, a] = pixel.0;
+                        premultiply(r, g, b, a)
+                    })
+                    .collect();
+                let img = imgref::Img::new(&pixels[..], target_width as usize, target_height as usize);
+                canvas.update_image(dst_image_id, crate::image::ImageSource::from(img), target_x, target_y)?;
                 None
             }
         };
@@ -844,6 +874,7 @@ impl GlyphAtlas {
         glyph_id: u16,
         subpixel_x: f32,
         normalized_coords: &[i16],
+        foreground: Option<[u8; 3]>,
     ) -> Result<Option<RenderedGlyph>, ErrorKind> {
         use swash::scale::{Render, Source, StrikeWith};
         use swash::zeno::Format;
@@ -870,10 +901,17 @@ impl GlyphAtlas {
                 .normalized_coords(normalized_coords);
             let mut scaler = scaler_builder.build();
 
-            Render::new(&[Source::ColorOutline(0), Source::ColorBitmap(strike), Source::Outline])
+            let sources = [Source::ColorOutline(0), Source::ColorBitmap(strike), Source::Outline];
+            let mut render = Render::new(&sources);
+            render
                 .format(Format::Alpha)
-                .offset(swash::zeno::Vector::new(subpixel_x, 0.0))
-                .render(&mut scaler, glyph_id)
+                .offset(swash::zeno::Vector::new(subpixel_x, 0.0));
+            // Color layers that use the text's color get it opaque: the paint's alpha applies when
+            // the glyph is drawn. Without it swash draws them grey.
+            if let Some([r, g, b]) = foreground {
+                render.default_color([r, g, b, 255]);
+            }
+            render.render(&mut scaler, glyph_id)
         };
 
         let image = match image {
@@ -903,6 +941,7 @@ impl GlyphAtlas {
                 glyph_id,
                 subpixel_x,
                 normalized_coords,
+                foreground,
             );
         }
 
@@ -962,16 +1001,19 @@ impl GlyphAtlas {
         let mut pixels = vec![rgb::RGBA8::new(0, 0, 0, 0); padded_width * padded_height];
 
         if is_color {
+            // The atlas holds premultiplied colors. swash's color outlines are premultiplied, its
+            // bitmaps are not.
+            let straight = matches!(image.source, Source::ColorBitmap(_));
             for y in 0..glyph_height as usize {
                 for x in 0..glyph_width as usize {
                     let src_idx = (y * glyph_width as usize + x) * 4;
                     let dst_idx = (y + GLYPH_PADDING as usize) * padded_width + x + GLYPH_PADDING as usize;
-                    pixels[dst_idx] = rgb::RGBA8::new(
-                        image.data[src_idx],
-                        image.data[src_idx + 1],
-                        image.data[src_idx + 2],
-                        image.data[src_idx + 3],
-                    );
+                    let [r, g, b, a] = [0, 1, 2, 3].map(|i| image.data[src_idx + i]);
+                    pixels[dst_idx] = if straight {
+                        premultiply(r, g, b, a)
+                    } else {
+                        rgb::RGBA8::new(r, g, b, a)
+                    };
                 }
             }
         } else {

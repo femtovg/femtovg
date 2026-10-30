@@ -3,6 +3,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `Canvas::draw_glyph_commands`: the images of `GlyphDrawCommands::color_glyphs`
+  must now hold premultiplied alpha, and are drawn with the paint's opacity.
+  A custom rasterizer that uploads straight alpha gets dark edges.
+
+### Fixed
+
+- Color emoji: now drawn with the paint's opacity and global alpha instead of
+  fully opaque; COLR glyphs no longer have dark edges, take the paint's color
+  for layers that use the text's color (palette index 0xFFFF) instead of grey,
+  and are drawn under a skew, rotation or size that draws text as outlines.
+
 ## [0.28.0] - 2026-10-26
 
 ### Breaking changes
