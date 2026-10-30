@@ -2029,6 +2029,9 @@ where
 
     /// Dispatch an explicit set of `GlyphDrawCommands` to the renderer. Use this only if you are
     /// using a custom font rasterizer/layout.
+    ///
+    /// The images of [`GlyphDrawCommands::color_glyphs`] must hold premultiplied alpha, and are
+    /// drawn with `paint`'s opacity and the canvas's global alpha.
     pub fn draw_glyph_commands(&mut self, draw_commands: GlyphDrawCommands, paint: &Paint) {
         let transform = self.state().transform;
         let create_vertices = |quads: &Vec<text::Quad>| {

@@ -105,7 +105,7 @@ pub struct RenderedGlyphId {
     render_mode: RenderMode,
     subpixel_location: i8,
     variation_hash: u64,
-    // The text's color, for a font whose color layers can take it (COLR palette index 0xFFFF).
+    // The text's color, for a glyph with a color layer that takes it (COLR palette index 0xFFFF).
     foreground: Option<[u8; 3]>,
 }
 
@@ -453,7 +453,8 @@ pub struct Quad {
 pub struct GlyphDrawCommands {
     /// Drawing commands for alpha (opacity) glyphs.
     pub alpha_glyphs: Vec<DrawCommand>,
-    /// Drawing commands for color glyphs.
+    /// Drawing commands for color glyphs. Their images hold premultiplied alpha, and are drawn
+    /// with the paint's opacity.
     pub color_glyphs: Vec<DrawCommand>,
 }
 
@@ -577,16 +578,6 @@ impl GlyphAtlas {
         normalized_coords: &[i16],
         foreground: Option<[u8; 3]>,
     ) -> Result<GlyphDrawCommands, ErrorKind> {
-        // Only a font with color layers draws in the text's color, so only its glyphs need one
-        // atlas entry for each color.
-        #[cfg(feature = "swash")]
-        let foreground = foreground.filter(|_| {
-            font.swash_font_ref()
-                .is_some_and(|font_ref| font_ref.table(swash::tag_from_bytes(b"COLR")).is_some())
-        });
-        #[cfg(not(feature = "swash"))]
-        let foreground = foreground.filter(|_| false);
-
         let mut alpha_cmd_map = FnvHashMap::default();
         let mut color_cmd_map = FnvHashMap::default();
 
@@ -603,6 +594,10 @@ impl GlyphAtlas {
             // the absolute value.
             let fract = glyph.x.fract();
             let subpixel_location = (crate::geometry::quantize(fract.abs(), 0.1) * 10.0).copysign(fract) as i8;
+
+            // The glyph atlas never evicts, so only a glyph drawn in the text's color gets one
+            // entry for each color.
+            let foreground = foreground.filter(|_| font.uses_text_color(glyph.glyph_id));
 
             let id = RenderedGlyphId::new(
                 glyph.glyph_id,

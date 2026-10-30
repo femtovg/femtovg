@@ -142,6 +142,17 @@ pub(crate) fn translucent_png_glyph_font() -> Vec<u8> {
 /// 0xFFFF).
 #[cfg(feature = "swash")]
 pub(crate) fn color_layer_font() -> Vec<u8> {
+    color_layer_font_with_palette_index(0xFFFF)
+}
+
+/// Like [`color_layer_font`], with its layer in the font's own black (palette index 0).
+#[cfg(feature = "swash")]
+pub(crate) fn fixed_color_layer_font() -> Vec<u8> {
+    color_layer_font_with_palette_index(0)
+}
+
+#[cfg(feature = "swash")]
+fn color_layer_font_with_palette_index(palette_index: u16) -> Vec<u8> {
     // Glyph 0 is empty, glyph 1 is one contour through four on-curve points. Each flag byte is
     // 1 (on curve), so each coordinate is a 16-bit delta.
     let mut glyf = Vec::new();
@@ -176,7 +187,7 @@ pub(crate) fn color_layer_font() -> Vec<u8> {
         push_u16(&mut colr, value); // base glyph record: glyphID, firstLayerIndex, numLayers
     }
     push_u16(&mut colr, 1); // layer record: glyphID
-    push_u16(&mut colr, 0xFFFF); // paletteIndex: the text's color
+    push_u16(&mut colr, palette_index); // paletteIndex
 
     let mut cpal = Vec::new();
     push_u16(&mut cpal, 0); // version
@@ -185,7 +196,7 @@ pub(crate) fn color_layer_font() -> Vec<u8> {
     push_u16(&mut cpal, 1); // numColorRecords
     push_u32(&mut cpal, 14); // colorRecordsArrayOffset
     push_u16(&mut cpal, 0); // colorRecordIndices[0]
-    cpal.extend_from_slice(&[0, 0, 0, 255]); // colorRecords[0], BGRA: black (unused)
+    cpal.extend_from_slice(&[0, 0, 0, 255]); // colorRecords[0], BGRA: black
 
     let mut tables = required_tables();
     for (tag, table) in &mut tables {
