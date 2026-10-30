@@ -595,18 +595,18 @@ fn swash_fill_at_negative_x_uses_the_mask_for_its_subpixel_offset() {
     }
 }
 
-/// The pixel at the center of the image that `fill_glyph_run` uploaded for the only glyph in the
-/// atlas: it is uploaded with its padding at the glyph's cell.
+/// The pixel at the center of the image that `fill_glyph_run` uploaded for the atlas entry with
+/// this text color: it is uploaded with its padding at the glyph's cell.
 #[cfg(feature = "swash")]
-fn uploaded_center_pixel(canvas: &TestCanvas) -> rgb::RGBA8 {
-    let rendered = *canvas
+fn uploaded_center_pixel(canvas: &TestCanvas, foreground: Option<[u8; 3]>) -> rgb::RGBA8 {
+    let rendered = canvas
         .glyph_atlas
         .rendered_glyphs
         .borrow()
-        .values()
-        .flatten()
-        .last()
-        .unwrap();
+        .iter()
+        .find(|(id, _)| id.foreground == foreground)
+        .and_then(|(_, rendered)| *rendered)
+        .expect("the glyph should be in the atlas with this color");
     let image_id = canvas.glyph_atlas.glyph_textures.borrow()[rendered.texture_index].image_id;
     let cell = (rendered.atlas_x as usize, rendered.atlas_y as usize);
     let uploads = &canvas.images.get(image_id).unwrap().updates;
@@ -639,7 +639,7 @@ fn a_translucent_bitmap_glyph_is_uploaded_premultiplied() {
     canvas.fill_glyph_run(font, &[], [glyph], &paint).unwrap();
 
     // (255, 0, 64) at alpha 128.
-    assert_eq!(uploaded_center_pixel(&canvas), rgb::RGBA8::new(128, 0, 32, 128));
+    assert_eq!(uploaded_center_pixel(&canvas, None), rgb::RGBA8::new(128, 0, 32, 128));
 }
 
 /// Asserts that `pixel` is a premultiplied color whose channels are 0 or full where `channels`
@@ -671,11 +671,11 @@ fn a_color_layer_takes_the_paints_color() {
     // The paint's alpha is left to the shader, so the layer is uploaded opaque.
     let blue = Paint::color(Color::rgba(0, 0, 255, 128)).with_font_size(24.0);
     canvas.fill_glyph_run(font, &[], [glyph.clone()], &blue).unwrap();
-    assert_layer_color(uploaded_center_pixel(&canvas), [0, 0, 1]);
+    assert_layer_color(uploaded_center_pixel(&canvas, Some([0, 0, 255])), [0, 0, 1]);
 
     let green = Paint::color(Color::rgb(0, 255, 0)).with_font_size(24.0);
     canvas.fill_glyph_run(font, &[], [glyph], &green).unwrap();
-    assert_layer_color(uploaded_center_pixel(&canvas), [0, 1, 0]);
+    assert_layer_color(uploaded_center_pixel(&canvas, Some([0, 255, 0])), [0, 1, 0]);
 
     let cached: Vec<bool> = canvas
         .glyph_atlas
@@ -686,6 +686,31 @@ fn a_color_layer_takes_the_paints_color() {
         .map(|glyph| glyph.color_glyph)
         .collect();
     assert_eq!(cached, [true, true], "one color glyph for each text color");
+}
+
+/// The atlas never evicts, so a text color animation must not add entries for glyphs that don't
+/// take the color: here a color layer with its own color (glyph 0) and a plain glyph (glyph 1).
+#[cfg(feature = "swash")]
+#[test]
+fn only_a_glyph_in_the_texts_color_gets_an_atlas_entry_for_each_color() {
+    let (mut canvas, _) = canvas();
+    let font = canvas
+        .text_context
+        .borrow_mut()
+        .add_font_mem(&test_fonts::fixed_color_layer_font())
+        .unwrap();
+
+    for color in [Color::rgb(0, 0, 255), Color::rgb(0, 255, 0)] {
+        let paint = Paint::color(color).with_font_size(24.0);
+        let glyphs = [0, 1].map(|glyph_id| PositionedGlyph {
+            x: 40.0,
+            y: 70.0,
+            glyph_id,
+        });
+        canvas.fill_glyph_run(font, &[], glyphs, &paint).unwrap();
+    }
+
+    assert_eq!(canvas.glyph_atlas.rendered_glyphs.borrow().len(), 2);
 }
 
 /// A skew draws text as outlines. A glyph of color layers has no outline of its own, so it is

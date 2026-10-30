@@ -939,35 +939,59 @@ impl Font {
     pub(crate) fn has_color_layers(&self, glyph_id: u16) -> bool {
         #[cfg(feature = "swash")]
         {
-            let Some(colr) = self
-                .swash_font_ref()
-                .and_then(|font| font.table(swash::tag_from_bytes(b"COLR")))
-            else {
-                return false;
-            };
-            let read_u16 = |at: usize| colr.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
-            let Some((count, offset)) =
-                read_u16(2).zip(colr.get(4..8).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]])))
-            else {
-                return false;
-            };
-            // The base glyph records (glyph id, first layer, layer count) are sorted by glyph id.
-            let (mut low, mut high) = (0, usize::from(count));
-            while low < high {
-                let middle = (low + high) / 2;
-                match read_u16(offset as usize + middle * 6) {
-                    Some(id) if id < glyph_id => low = middle + 1,
-                    Some(id) if id > glyph_id => high = middle,
-                    found => return found.is_some(),
-                }
-            }
-            false
+            self.color_layers(glyph_id).is_some()
         }
         #[cfg(not(feature = "swash"))]
         {
             let _ = glyph_id;
             false
         }
+    }
+
+    /// Returns true if a color layer of the glyph takes the text's color (palette index 0xFFFF).
+    pub(crate) fn uses_text_color(&self, glyph_id: u16) -> bool {
+        #[cfg(feature = "swash")]
+        {
+            self.color_layers(glyph_id)
+                .is_some_and(|mut palette_indices| palette_indices.any(|index| index == 0xFFFF))
+        }
+        #[cfg(not(feature = "swash"))]
+        {
+            let _ = glyph_id;
+            false
+        }
+    }
+
+    /// The palette indices of the glyph's color layers (COLR version 0), if it has any.
+    #[cfg(feature = "swash")]
+    fn color_layers(&self, glyph_id: u16) -> Option<impl Iterator<Item = u16> + '_> {
+        let colr = self.swash_font_ref()?.table(swash::tag_from_bytes(b"COLR"))?;
+        let read_u16 = move |at: usize| colr.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
+        let read_u32 = |at: usize| {
+            colr.get(at..at + 4)
+                .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+        };
+        let count = read_u16(2)?;
+        let base_records = read_u32(4)? as usize;
+        let layer_records = read_u32(8)? as usize;
+        // The base glyph records (glyph id, first layer, layer count) are sorted by glyph id.
+        let (mut low, mut high) = (0, usize::from(count));
+        while low < high {
+            let middle = (low + high) / 2;
+            let record = base_records + middle * 6;
+            let id = read_u16(record)?;
+            if id < glyph_id {
+                low = middle + 1;
+            } else if id > glyph_id {
+                high = middle;
+            } else {
+                let first = usize::from(read_u16(record + 2)?);
+                let layers = usize::from(read_u16(record + 4)?);
+                // A layer record is a glyph id and a palette index.
+                return Some((first..first + layers).map_while(move |layer| read_u16(layer_records + layer * 4 + 2)));
+            }
+        }
+        None
     }
 
     /// Returns true if the glyph has no path, so that the atlas draws it as an image (e.g., a PNG color emoji).
