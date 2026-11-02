@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `renderer::OpenGl::html_canvas_context_attributes()` (wasm32 in the browser)
+  returns the WebGL context attributes `OpenGl::new_from_html_canvas` uses, so
+  a caller can create the canvas's WebGL 2 context first, for example to check
+  for WebGL 2 support early.
+
 ### Changed
 
 - `Canvas::draw_glyph_commands`: the images of `GlyphDrawCommands::color_glyphs`

@@ -122,12 +122,22 @@ impl OpenGl {
         unsafe { OpenGl::new_from_function_cstr(|s| display.get_proc_address(s).cast()) }
     }
 
-    /// Creates a new OpenGL renderer from an HTML canvas element in a WASM32 target.
+    /// Returns the context attributes that [`OpenGl::new_from_html_canvas`] will pass
+    /// to getContext(...). Useful for creating the canvas early, since it is a global
+    /// object this can be done externally, and the user-created canvas will be picked
+    /// up by new_from_html_canvas().
     #[cfg(wasm_unknown)]
-    pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
+    pub fn html_canvas_context_attributes() -> web_sys::WebGlContextAttributes {
         let attrs = web_sys::WebGlContextAttributes::new();
         attrs.set_stencil(true);
         attrs.set_antialias(false);
+        attrs
+    }
+
+    /// Creates a new OpenGL renderer from an HTML canvas element in a WASM32 target.
+    #[cfg(wasm_unknown)]
+    pub fn new_from_html_canvas(canvas: &web_sys::HtmlCanvasElement) -> Result<Self, ErrorKind> {
+        let attrs = Self::html_canvas_context_attributes();
 
         use wasm_bindgen::JsCast;
         let webgl2_context = match canvas.get_context_with_context_options("webgl2", &attrs) {
