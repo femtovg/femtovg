@@ -503,7 +503,21 @@ fn shape_word(
 
         let mut has_missing = false;
 
-        for (position, (info, c)) in positions.iter().zip(infos.iter().zip(word.chars())) {
+        // Iterate the shaped output fully instead of zipping it with
+        // `word.chars()`. A font may emit MORE glyphs than input chars —
+        // e.g. Noto Sans Arabic splits dot marks into separate
+        // zero-advance glyphs — and `zip` silently truncated the tail of
+        // the output. For RTL words the tail is the word's FIRST letters,
+        // so e.g. "مرحبا" rendered without its م. `c` is now derived
+        // from the glyph's own cluster, which also fixes the old
+        // mispairing of logical chars with visual-order glyphs for RTL;
+        // `c` feeds only the whitespace checks below.
+        for (position, info) in positions.iter().zip(infos.iter()) {
+            let c = word
+                .get(info.cluster as usize..)
+                .and_then(|rest| rest.chars().next())
+                .unwrap_or(' ');
+
             if info.glyph_id == 0 {
                 has_missing = true;
             }
@@ -525,7 +539,16 @@ fn shape_word(
                 advance_x: position.x_advance as f32 * scale,
                 advance_y: position.y_advance as f32 * scale,
                 offset_x: position.x_offset as f32 * scale,
-                offset_y: position.y_offset as f32 * scale,
+                // HarfBuzz y_offset follows the font's Y-up convention
+                // (+ = toward the ascender), but the glyph positions
+                // produced here feed quads built in a Y-down screen
+                // convention — see `layout()`/`fill_glyphs`, where a
+                // glyph's quad top is `glyph.y - bearing_y` and
+                // `bearing_y` is the font's Y-up y_max. Adding the offset
+                // unflipped pushed every mark attachment to the opposite
+                // side of the baseline: ي's two dots rendered ABOVE the
+                // letter instead of below it.
+                offset_y: -position.y_offset as f32 * scale,
                 bearing_y: 0.0,
             };
 
