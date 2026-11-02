@@ -11,6 +11,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Complex-script text shaping: the shaped glyph output is no longer truncated
+  when a font emits more glyphs than the input has chars (mark-splitting faces
+  such as Noto Sans Arabic) — the dropped tail is an RTL word's first letters,
+  so e.g. "مرحبا" rendered without its م. Mark attachments also land on the
+  correct side of the baseline: HarfBuzz `y_offset` is Y-up (+ toward the
+  ascender) while glyph positions here are Y-down, so the unflipped offset
+  drew ي's two dots above the letter instead of below it.
 - Color emoji: now drawn with the paint's opacity and global alpha instead of
   fully opaque; COLR glyphs no longer have dark edges, take the paint's color
   for layers that use the text's color (palette index 0xFFFF) instead of grey,
