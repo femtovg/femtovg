@@ -6,31 +6,52 @@ Femtovg uses OpenGL to talk to the GPU. We'll need to give Femtovg an [OpenGL co
 
 > If you're new to graphics, maybe this part will feel a bit overwhelming. Don't worry, we'll wrap all the weird code in a function and never worry about it again.
 
-So, how do we get this OpenGL context? We'll use the winit library to create a window and the `glutin` library to create an OpenGL context for rendering to that window:
+So, how do we get this OpenGL context? We'll use the winit library to create a window and the `glutin` library to create an OpenGL context for rendering to that window. `glutin-winit` connects the two, and `raw-window-handle` lets glutin find the window winit made:
 
 ```toml
 [dependencies]
-winit = "0.28.6"
-glutin = "0.30.10"
+femtovg = "0.28"
+winit = "0.30"
+glutin = "0.32"
+glutin-winit = "0.5"
+raw-window-handle = "0.6"
 ```
 
-The first thing we need to do is create an Event Loop – we'll only really use it later, but we can't even create a window without it!
+The first thing we need to do is create an Event Loop. winit hands it an application – a type implementing `ApplicationHandler` – and calls it back as things happen. Windows can only be created once the application has been resumed, so that is where we'll set everything up:
 
 ```rust,ignore
-use winit::event_loop::EventLoop;
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, EventLoop};
+
+struct App {
+    context: Option<PossiblyCurrentContext>,
+}
+
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.context.is_none() {
+            self.context = Some(create_window(event_loop));
+        }
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: winit::window::WindowId, event: WindowEvent) {}
+}
 
 fn main() {
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
+    let mut app = App { context: None };
+    event_loop.run_app(&mut app).unwrap();
 }
 ```
 
 Let's configure a window. We can specify many settings here, but let's just set the size and title:
 
 ```rust,ignore
-use winit::window::WindowBuilder;
+use winit::window::Window;
 use winit::dpi::PhysicalSize;
 
-let window_builder = WindowBuilder::new()
+let window_attrs = Window::default_attributes()
     .with_inner_size(PhysicalSize::new(1000., 600.))
     .with_title("Femtovg");
 ```
@@ -39,6 +60,7 @@ Next we specify a configuration for that window. Usually windows may have many d
 
 ```rust,ignore
 use glutin_winit::DisplayBuilder;
+use raw_window_handle::HasWindowHandle;
 
 use glutin::{
     config::ConfigTemplateBuilder,
@@ -50,7 +72,7 @@ use glutin::{
 
 let template = ConfigTemplateBuilder::new().with_alpha_size(8);
 
-let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attrs));
 
 let (window, gl_config) = display_builder
     .build(event_loop, template, |mut configs| configs.next().unwrap())
@@ -60,7 +82,8 @@ let window = window.unwrap();
 
 let gl_display = gl_config.display();
 
-let context_attributes = ContextAttributesBuilder::new().build(Some(window.raw_window_handle()));
+let raw_window_handle = window.window_handle().unwrap().as_raw();
+let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
 
 let mut not_current_gl_context =
     Some(unsafe { gl_display.create_context(&gl_config, &context_attributes).unwrap() });
@@ -70,10 +93,10 @@ let mut not_current_gl_context =
 Now, we can create a surface for rendering and make our OpenGL context current on that surface:
 
 ```rust,ignore
-use surface::{SurfaceAttributesBuilder, WindowSurface},
+use glutin::surface::{SurfaceAttributesBuilder, WindowSurface};
 
 let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-    window.raw_window_handle(),
+    raw_window_handle,
     NonZeroU32::new(1000).unwrap(),
     NonZeroU32::new(600).unwrap(),
 );
@@ -85,13 +108,13 @@ not_current_gl_context.take().unwrap().make_current(&surface).unwrap()
 
 > In order for any OpenGL commands to work, a context must be current; all OpenGL commands affect the state of whichever context is current (*from [OpenGL wiki](https://www.khronos.org/opengl/wiki/OpenGL_Context)*)
 
-We'll need the `event_loop` and `current_context` for the next step, but as promised, we can hide everything else in a function. Here's the code we have so far:
+We'll need the current context for the next step, but as promised, we can hide everything else in a function, `create_window`. Here's the code we have so far:
 
 ```rust,ignore
 {{#include 1_setting_up.rs}}
 ```
 
-It compiles, runs, and immediately exits successfully.
+It compiles, runs, and opens an empty window that closes when you click its close button.
 
 ## Creating a Canvas
 We have an OpenGL context and display now – the Femtovg renderer can use it as output for rendering things. Let's create a renderer from the display we have:

@@ -130,10 +130,99 @@ pub(crate) fn two_strike_png_glyph_font() -> Vec<u8> {
     font_with_png_glyph(&[(512, &png(600, 600)), (1024, &png(1024, 1024))], (0, 0), Vec::new())
 }
 
+/// Builds a font whose only glyph is a 24 by 24 PNG bitmap of half-transparent color
+/// (255, 0, 64, 128) in an `sbix` strike at 24 ppem.
+#[cfg(feature = "swash")]
+pub(crate) fn translucent_png_glyph_font() -> Vec<u8> {
+    font_with_png_glyph(&[(24, &png_with_color(24, 24, [255, 0, 64, 128]))], (0, 0), Vec::new())
+}
+
+/// Builds a font with color layers (`COLR` version 0, `CPAL`): glyph 0 has no outline of its
+/// own and one layer, glyph 1, a 500-unit square drawn in the text's color (palette index
+/// 0xFFFF).
+#[cfg(feature = "swash")]
+pub(crate) fn color_layer_font() -> Vec<u8> {
+    color_layer_font_with_palette_index(0xFFFF)
+}
+
+/// Like [`color_layer_font`], with its layer in the font's own black (palette index 0).
+#[cfg(feature = "swash")]
+pub(crate) fn fixed_color_layer_font() -> Vec<u8> {
+    color_layer_font_with_palette_index(0)
+}
+
+#[cfg(feature = "swash")]
+fn color_layer_font_with_palette_index(palette_index: u16) -> Vec<u8> {
+    // Glyph 0 is empty, glyph 1 is one contour through four on-curve points. Each flag byte is
+    // 1 (on curve), so each coordinate is a 16-bit delta.
+    let mut glyf = Vec::new();
+    for value in [1, 0, 0, 500, 500] {
+        push_i16(&mut glyf, value); // numberOfContours, xMin, yMin, xMax, yMax
+    }
+    push_u16(&mut glyf, 3); // endPtsOfContours[0]
+    push_u16(&mut glyf, 0); // instructionLength
+    glyf.extend_from_slice(&[1; 4]); // flags
+    for delta in [0, 0, 500, 0, 0, 500, 0, -500] {
+        push_i16(&mut glyf, delta); // x deltas, then y deltas
+    }
+
+    let mut loca = Vec::new();
+    push_u16(&mut loca, 0); // offsets[0], in units of two bytes: glyph 0 is empty
+    push_u16(&mut loca, 0); // offsets[1]
+    push_u16(&mut loca, glyf.len() as u16 / 2); // offsets[2]
+
+    // swash reads `glyf` outlines only when the font has an `hmtx` table. `hhea` gives no glyph
+    // full metrics, so `hmtx` holds only the left side bearings.
+    let mut hmtx = Vec::new();
+    push_i16(&mut hmtx, 0); // leftSideBearings[0]
+    push_i16(&mut hmtx, 0); // leftSideBearings[1]
+
+    let mut colr = Vec::new();
+    push_u16(&mut colr, 0); // version
+    push_u16(&mut colr, 1); // numBaseGlyphRecords
+    push_u32(&mut colr, 14); // baseGlyphRecordsOffset
+    push_u32(&mut colr, 20); // layerRecordsOffset
+    push_u16(&mut colr, 1); // numLayerRecords
+    for value in [0, 0, 1] {
+        push_u16(&mut colr, value); // base glyph record: glyphID, firstLayerIndex, numLayers
+    }
+    push_u16(&mut colr, 1); // layer record: glyphID
+    push_u16(&mut colr, palette_index); // paletteIndex
+
+    let mut cpal = Vec::new();
+    push_u16(&mut cpal, 0); // version
+    push_u16(&mut cpal, 1); // numPaletteEntries
+    push_u16(&mut cpal, 1); // numPalettes
+    push_u16(&mut cpal, 1); // numColorRecords
+    push_u32(&mut cpal, 14); // colorRecordsArrayOffset
+    push_u16(&mut cpal, 0); // colorRecordIndices[0]
+    cpal.extend_from_slice(&[0, 0, 0, 255]); // colorRecords[0], BGRA: black
+
+    let mut tables = required_tables();
+    for (tag, table) in &mut tables {
+        if tag == b"maxp" {
+            table[4..6].copy_from_slice(&2_u16.to_be_bytes()); // numGlyphs
+        }
+    }
+    tables.extend([
+        (*b"glyf", glyf),
+        (*b"loca", loca),
+        (*b"hmtx", hmtx),
+        (*b"COLR", colr),
+        (*b"CPAL", cpal),
+    ]);
+    font_from_tables(TRUETYPE, tables)
+}
+
 /// Encodes a `width` by `height` PNG of one color.
 fn png(width: u32, height: u32) -> Vec<u8> {
+    png_with_color(width, height, [255, 0, 64, 255])
+}
+
+/// Encodes a `width` by `height` PNG of one straight-alpha `color`.
+fn png_with_color(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
     let mut png = std::io::Cursor::new(Vec::new());
-    ::image::RgbaImage::from_pixel(width, height, ::image::Rgba([255, 0, 64, 255]))
+    ::image::RgbaImage::from_pixel(width, height, ::image::Rgba(color))
         .write_to(&mut png, ::image::ImageFormat::Png)
         .unwrap();
     png.into_inner()

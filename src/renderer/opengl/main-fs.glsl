@@ -496,8 +496,9 @@ void main(void) {
     if (glyphTextureType == 1) {
         mask = vec4(mask.x);
     } else {
-        result = vec4(1, 1, 1, 1);
-        mask = vec4(mask.xyz * mask.w, mask.w);
+        // A color glyph keeps its own colors and takes the paint's opacity. The texture holds
+        // premultiplied colors.
+        result = vec4(result.a);
     }
 
     mask *= scissor;

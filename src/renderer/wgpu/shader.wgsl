@@ -247,8 +247,9 @@ fn shade(vertex: VertexOutput, clip: f32) -> vec4<f32> {
         if (params.glyph_texture_type == 1) {
             mask = vec4<f32>(mask.x);
         } else {
-            result = vec4<f32>(1, 1, 1, 1);
-            mask = vec4<f32>(mask.xyz * mask.w, mask.w);
+            // A color glyph keeps its own colors and takes the paint's opacity. The texture holds
+            // premultiplied colors.
+            result = vec4<f32>(result.a);
         }
 
         mask *= scissor;

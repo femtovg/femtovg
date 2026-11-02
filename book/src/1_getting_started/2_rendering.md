@@ -3,8 +3,8 @@
 Now that we have a `canvas`, we can start drawing things! To keep things organized, let's create a `render` function that will do all the rendering:
 
 ```rust,ignore
-fn main() {
-    let (context, gl_display, window, surface) = ...;
+fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    let (context, gl_display, window, surface) = create_window(event_loop);
     // [...]
     let mut canvas = ..;
 
@@ -36,14 +36,14 @@ canvas.clear_rect(30, 30, 30, 30, Color::rgbf(1., 0., 0.));
 > 
 > [`Color::rgbf`](https://docs.rs/femtovg/latest/femtovg/struct.Color.html#method.rgbf) is one of the functions that lets you create a Color. The three parameters correspond to the Red, Green and Blue values in the range 0..1.
 
-Even if you consider your minimalist abstract masterpiece complete, there's actually some more code we need to write. We have to call [`canvas.flush()`](https://docs.rs/femtovg/latest/femtovg/struct.Canvas.html#method.flush) to tell the renderer to execute all drawing commands. Then, we must call [`swap_buffers`](https://docs.rs/glutin/0.30.10/glutin/surface/enum.Surface.html#method.swap_buffers) to display what we've rendered: 
+Even if you consider your minimalist abstract masterpiece complete, there's actually some more code we need to write. We have to call [`canvas.flush()`](https://docs.rs/femtovg/latest/femtovg/struct.Canvas.html#method.flush) to tell the renderer to execute all drawing commands. Then, we must call [`swap_buffers`](https://docs.rs/glutin/0.32/glutin/surface/enum.Surface.html#method.swap_buffers) to display what we've rendered: 
 
 ```rust,ignore
 canvas.flush();
 surface.swap_buffers(context).expect("Could not swap buffers");
 ```
 
-The `render` function is finished, but if you run your program, you won't get to look at it for very long – as soon as `render` completes, the program exits. To fix this, let's freeze the program with an infinite `loop {}`.
+The `render` function is finished. The canvas, context, surface and window have to outlive `resumed`, so the app keeps them in an `AppState`; the event loop keeps the window open until it's closed.
 
 Our program now looks like this:
 
