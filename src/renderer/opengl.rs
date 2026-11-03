@@ -644,7 +644,32 @@ impl OpenGl {
                 self.context
                     .draw_arrays(glow::TRIANGLE_STRIP, start as i32, count as i32);
             }
+        }
 
+        if cmd.zero_fans {
+            // The fill's vertices reach past the cover: draw the fans again,
+            // coloring nothing, to zero the winding the cover missed, with the
+            // cover's program and params as the WGPU backend does. The stencil
+            // mask still protects an armed clip's bit.
+            unsafe {
+                self.context.color_mask(false, false, false, false);
+                self.context.stencil_func(glow::ALWAYS, 0, 0xff);
+                self.context.stencil_op(glow::ZERO, glow::ZERO, glow::ZERO);
+                self.context.disable(glow::CULL_FACE);
+            }
+            let mut first = fans;
+            for drawable in &cmd.drawables {
+                if let Some((start, count)) = drawable.fill_verts {
+                    self.draw_fan(&mut first, start, count);
+                }
+            }
+            unsafe {
+                self.context.enable(glow::CULL_FACE);
+                self.context.color_mask(true, true, true, true);
+            }
+        }
+
+        unsafe {
             self.context.stencil_mask(0xff);
             self.context.disable(glow::STENCIL_TEST);
         }

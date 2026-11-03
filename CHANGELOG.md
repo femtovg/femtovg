@@ -22,6 +22,11 @@ All notable changes to this project will be documented in this file.
   fully opaque; COLR glyphs no longer have dark edges, take the paint's color
   for layers that use the text's color (palette index 0xFFFF) instead of grey,
   and are drawn under a skew, rotation or size that draws text as outlines.
+- Concave fills no longer leave winding counts in the stencil where a fill
+  reaches past the quad that covers it - a feature thinner than the
+  antialiasing fringe, whose fill vertices move outward - which the next
+  concave fill whose cover reached them painted, outside its own shape. Such a
+  fill now draws its fans again after the cover to zero them.
 
 ## [0.28.0] - 2026-10-26
 
