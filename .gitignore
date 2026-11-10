@@ -16,3 +16,6 @@ examples/generated
 Cargo.lock
 
 .vscode
+
+# Python bytecode from tools/svg-harness/scripts
+__pycache__/

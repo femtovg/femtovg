@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <path d="M 40 40 L 120 40 L 120 120 L 40 120 Z M 50 50 L 50 110 L 110 110 L 110 50 Z" fill-rule="evenodd" fill="green"/>
+</svg>

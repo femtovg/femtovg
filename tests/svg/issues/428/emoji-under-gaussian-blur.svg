@@ -1,0 +1,9 @@
+<!-- Upstream source: wpt/svg/text/emoji-under-gaussian-blur | FemtoVG: PR #413, Issue #325 (color emoji under feGaussianBlur filter) -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="400" height="130" viewBox="0 0 400 130">
+  <title>Test: emoji-under-gaussian-blur</title>
+  <html:link rel="match" href="emoji-under-gaussian-blur-ref.svg"/>
+  <defs>
+    <filter id="b3"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+  <text x="30" y="85" font-family="Apple Color Emoji, Noto Color Emoji, sans-serif" font-size="64" filter="url(#b3)">🌟🚀✨</text>
+</svg>

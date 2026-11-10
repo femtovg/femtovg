@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+<!-- A: one bar 1.2 px tall, one contour: ConvexFill, half fringe (control) -->
+<path d="M20 20.3h160v1.2H20z"/>
+<!-- B: two such bars in one path: every contour convex, drawn as a ConcaveFill with the full fringe -->
+<path d="M20 40.3h160v1.2H20zM20 50.3h160v1.2H20z"/>
+<!-- C: a ring with 1.2 px walls: outer contour clockwise, hole counter-clockwise -->
+<path d="M20.3 70.3h160v20h-160zM21.5 71.5v17.6h157.6v-17.6z"/>
+</svg>

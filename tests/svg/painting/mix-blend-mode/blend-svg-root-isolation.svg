@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="100" height="100" viewBox="0 0 100 100">
+  <!--
+    WPT Test: css/compositing/svg/mix-blend-mode-in-svg-image.html & support/green_square_blending.svg
+    Spec: https://drafts.fxtf.org/compositing-1/#isolation & https://drafts.fxtf.org/compositing-1/#csscompositingrules_SVG
+    Invariant: An SVG root document establishes an isolated group per the Compositing spec.
+               Its initial backdrop is transparent black (0, 0, 0, 0).
+               A green element (#00FF00) with mix-blend-mode: difference blending against the
+               root document backdrop must remain pure green.
+               If the SVG root does not isolate and instead blends with an outer container
+               or default white background, difference with white yields magenta (#FF00FF).
+               Test passes if you see a solid green rectangle.
+  -->
+  <html:link rel="match" href="blend-svg-root-isolation-ref.svg"/>
+
+  <rect width="100" height="100" fill="#00FF00" style="mix-blend-mode: difference;"/>
+</svg>

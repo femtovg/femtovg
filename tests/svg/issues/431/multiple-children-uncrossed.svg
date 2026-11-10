@@ -1,0 +1,15 @@
+<!-- resvg-clippath-multiple-children with its even-odd pentagram redrawn as the same region without crossings: the outline (a 10-gon) and the inner pentagon wound against it, under nonzero. No pixel sees winding 2. -->
+<svg id="svg1" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200">
+  <html:link rel="match" href="resvg-clippath-multiple-children-ref.svg"/>
+    <title>Multiple children</title>
+
+    <clipPath id="clip1">
+        <path id="path1" d="M20.000000 75.000000 L81.250000 75.000000 L100.000000 15.000000 L118.750000 75.000000 L180.000000 75.000000 L130.620155 112.984496 L150.000000 175.000000 L100.000000 136.538462 L50.000000 175.000000 L69.379845 112.984496 Z M69.379845 112.984496 L100.000000 136.538462 L130.620155 112.984496 L118.750000 75.000000 L81.250000 75.000000 Z"
+              clip-rule="nonzero"/>
+        <circle id="circle1" cx="100" cy="100" r="10"/>
+    </clipPath>
+    <rect id="rect1" x="0" y="0" width="200" height="200" fill="green" clip-path="url(#clip1)"/>
+
+    <!-- image frame -->
+    <rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

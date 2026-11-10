@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+<defs>
+<clipPath id="c0"><rect x="30" y="30" width="20" height="20"/></clipPath>
+<clipPath id="c1"><rect x="70" y="30" width="20" height="20"/></clipPath>
+<clipPath id="c2"><rect x="110" y="30" width="20" height="20"/></clipPath>
+<clipPath id="c3"><rect x="150" y="30" width="20" height="20"/></clipPath>
+<clipPath id="c4"><rect x="150" y="70" width="20" height="20"/></clipPath>
+<clipPath id="c5"><rect x="150" y="110" width="20" height="20"/></clipPath>
+<clipPath id="c6"><rect x="150" y="150" width="20" height="20"/></clipPath>
+<clipPath id="c7"><rect x="110" y="150" width="20" height="20"/></clipPath>
+<clipPath id="c8"><rect x="70" y="150" width="20" height="20"/></clipPath>
+<clipPath id="c9"><rect x="30" y="150" width="20" height="20"/></clipPath>
+<clipPath id="c10"><rect x="30" y="110" width="20" height="20"/></clipPath>
+<clipPath id="c11"><rect x="30" y="70" width="20" height="20"/></clipPath>
+</defs><g fill="green">
+<circle cx="40" cy="40" r="20" clip-path="url(#c0)"/>
+<circle cx="80" cy="40" r="20" clip-path="url(#c1)"/>
+<circle cx="120" cy="40" r="20" clip-path="url(#c2)"/>
+<circle cx="160" cy="40" r="20" clip-path="url(#c3)"/>
+<circle cx="160" cy="80" r="20" clip-path="url(#c4)"/>
+<circle cx="160" cy="120" r="20" clip-path="url(#c5)"/>
+<circle cx="160" cy="160" r="20" clip-path="url(#c6)"/>
+<circle cx="120" cy="160" r="20" clip-path="url(#c7)"/>
+<circle cx="80" cy="160" r="20" clip-path="url(#c8)"/>
+<circle cx="40" cy="160" r="20" clip-path="url(#c9)"/>
+<circle cx="40" cy="120" r="20" clip-path="url(#c10)"/>
+<circle cx="40" cy="80" r="20" clip-path="url(#c11)"/>
+</g><rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/></svg>

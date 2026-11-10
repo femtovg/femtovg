@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <!-- Reference for fill-path-subpixel-sliver-control.svg: Identical geometry rendered -->
+  <rect width="200" height="200" fill="#FFFFFF"/>
+  <path d="M 20 100 L 180 100 L 100 101 Z" fill="#008000" stroke="none"/>
+</svg>

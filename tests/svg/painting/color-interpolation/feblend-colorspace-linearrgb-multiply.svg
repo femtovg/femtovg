@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    FemtoVG PR #355 Color Space Reftest: Explicit linearRGB feBlend
+    Spec: https://drafts.fxtf.org/filter-effects-1/#ColorInterpolationFiltersProperty
+    Invariant: color-interpolation-filters="linearRGB" converts sRGB inputs to linear space, multiplies, and converts back to sRGB.
+               Seagreen (#2E8B57) * lightblue (#ADD8E6) in linearRGB converts to sRGB [28, 118, 77] (#1C764D).
+               Differs from sRGB multiply [31, 118, 78] by 3 RGB units in red and 1 in blue.
+  -->
+  <html:link rel="match" href="feblend-colorspace-linearrgb-multiply-ref.svg"/>
+  <defs>
+    <filter id="fLinear" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="linearRGB">
+      <feFlood flood-color="#ADD8E6" result="flood"/>
+      <feBlend mode="multiply" in="flood" in2="SourceGraphic"/>
+    </filter>
+  </defs>
+  <rect x="20" y="20" width="160" height="160" fill="#2E8B57" filter="url(#fLinear)"/>
+</svg>

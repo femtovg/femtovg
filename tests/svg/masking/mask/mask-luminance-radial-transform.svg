@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+<title>Luminance mask with a transformed radial gradient, single and nested</title>
+<desc>Top half: a solid blue rect under a luminance mask whose radial gradient carries a
+rotate+scale+translate gradientTransform and stops black -> white -> gray, so both the stop
+colours and the transform decide the coverage (gray pads the outside at ~50% sRGB luminance).
+Bottom half: the same idea nested - a masked group inside a translated masked group - so the
+inner mask must be applied in root device space, not against the outer layer's capture origin.</desc>
+<defs>
+<radialGradient id="rgSingle" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+    gradientTransform="translate(100 50) rotate(30) scale(78 30)">
+<stop offset="0" stop-color="#000000"/>
+<stop offset="0.55" stop-color="#ffffff"/>
+<stop offset="1" stop-color="#808080"/>
+</radialGradient>
+<mask id="lumSingle" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="100">
+<rect x="0" y="0" width="200" height="100" fill="url(#rgSingle)"/>
+</mask>
+<radialGradient id="rgOuter" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+    gradientTransform="translate(80 40) rotate(-20) scale(92 44)">
+<stop offset="0" stop-color="#ffffff"/>
+<stop offset="0.7" stop-color="#ffffff"/>
+<stop offset="1" stop-color="#000000"/>
+</radialGradient>
+<mask id="lumOuter" maskUnits="userSpaceOnUse" x="-20" y="-20" width="220" height="140">
+<rect x="-20" y="-20" width="220" height="140" fill="url(#rgOuter)"/>
+</mask>
+<radialGradient id="rgInner" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse"
+    gradientTransform="translate(80 40) rotate(45) scale(62 26)">
+<stop offset="0" stop-color="#000000"/>
+<stop offset="0.5" stop-color="#ffffff"/>
+<stop offset="1" stop-color="#808080"/>
+</radialGradient>
+<mask id="lumInner" maskUnits="userSpaceOnUse" x="-20" y="-20" width="220" height="140">
+<rect x="-20" y="-20" width="220" height="140" fill="url(#rgInner)"/>
+</mask>
+</defs>
+<rect x="0" y="0" width="200" height="100" fill="#1e64ff" mask="url(#lumSingle)"/>
+<g transform="translate(20 110)" mask="url(#lumOuter)">
+<g mask="url(#lumInner)">
+<rect x="0" y="0" width="160" height="80" fill="#ff3c00"/>
+</g>
+</g>
+</svg>

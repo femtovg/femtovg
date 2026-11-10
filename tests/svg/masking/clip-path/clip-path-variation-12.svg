@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <html:link rel="match" href="clip-path-variation-12-ref.svg"/>
+  <defs>
+    <clipPath id="cp">
+      <circle cx="50" cy="80" r="25"/>
+    </clipPath>
+  </defs>
+  <rect x="0" y="0" width="200" height="200" fill="green" clip-path="url(#cp)"/>
+</svg>

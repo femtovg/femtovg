@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+  <!-- Reference for blur-negative-and-zero-stddev.svg: Four crisp unblurred squares -->
+  <rect x="20" y="20" width="40" height="40" fill="#008000"/>
+  <rect x="90" y="20" width="40" height="40" fill="#008000"/>
+  <rect x="20" y="90" width="40" height="40" fill="#008000"/>
+  <rect x="90" y="90" width="40" height="40" fill="#008000"/>
+</svg>

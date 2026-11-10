@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    FemtoVG PR #355 & PR #356 Interaction Reftest
+    Spec: https://drafts.fxtf.org/compositing-1/#mix-blend-mode & https://drafts.fxtf.org/filter-effects-1/
+    Invariant: Rect has filter flood-color="#ADD8E6" (lightblue) executed via ImageFilter.
+               Containing group has mix-blend-mode: multiply executed via LayerEffects over seagreen (#2E8B57).
+               Final composited color is exact sRGB multiply: #1F764E.
+  -->
+  <html:link rel="match" href="filter-layer-mix-blend-filtered-ref.svg"/>
+  <defs>
+    <filter id="floodLightBlue" x="0%" y="0%" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feFlood flood-color="#ADD8E6"/>
+    </filter>
+  </defs>
+  <rect x="20" y="20" width="160" height="160" fill="#2E8B57"/>
+  <g style="mix-blend-mode: multiply;">
+    <rect x="20" y="20" width="160" height="160" fill="#000000" filter="url(#floodLightBlue)"/>
+  </g>
+</svg>

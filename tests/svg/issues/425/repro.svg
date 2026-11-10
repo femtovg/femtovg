@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+  <!-- The stroke's centreline (y = 120) lies past the bottom of a 460x260 frame
+       once the 100x50 viewport is fitted into the harness's 200 px box (device
+       y = 30 + 2*120 = 270); its 240-wide band covers the whole viewport. -->
+  <rect width="100" height="50" fill="#f00"/>
+  <path d="M -50 120 H 150" stroke="#0f0" stroke-width="240"/>
+</svg>

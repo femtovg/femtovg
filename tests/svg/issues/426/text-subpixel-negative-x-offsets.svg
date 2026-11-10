@@ -1,0 +1,10 @@
+<!-- Upstream source: wpt/html/canvas/element/text/text-subpixel-negative-x-offsets | FemtoVG: PR #384 (subpixel negative fractional tenths x=-0.3, -0.7, -15.4 to verify signed tenth cache keys) -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="400" height="160" viewBox="0 0 400 160">
+  <title>Test: text-subpixel-negative-x-offsets</title>
+  <html:link rel="match" href="text-subpixel-negative-x-offsets-ref.svg"/>
+  <g transform="translate(100, 0)">
+    <text x="-0.3" y="40" font-size="20" fill="#222">Offset -0.3px</text>
+    <text x="-0.7" y="80" font-size="20" fill="#222">Offset -0.7px</text>
+    <text x="-15.4" y="120" font-size="20" fill="#222">Offset -15.4px</text>
+  </g>
+</svg>

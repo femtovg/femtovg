@@ -1,0 +1,14 @@
+<!-- Upstream source: resvg-test-suite/tests/text/text/compound-emojis.svg | FemtoVG: PR #413 (compound emoji ZWJ sequence rainbow flag) -->
+<svg id="svg1" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"
+     font-family="Noto Color Emoji" font-size="32" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200">
+  <html:link rel="match" href="resvg-compound-emojis-rainbow-flag-ref.svg"/>
+    <title>Compound emojis</title>
+
+    <path id="crosshair" d="M 20 100 L 180 100 M 100 20 L 100 180"
+          stroke="gray" stroke-width="0.5"/>
+
+    <text id="text1" x="86" y="111">🏳️‍🌈</text>
+
+    <!-- image frame -->
+    <rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

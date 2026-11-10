@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    FemtoVG PR #356 Reftest: Nested clip paths with mix-blend-mode: overlay over 50% gray
+    Spec: https://drafts.fxtf.org/compositing-1/#mix-blend-mode
+    Invariant: In W3C overlay blend mode, backdrop Cb = 0.5 yields 2 * 0.5 * Cs = Cs (identity).
+               Verifies nested clip paths (parent rounded rect + child circle) correctly mask the offscreen blend layer.
+  -->
+  <html:link rel="match" href="blend-clip-path-nested-overlay-ref.svg"/>
+  <defs>
+    <clipPath id="outerClip">
+      <rect x="30" y="30" width="140" height="140" rx="30" ry="30"/>
+    </clipPath>
+    <clipPath id="innerClip">
+      <circle cx="100" cy="100" r="60"/>
+    </clipPath>
+  </defs>
+  <rect x="0" y="0" width="200" height="200" fill="#808080"/>
+  <g clip-path="url(#outerClip)">
+    <rect x="0" y="0" width="200" height="200" fill="#FF8020" clip-path="url(#innerClip)" style="mix-blend-mode: overlay;"/>
+  </g>
+</svg>

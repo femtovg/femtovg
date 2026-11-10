@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <title>Reference: resvg-dasharray-0-n-square-caps</title>
+  <g fill="green">
+    <rect x="30" y="30" width="20" height="20"/><rect x="70" y="30" width="20" height="20"/><rect x="110" y="30" width="20" height="20"/><rect x="150" y="30" width="20" height="20"/>
+    <rect x="150" y="70" width="20" height="20"/><rect x="150" y="110" width="20" height="20"/><rect x="150" y="150" width="20" height="20"/>
+    <rect x="110" y="150" width="20" height="20"/><rect x="70" y="150" width="20" height="20"/><rect x="30" y="150" width="20" height="20"/>
+    <rect x="30" y="110" width="20" height="20"/><rect x="30" y="70" width="20" height="20"/>
+  </g>
+  <rect id="frame" x="1" y="1" width="198" height="198" fill="none" stroke="black"/>
+</svg>

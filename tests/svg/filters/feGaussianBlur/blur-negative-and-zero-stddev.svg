@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="160" height="160" viewBox="0 0 160 160">
+  <!--
+    Cross-checks: Issue #325 ("Gaussian blur kernel diverges from browser rendering on structured content")
+    WPT Test: css/filter-effects/feGaussianBlur-negative-deviation.svg
+    W3C Test: svg/import/filters-gauss-03-f-manual.svg
+    Spec: https://drafts.csswg.org/filter-effects-1/#element-attrdef-fegaussianblur-stddeviation
+    Invariant: A stdDeviation value of zero or negative disables blur processing and acts as an
+               exact identity pass. Negative values are clamped to zero.
+               All four squares must render crisp and unblurred.
+  -->
+  <html:link rel="match" href="blur-negative-and-zero-stddev-ref.svg"/>
+  <defs>
+    <filter id="blur-zero">
+      <feGaussianBlur stdDeviation="0"/>
+    </filter>
+    <filter id="blur-negative">
+      <feGaussianBlur stdDeviation="-5"/>
+    </filter>
+    <filter id="blur-neg-both">
+      <feGaussianBlur stdDeviation="-5 -5"/>
+    </filter>
+    <filter id="blur-zero-neg">
+      <feGaussianBlur stdDeviation="0 -5"/>
+    </filter>
+  </defs>
+
+  <rect x="20" y="20" width="40" height="40" fill="#008000" filter="url(#blur-zero)"/>
+  <rect x="90" y="20" width="40" height="40" fill="#008000" filter="url(#blur-negative)"/>
+  <rect x="20" y="90" width="40" height="40" fill="#008000" filter="url(#blur-neg-both)"/>
+  <rect x="90" y="90" width="40" height="40" fill="#008000" filter="url(#blur-zero-neg)"/>
+</svg>

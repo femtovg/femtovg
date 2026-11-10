@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+  <!-- Reference for blend-mask-circle-difference.svg: Green circle over yellow square -->
+  <defs>
+    <mask id="circle-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <circle cx="50" cy="50" r="40" fill="#FFFFFF"/>
+    </mask>
+  </defs>
+
+  <!-- Yellow backdrop -->
+  <rect width="100" height="100" fill="#FFFF00"/>
+
+  <!-- Pre-computed green circle using identical mask geometry -->
+  <rect width="100" height="100" fill="#00FF00" mask="url(#circle-mask)"/>
+</svg>
