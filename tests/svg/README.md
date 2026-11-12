@@ -39,7 +39,7 @@ another renders it alike:
 |---|---|
 | `blend-svg-root-isolation` | Firefox |
 | `morphology-closing-chain` | WebKit |
-| `blur-negative-and-zero-stddev`, `blur-primitive-subregion-clipping`, `morphology-erode-complete` | Chromium, Firefox |
+| `blur-negative-and-zero-stddev`, `blur-primitive-subregion-clipping`, `clip-path-hidden-child`, `morphology-erode-complete` | Chromium, Firefox |
 
 Some pairs differ by design in every engine (the `-ref` is not an equal rendering); they serve as two probes.
 

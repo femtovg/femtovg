@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="100" height="100" viewBox="0 0 100 100">
+  <!--
+    Spec: CSS Masking 1 § 6.1 ("The clipPath element")
+    Invariant: A clipPath child with visibility="hidden" adds nothing to the clip region.
+  -->
+  <html:link rel="match" href="clip-path-hidden-child-ref.svg"/>
+  <defs>
+    <clipPath id="cp">
+      <rect x="30" y="30" width="40" height="40"/>
+      <rect width="100" height="100" visibility="hidden"/>
+    </clipPath>
+  </defs>
+  <rect width="100" height="100" fill="white"/>
+  <rect width="100" height="100" fill="green" clip-path="url(#cp)"/>
+</svg>

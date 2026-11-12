@@ -3,7 +3,7 @@
 
 use femtovg::{FillRule, LayerEffects, MaskKind, Path};
 
-use crate::scene::{key, Canvas, Painter};
+use crate::scene::{key, to_path, Canvas, Painter};
 
 /// What `push_clip` took, in order: `false` a clip on the canvas (a `restore` is owed), `true` a coverage layer (an
 /// `end_layer`).
@@ -95,7 +95,6 @@ impl Painter {
 /// `base`: the clip is their union. Clip content may be nested in groups (usvg wraps a `<use>` in one).
 fn clip_to(canvas: &mut Canvas, clip: &usvg::ClipPath, base: usvg::Transform) {
     fn collect(nodes: &[usvg::Node], base: usvg::Transform, paths: &mut Vec<(Path, FillRule)>) {
-        use usvg::tiny_skia_path::PathSegment;
         for node in nodes {
             match node {
                 usvg::Node::Group(g) => collect(g.children(), base, paths),
@@ -104,34 +103,9 @@ fn clip_to(canvas: &mut Canvas, clip: &usvg::ClipPath, base: usvg::Transform) {
                         Some(usvg::FillRule::EvenOdd) => FillRule::EvenOdd,
                         _ => FillRule::NonZero,
                     };
-                    let ct = base.pre_concat(p.abs_transform());
-                    let map = |x: f32, y: f32| (ct.sx * x + ct.kx * y + ct.tx, ct.ky * x + ct.sy * y + ct.ty);
-                    let mut path = Path::new();
-                    for seg in p.data().segments() {
-                        match seg {
-                            PathSegment::MoveTo(q) => {
-                                let (x, y) = map(q.x, q.y);
-                                path.move_to(x, y);
-                            }
-                            PathSegment::LineTo(q) => {
-                                let (x, y) = map(q.x, q.y);
-                                path.line_to(x, y);
-                            }
-                            PathSegment::QuadTo(a, q) => {
-                                let (ax, ay) = map(a.x, a.y);
-                                let (x, y) = map(q.x, q.y);
-                                path.quad_to(ax, ay, x, y);
-                            }
-                            PathSegment::CubicTo(a, b, q) => {
-                                let (ax, ay) = map(a.x, a.y);
-                                let (bx, by) = map(b.x, b.y);
-                                let (x, y) = map(q.x, q.y);
-                                path.bezier_to(ax, ay, bx, by, x, y);
-                            }
-                            PathSegment::Close => path.close(),
-                        }
+                    if let Some(path) = to_path(p, base.pre_concat(p.abs_transform())) {
+                        paths.push((path, rule));
                     }
-                    paths.push((path, rule));
                 }
                 _ => {}
             }
