@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <html:link rel="match" href="mask-region-clips-content-ref.svg"/>
+  <title>Mask content outside the mask region does not reveal the masked element</title>
+  <desc>Each masked path is a square inside the mask region and a ring outside it, and each mask holds a white rect
+  larger than the path. Only the squares show. Top left: maskUnits="userSpaceOnUse". Bottom right: the default
+  objectBoundingBox units on a rotated path, where the ring reaches into the corners of the region's bounding box.</desc>
+  <defs>
+    <mask id="user" maskUnits="userSpaceOnUse" x="20" y="20" width="60" height="60">
+      <rect width="200" height="200" fill="white"/>
+    </mask>
+    <mask id="bbox" x="0.25" y="0.25" width="0.5" height="0.5">
+      <rect x="-100" y="-100" width="200" height="200" fill="white"/>
+    </mask>
+  </defs>
+  <path d="M0 0h100v100h-100z M15 15h70v70h-70z M30 30h40v40h-40z" fill="green" fill-rule="evenodd"
+        mask="url(#user)"/>
+  <g transform="translate(140 140) rotate(30)">
+    <path d="M-40 -40h80v80h-80z M-25 -25h50v50h-50z M-15 -15h30v30h-30z" fill="green" fill-rule="evenodd"
+          mask="url(#bbox)"/>
+  </g>
+</svg>

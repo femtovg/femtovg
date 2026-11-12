@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <path d="M30 30h40v40h-40z" fill="green"/>
+  <g transform="translate(140 140) rotate(30)">
+    <path d="M-15 -15h30v30h-30z" fill="green"/>
+  </g>
+</svg>

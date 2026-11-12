@@ -258,6 +258,8 @@ impl Painter {
                 self.precapture_masks(canvas, mask.root().children(), at);
                 // Mask content lives in the referencing group's user space.
                 let image = self.capture(canvas, Some(at), |painter, canvas| {
+                    let region = mask.rect();
+                    canvas.intersect_scissor(region.x(), region.y(), region.width(), region.height());
                     painter.draw_nodes(canvas, mask.root().children())
                 });
                 if let Some(image) = image {
