@@ -375,14 +375,20 @@ impl Painter {
         Some(paint)
     }
 
-    /// A span's fill and stroke as (paint, opacity, is the stroke), in paint order.
-    pub(crate) fn span_passes(
+    /// A fill and a stroke as (paint, opacity, is the stroke), in paint order.
+    pub(crate) fn paint_passes(
         &self,
         fill: Option<&usvg::Fill>,
         stroke: Option<&usvg::Stroke>,
         order: usvg::PaintOrder,
-    ) -> Vec<(Paint, f32, bool)> {
-        let fill = fill.and_then(|f| Some((self.to_paint(f.paint())?, f.opacity().get(), false)));
+    ) -> impl Iterator<Item = (Paint, f32, bool)> {
+        let fill = fill.and_then(|f| {
+            let rule = match f.rule() {
+                usvg::FillRule::NonZero => FillRule::NonZero,
+                usvg::FillRule::EvenOdd => FillRule::EvenOdd,
+            };
+            Some((self.to_paint(f.paint())?.with_fill_rule(rule), f.opacity().get(), false))
+        });
         let stroke = stroke.and_then(|s| Some((self.stroke_paint(s)?, s.opacity().get(), true)));
         match order {
             usvg::PaintOrder::FillAndStroke => [fill, stroke],
@@ -390,7 +396,6 @@ impl Painter {
         }
         .into_iter()
         .flatten()
-        .collect()
     }
 
     /// Applies the transform of a node with absolute transform `t`; while a shadow copy is drawn, its offset goes
@@ -757,24 +762,14 @@ impl Painter {
         }
         canvas.save();
         self.set_node_transform(canvas, svg_path.abs_transform());
-        if let Some(fill) = svg_path.fill() {
-            if let Some(mut paint) = self.to_paint(fill.paint()) {
-                paint.set_fill_rule(match fill.rule() {
-                    usvg::FillRule::NonZero => FillRule::NonZero,
-                    usvg::FillRule::EvenOdd => FillRule::EvenOdd,
-                });
-                canvas.set_global_alpha(fill.opacity().get());
-                canvas.fill_path(&path, &paint);
-                canvas.set_global_alpha(1.0);
-                self.stats.fills += 1;
-            }
-        }
-        if let Some(stroke) = svg_path.stroke() {
-            if let Some(paint) = self.stroke_paint(stroke) {
-                canvas.set_global_alpha(stroke.opacity().get());
+        for (paint, alpha, stroked) in self.paint_passes(svg_path.fill(), svg_path.stroke(), svg_path.paint_order()) {
+            canvas.set_global_alpha(alpha);
+            if stroked {
                 canvas.stroke_path(&path, &paint);
-                canvas.set_global_alpha(1.0);
                 self.stats.strokes += 1;
+            } else {
+                canvas.fill_path(&path, &paint);
+                self.stats.fills += 1;
             }
         }
         canvas.restore();
