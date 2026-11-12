@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+<rect width="200" height="200" fill="#000"/>
+<path d="M14 49 L24 49 L32.6603 54" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M64.41 49.23 L74.41 49.23 L79.41 57.8903" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M114.82 49.46 L124.82 49.46 L124.82 59.46" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M164.23 49.69 L174.23 49.69 L169.23 58.3503" stroke="#fff" stroke-width="1.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M14.64 79.92 L24.64 79.92 L33.3003 84.92" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M64.05 79.15 L74.05 79.15 L79.05 87.8103" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M114.46 79.38 L124.46 79.38 L124.46 89.38" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M164.87 79.61 L174.87 79.61 L169.87 88.2703" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M14.28 109.84 L24.28 109.84 L32.9403 114.84" stroke="#fff" stroke-width="4" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M64.69 109.07 L74.69 109.07 L79.69 117.7303" stroke="#fff" stroke-width="4" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M114.1 109.3 L124.1 109.3 L124.1 119.3" stroke="#fff" stroke-width="4" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M164.51 109.53 L174.51 109.53 L169.51 118.1903" stroke="#fff" stroke-width="4" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M14.92 139.76 L24.92 139.76 L33.5803 144.76" stroke="#fff" stroke-width="6" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M64.33 139.99 L74.33 139.99 L79.33 148.6503" stroke="#fff" stroke-width="6" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M114.74 139.22 L124.74 139.22 L124.74 149.22" stroke="#fff" stroke-width="6" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+<path d="M164.15 139.45 L174.15 139.45 L169.15 148.1103" stroke="#fff" stroke-width="6" stroke-linejoin="round" stroke-miterlimit="10" fill="none"/>
+</svg>

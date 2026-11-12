@@ -1,0 +1,8 @@
+<!-- Upstream source: wpt/html/canvas/element/line-styles/2d.line.miter.acute.html | FemtoVG: PR #401, PR #402 (acute 45-degree miter join boundary at miterLimit 2.614 vs 2.613) -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="100" height="50" viewBox="0 0 100 50">
+  <title>Upstream wpt/html/canvas/element/line-styles/2d.line.miter.acute.html</title>
+  <html:link rel="match" href="wpt-2d-line-miter-acute-ref.svg"/>
+  <rect width="100" height="50" fill="#f00"/>
+  <path d="M 100 1000 L 100 100 L 1000 1000 M 50 55 L 50 56" fill="none" stroke="#0f0" stroke-width="200" stroke-linejoin="miter" stroke-miterlimit="2.614"/>
+  <path d="M 100 1000 L 100 100 L 1000 1000" fill="none" stroke="#f00" stroke-width="200" stroke-linejoin="miter" stroke-miterlimit="2.613"/>
+</svg>

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect width="200" height="200" fill="#fff"/>
+  <path d="M110.00 100.00 L109.40 103.42 L107.66 106.43 L105.00 108.66 L101.74 109.85 L98.26 109.85 L95.00 108.66 L92.34 106.43 L90.60 103.42 L90.00 100.00 L90.60 96.58 L92.34 93.57 L95.00 91.34 L98.26 90.15 L101.74 90.15 L105.00 91.34" fill="none" stroke="rgb(65,212,215)" stroke-opacity="0.392" stroke-width="12" stroke-linecap="square" stroke-linejoin="bevel"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect width="200" height="200" fill="#fff"/>
+  <!-- one path of four squares each: shared edges through pixel centres, a quarter pixel off them, on pixel edges -->
+  <path d="M20.5 20.5h10v10h-10zM30.5 20.5h10v10h-10zM40.5 20.5h10v10h-10zM50.5 20.5h10v10h-10z"/>
+  <path d="M20.25 35.5h10v10h-10zM30.25 35.5h10v10h-10zM40.25 35.5h10v10h-10zM50.25 35.5h10v10h-10z"/>
+  <path d="M20 50.5h10v10h-10zM30 50.5h10v10h-10zM40 50.5h10v10h-10zM50 50.5h10v10h-10z"/>
+  <!-- the first row's squares as four paths (#411) -->
+  <path d="M20.5 65.5h10v10h-10z"/><path d="M30.5 65.5h10v10h-10z"/><path d="M40.5 65.5h10v10h-10z"/><path d="M50.5 65.5h10v10h-10z"/>
+</svg>

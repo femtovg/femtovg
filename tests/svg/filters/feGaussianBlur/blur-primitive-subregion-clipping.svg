@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    Cross-checks: Issue #325 & Filter Primitive Subregion specification
+    WPT Test: css/filter-effects/filter-subregion-01.html
+    W3C Test: svg/import/filters-gauss-01-b-manual.svg
+    Spec: https://drafts.fxtf.org/filter-effects/#FilterPrimitiveSubRegion
+    Invariant: An feGaussianBlur filter primitive with explicit subregion attributes (x, y, width, height)
+               clips its blurred result strictly to that subregion.
+               The primitive subregion is set to x="25" y="25" width="100" height="100".
+               The source graphic is a 100x100 green square at (25,25) with stdDeviation="15".
+               Although the blur attempts to expand by 45px outward, the primitive subregion
+               strictly clips the blur to [25, 25, 100, 100].
+  -->
+  <html:link rel="match" href="blur-primitive-subregion-clipping-ref.svg"/>
+  <defs>
+    <filter id="subregion-blur" filterUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="15" x="25" y="25" width="100" height="100"/>
+    </filter>
+  </defs>
+
+  <!-- Canvas background: black -->
+  <rect width="200" height="200" fill="#000000"/>
+
+  <!-- Element filtered with subregion-clipped blur -->
+  <rect x="25" y="25" width="100" height="100" fill="#00FF00" filter="url(#subregion-blur)"/>
+</svg>

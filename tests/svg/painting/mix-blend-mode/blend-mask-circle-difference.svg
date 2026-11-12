@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="100" height="100" viewBox="0 0 100 100">
+  <!--
+    WPT Test: css/compositing/mix-blend-mode/mix-blend-mode-mask.html
+    Spec: https://drafts.fxtf.org/compositing-1/#mix-blend-mode
+    Invariant: An element having both a mask and mix-blend-mode (difference) blends correctly
+               with its parent element (yellow). The mask restricts where the blended element
+               is visible; inside the mask, red (#FF0000) difference yellow (#FFFF00) yields
+               green (#00FF00). Outside the mask, the yellow backdrop is preserved intact.
+  -->
+  <html:link rel="match" href="blend-mask-circle-difference-ref.svg"/>
+  <defs>
+    <mask id="circle-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <circle cx="50" cy="50" r="40" fill="#FFFFFF"/>
+    </mask>
+  </defs>
+
+  <!-- Yellow backdrop -->
+  <rect width="100" height="100" fill="#FFFF00"/>
+
+  <!-- Blended element with inlined circular mask -->
+  <rect width="100" height="100" fill="#FF0000" mask="url(#circle-mask)" style="mix-blend-mode: difference;"/>
+</svg>

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+  <clipPath id="c"><path d="M100 15l50 160-130-100h160l-130 100z" clip-rule="evenodd"/></clipPath>
+  <rect width="200" height="200" fill="green" clip-path="url(#c)"/>
+</svg>

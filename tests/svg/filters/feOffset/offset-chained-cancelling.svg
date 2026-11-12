@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <html:link rel="match" href="offset-chained-cancelling-ref.svg"/>
+  <defs>
+    <filter id="f" x="0%" y="0%" width="100%" height="100%">
+      <feOffset dx="30" dy="40" result="step1"/>
+      <feOffset in="step1" dx="-30" dy="-40"/>
+    </filter>
+  </defs>
+  <rect x="50" y="50" width="60" height="60" fill="green" filter="url(#f)"/>
+</svg>

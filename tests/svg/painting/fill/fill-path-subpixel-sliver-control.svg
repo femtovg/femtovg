@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    Cross-checks: PR #360 (Closes #341: "Fill nothing for a contour whose points lie on one line")
+    Test suite origin: tests/zero_area_fill_wgpu.rs ("a third-of-a-pixel sliver and a square still fill")
+    Invariant: Contrast control test. A narrow sliver triangle with base 160 and non-zero height (0.5px)
+               encloses positive area (area = 40.0 px² > 0). It is NOT collinear and MUST still be filled
+               with anti-aliasing.
+               Verifies that the collinearity detector does not erroneously discard valid thin geometry.
+  -->
+  <html:link rel="match" href="fill-path-subpixel-sliver-control-ref.svg"/>
+
+  <!-- Canvas background: white -->
+  <rect width="200" height="200" fill="#FFFFFF"/>
+
+  <!-- Non-zero area triangle sliver: height = 1.0px, base = 160px -->
+  <path d="M 20 100 L 180 100 L 100 101 Z" fill="#008000" stroke="none"/>
+</svg>

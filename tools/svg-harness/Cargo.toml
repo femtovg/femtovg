@@ -1,0 +1,14 @@
+[package]
+name = "svg-harness"
+description = "Renders SVG files through usvg and femtovg's wgpu backend, headless, for conformance and performance runs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+femtovg = { path = "../..", features = ["wgpu"] }
+usvg = "0.49.0"
+wgpu = "30.0.0"
+pollster = "1.0"
+image = { version = "0.25.0", default-features = false, features = ["png"] }

@@ -1,0 +1,8 @@
+<!-- Upstream source: wpt/svg/text/emoji-under-scale-and-rotate | FemtoVG: PR #413 (color emoji transformed under scale and rotate) -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="350" height="300" viewBox="0 0 350 300">
+  <title>Test: emoji-under-scale-and-rotate</title>
+  <html:link rel="match" href="emoji-under-scale-and-rotate-ref.svg"/>
+  <g transform="translate(100, 60) rotate(30) scale(1.3)">
+    <text x="0" y="60" font-family="Apple Color Emoji, Noto Color Emoji, sans-serif" font-size="60">🎨🎭</text>
+  </g>
+</svg>

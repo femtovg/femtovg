@@ -1,0 +1,94 @@
+{
+  "reddit": {
+    "description": "Reddit logos, Snoo avatar and icons",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/logos/reddit-lockup-logo.svg",
+      "corpus/logos/reddit-powered-by-logo.svg",
+      "corpus/logos/reddit-link-post-fallback.svg",
+      "corpus/logos/reddit-rotate-icon.svg",
+      "corpus/logos/reddit-snoo-avatar.svg"
+    ]
+  },
+  "google": {
+    "description": "Google logo, Google Workspace icons at 24 and 48 px, Google Pay",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/logos/googlelogo_clr_74x24px.svg",
+      "corpus/logos/google-workspace-24px.svg",
+      "google-workspace-48px.svg",
+      "corpus/firefox/google-pay.svg"
+    ]
+  },
+  "firefox": {
+    "description": "Firefox logo and wordmark, firefox.com and Firefox UI illustrations",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/firefox/firefox.svg",
+      "corpus/firefox-com/logo-word-hor-2026.svg",
+      "corpus/firefox-com/fingerprint-tracking-cropped.width-400.svg",
+      "corpus/firefox/lists-empty-state-light.svg",
+      "corpus/firefox/wallpaper-landscape-planet.svg",
+      "fox-with-box-on-cloud.svg"
+    ]
+  },
+  "solidjs": {
+    "description": "SolidJS banner: text over gradients",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/banner.svg"
+    ]
+  },
+  "logos": {
+    "description": "GitHub Copilot animation (CSS), Callstack stack diagram (embedded font), Discord, Slack, Renovate, DuckDuckGo",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/logos/copilot-animation.svg",
+      "corpus/logos/callstack-bloomberg-roku-stack-diagram.svg",
+      "corpus/logos/discord-main-logo.svg",
+      "corpus/logos/slacklogo.svg",
+      "corpus/logos/renovate.svg",
+      "duckduckgo-com_2x.svg"
+    ]
+  },
+  "buseybench": {
+    "description": "Layer- and filter-heavy portraits drawn by language models (blurs, turbulence, blends, masks)",
+    "license": "third-party artwork, not redistributed; fetched for comparison only",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "corpus/buseybench/gpt-6-astra.svg",
+      "corpus/buseybench/claude-sonnet-5-5.svg",
+      "corpus/buseybench/claude-opus-5.svg",
+      "corpus/buseybench/claude-opus-5-5.svg",
+      "corpus/buseybench/glm-5v-turbo.svg",
+      "corpus/buseybench/gpt-5-6-luna-pro.svg",
+      "corpus/buseybench/gemini-3-7-flash.svg",
+      "corpus/buseybench/gemini-3-8-flash.svg"
+    ]
+  },
+  "issues": {
+    "description": "Larger files that open issues reproduce on: NYT crescent (#327), Babylon.js canvases (#411, #426, #427), nine Ghostscript tigers (#427), SVGenius icons (#423, #424)",
+    "license": "third-party: NYT artwork (not redistributed), Babylon.js and SVGenius Apache-2.0, Ghostscript tiger AGPL-3.0",
+    "git": "https://github.com/rebeckerspecialties/femtovg",
+    "rev": "64203a472c2c2e8522edd5f92cbabb6b899d376c",
+    "paths": [
+      "thin-fill-crescent.svg",
+      "corpus/babylon/vertex-pulling-normals-uvs-colors-tangents__1.svg",
+      "corpus/babylon/pointers.svg",
+      "harness/zoom-ladder/thin-fill-mask-frames/tiger9.svg",
+      "corpus/svgenius/hard/page_70_像素鞋子图标_40194_icon_17.svg",
+      "corpus/svgenius/medium/page_275_化妆品装饰_25821_icon_24.svg"
+    ]
+  }
+}

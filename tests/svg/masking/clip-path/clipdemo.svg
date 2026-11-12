@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 230 130">
+<defs>
+<clipPath id="star" clip-rule="nonzero">
+<path d="M55 8 L67 42 L103 42 L74 63 L85 98 L55 76 L25 98 L36 63 L7 42 L43 42 Z"/>
+</clipPath>
+<clipPath id="donut" clip-rule="evenodd">
+<path fill-rule="evenodd" d="M170 10 a55 55 0 1 0 0.01 0 Z M170 35 a30 30 0 1 1 -0.01 0 Z"/>
+</clipPath>
+<linearGradient id="lg" x1="0" y1="0" x2="230" y2="130" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#e33"/><stop offset="0.5" stop-color="#fb0"/><stop offset="1" stop-color="#36c"/>
+</linearGradient>
+</defs>
+<g clip-path="url(#star)">
+<rect x="0" y="0" width="115" height="130" fill="url(#lg)"/>
+<circle cx="40" cy="40" r="28" fill="#2a4"/>
+<circle cx="75" cy="75" r="30" fill="#c3c"/>
+</g>
+<g clip-path="url(#donut)">
+<rect x="110" y="0" width="120" height="130" fill="url(#lg)"/>
+<circle cx="150" cy="50" r="35" fill="#0aa"/>
+<circle cx="195" cy="85" r="35" fill="#f80"/>
+</g>
+</svg>

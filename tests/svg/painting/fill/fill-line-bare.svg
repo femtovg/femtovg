@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="200" viewBox="0 0 200 200">
+  <!--
+    Cross-checks: PR #360 (Closes #341: "Fill nothing for a contour whose points lie on one line")
+    W3C Test: svg/import/shapes-line-02-f-manual.svg ("The 'fill' attribute has no effect on the 'line' element")
+    Spec: SVG 2 § 9.5 ("The 'line' element") & § 13.4.2 ("The 'fill' property")
+    Invariant: An SVG <line> element has zero enclosed area. Filling a <line> element
+               (whether with explicit fill="red" or default fill="black", with stroke="none")
+               must produce zero inked pixels.
+               Test passes if the canvas remains 100% blank white (zero red pixels).
+  -->
+  <html:link rel="match" href="fill-line-bare-ref.svg"/>
+
+  <!-- Canvas background: white -->
+  <rect width="200" height="200" fill="#FFFFFF"/>
+
+  <!-- Horizontal bare line -->
+  <line x1="20" y1="50" x2="180" y2="50" fill="#FF0000" stroke="none"/>
+
+  <!-- Vertical bare line -->
+  <line x1="100" y1="20" x2="100" y2="180" fill="#FF0000" stroke="none"/>
+
+  <!-- Diagonal bare line -->
+  <line x1="20" y1="20" x2="180" y2="180" fill="#FF0000" stroke="none"/>
+
+  <!-- Rotated bare line -->
+  <line x1="40" y1="100" x2="160" y2="100" fill="#FF0000" stroke="none" transform="rotate(35 100 100)"/>
+
+  <!-- Default fill (black in SVG, no stroke specified) -->
+  <line x1="20" y1="120" x2="180" y2="120"/>
+</svg>

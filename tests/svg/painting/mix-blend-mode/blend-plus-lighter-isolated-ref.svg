@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="250" viewBox="0 0 200 250">
+  <!-- Reference for blend-plus-lighter-isolated.svg -->
+  <g style="isolation: isolate;">
+    <!-- Base rectangles at opacity 0.6 -->
+    <rect opacity="0.6" x="10" y="10" width="100" height="100" fill="#000064"/>
+    <rect opacity="0.6" x="30" y="65" width="100" height="100" fill="#000064"/>
+    <rect opacity="0.6" x="50" y="120" width="100" height="100" fill="#006400"/>
+
+    <!-- Pre-computed additive intersection rectangles -->
+    <rect x="30" y="65" width="80" height="45" fill="#000078"/>
+    <rect x="50" y="120" width="80" height="45" fill="#003C3C"/>
+  </g>
+</svg>

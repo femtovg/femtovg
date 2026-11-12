@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="200" height="250" viewBox="0 0 200 250">
+  <!--
+    WPT Test: css/compositing/mix-blend-mode/mix-blend-mode-plus-lighter-svg-basic.html
+    Spec: https://drafts.fxtf.org/compositing-2/#mix-blend-mode
+    Invariant: Tests mix-blend-mode: plus-lighter (additive blending) on SVG rects within
+               an isolated group. Opacity 0.6 layers add their color contributions in intersection
+               regions without exceeding isolated backdrop bounds.
+               - Layer 1: #000064 at (10,10,100,100)
+               - Layer 2: #000064 at (30,65,100,100) -> Overlap 1: #000078
+               - Layer 3: #006400 at (50,120,100,100) -> Overlap 2: #003C3C
+  -->
+  <html:link rel="match" href="blend-plus-lighter-isolated-ref.svg"/>
+  <style>
+    .layer {
+      opacity: 0.6;
+      mix-blend-mode: plus-lighter;
+    }
+  </style>
+
+  <g style="isolation: isolate;">
+    <rect class="layer" x="10" y="10" width="100" height="100" fill="#000064"/>
+    <rect class="layer" x="30" y="65" width="100" height="100" fill="#000064"/>
+    <rect class="layer" x="50" y="120" width="100" height="100" fill="#006400"/>
+  </g>
+</svg>
