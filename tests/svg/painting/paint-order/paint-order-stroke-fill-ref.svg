@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+  <!--
+    Reference for paint-order-stroke-fill.svg: each stroke and then its fill, drawn as separate elements. The second
+    shape gets its opacity from the element instead of the paint, and its hole from a reversed inner square under the
+    nonzero rule instead of evenodd.
+  -->
+  <rect width="100" height="100" fill="white"/>
+  <rect x="10" y="10" width="30" height="30" fill="none" stroke="blue" stroke-width="10"/>
+  <rect x="10" y="10" width="30" height="30" fill="red"/>
+  <path d="M 55 55 H 90 V 90 H 55 Z M 65 65 H 80 V 80 H 65 Z" fill="none" stroke="blue" stroke-width="6"
+        opacity="0.4"/>
+  <path d="M 55 55 H 90 V 90 H 55 Z M 65 65 V 80 H 80 V 65 Z" fill="green" opacity="0.7"/>
+</svg>

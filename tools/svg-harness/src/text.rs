@@ -140,7 +140,7 @@ impl Painter {
                 .collect();
             self.draw_nodes(canvas, &lines);
             for (mut paint, alpha, stroked) in
-                self.span_passes(span.fill.as_ref(), span.stroke.as_ref(), span.paint_order)
+                self.paint_passes(span.fill.as_ref(), span.stroke.as_ref(), span.paint_order)
             {
                 canvas.save();
                 self.set_node_transform(canvas, transform);
@@ -330,7 +330,9 @@ impl Painter {
                 size: span.font_size().get(),
                 letter_spacing: span.letter_spacing(),
                 faces,
-                passes: self.span_passes(span.fill(), span.stroke(), span.paint_order()),
+                passes: self
+                    .paint_passes(span.fill(), span.stroke(), span.paint_order())
+                    .collect(),
             });
         }
         let transform = text.abs_transform();
