@@ -71,6 +71,42 @@ pub fn ts_to_t2d(t: usvg::Transform) -> Transform2D {
     Transform2D([t.sx, t.ky, t.kx, t.sy, t.tx, t.ty])
 }
 
+/// The path's geometry with `ts` applied to its points, or `None` when the path is hidden. A hidden path is neither
+/// painted nor part of a clip.
+pub fn to_path(svg_path: &usvg::Path, ts: usvg::Transform) -> Option<Path> {
+    use usvg::tiny_skia_path::{PathSegment, Point};
+    if !svg_path.is_visible() {
+        return None;
+    }
+    let map = |mut p: Point| {
+        ts.map_point(&mut p);
+        p
+    };
+    let mut path = Path::new();
+    for seg in svg_path.data().segments() {
+        match seg {
+            PathSegment::MoveTo(p) => {
+                let p = map(p);
+                path.move_to(p.x, p.y);
+            }
+            PathSegment::LineTo(p) => {
+                let p = map(p);
+                path.line_to(p.x, p.y);
+            }
+            PathSegment::CubicTo(a, b, p) => {
+                let (a, b, p) = (map(a), map(b), map(p));
+                path.bezier_to(a.x, a.y, b.x, b.y, p.x, p.y);
+            }
+            PathSegment::QuadTo(a, p) => {
+                let (a, p) = (map(a), map(p));
+                path.quad_to(a.x, a.y, p.x, p.y);
+            }
+            PathSegment::Close => path.close(),
+        }
+    }
+    Some(path)
+}
+
 /// A usvg group's identity for the maps of precaptured images.
 pub fn key(group: &usvg::Group) -> usize {
     group as *const usvg::Group as usize
@@ -258,6 +294,8 @@ impl Painter {
                 self.precapture_masks(canvas, mask.root().children(), at);
                 // Mask content lives in the referencing group's user space.
                 let image = self.capture(canvas, Some(at), |painter, canvas| {
+                    let region = mask.rect();
+                    canvas.intersect_scissor(region.x(), region.y(), region.width(), region.height());
                     painter.draw_nodes(canvas, mask.root().children())
                 });
                 if let Some(image) = image {
@@ -749,17 +787,9 @@ impl Painter {
     }
 
     fn draw_path(&mut self, canvas: &mut Canvas, svg_path: &usvg::Path) {
-        use usvg::tiny_skia_path::PathSegment;
-        let mut path = Path::new();
-        for seg in svg_path.data().segments() {
-            match seg {
-                PathSegment::MoveTo(p) => path.move_to(p.x, p.y),
-                PathSegment::LineTo(p) => path.line_to(p.x, p.y),
-                PathSegment::CubicTo(a, b, p) => path.bezier_to(a.x, a.y, b.x, b.y, p.x, p.y),
-                PathSegment::QuadTo(a, p) => path.quad_to(a.x, a.y, p.x, p.y),
-                PathSegment::Close => path.close(),
-            }
-        }
+        let Some(path) = to_path(svg_path, usvg::Transform::identity()) else {
+            return;
+        };
         canvas.save();
         self.set_node_transform(canvas, svg_path.abs_transform());
         for (paint, alpha, stroked) in self.paint_passes(svg_path.fill(), svg_path.stroke(), svg_path.paint_order()) {

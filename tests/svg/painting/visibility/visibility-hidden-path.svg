@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:html="http://www.w3.org/1999/xhtml" width="100" height="100" viewBox="0 0 100 100">
+  <!--
+    Spec: SVG 2 § 3.2.3 ("Controlling visibility: the effect of the 'display' and 'visibility' properties")
+    Invariant: A path with visibility="hidden" draws neither its fill nor its stroke. A child that sets
+               visibility="visible" inside a hidden group is drawn.
+  -->
+  <html:link rel="match" href="visibility-hidden-path-ref.svg"/>
+  <rect width="100" height="100" fill="white"/>
+  <rect x="10" y="10" width="80" height="80" fill="red" stroke="red" stroke-width="10" visibility="hidden"/>
+  <g visibility="hidden">
+    <rect x="30" y="30" width="40" height="40" fill="green" visibility="visible"/>
+  </g>
+</svg>
