@@ -353,6 +353,13 @@ pub trait Renderer {
     /// Allocate a new image with the specified image info.
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind>;
 
+    /// Allocate a new image already holding `data`, which covers the whole image and matches its
+    /// format, or return `None` to have the caller allocate it and then update it, which is the
+    /// default. Renderers override it only to save that second upload.
+    fn alloc_image_with(&mut self, _info: ImageInfo, _data: ImageSource) -> Result<Option<Self::Image>, ErrorKind> {
+        Ok(None)
+    }
+
     /// Create a new image from a native texture.
     fn create_image_from_native_texture(
         &mut self,

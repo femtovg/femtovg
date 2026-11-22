@@ -8,7 +8,7 @@ use glutin::display::GlDisplay;
 
 use fnv::FnvHashMap;
 use imgref::ImgVec;
-use rgb::RGBA8;
+use rgb::{ComponentBytes, RGBA8};
 
 use crate::{
     renderer::{GlyphTexture, ImageId, Vertex},
@@ -1561,6 +1561,22 @@ impl Renderer for OpenGl {
 
     fn alloc_image(&mut self, info: ImageInfo) -> Result<Self::Image, ErrorKind> {
         Self::Image::new(&self.context, info, self.is_opengles_2_0)
+    }
+
+    fn alloc_image_with(&mut self, info: ImageInfo, data: ImageSource) -> Result<Option<Self::Image>, ErrorKind> {
+        // Only a source of the image's size with rows packed one after another, as the texture
+        // reads them; anything else is uploaded into a zeroed texture as before.
+        let size = data.dimensions();
+        if (size.width, size.height) != (info.width(), info.height()) {
+            return Ok(None);
+        }
+        let bytes: &[u8] = match data {
+            ImageSource::Rgba(data) if data.stride() == data.width() => data.buf().as_bytes(),
+            ImageSource::Rgb(data) if data.stride() == data.width() => data.buf().as_bytes(),
+            ImageSource::Gray(data) if data.stride() == data.width() => data.buf().as_bytes(),
+            _ => return Ok(None),
+        };
+        Self::Image::new_with(&self.context, info, self.is_opengles_2_0, Some(bytes)).map(Some)
     }
 
     fn create_image_from_native_texture(

@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `Canvas::create_image` creates the texture with the image's pixels instead of
+  zero-filling it and uploading the pixels again (OpenGL backend).
 - `Canvas::draw_glyph_commands`: the images of `GlyphDrawCommands::color_glyphs`
   must now hold premultiplied alpha, and are drawn with the paint's opacity.
   A custom rasterizer that uploads straight alpha gets dark edges.
