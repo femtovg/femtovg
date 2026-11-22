@@ -975,9 +975,10 @@ where
     ) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
-        let id = self.create_image_empty(size.width, size.height, src.format(), flags)?;
-        self.images.update(&mut self.renderer, id, src, 0, 0)?;
-        Ok(id)
+        // The texture is created with the pixels rather than zeroed and then filled, which
+        // saves an upload and a zeroed buffer as large as the image.
+        let info = ImageInfo::new(flags, size.width, size.height, src.format());
+        self.images.alloc_from(&mut self.renderer, info, src)
     }
 
     /// Returns the native texture of an image given its ID.

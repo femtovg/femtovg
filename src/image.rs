@@ -260,6 +260,25 @@ impl<T> ImageStore<T> {
         Ok(ImageId(self.0.insert((info, image))))
     }
 
+    /// [`Self::alloc`] with the image holding `data`, which covers the whole image.
+    pub fn alloc_from<R: Renderer<Image = T>>(
+        &mut self,
+        renderer: &mut R,
+        info: ImageInfo,
+        data: ImageSource,
+    ) -> Result<ImageId, ErrorKind> {
+        data.check_update(&info, 0, 0)?;
+        if let Some(image) = renderer.alloc_image_with(info, data)? {
+            return Ok(ImageId(self.0.insert((info, image))));
+        }
+        let id = self.alloc(renderer, info)?;
+        if let Err(err) = self.update(renderer, id, data, 0, 0) {
+            self.remove(renderer, id);
+            return Err(err);
+        }
+        Ok(id)
+    }
+
     pub fn register_native_texture<R: Renderer<Image = T>>(
         &mut self,
         renderer: &mut R,
@@ -1182,5 +1201,87 @@ mod filter_fold_tests {
         let blur = ImageFilter::gaussian_blur(2.0);
         assert!(blur.fold_with(ImageFilter::sepia(1.0)).is_none());
         assert!(ImageFilter::sepia(1.0).fold_with(blur).is_none());
+    }
+}
+
+#[cfg(test)]
+mod alloc_from_tests {
+    use imgref::ImgVec;
+    use rgb::RGBA8;
+
+    use super::{ImageFlags, ImageId, ImageInfo, ImageSource, ImageStore, PixelFormat};
+    use crate::renderer::{Command, Renderer, Vertex};
+    use crate::ErrorKind;
+
+    /// Allocates, then fails every update, and counts the images it is asked to delete.
+    #[derive(Default)]
+    struct FailingUpdate {
+        deleted: usize,
+    }
+
+    impl Renderer for FailingUpdate {
+        type Image = ();
+        type NativeTexture = ();
+        type ExternalTexture = ();
+        type RenderOutput = ();
+        type CommandBuffer = ();
+
+        fn set_size(&mut self, _width: u32, _height: u32, _dpi: f32) {}
+
+        fn render(
+            &mut self,
+            _output: impl Into<Self::RenderOutput>,
+            _images: &mut ImageStore<()>,
+            _verts: &[Vertex],
+            _commands: Vec<Command>,
+        ) {
+        }
+
+        fn alloc_image(&mut self, _info: ImageInfo) -> Result<(), ErrorKind> {
+            Ok(())
+        }
+
+        fn create_image_from_native_texture(&mut self, _texture: (), _info: ImageInfo) -> Result<(), ErrorKind> {
+            Err(ErrorKind::UnsupportedImageFormat)
+        }
+
+        fn create_image_from_external_texture(&mut self, _texture: (), _info: ImageInfo) -> Result<(), ErrorKind> {
+            Err(ErrorKind::UnsupportedImageFormat)
+        }
+
+        fn update_image(&mut self, _image: &mut (), _data: ImageSource, _x: usize, _y: usize) -> Result<(), ErrorKind> {
+            Err(ErrorKind::UnsupportedImageFormat)
+        }
+
+        fn delete_image(&mut self, _image: (), _id: ImageId) {
+            self.deleted += 1;
+        }
+
+        fn screenshot(&mut self) -> Result<ImgVec<RGBA8>, ErrorKind> {
+            Ok(ImgVec::new(Vec::new(), 0, 0))
+        }
+    }
+
+    #[test]
+    fn a_failed_update_deletes_the_new_image() {
+        let mut renderer = FailingUpdate::default();
+        let mut store = ImageStore::new();
+        let pixels = vec![RGBA8::new(1, 2, 3, 4); 4];
+        let info = ImageInfo::new(ImageFlags::empty(), 2, 2, PixelFormat::Rgba8);
+        let result = store.alloc_from(&mut renderer, info, imgref::Img::new(pixels.as_slice(), 2, 2).into());
+        assert!(matches!(result, Err(ErrorKind::UnsupportedImageFormat)));
+        assert_eq!(renderer.deleted, 1);
+        assert_eq!(store.0.len(), 0);
+    }
+
+    #[test]
+    fn a_source_that_does_not_fit_allocates_nothing() {
+        let mut renderer = FailingUpdate::default();
+        let mut store = ImageStore::new();
+        let pixels = vec![RGBA8::new(1, 2, 3, 4); 6];
+        let info = ImageInfo::new(ImageFlags::empty(), 2, 2, PixelFormat::Rgba8);
+        let result = store.alloc_from(&mut renderer, info, imgref::Img::new(pixels.as_slice(), 3, 2).into());
+        assert!(matches!(result, Err(ErrorKind::ImageUpdateOutOfBounds)));
+        assert_eq!(store.0.len(), 0);
     }
 }

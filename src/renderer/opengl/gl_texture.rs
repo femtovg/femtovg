@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
 use glow::HasContext;
 
@@ -26,6 +26,16 @@ impl GlTexture {
         }
     }
     pub fn new(context: &Rc<glow::Context>, info: ImageInfo, opengles_2_0: bool) -> Result<Self, ErrorKind> {
+        Self::new_with(context, info, opengles_2_0, None)
+    }
+
+    /// [`Self::new`] holding `pixels`, the whole image in its format, instead of zeros.
+    pub fn new_with(
+        context: &Rc<glow::Context>,
+        info: ImageInfo,
+        opengles_2_0: bool,
+        pixels: Option<&[u8]>,
+    ) -> Result<Self, ErrorKind> {
         //let size = src.dimensions();
 
         let id = unsafe {
@@ -59,7 +69,10 @@ impl GlTexture {
             PixelFormat::Rgb8 => 3,
             PixelFormat::Rgba8 => 4,
         };
-        let zeroed = vec![0u8; info.width() * info.height() * bytes_per_pixel];
+        let pixels: Cow<[u8]> = match pixels {
+            Some(pixels) => pixels.into(),
+            None => vec![0u8; info.width() * info.height() * bytes_per_pixel].into(),
+        };
 
         match info.format() {
             PixelFormat::Gray8 => unsafe {
@@ -75,7 +88,7 @@ impl GlTexture {
                     0,
                     format,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(&zeroed)),
+                    glow::PixelUnpackData::Slice(Some(&pixels)),
                 );
             },
             PixelFormat::Rgb8 => unsafe {
@@ -88,7 +101,7 @@ impl GlTexture {
                     0,
                     glow::RGB,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(&zeroed)),
+                    glow::PixelUnpackData::Slice(Some(&pixels)),
                 );
             },
             PixelFormat::Rgba8 => unsafe {
@@ -101,7 +114,7 @@ impl GlTexture {
                     0,
                     glow::RGBA,
                     glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(&zeroed)),
+                    glow::PixelUnpackData::Slice(Some(&pixels)),
                 );
             },
         }
