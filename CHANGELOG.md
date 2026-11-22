@@ -5,14 +5,19 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- `Canvas::create_image` creates the texture with the image's pixels instead of
-  zero-filling it and uploading the pixels again (OpenGL backend).
+- `Canvas::create_image` on OpenGL uploads the pixels once instead of twice and no
+  longer allocates a zeroed buffer as large as the image, which lowers peak memory.
+  A strided source (such as `ImgRef::sub_image`) is still uploaded twice.
 - `Canvas::draw_glyph_commands`: the images of `GlyphDrawCommands::color_glyphs`
   must now hold premultiplied alpha, and are drawn with the paint's opacity.
   A custom rasterizer that uploads straight alpha gets dark edges.
 
 ### Fixed
 
+- OpenGL: `Canvas::create_image` and `Canvas::update_image` upload a strided
+  source (such as `ImgRef::sub_image`) correctly; its rows were read the image's
+  width apart instead of the stride apart, which skewed the image.
+- A `Canvas::create_image` that fails after allocating no longer leaks the image.
 - Complex-script text shaping: the shaped glyph output is no longer truncated
   when a font emits more glyphs than the input has chars (mark-splitting faces
   such as Noto Sans Arabic) — the dropped tail is an RTL word's first letters,

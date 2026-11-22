@@ -975,8 +975,7 @@ where
     ) -> Result<ImageId, ErrorKind> {
         let src = src.into();
         let size = src.dimensions();
-        // The texture is created with the pixels rather than zeroed and then filled, which
-        // saves an upload and a zeroed buffer as large as the image.
+        // Renderers that override `alloc_image_with` create the texture with the pixels, saving an upload.
         let info = ImageInfo::new(flags, size.width, size.height, src.format());
         self.images.alloc_from(&mut self.renderer, info, src)
     }

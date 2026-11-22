@@ -260,7 +260,8 @@ impl<T> ImageStore<T> {
         Ok(ImageId(self.0.insert((info, image))))
     }
 
-    /// [`Self::alloc`] with the image holding `data`, which covers the whole image.
+    /// [`Self::alloc`] followed by [`Self::update`] with `data` at the top left. If either fails,
+    /// no image is left in the store.
     pub fn alloc_from<R: Renderer<Image = T>>(
         &mut self,
         renderer: &mut R,
@@ -268,8 +269,10 @@ impl<T> ImageStore<T> {
         data: ImageSource,
     ) -> Result<ImageId, ErrorKind> {
         data.check_update(&info, 0, 0)?;
-        if let Some(image) = renderer.alloc_image_with(info, data)? {
-            return Ok(ImageId(self.0.insert((info, image))));
+        if data.dimensions() == info.size() {
+            if let Some(image) = renderer.alloc_image_with(info, data)? {
+                return Ok(ImageId(self.0.insert((info, image))));
+            }
         }
         let id = self.alloc(renderer, info)?;
         if let Err(err) = self.update(renderer, id, data, 0, 0) {
@@ -1213,13 +1216,18 @@ mod alloc_from_tests {
     use crate::renderer::{Command, Renderer, Vertex};
     use crate::ErrorKind;
 
-    /// Allocates, then fails every update, and counts the images it is asked to delete.
+    /// Records what `alloc_from` asks of it. `alloc_image_with` makes the image when `with` is set;
+    /// updates fail when `fail_updates` is set.
     #[derive(Default)]
-    struct FailingUpdate {
+    struct Recorder {
+        with: bool,
+        fail_updates: bool,
+        alloc_with_calls: usize,
+        updates: Vec<(usize, usize)>,
         deleted: usize,
     }
 
-    impl Renderer for FailingUpdate {
+    impl Renderer for Recorder {
         type Image = ();
         type NativeTexture = ();
         type ExternalTexture = ();
@@ -1241,6 +1249,11 @@ mod alloc_from_tests {
             Ok(())
         }
 
+        fn alloc_image_with(&mut self, _info: ImageInfo, _data: ImageSource) -> Result<Option<()>, ErrorKind> {
+            self.alloc_with_calls += 1;
+            Ok(self.with.then_some(()))
+        }
+
         fn create_image_from_native_texture(&mut self, _texture: (), _info: ImageInfo) -> Result<(), ErrorKind> {
             Err(ErrorKind::UnsupportedImageFormat)
         }
@@ -1249,8 +1262,12 @@ mod alloc_from_tests {
             Err(ErrorKind::UnsupportedImageFormat)
         }
 
-        fn update_image(&mut self, _image: &mut (), _data: ImageSource, _x: usize, _y: usize) -> Result<(), ErrorKind> {
-            Err(ErrorKind::UnsupportedImageFormat)
+        fn update_image(&mut self, _image: &mut (), _data: ImageSource, x: usize, y: usize) -> Result<(), ErrorKind> {
+            self.updates.push((x, y));
+            if self.fail_updates {
+                return Err(ErrorKind::UnsupportedImageFormat);
+            }
+            Ok(())
         }
 
         fn delete_image(&mut self, _image: (), _id: ImageId) {
@@ -1262,13 +1279,25 @@ mod alloc_from_tests {
         }
     }
 
+    fn alloc(
+        renderer: &mut Recorder,
+        store: &mut ImageStore<()>,
+        size: usize,
+        src: usize,
+    ) -> Result<ImageId, ErrorKind> {
+        let pixels = vec![RGBA8::new(1, 2, 3, 4); src * src];
+        let info = ImageInfo::new(ImageFlags::empty(), size, size, PixelFormat::Rgba8);
+        store.alloc_from(renderer, info, imgref::Img::new(pixels.as_slice(), src, src).into())
+    }
+
     #[test]
     fn a_failed_update_deletes_the_new_image() {
-        let mut renderer = FailingUpdate::default();
+        let mut renderer = Recorder {
+            fail_updates: true,
+            ..Default::default()
+        };
         let mut store = ImageStore::new();
-        let pixels = vec![RGBA8::new(1, 2, 3, 4); 4];
-        let info = ImageInfo::new(ImageFlags::empty(), 2, 2, PixelFormat::Rgba8);
-        let result = store.alloc_from(&mut renderer, info, imgref::Img::new(pixels.as_slice(), 2, 2).into());
+        let result = alloc(&mut renderer, &mut store, 2, 2);
         assert!(matches!(result, Err(ErrorKind::UnsupportedImageFormat)));
         assert_eq!(renderer.deleted, 1);
         assert_eq!(store.0.len(), 0);
@@ -1276,12 +1305,35 @@ mod alloc_from_tests {
 
     #[test]
     fn a_source_that_does_not_fit_allocates_nothing() {
-        let mut renderer = FailingUpdate::default();
+        let mut renderer = Recorder::default();
         let mut store = ImageStore::new();
-        let pixels = vec![RGBA8::new(1, 2, 3, 4); 6];
-        let info = ImageInfo::new(ImageFlags::empty(), 2, 2, PixelFormat::Rgba8);
-        let result = store.alloc_from(&mut renderer, info, imgref::Img::new(pixels.as_slice(), 3, 2).into());
+        let result = alloc(&mut renderer, &mut store, 2, 3);
         assert!(matches!(result, Err(ErrorKind::ImageUpdateOutOfBounds)));
         assert_eq!(store.0.len(), 0);
+    }
+
+    #[test]
+    fn a_whole_image_source_is_handed_to_alloc_image_with() {
+        let mut renderer = Recorder {
+            with: true,
+            ..Default::default()
+        };
+        let mut store = ImageStore::new();
+        alloc(&mut renderer, &mut store, 2, 2).expect("alloc_from");
+        assert_eq!(renderer.alloc_with_calls, 1);
+        assert_eq!(renderer.updates, []);
+    }
+
+    #[test]
+    fn a_smaller_source_is_not_handed_to_alloc_image_with() {
+        let mut renderer = Recorder {
+            with: true,
+            ..Default::default()
+        };
+        let mut store = ImageStore::new();
+        alloc(&mut renderer, &mut store, 4, 2).expect("alloc_from");
+        assert_eq!(renderer.alloc_with_calls, 0);
+        assert_eq!(renderer.updates, [(0, 0)]);
+        assert_eq!(store.0.len(), 1);
     }
 }
