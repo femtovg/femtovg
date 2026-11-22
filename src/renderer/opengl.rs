@@ -1564,12 +1564,8 @@ impl Renderer for OpenGl {
     }
 
     fn alloc_image_with(&mut self, info: ImageInfo, data: ImageSource) -> Result<Option<Self::Image>, ErrorKind> {
-        // Only a source of the image's size with rows packed one after another, as the texture
-        // reads them; anything else is uploaded into a zeroed texture as before.
-        let size = data.dimensions();
-        if (size.width, size.height) != (info.width(), info.height()) {
-            return Ok(None);
-        }
+        // Only a source with rows packed one after another, as the texture reads them; for anything
+        // else the caller allocates a zeroed texture and updates it.
         let bytes: &[u8] = match data {
             ImageSource::Rgba(data) if data.stride() == data.width() => data.buf().as_bytes(),
             ImageSource::Rgb(data) if data.stride() == data.width() => data.buf().as_bytes(),

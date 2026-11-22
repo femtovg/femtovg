@@ -214,60 +214,20 @@ impl GlTexture {
         y: usize,
         opengles_2_0: bool,
     ) -> Result<(), ErrorKind> {
-        let size = src.dimensions();
-
         src.check_update(&self.info, x, y)?;
 
         unsafe {
             context.bind_texture(glow::TEXTURE_2D, Some(self.id));
             context.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-            if !opengles_2_0 {
-                context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, size.width as i32);
-            }
         }
 
         match src {
-            ImageSource::Gray(data) => unsafe {
+            ImageSource::Gray(data) => {
                 let format = if opengles_2_0 { glow::LUMINANCE } else { glow::RED };
-
-                context.tex_sub_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.width as i32,
-                    size.height as i32,
-                    format,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
-                );
-            },
-            ImageSource::Rgb(data) => unsafe {
-                context.tex_sub_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.width as i32,
-                    size.height as i32,
-                    glow::RGB,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
-                );
-            },
-            ImageSource::Rgba(data) => unsafe {
-                context.tex_sub_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    x as i32,
-                    y as i32,
-                    size.width as i32,
-                    size.height as i32,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(Some(data.buf().align_to().1)),
-                );
-            },
+                upload_rows(context, data, x, y, format, opengles_2_0);
+            }
+            ImageSource::Rgb(data) => upload_rows(context, data, x, y, glow::RGB, opengles_2_0),
+            ImageSource::Rgba(data) => upload_rows(context, data, x, y, glow::RGBA, opengles_2_0),
             #[cfg(wasm_unknown)]
             ImageSource::HtmlImageElement(image_element) => unsafe {
                 context.tex_sub_image_2d_with_html_image(
@@ -329,5 +289,39 @@ impl GlTexture {
 
     pub fn info(&self) -> ImageInfo {
         self.info
+    }
+}
+
+/// Uploads `data` into the bound texture at `x`, `y`, reading rows `data.stride()` pixels apart. The
+/// GLES 2.0 path (also taken on WebGL) sets no `UNPACK_ROW_LENGTH`, so there a strided source is
+/// packed first.
+fn upload_rows<T: Copy>(
+    context: &glow::Context,
+    data: imgref::ImgRef<T>,
+    x: usize,
+    y: usize,
+    format: u32,
+    opengles_2_0: bool,
+) {
+    let pixels = if opengles_2_0 && data.stride() != data.width() {
+        Cow::Owned(data.pixels().collect())
+    } else {
+        Cow::Borrowed(*data.buf())
+    };
+    unsafe {
+        if !opengles_2_0 {
+            context.pixel_store_i32(glow::UNPACK_ROW_LENGTH, data.stride() as i32);
+        }
+        context.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            x as i32,
+            y as i32,
+            data.width() as i32,
+            data.height() as i32,
+            format,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(pixels.align_to().1)),
+        );
     }
 }
