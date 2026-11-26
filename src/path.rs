@@ -205,15 +205,10 @@ impl Path {
             return self.clone();
         }
 
-        let contours = self.flattened_contours(tess_tol, self.dist_tol);
         let mut dashed = Self::new();
         dashed.dist_tol = self.dist_tol;
 
-        for contour in contours {
-            if contour.points.len() < 2 {
-                continue;
-            }
-
+        self.for_each_flattened_contour(tess_tol, self.dist_tol, |contour| {
             let mut cursor = DashCursor::new(&dash, offset);
             for segment in contour.points.windows(2) {
                 dash_line_segment(&mut dashed, segment[0], segment[1], &mut cursor, self.dist_tol);
@@ -228,30 +223,28 @@ impl Path {
                     self.dist_tol,
                 );
             }
-        }
+        });
 
         dashed
     }
 
-    fn flattened_contours(&self, tess_tol: f32, dist_tol: f32) -> Vec<FlattenedContour> {
-        let mut contours = Vec::new();
+    fn for_each_flattened_contour(&self, tess_tol: f32, dist_tol: f32, mut visit: impl FnMut(&FlattenedContour)) {
         let mut current = FlattenedContour::default();
         let mut current_pos = Position::default();
         let mut first_pos = None;
 
-        let finish_current = |contours: &mut Vec<FlattenedContour>, current: &mut FlattenedContour| {
+        let mut finish_current = |current: &mut FlattenedContour| {
             if current.points.len() >= 2 {
-                contours.push(std::mem::take(current));
-            } else {
-                current.points.clear();
-                current.closed = false;
+                visit(current);
             }
+            current.points.clear();
+            current.closed = false;
         };
 
         for verb in self.verbs() {
             match verb {
                 Verb::MoveTo(x, y) => {
-                    finish_current(&mut contours, &mut current);
+                    finish_current(&mut current);
                     current_pos = Position { x, y };
                     first_pos = Some(current_pos);
                     current.points.push(current_pos);
@@ -284,8 +277,7 @@ impl Path {
             }
         }
 
-        finish_current(&mut contours, &mut current);
-        contours
+        finish_current(&mut current);
     }
 
     // Path funcs
