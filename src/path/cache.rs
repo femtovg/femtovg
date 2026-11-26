@@ -174,6 +174,35 @@ impl Contour {
         points.iter().all(|p| (p.pos - origin).cross(axis).abs() <= 1.0 / 256.0)
     }
 
+    fn bounds(&self, points: &[Point]) -> Bounds {
+        let mut b = Bounds::default();
+        if !self.degenerate {
+            for p in &points[self.point_range.clone()] {
+                b.minx = b.minx.min(p.pos.x);
+                b.maxx = b.maxx.max(p.pos.x);
+                b.miny = b.miny.min(p.pos.y);
+                b.maxy = b.maxy.max(p.pos.y);
+            }
+        }
+        b
+    }
+
+    fn crossings_at<'a>(edges: impl Iterator<Item = (&'a Point, &'a Point)>, x: f32, y: f32) -> (i32, u32) {
+        let (mut winding, mut crossings) = (0, 0);
+        for (p0, p1) in edges {
+            if p0.pos.y <= y {
+                if p1.pos.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
+                    winding += 1;
+                    crossings += 1;
+                }
+            } else if p1.pos.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
+                winding -= 1;
+                crossings += 1;
+            }
+        }
+        (winding, crossings)
+    }
+
     fn point_count(&self) -> usize {
         self.point_range.end - self.point_range.start
     }
@@ -823,64 +852,141 @@ impl PathCache {
     /// of each contour's first edge, plus the contour's own orientation sign,
     /// computed once per cache. A contour whose box misses the sample point
     /// cannot wind around it (its crossings of the ray cancel), so only
-    /// overlapping boxes are walked: near-linear for the usual
-    /// many-disjoint-contours path. A degenerate contour draws nothing, so
-    /// it gets an empty box and counts nowhere: a sliver within the band
+    /// samples inside the box can contribute. A degenerate contour draws
+    /// nothing and counts nowhere: a sliver within the band
     /// could otherwise wind once around a sample point on its line and turn
     /// the contour that owns the point inside out.
     fn contour_sides(&mut self) -> &[(i32, u32, i32)] {
         if self.contour_sides.is_none() {
-            let n = self.contours.len();
-            let boxes: Vec<Bounds> = self
-                .contours
-                .iter()
-                .map(|contour| {
-                    let mut b = Bounds::default();
-                    if contour.degenerate {
-                        return b;
-                    }
-                    for point in &self.points[contour.point_range.clone()] {
-                        b.minx = b.minx.min(point.pos.x);
-                        b.miny = b.miny.min(point.pos.y);
-                        b.maxx = b.maxx.max(point.pos.x);
-                        b.maxy = b.maxy.max(point.pos.y);
-                    }
-                    b
-                })
-                .collect();
-            let sides = (0..n)
-                .map(|i| {
-                    let points = &self.points[self.contours[i].point_range.clone()];
-                    if n < 2 || points.len() < 3 {
-                        return (0, 0, 0);
-                    }
-                    let (a, b) = (points[0].pos, points[1].pos);
-                    let (x, y) = ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
-                    // `is_left` winds the orientation `polygon_area` calls positive as -1.
-                    let own = if Contour::polygon_area(points) > 0.0 { -1 } else { 1 };
-                    let (mut winding, mut crossings) = (0i32, 0u32);
-                    for (j, contour) in self.contours.iter().enumerate() {
-                        if j == i || !boxes[j].contains(x, y) {
-                            continue;
-                        }
-                        for (p0, p1) in contour.point_pairs(&self.points) {
-                            if p0.pos.y <= y {
-                                if p1.pos.y > y && Point::is_left(p0, p1, x, y) > 0.0 {
-                                    winding += 1;
-                                    crossings += 1;
-                                }
-                            } else if p1.pos.y <= y && Point::is_left(p0, p1, x, y) < 0.0 {
-                                winding -= 1;
-                                crossings += 1;
-                            }
-                        }
-                    }
-                    (winding, crossings, own)
-                })
-                .collect();
-            self.contour_sides = Some(sides);
+            let boxes: Vec<_> = self.contours.iter().map(|c| c.bounds(&self.points)).collect();
+            // On small paths the direct scan costs less than building an index of the rays.
+            self.contour_sides = Some(if self.contours.len() <= 32 {
+                self.direct_contour_sides(&boxes)
+            } else {
+                self.indexed_contour_sides(&boxes)
+            });
         }
         self.contour_sides.as_deref().unwrap_or(&[])
+    }
+
+    fn direct_contour_sides(&self, boxes: &[Bounds]) -> Vec<(i32, u32, i32)> {
+        let n = self.contours.len();
+        (0..n)
+            .map(|i| {
+                let points = &self.points[self.contours[i].point_range.clone()];
+                if n < 2 || points.len() < 3 {
+                    return (0, 0, 0);
+                }
+                let (a, b) = (points[0].pos, points[1].pos);
+                let (x, y) = ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+                // `is_left` winds the orientation `polygon_area` calls positive as -1.
+                let own = if Contour::polygon_area(points) > 0.0 { -1 } else { 1 };
+                let (mut winding, mut crossings) = (0i32, 0u32);
+                for (j, contour) in self.contours.iter().enumerate() {
+                    if j == i || !boxes[j].contains(x, y) {
+                        continue;
+                    }
+                    let (w, c) = Contour::crossings_at(contour.point_pairs(&self.points), x, y);
+                    winding += w;
+                    crossings += c;
+                }
+                (winding, crossings, own)
+            })
+            .collect()
+    }
+
+    fn indexed_contour_sides(&self, boxes: &[Bounds]) -> Vec<(i32, u32, i32)> {
+        let mut sides = vec![(0, 0, 0); self.contours.len()];
+        let mut samples = Vec::with_capacity(self.contours.len());
+        for (i, contour) in self.contours.iter().enumerate() {
+            let points = &self.points[contour.point_range.clone()];
+            if points.len() < 3 {
+                continue;
+            }
+            let (a, b) = (points[0].pos, points[1].pos);
+            let (x, y) = ((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
+            sides[i].2 = if Contour::polygon_area(points) > 0.0 { -1 } else { 1 };
+            if !x.is_nan() && !y.is_nan() {
+                samples.push((y, x, i));
+            }
+        }
+        let extent = Bounds::from_points(samples.iter().map(|&(y, x, _)| (x, y)));
+        let by_x = extent.maxx - extent.minx > extent.maxy - extent.miny;
+        if by_x {
+            for (y, x, _) in &mut samples {
+                std::mem::swap(y, x);
+            }
+        }
+        samples.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
+
+        // If most boxes contain all ray origins, the spatial index cannot reject
+        // those pairs. Coincident origins can still share their winding test.
+        if samples.chunk_by(|a, b| a.0 == b.0 && a.1 == b.1).count() > samples.len() / 2
+            && boxes
+                .iter()
+                .filter(|b| b.contains(extent.minx, extent.miny) && b.contains(extent.maxx, extent.maxy))
+                .count()
+                > boxes.len() / 2
+        {
+            return self.direct_contour_sides(boxes);
+        }
+
+        // Adjacent coastline or glyph edges usually occupy a narrow band. A ray
+        // outside a block's vertical extent cannot cross any of its edges.
+        const EDGES_PER_BLOCK: usize = 32;
+        let mut blocks = Vec::new();
+        for (j, contour) in self.contours.iter().enumerate() {
+            if contour.degenerate {
+                continue;
+            }
+            let b = &boxes[j];
+            let (lo, hi) = if by_x { (b.minx, b.maxx) } else { (b.miny, b.maxy) };
+            let start = samples.partition_point(|s| s.0 < lo);
+            let end = start + samples[start..].partition_point(|s| s.0 <= hi);
+            let points = &self.points[contour.point_range.clone()];
+            blocks.clear();
+            if points.len() > EDGES_PER_BLOCK {
+                let mut previous = points.last().unwrap();
+                for block in points.chunks(EDGES_PER_BLOCK) {
+                    let mut low = previous.pos.y;
+                    let mut high = low;
+                    for point in block {
+                        low = low.min(point.pos.y);
+                        high = high.max(point.pos.y);
+                    }
+                    blocks.push((low, high, previous, block));
+                    previous = block.last().unwrap();
+                }
+            }
+            for group in samples[start..end].chunk_by(|a, b| a.0 == b.0 && a.1 == b.1) {
+                let (first, second, owner) = group[0];
+                let (x, y) = if by_x { (first, second) } else { (second, first) };
+                if !b.contains(x, y) || (group.len() == 1 && owner == j) {
+                    continue;
+                }
+                let (winding, crossings) = if blocks.is_empty() {
+                    Contour::crossings_at(contour.point_pairs(&self.points), x, y)
+                } else {
+                    let mut total = (0, 0);
+                    for &(low, high, previous, block) in &blocks {
+                        if low <= y && y < high {
+                            let edges = std::iter::once(previous).chain(block).zip(block);
+                            let (w, c) = Contour::crossings_at(edges, x, y);
+                            total.0 += w;
+                            total.1 += c;
+                        }
+                    }
+                    total
+                };
+                for &(_, _, i) in group {
+                    if i != j {
+                        sides[i].0 += winding;
+                        sides[i].1 += crossings;
+                    }
+                }
+            }
+        }
+        sides
     }
 
     /// For each contour, whether the region just inside it is unfilled under
@@ -1479,6 +1585,37 @@ mod tests {
     thread_local! {
         /// The pieces `tesselate_bezier` has examined on this thread.
         pub(super) static BEZIER_PIECES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    #[test]
+    fn indexed_winding_matches_the_direct_scan() {
+        let mut path = Path::new();
+        // Mix distinct and coincident first-edge midpoints, reversed edges, touching
+        // corners, and open and degenerate contours on the same scanlines.
+        for i in 0..160 {
+            let x = ((i % 9) * 3) as f32;
+            let y = ((i % 5) * 2) as f32;
+            path.move_to(x, y);
+            path.line_to(x + 6.0, y);
+            match i % 4 {
+                0 => path.line_to(x + 3.0, y + 6.0),
+                1 => path.line_to(x + 3.0, y - 6.0),
+                2 => path.line_to(x + 9.0, y),
+                _ => path.line_to(x, y + 2.0),
+            }
+            if i % 3 == 0 {
+                path.close();
+            }
+        }
+        // Include edges on both sides of a block boundary, and the closing edge.
+        path.move_to(0.0, -4.0);
+        for x in 1..70 {
+            path.line_to(x as f32, if x % 2 == 0 { 16.0 } else { -4.0 });
+        }
+        path.close();
+        let cache = PathCache::new(path.verbs(), &Transform2D::identity(), 0.25, 0.01);
+        let boxes: Vec<_> = cache.contours.iter().map(|c| c.bounds(&cache.points)).collect();
+        assert_eq!(cache.indexed_contour_sides(&boxes), cache.direct_contour_sides(&boxes));
     }
 
     fn pieces_flattening(path: &Path, transform: &Transform2D) -> usize {
