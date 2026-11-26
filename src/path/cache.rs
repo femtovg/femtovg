@@ -860,7 +860,7 @@ impl PathCache {
         if self.contour_sides.is_none() {
             let boxes: Vec<_> = self.contours.iter().map(|c| c.bounds(&self.points)).collect();
             // On small paths the direct scan costs less than building an index of the rays.
-            self.contour_sides = Some(if self.contours.len() <= 32 {
+            self.contour_sides = Some(if self.contours.len() < 48 {
                 self.direct_contour_sides(&boxes)
             } else {
                 self.indexed_contour_sides(&boxes)
