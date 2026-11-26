@@ -162,7 +162,8 @@ impl Params {
                 params.inner_col = color;
                 params.outer_col = color;
                 params.shader_type = ShaderType::FillColor;
-                inv_transform = global_transform.inverse();
+                // A solid color does not depend on the paint transform.
+                return params;
             }
             &PaintFlavor::Image {
                 id,
