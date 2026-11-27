@@ -112,16 +112,23 @@ fn build_lattice(seed: i32) -> ([u8; B_SIZE], [[[f64; 2]; B_SIZE]; 4]) {
 pub(crate) fn lattice_texels(seed: i32) -> Vec<RGBA8> {
     let (selector, gradient) = build_lattice(seed);
     let encode = |g: f64| ((g + 1.0) / 2.0 * 255.0).round() as u8;
+    // Each channel pair has only 256 distinct texels across the entire tile.
+    let pairs: [[RGBA8; B_SIZE]; 2] = std::array::from_fn(|pair| {
+        selector.map(|corner| {
+            let corner = usize::from(corner);
+            let [x0, y0] = gradient[2 * pair][corner];
+            let [x1, y1] = gradient[2 * pair + 1][corner];
+            RGBA8::new(encode(x0), encode(y0), encode(x1), encode(y1))
+        })
+    });
     let mut texels = vec![RGBA8::default(); LATTICE_WIDTH * LATTICE_HEIGHT];
-    for by in 0..B_SIZE {
-        for bx in 0..B_SIZE {
-            let corner = selector[(selector[bx] as usize + by) & 0xff] as usize;
-            for pair in 0..2 {
-                let g0 = gradient[2 * pair][corner];
-                let g1 = gradient[2 * pair + 1][corner];
-                texels[by * LATTICE_WIDTH + bx + pair * B_SIZE] =
-                    RGBA8::new(encode(g0[0]), encode(g0[1]), encode(g1[0]), encode(g1[1]));
-            }
+    let (rows, _) = texels.as_chunks_mut::<LATTICE_WIDTH>();
+    for (by, row) in rows.iter_mut().enumerate() {
+        let (left, right) = row.split_at_mut(B_SIZE);
+        for (bx, &x) in selector.iter().enumerate() {
+            let corner = (x as usize + by) & 0xff;
+            left[bx] = pairs[0][corner];
+            right[bx] = pairs[1][corner];
         }
     }
     texels
