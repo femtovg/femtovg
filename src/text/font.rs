@@ -359,7 +359,19 @@ impl fmt::Debug for Font {
 /// The hash covers all normalized variation coordinates, or 0 for defaults.
 type GlyphCacheKey = (u16, u64);
 
+#[cfg(feature = "textlayout")]
+self_cell::self_cell!(
+    struct ParsedFont {
+        owner: Box<dyn AsRef<[u8]>>,
+        #[covariant]
+        dependent: TtfFont,
+    }
+);
+
 pub struct Font {
+    #[cfg(feature = "textlayout")]
+    data: ParsedFont,
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
     data: Box<dyn AsRef<[u8]>>,
     face_index: u32,
     // swash's table-directory offset and cache key; `None` if swash can't parse the face.
@@ -379,8 +391,12 @@ impl Font {
         face_index: u32,
         _text_context: &super::TextContextImpl,
     ) -> Result<Self, ErrorKind> {
-        let ttf_font = TtfFont::parse(data.as_ref(), face_index).map_err(|_| ErrorKind::FontParseError)?;
+        let data = ParsedFont::try_new(Box::new(data), |bytes| {
+            TtfFont::parse(bytes.as_ref().as_ref(), face_index)
+        })
+        .map_err(|_| ErrorKind::FontParseError)?;
 
+        let ttf_font = data.borrow_dependent();
         let units_per_em = ttf_font.units_per_em();
 
         let ascender = ttf_font.ascender() as f32;
@@ -462,9 +478,9 @@ impl Font {
 
         Ok(Self {
             #[cfg(feature = "swash")]
-            swash_identity: swash::FontRef::from_index(data.as_ref(), face_index as usize)
+            swash_identity: swash::FontRef::from_index(ttf_font.raw_face().data, face_index as usize)
                 .map(|font_ref| (font_ref.offset, font_ref.key)),
-            data: Box::new(data),
+            data,
             face_index,
             units_per_em,
             metrics,
@@ -593,18 +609,13 @@ impl Font {
     }
 
     #[allow(dead_code)]
-    pub fn data(&self) -> &[u8] {
-        (*self.data).as_ref()
-    }
-
-    #[allow(dead_code)]
     pub fn face_index(&self) -> u32 {
         self.face_index
     }
 
     #[cfg(feature = "textlayout")]
     pub(crate) fn face_ref(&self) -> FontFaceRef<'_> {
-        FontFaceRef(ttf_parser::Face::parse(self.data.as_ref().as_ref(), self.face_index).unwrap())
+        FontFaceRef(self.data.borrow_dependent().clone())
     }
 
     #[cfg(not(feature = "textlayout"))]
@@ -617,11 +628,11 @@ impl Font {
         // swash caches per-font scaler data and hinting instances by key, and every
         // `FontRef` constructor mints a new key, so reuse the one minted at load.
         let (offset, key) = self.swash_identity?;
-        Some(swash::FontRef {
-            data: self.data.as_ref().as_ref(),
-            offset,
-            key,
-        })
+        #[cfg(feature = "textlayout")]
+        let data = self.data.borrow_dependent().raw_face().data;
+        #[cfg(not(feature = "textlayout"))]
+        let data = (*self.data).as_ref();
+        Some(swash::FontRef { data, offset, key })
     }
 
     #[cfg(all(feature = "swash", not(feature = "textlayout")))]
@@ -732,9 +743,9 @@ impl Font {
 
     #[cfg(feature = "textlayout")]
     pub fn variation_axes(&self) -> Vec<VariationAxisInfo> {
-        let face = self.face_ref();
+        let face = self.data.borrow_dependent();
         let mut axes = Vec::new();
-        if let Some(table) = face.0.tables().fvar {
+        if let Some(table) = face.tables().fvar {
             for axis in table.axes {
                 axes.push(VariationAxisInfo {
                     tag: axis.tag.to_bytes(),

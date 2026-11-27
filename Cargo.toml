@@ -40,6 +40,7 @@ log = "0.4"
 # Send, and the target panics by aborting).
 wgpu = { version = "30.0.0", optional = true, default-features = false, features = ["wgsl", "std"] }
 itertools = "0.15"
+self_cell = { version = "1", optional = true }
 ttf-parser = { version = "0.25.1", optional = true }
 swash = { version = "0.2.6", optional = true }
 
@@ -66,7 +67,7 @@ default = ["image-loading", "textlayout"]
 image-loading = ["image"]
 debug_inspector = []
 wgpu = ["dep:wgpu"]
-textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:lru", "dep:ttf-parser"]
+textlayout = ["dep:rustybuzz", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:lru", "dep:ttf-parser", "dep:self_cell"]
 swash = ["dep:swash"]
 
 [dev-dependencies]
