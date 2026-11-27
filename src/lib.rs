@@ -1689,16 +1689,8 @@ where
 
         // Calculate stroke vertices.
         // expand_stroke will fill path_cache.contours[].stroke with vertex data for the GPU
-        let fringe_with = if anti_alias { self.fringe_width } else { 0.0 };
-        path_cache.expand_stroke(
-            line_width * 0.5,
-            fringe_with,
-            stroke.line_cap_start,
-            stroke.line_cap_end,
-            stroke.line_join,
-            stroke.miter_limit,
-            self.tess_tol,
-        );
+        let fringe_width = if anti_alias { self.fringe_width } else { 0.0 };
+        let needs_stencil = path_cache.expand_stroke(stroke, line_width, fringe_width, self.tess_tol);
 
         // GPU uniforms
         let params = Params::new(
@@ -1713,7 +1705,7 @@ where
         )
         .with_clip(&clip);
 
-        let flavor = if stroke.stencil_strokes {
+        let flavor = if needs_stencil {
             let params2 = Params::new(
                 &self.images,
                 &paint_transform,
@@ -5146,7 +5138,7 @@ fn nested_layers_accumulate_their_root_origin() {
 /// built, so pinning it on the recorded command holds for every backend.
 #[test]
 fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
-    /// The stroke `Params` recorded for a horizontal white line of
+    /// The stroke `Params` recorded for a white polyline of
     /// `line_width` user units on a canvas at `dpi`, drawn as a stencilled
     /// stroke (the default) or a plain one.
     fn stroke_params(line_width: f32, dpi: f32, stencil: bool) -> Params {
@@ -5158,6 +5150,7 @@ fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
         let mut path = Path::new();
         path.move_to(10.0, 50.0);
         path.line_to(90.0, 50.0);
+        path.line_to(90.0, 60.0);
         let paint = Paint::color(Color::white())
             .with_line_width(line_width)
             .with_anti_alias(true)
@@ -5169,8 +5162,8 @@ fn sub_pixel_stroke_alpha_scales_linearly_with_width() {
             .borrow()
             .iter()
             .find_map(|cmd| match &cmd.cmd_type {
-                CommandType::Stroke { params } => Some(*params),
-                CommandType::StencilStroke { params1, params2 } => {
+                CommandType::Stroke { params } if !stencil => Some(*params),
+                CommandType::StencilStroke { params1, params2 } if stencil => {
                     // Both passes of a stencilled stroke carry the same paint.
                     assert_eq!(params1.inner_col, params2.inner_col);
                     Some(*params1)
