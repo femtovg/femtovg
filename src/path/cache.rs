@@ -30,6 +30,10 @@ pub struct Point {
 }
 
 impl Point {
+    fn needs_bevel(&self) -> bool {
+        self.flags.intersects(PointFlags::BEVEL | PointFlags::INNERBEVEL)
+    }
+
     pub fn new(x: f32, y: f32, flags: PointFlags) -> Self {
         Self {
             pos: Position { x, y },
@@ -1038,17 +1042,16 @@ impl PathCache {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Expands the stroke and returns whether its draw needs the stencil buffer.
     pub(crate) fn expand_stroke(
         &mut self,
-        stroke_width: f32,
+        stroke: &crate::StrokeSettings,
+        line_width: f32,
         fringe_width: f32,
-        line_cap_start: LineCap,
-        line_cap_end: LineCap,
-        line_join: LineJoin,
-        miter_limit: f32,
         tess_tol: f32,
-    ) {
+    ) -> bool {
+        let stroke_width = line_width * 0.5;
+        let line_join = stroke.line_join;
         let ncap = curve_divisions(stroke_width, PI, tess_tol);
 
         let stroke_width = stroke_width + (fringe_width * 0.5);
@@ -1056,7 +1059,7 @@ impl PathCache {
         // Disable the gradient used for antialiasing when antialiasing is not enabled.
         let (u0, u1) = if fringe_width == 0.0 { (0.5, 0.5) } else { (0.0, 1.0) };
 
-        self.calculate_joins(stroke_width, line_join, miter_limit);
+        self.calculate_joins(stroke_width, line_join, stroke.miter_limit);
 
         for contour in &mut self.contours {
             contour.stroke.clear();
@@ -1064,7 +1067,7 @@ impl PathCache {
             for (i, (p0, p1)) in contour.point_pairs(&self.points).enumerate() {
                 // Add start cap
                 if !contour.closed && i == 1 {
-                    match line_cap_start {
+                    match stroke.line_cap_start {
                         LineCap::Butt => butt_cap_start(
                             &mut contour.stroke,
                             p0,
@@ -1092,7 +1095,7 @@ impl PathCache {
                 }
 
                 if (i > 0 && i < contour.point_count() - 1) || contour.closed {
-                    if p1.flags.contains(PointFlags::BEVEL) || p1.flags.contains(PointFlags::INNERBEVEL) {
+                    if p1.needs_bevel() {
                         if line_join == LineJoin::Round {
                             round_join(
                                 &mut contour.stroke,
@@ -1119,7 +1122,7 @@ impl PathCache {
 
                 // Add end cap
                 if !contour.closed && i == contour.point_count() - 1 {
-                    match line_cap_end {
+                    match stroke.line_cap_end {
                         LineCap::Butt => butt_cap_end(
                             &mut contour.stroke,
                             p1,
@@ -1155,6 +1158,33 @@ impl PathCache {
                     .stroke
                     .push(Vertex::new(contour.stroke[1].x, contour.stroke[1].y, u1, 1.0));
             }
+        }
+        stroke.stencil_strokes && !self.stroke_is_disjoint(stroke, line_width, fringe_width)
+    }
+
+    fn stroke_is_disjoint(&self, stroke: &crate::StrokeSettings, line_width: f32, fringe_width: f32) -> bool {
+        let [contour] = self.contours.as_slice() else {
+            return false;
+        };
+        match &self.points[contour.point_range.clone()] {
+            // The two butt-cap ramps each reach half a fringe into the segment.
+            [a, b]
+                if !contour.closed
+                    && stroke.line_cap_start == LineCap::Butt
+                    && stroke.line_cap_end == LineCap::Butt =>
+            {
+                (a.pos.x == b.pos.x && (a.pos.y - b.pos.y).abs() >= fringe_width)
+                    || (a.pos.y == b.pos.y && (a.pos.x - b.pos.x).abs() >= fringe_width)
+            }
+            corners @ [a, b, c, d] if contour.closed && !corners.iter().any(Point::needs_bevel) => {
+                let (a, b, c, d) = (a.pos, b.pos, c.pos, d.pos);
+                let full_width = line_width + fringe_width;
+                (a.x - c.x).abs() > full_width
+                    && (a.y - c.y).abs() > full_width
+                    && ((a.x == b.x && b.y == c.y && c.x == d.x && d.y == a.y)
+                        || (a.y == b.y && b.x == c.x && c.y == d.y && d.x == a.x))
+            }
+            _ => false,
         }
     }
 
@@ -1719,6 +1749,34 @@ mod tests {
         path_cache.expand_fill(1.0, LineJoin::Miter, 10.0, FillRule::NonZero);
 
         assert_eq!(path_cache.contours[0].convexity, Convexity::Concave);
+    }
+
+    #[test]
+    fn stencil_choice_tracks_the_current_stroke_expansion() {
+        let mut path = crate::Path::new();
+        path.rect(2.0, 2.0, 12.0, 4.0);
+        let mut rect = path.cache(&Transform2D::identity(), 0.25, 0.01);
+        let miter = crate::StrokeSettings::default();
+        let bevel = crate::StrokeSettings {
+            line_join: LineJoin::Bevel,
+            ..miter.clone()
+        };
+        assert!(!rect.expand_stroke(&miter, 2.0, 1.0, 0.25));
+        assert!(rect.expand_stroke(&bevel, 2.0, 1.0, 0.25));
+        assert!(rect.expand_stroke(&miter, 3.0, 1.0, 0.25));
+        assert!(!rect.expand_stroke(&miter, 3.0, 0.0, 0.25));
+
+        let mut path = crate::Path::new();
+        path.move_to(2.0, 2.0);
+        path.line_to(3.0, 2.0);
+        let mut line = path.cache(&Transform2D::identity(), 0.25, 0.01);
+        assert!(!line.expand_stroke(&miter, 2.0, 1.0, 0.25));
+        assert!(line.expand_stroke(&miter, 2.0, 1.25, 0.25));
+        let round_end = crate::StrokeSettings {
+            line_cap_end: LineCap::Round,
+            ..miter
+        };
+        assert!(line.expand_stroke(&round_end, 2.0, 1.0, 0.25));
     }
 
     /// A rect stays a rect under a mirrored transform: the corners arrive in
