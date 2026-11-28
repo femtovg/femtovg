@@ -377,6 +377,10 @@ pub struct Font {
     // swash's table-directory offset and cache key; `None` if swash can't parse the face.
     #[cfg(feature = "swash")]
     swash_identity: Option<(u32, swash::CacheKey)>,
+    #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+    has_color_strikes: bool,
+    #[cfg(feature = "swash")]
+    has_colr: bool,
     units_per_em: u16,
     metrics: FontMetrics,
     glyphs: RefCell<FnvHashMap<GlyphCacheKey, Glyph>>,
@@ -476,10 +480,14 @@ impl Font {
             weight: ttf_font.weight().to_number(),
         };
 
+        #[cfg(feature = "swash")]
+        let swash_face = swash::FontRef::from_index(ttf_font.raw_face().data, face_index as usize);
+
         Ok(Self {
             #[cfg(feature = "swash")]
-            swash_identity: swash::FontRef::from_index(ttf_font.raw_face().data, face_index as usize)
-                .map(|font_ref| (font_ref.offset, font_ref.key)),
+            has_colr: swash_face.is_some_and(|face| face.table(swash::tag_from_bytes(b"COLR")).is_some()),
+            #[cfg(feature = "swash")]
+            swash_identity: swash_face.map(|face| (face.offset, face.key)),
             data,
             face_index,
             units_per_em,
@@ -589,6 +597,8 @@ impl Font {
         };
 
         Ok(Self {
+            has_color_strikes: swash::proxy::BitmapStrikesProxy::from_font(&font_ref).has_color(),
+            has_colr: font_ref.table(swash::tag_from_bytes(b"COLR")).is_some(),
             swash_identity: Some((font_ref.offset, font_ref.key)),
             data: Box::new(data),
             face_index,
@@ -976,6 +986,9 @@ impl Font {
     /// The palette indices of the glyph's color layers (COLR version 0), if it has any.
     #[cfg(feature = "swash")]
     fn color_layers(&self, glyph_id: u16) -> Option<impl Iterator<Item = u16> + '_> {
+        if !self.has_colr {
+            return None;
+        }
         let colr = self.swash_font_ref()?.table(swash::tag_from_bytes(b"COLR"))?;
         let read_u16 = move |at: usize| colr.get(at..at + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
         let read_u32 = |at: usize| {
@@ -1007,6 +1020,10 @@ impl Font {
 
     /// Returns true if the glyph has no path, so that the atlas draws it as an image (e.g., a PNG color emoji).
     pub(crate) fn is_bitmap_glyph(&self, face: &FontFaceRef<'_>, codepoint: u16, normalized_coords: &[i16]) -> bool {
+        #[cfg(all(feature = "swash", not(feature = "textlayout")))]
+        if !self.has_color_strikes {
+            return false;
+        }
         self.glyph(face, codepoint, normalized_coords)
             .is_some_and(|glyph| glyph.path.is_none())
     }
